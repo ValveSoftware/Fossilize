@@ -1,0 +1,7 @@
+*.so
+*.a
+*.o
+/cmake-build-debug
+/cmake-build-release
+.idea
+*.iml
