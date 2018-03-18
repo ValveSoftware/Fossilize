@@ -1,3 +1,8 @@
+#define RAPIDJSON_HAS_STDSTRING 1
+#include "rapidjson/include/rapidjson/document.h"
+#include "rapidjson/include/rapidjson/prettywriter.h"
+using namespace rapidjson;
+
 #include "vulkan_pipeline_cache.hpp"
 #include <stdexcept>
 #include <algorithm>
@@ -839,6 +844,39 @@ bool StateRecorder::create_device(const VkPhysicalDeviceProperties &,
                                   const VkDeviceCreateInfo &)
 {
 	return true;
+}
+
+std::string StateRecorder::serialize() const
+{
+	Document doc;
+	doc.SetObject();
+	auto &alloc = doc.GetAllocator();
+
+	Value samplers(kArrayType);
+	doc.AddMember("samplers", samplers, alloc);
+
+	Value set_layouts(kArrayType);
+	doc.AddMember("setLayouts", set_layouts, alloc);
+
+	Value pipeline_layouts(kArrayType);
+	doc.AddMember("pipelineLayouts", pipeline_layouts, alloc);
+
+	Value render_passes(kArrayType);
+	doc.AddMember("renderPasses", render_passes, alloc);
+
+	Value shader_modules(kArrayType);
+	doc.AddMember("shaderModules", shader_modules, alloc);
+
+	Value compute_pipelines(kArrayType);
+	doc.AddMember("computePipelines", compute_pipelines, alloc);
+
+	Value graphics_pipelines(kArrayType);
+	doc.AddMember("graphicsPipelines", graphics_pipelines, alloc);
+
+	StringBuffer buffer;
+	PrettyWriter<StringBuffer> writer(buffer);
+	doc.Accept(writer);
+	return buffer.GetString();
 }
 
 }
