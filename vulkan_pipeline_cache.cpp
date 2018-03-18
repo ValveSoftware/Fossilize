@@ -804,6 +804,9 @@ VkGraphicsPipelineCreateInfo StateRecorder::copy_graphics_pipeline(const VkGraph
 	if (ms.pSampleMask)
 		ms.pSampleMask = copy(ms.pSampleMask, (ms.rasterizationSamples + 31) / 32);
 
+	const_cast<VkPipelineDynamicStateCreateInfo *>(info.pDynamicState)->pDynamicStates =
+		copy(info.pDynamicState->pDynamicStates, info.pDynamicState->dynamicStateCount);
+
 	return info;
 }
 
@@ -830,6 +833,12 @@ VkRenderPassCreateInfo StateRecorder::copy_render_pass(const VkRenderPassCreateI
 	}
 
 	return info;
+}
+
+bool StateRecorder::create_device(const VkPhysicalDeviceProperties &,
+                                  const VkDeviceCreateInfo &)
+{
+	return true;
 }
 
 }
