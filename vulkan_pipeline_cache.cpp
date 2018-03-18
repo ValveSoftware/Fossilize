@@ -1,6 +1,7 @@
 #include "vulkan_pipeline_cache.hpp"
 #include <stdexcept>
 #include <algorithm>
+#include <string.h>
 
 using namespace std;
 
@@ -743,6 +744,66 @@ VkPipelineLayoutCreateInfo StateRecorder::copy_pipeline_layout(const VkPipelineL
 		const_cast<VkDescriptorSetLayout *>(info.pSetLayouts)[i] =
 			reinterpret_cast<VkDescriptorSetLayout>(uint64_t(descriptor_set_layout_to_index[info.pSetLayouts[i]] + 1));
 	}
+	return info;
+}
+
+VkSpecializationInfo *StateRecorder::copy_specialization_info(const VkSpecializationInfo *info)
+{
+	auto *ret = copy(info, 1);
+	ret->pMapEntries = copy(ret->pMapEntries, ret->mapEntryCount);
+	ret->pData = copy(static_cast<const uint8_t *>(ret->pData), ret->dataSize);
+	return ret;
+}
+
+VkComputePipelineCreateInfo StateRecorder::copy_compute_pipeline(const VkComputePipelineCreateInfo &create_info)
+{
+	auto info = create_info;
+	info.stage.pSpecializationInfo = copy_specialization_info(info.stage.pSpecializationInfo);
+	info.stage.module = reinterpret_cast<VkShaderModule>(uint64_t(shader_module_to_index[create_info.stage.module] + 1));
+	info.stage.pName = copy(info.stage.pName, strlen(info.stage.pName) + 1);
+	if (info.basePipelineHandle != VK_NULL_HANDLE)
+		info.basePipelineHandle = reinterpret_cast<VkPipeline>(uint64_t(compute_pipeline_to_index[info.basePipelineHandle] + 1));
+	return info;
+}
+
+VkGraphicsPipelineCreateInfo StateRecorder::copy_graphics_pipeline(const VkGraphicsPipelineCreateInfo &create_info)
+{
+	auto info = create_info;
+
+	info.pStages = copy(info.pStages, info.stageCount);
+	info.pTessellationState = copy(info.pTessellationState, 1);
+	info.pColorBlendState = copy(info.pColorBlendState, 1);
+	info.pVertexInputState = copy(info.pVertexInputState, 1);
+	info.pMultisampleState = copy(info.pMultisampleState, 1);
+	info.pVertexInputState = copy(info.pVertexInputState, 1);
+	info.pViewportState = copy(info.pViewportState, 1);
+	info.pInputAssemblyState  = copy(info.pInputAssemblyState, 1);
+	info.pDepthStencilState = copy(info.pDepthStencilState, 1);
+	info.pRasterizationState = copy(info.pRasterizationState, 1);
+	info.pDynamicState = copy(info.pDynamicState, 1);
+	info.renderPass = reinterpret_cast<VkRenderPass>(uint64_t(render_pass_to_index[info.renderPass] + 1));
+	if (info.basePipelineHandle != VK_NULL_HANDLE)
+		info.basePipelineHandle = reinterpret_cast<VkPipeline>(uint64_t(graphics_pipeline_to_index[info.basePipelineHandle] + 1));
+
+	for (uint32_t i = 0; i < info.stageCount; i++)
+	{
+		auto &stage = const_cast<VkPipelineShaderStageCreateInfo &>(info.pStages[i]);
+		stage.pName = copy(stage.pName, strlen(stage.pName) + 1);
+		stage.pSpecializationInfo = copy_specialization_info(stage.pSpecializationInfo);
+		stage.module = reinterpret_cast<VkShaderModule>(uint64_t(shader_module_to_index[stage.module] + 1));
+	}
+
+	auto &blend = const_cast<VkPipelineColorBlendStateCreateInfo &>(*info.pColorBlendState);
+	blend.pAttachments = copy(blend.pAttachments, blend.attachmentCount);
+
+	auto &vs = const_cast<VkPipelineVertexInputStateCreateInfo &>(*info.pVertexInputState);
+	vs.pVertexAttributeDescriptions = copy(vs.pVertexAttributeDescriptions, vs.vertexAttributeDescriptionCount);
+	vs.pVertexBindingDescriptions = copy(vs.pVertexBindingDescriptions, vs.vertexBindingDescriptionCount);
+
+	auto &ms = const_cast<VkPipelineMultisampleStateCreateInfo &>(*info.pMultisampleState);
+	if (ms.pSampleMask)
+		ms.pSampleMask = copy(ms.pSampleMask, (ms.rasterizationSamples + 31) / 32);
+
 	return info;
 }
 

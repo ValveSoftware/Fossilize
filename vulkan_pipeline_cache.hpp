@@ -179,6 +179,8 @@ private:
 	VkSamplerCreateInfo copy_sampler(const VkSamplerCreateInfo &create_info);
 	VkRenderPassCreateInfo copy_render_pass(const VkRenderPassCreateInfo &create_info);
 
+	VkSpecializationInfo *copy_specialization_info(const VkSpecializationInfo *info);
+
 	template <typename T>
 	T *copy(const T *src, size_t count);
 };
