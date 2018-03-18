@@ -846,6 +846,12 @@ bool StateRecorder::create_device(const VkPhysicalDeviceProperties &,
 	return true;
 }
 
+static std::string encode_base64(const void *data, size_t size)
+{
+	return "";
+
+}
+
 std::string StateRecorder::serialize() const
 {
 	Document doc;
@@ -853,19 +859,99 @@ std::string StateRecorder::serialize() const
 	auto &alloc = doc.GetAllocator();
 
 	Value samplers(kArrayType);
+	for (auto &sampler : this->samplers)
+	{
+		Value s(kObjectType);
+		s.AddMember("flags", sampler.info.flags, alloc);
+		s.AddMember("minFilter", sampler.info.minFilter, alloc);
+		s.AddMember("magFilter", sampler.info.magFilter, alloc);
+		s.AddMember("maxAnisotropy", sampler.info.maxAnisotropy, alloc);
+		s.AddMember("compareOp", sampler.info.compareOp, alloc);
+		s.AddMember("anisotropyEnable", sampler.info.anisotropyEnable, alloc);
+		s.AddMember("mipmapMode", sampler.info.mipmapMode, alloc);
+		s.AddMember("addressModeU", sampler.info.addressModeU, alloc);
+		s.AddMember("addressModeV", sampler.info.addressModeU, alloc);
+		s.AddMember("addressModeW", sampler.info.addressModeU, alloc);
+		s.AddMember("borderColor", sampler.info.borderColor, alloc);
+		s.AddMember("unnormalizedCoordinates", sampler.info.unnormalizedCoordinates, alloc);
+		s.AddMember("compareEnable", sampler.info.compareEnable, alloc);
+		s.AddMember("mipLodBias", sampler.info.mipLodBias, alloc);
+		s.AddMember("minLod", sampler.info.minLod, alloc);
+		s.AddMember("maxLod", sampler.info.maxLod, alloc);
+		samplers.PushBack(s, alloc);
+	}
 	doc.AddMember("samplers", samplers, alloc);
 
 	Value set_layouts(kArrayType);
 	doc.AddMember("setLayouts", set_layouts, alloc);
+	for (auto &layout : descriptor_sets)
+	{
+		Value l(kObjectType);
+		l.AddMember("hash", layout.hash, alloc);
+		l.AddMember("flags", layout.info.flags, alloc);
+
+		Value bindings(kArrayType);
+		for (uint32_t i = 0; i < layout.info.bindingCount; i++)
+		{
+			auto &b = layout.info.pBindings[i];
+			Value binding(kObjectType);
+			binding.AddMember("descriptorType", b.descriptorType, alloc);
+			binding.AddMember("descriptorCount", b.descriptorCount, alloc);
+			binding.AddMember("stageFlags", b.stageFlags, alloc);
+			binding.AddMember("binding", b.binding, alloc);
+			if (b.pImmutableSamplers)
+			{
+				Value immutables(kArrayType);
+				for (uint32_t j = 0; j < b.descriptorCount; j++)
+					immutables.PushBack(reinterpret_cast<uint64_t>(b.pImmutableSamplers[j]), alloc);
+				binding.AddMember("immutableSamplers", immutables, alloc);
+			}
+			bindings.PushBack(binding, alloc);
+		}
+		l.AddMember("bindings", bindings, alloc);
+
+		set_layouts.PushBack(l, alloc);
+	}
 
 	Value pipeline_layouts(kArrayType);
+	for (auto &layout : this->pipeline_layouts)
+	{
+		Value p(kObjectType);
+		p.AddMember("hash", layout.hash, alloc);
+		p.AddMember("flags", layout.info.flags, alloc);
+		Value push(kArrayType);
+		for (uint32_t i = 0; i < layout.info.pushConstantRangeCount; i++)
+		{
+			Value range(kObjectType);
+			range.AddMember("stageFlags", layout.info.pPushConstantRanges[i].stageFlags, alloc);
+			range.AddMember("size", layout.info.pPushConstantRanges[i].size, alloc);
+			range.AddMember("offset", layout.info.pPushConstantRanges[i].offset, alloc);
+			push.PushBack(range, alloc);
+		}
+		p.AddMember("pushConstantRanges", push, alloc);
+
+		Value set_layouts(kArrayType);
+		for (uint32_t i = 0; i < layout.info.setLayoutCount; i++)
+			set_layouts.PushBack(reinterpret_cast<uint64_t>(layout.info.pSetLayouts[i]), alloc);
+		p.AddMember("setLayouts", set_layouts, alloc);
+
+		pipeline_layouts.PushBack(p, alloc);
+	}
 	doc.AddMember("pipelineLayouts", pipeline_layouts, alloc);
+
+	Value shader_modules(kArrayType);
+	for (auto &module : this->shader_modules)
+	{
+		Value m(kObjectType);
+		m.AddMember("hash", module.hash, alloc);
+		m.AddMember("flags", module.info.flags, alloc);
+		m.AddMember("code", encode_base64(module.info.pCode, module.info.codeSize), alloc);
+		shader_modules.PushBack(m, alloc);
+	}
+	doc.AddMember("shaderModules", shader_modules, alloc);
 
 	Value render_passes(kArrayType);
 	doc.AddMember("renderPasses", render_passes, alloc);
-
-	Value shader_modules(kArrayType);
-	doc.AddMember("shaderModules", shader_modules, alloc);
 
 	Value compute_pipelines(kArrayType);
 	doc.AddMember("computePipelines", compute_pipelines, alloc);
