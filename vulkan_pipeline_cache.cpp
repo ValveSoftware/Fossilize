@@ -38,19 +38,350 @@ Hash compute_hash_pipeline_layout(const StateRecorder &recorder, const VkPipelin
 {
 	Hasher h;
 
+	h.u32(layout.setLayoutCount);
+	for (uint32_t i = 0; i < layout.setLayoutCount; i++)
+	{
+		if (layout.pSetLayouts[i])
+			h.u64(recorder.get_hash_for_descriptor_set_layout(layout.pSetLayouts[i]));
+		else
+			h.u32(0);
+	}
+
+	h.u32(layout.pushConstantRangeCount);
+	for (uint32_t i = 0; i < layout.pushConstantRangeCount; i++)
+	{
+		auto &push = layout.pPushConstantRanges[i];
+		h.u32(push.stageFlags);
+		h.u32(push.size);
+		h.u32(push.offset);
+	}
+
+	h.u32(layout.flags);
+
 	return h.get();
 }
 
-Hash compute_hash_shader_module(const StateRecorder &recorder, const VkShaderModuleCreateInfo &create_info)
+Hash compute_hash_shader_module(const StateRecorder &, const VkShaderModuleCreateInfo &create_info)
 {
 	Hasher h;
-
+	h.data(create_info.pCode, create_info.codeSize);
+	h.u32(create_info.flags);
 	return h.get();
+}
+
+static void hash_specialization_info(Hasher &h, const VkSpecializationInfo &spec)
+{
+	h.data(static_cast<const uint8_t *>(spec.pData), spec.dataSize);
+	h.u32(spec.dataSize);
+	h.u32(spec.mapEntryCount);
+	for (uint32_t i = 0; i < spec.mapEntryCount; i++)
+	{
+		h.u32(spec.pMapEntries[i].offset);
+		h.u32(spec.pMapEntries[i].size);
+		h.u32(spec.pMapEntries[i].constantID);
+	}
 }
 
 Hash compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraphicsPipelineCreateInfo &create_info)
 {
 	Hasher h;
+
+	h.u32(create_info.flags);
+
+	if (create_info.basePipelineHandle != VK_NULL_HANDLE)
+	{
+		h.u64(recorder.get_hash_for_graphics_pipeline_handle(create_info.basePipelineHandle));
+		h.s32(create_info.basePipelineIndex);
+	}
+
+	h.u64(recorder.get_hash_for_pipeline_layout(create_info.layout));
+	h.u64(recorder.get_hash_for_render_pass(create_info.renderPass));
+	h.u32(create_info.subpass);
+	h.u32(create_info.stageCount);
+
+	bool dynamic_stencil_compare = false;
+	bool dynamic_stencil_reference = false;
+	bool dynamic_stencil_write_mask = false;
+	bool dynamic_depth_bounds = false;
+	bool dynamic_depth_bias = false;
+	bool dynamic_line_width = false;
+	bool dynamic_blend_constants = false;
+	bool dynamic_scissor = false;
+	bool dynamic_viewport = false;
+	if (create_info.pDynamicState)
+	{
+		auto &state = *create_info.pDynamicState;
+		h.u32(state.dynamicStateCount);
+		h.u32(state.flags);
+		for (uint32_t i = 0; i < state.dynamicStateCount; i++)
+		{
+			h.u32(state.pDynamicStates[i]);
+			switch (state.pDynamicStates[i])
+			{
+			case VK_DYNAMIC_STATE_DEPTH_BIAS:
+				dynamic_depth_bias = true;
+				break;
+			case VK_DYNAMIC_STATE_DEPTH_BOUNDS:
+				dynamic_depth_bounds = true;
+				break;
+			case VK_DYNAMIC_STATE_STENCIL_WRITE_MASK:
+				dynamic_stencil_write_mask = true;
+				break;
+			case VK_DYNAMIC_STATE_STENCIL_REFERENCE:
+				dynamic_stencil_reference = true;
+				break;
+			case VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK:
+				dynamic_stencil_compare = true;
+				break;
+			case VK_DYNAMIC_STATE_BLEND_CONSTANTS:
+				dynamic_blend_constants = true;
+				break;
+			case VK_DYNAMIC_STATE_SCISSOR:
+				dynamic_scissor = true;
+				break;
+			case VK_DYNAMIC_STATE_VIEWPORT:
+				dynamic_viewport = true;
+				break;
+			case VK_DYNAMIC_STATE_LINE_WIDTH:
+				dynamic_line_width = true;
+				break;
+			default:
+				break;
+			}
+		}
+	}
+	else
+		h.u32(0);
+
+	if (create_info.pDepthStencilState)
+	{
+		auto &ds = *create_info.pDepthStencilState;
+		h.u32(ds.flags);
+		h.u32(ds.depthBoundsTestEnable);
+		h.u32(ds.depthCompareOp);
+		h.u32(ds.depthTestEnable);
+		h.u32(ds.depthWriteEnable);
+		h.u32(ds.front.compareOp);
+		h.u32(ds.front.depthFailOp);
+		h.u32(ds.front.failOp);
+		h.u32(ds.front.passOp);
+		h.u32(ds.back.compareOp);
+		h.u32(ds.back.depthFailOp);
+		h.u32(ds.back.failOp);
+		h.u32(ds.back.passOp);
+		h.u32(ds.stencilTestEnable);
+
+		if (!dynamic_depth_bounds && ds.depthBoundsTestEnable)
+		{
+			h.f32(ds.minDepthBounds);
+			h.f32(ds.maxDepthBounds);
+		}
+
+		if (ds.stencilTestEnable)
+		{
+			if (!dynamic_stencil_compare)
+			{
+				h.u32(ds.front.compareMask);
+				h.u32(ds.back.compareMask);
+			}
+
+			if (!dynamic_stencil_reference)
+			{
+				h.u32(ds.front.reference);
+				h.u32(ds.back.reference);
+			}
+
+			if (!dynamic_stencil_write_mask)
+			{
+				h.u32(ds.front.writeMask);
+				h.u32(ds.back.writeMask);
+			}
+		}
+	}
+	else
+		h.u32(0);
+
+	if (create_info.pInputAssemblyState)
+	{
+		auto &ia = *create_info.pInputAssemblyState;
+		h.u32(ia.flags);
+		h.u32(ia.primitiveRestartEnable);
+		h.u32(ia.topology);
+	}
+	else
+		h.u32(0);
+
+	if (create_info.pRasterizationState)
+	{
+		auto &rs = *create_info.pRasterizationState;
+		h.u32(rs.flags);
+		h.u32(rs.cullMode);
+		h.u32(rs.depthClampEnable);
+		h.u32(rs.frontFace);
+		h.u32(rs.rasterizerDiscardEnable);
+		h.u32(rs.polygonMode);
+		h.u32(rs.depthBiasEnable);
+
+		if (rs.depthBiasEnable && !dynamic_depth_bias)
+		{
+			h.f32(rs.depthBiasClamp);
+			h.f32(rs.depthBiasSlopeFactor);
+			h.f32(rs.depthBiasConstantFactor);
+		}
+
+		if (!dynamic_line_width)
+			h.f32(rs.lineWidth);
+	}
+	else
+		h.u32(0);
+
+	if (create_info.pMultisampleState)
+	{
+		auto &ms = *create_info.pMultisampleState;
+		h.u32(ms.flags);
+		h.u32(ms.alphaToCoverageEnable);
+		h.u32(ms.alphaToOneEnable);
+		h.f32(ms.minSampleShading);
+		h.u32(ms.rasterizationSamples);
+		h.u32(ms.sampleShadingEnable);
+		if (ms.pSampleMask)
+		{
+			uint32_t elems = (ms.rasterizationSamples + 31) / 32;
+			for (uint32_t i = 0; i < elems; i++)
+				h.u32(ms.pSampleMask[i]);
+		}
+		else
+			h.u32(0);
+	}
+
+	if (create_info.pViewportState)
+	{
+		auto &vp = *create_info.pViewportState;
+		h.u32(vp.flags);
+		h.u32(vp.scissorCount);
+		h.u32(vp.viewportCount);
+		if (!dynamic_scissor)
+		{
+			for (uint32_t i = 0; i < vp.scissorCount; i++)
+			{
+				h.s32(vp.pScissors[i].offset.x);
+				h.s32(vp.pScissors[i].offset.y);
+				h.u32(vp.pScissors[i].extent.width);
+				h.u32(vp.pScissors[i].extent.height);
+			}
+		}
+
+		if (!dynamic_viewport)
+		{
+			for (uint32_t i = 0; i < vp.viewportCount; i++)
+			{
+				h.f32(vp.pViewports[i].x);
+				h.f32(vp.pViewports[i].y);
+				h.f32(vp.pViewports[i].width);
+				h.f32(vp.pViewports[i].height);
+				h.f32(vp.pViewports[i].minDepth);
+				h.f32(vp.pViewports[i].maxDepth);
+			}
+		}
+	}
+	else
+		h.u32(0);
+
+	if (create_info.pVertexInputState)
+	{
+		auto &vi = *create_info.pVertexInputState;
+		h.u32(vi.flags);
+		h.u32(vi.vertexAttributeDescriptionCount);
+		h.u32(vi.vertexBindingDescriptionCount);
+
+		for (uint32_t i = 0; i < vi.vertexAttributeDescriptionCount; i++)
+		{
+			h.u32(vi.pVertexAttributeDescriptions[i].offset);
+			h.u32(vi.pVertexAttributeDescriptions[i].binding);
+			h.u32(vi.pVertexAttributeDescriptions[i].format);
+			h.u32(vi.pVertexAttributeDescriptions[i].location);
+		}
+
+		for (uint32_t i = 0; i < vi.vertexBindingDescriptionCount; i++)
+		{
+			h.u32(vi.pVertexBindingDescriptions[i].binding);
+			h.u32(vi.pVertexBindingDescriptions[i].inputRate);
+			h.u32(vi.pVertexBindingDescriptions[i].stride);
+		}
+	}
+	else
+		h.u32(0);
+
+	if (create_info.pColorBlendState)
+	{
+		auto &b = *create_info.pColorBlendState;
+		h.u32(b.flags);
+		h.u32(b.attachmentCount);
+		h.u32(b.logicOpEnable);
+		h.u32(b.logicOp);
+
+		bool need_blend_constants = false;
+
+		for (uint32_t i = 0; i < b.attachmentCount; i++)
+		{
+			h.u32(b.pAttachments[i].blendEnable);
+			if (b.pAttachments[i].blendEnable)
+			{
+				h.u32(b.pAttachments[i].colorWriteMask);
+				h.u32(b.pAttachments[i].alphaBlendOp);
+				h.u32(b.pAttachments[i].colorBlendOp);
+				h.u32(b.pAttachments[i].dstAlphaBlendFactor);
+				h.u32(b.pAttachments[i].srcAlphaBlendFactor);
+				h.u32(b.pAttachments[i].dstColorBlendFactor);
+				h.u32(b.pAttachments[i].srcColorBlendFactor);
+
+				if (b.pAttachments[i].dstAlphaBlendFactor == VK_BLEND_FACTOR_CONSTANT_ALPHA ||
+				    b.pAttachments[i].dstAlphaBlendFactor == VK_BLEND_FACTOR_CONSTANT_COLOR ||
+				    b.pAttachments[i].srcAlphaBlendFactor == VK_BLEND_FACTOR_CONSTANT_ALPHA ||
+				    b.pAttachments[i].srcAlphaBlendFactor == VK_BLEND_FACTOR_CONSTANT_COLOR ||
+					b.pAttachments[i].dstColorBlendFactor == VK_BLEND_FACTOR_CONSTANT_ALPHA ||
+					b.pAttachments[i].dstColorBlendFactor == VK_BLEND_FACTOR_CONSTANT_COLOR ||
+					b.pAttachments[i].srcColorBlendFactor == VK_BLEND_FACTOR_CONSTANT_ALPHA ||
+					b.pAttachments[i].srcColorBlendFactor == VK_BLEND_FACTOR_CONSTANT_COLOR)
+				{
+					need_blend_constants = true;
+				}
+			}
+			else
+				h.u32(0);
+		}
+
+		if (need_blend_constants && !dynamic_blend_constants)
+			for (auto &blend_const : b.blendConstants)
+				h.f32(blend_const);
+	}
+	else
+		h.u32(0);
+
+	if (create_info.pTessellationState)
+	{
+		auto &tess = *create_info.pTessellationState;
+		h.u32(tess.flags);
+		h.u32(tess.patchControlPoints);
+	}
+	else
+		h.u32(0);
+
+	for (uint32_t i = 0; i < create_info.stageCount; i++)
+	{
+		auto &stage = create_info.pStages[i];
+		h.u32(stage.flags);
+		h.string(stage.pName);
+		h.u32(stage.stage);
+		h.u64(recorder.get_hash_for_shader_module(stage.module));
+		if (stage.pSpecializationInfo)
+		{
+			hash_specialization_info(h, *stage.pSpecializationInfo);
+
+		}
+		else
+			h.u32(0);
+	}
 
 	return h.get();
 }
@@ -59,12 +390,120 @@ Hash compute_hash_compute_pipeline(const StateRecorder &recorder, const VkComput
 {
 	Hasher h;
 
+	h.u64(recorder.get_hash_for_pipeline_layout(create_info.layout));
+	h.u32(create_info.flags);
+
+	if (create_info.basePipelineHandle != VK_NULL_HANDLE)
+	{
+		h.u64(recorder.get_hash_for_compute_pipeline_handle(create_info.basePipelineHandle));
+		h.s32(create_info.basePipelineIndex);
+	}
+	else
+		h.u32(0);
+
+	h.u64(recorder.get_hash_for_shader_module(create_info.stage.module));
+	h.string(create_info.stage.pName);
+	h.u32(create_info.stage.flags);
+	h.u32(create_info.stage.stage);
+
+	if (create_info.stage.pSpecializationInfo)
+		hash_specialization_info(h, *create_info.stage.pSpecializationInfo);
+	else
+		h.u32(0);
+
 	return h.get();
 }
 
-Hash compute_hash_render_pass(const StateRecorder &recorder, const VkRenderPassCreateInfo &create_info)
+static void hash_attachment(Hasher &h, const VkAttachmentDescription &att)
+{
+	h.u32(att.flags);
+	h.u32(att.initialLayout);
+	h.u32(att.finalLayout);
+	h.u32(att.format);
+	h.u32(att.loadOp);
+	h.u32(att.storeOp);
+	h.u32(att.stencilLoadOp);
+	h.u32(att.stencilStoreOp);
+	h.u32(att.samples);
+}
+
+static void hash_dependency(Hasher &h, const VkSubpassDependency &dep)
+{
+	h.u32(dep.dependencyFlags);
+	h.u32(dep.dstAccessMask);
+	h.u32(dep.srcAccessMask);
+	h.u32(dep.srcSubpass);
+	h.u32(dep.dstSubpass);
+	h.u32(dep.srcStageMask);
+	h.u32(dep.dstStageMask);
+}
+
+static void hash_subpass(Hasher &h, const VkSubpassDescription &subpass)
+{
+	h.u32(subpass.flags);
+	h.u32(subpass.colorAttachmentCount);
+	h.u32(subpass.inputAttachmentCount);
+	h.u32(subpass.preserveAttachmentCount);
+	h.u32(subpass.pipelineBindPoint);
+
+	for (uint32_t i = 0; i < subpass.preserveAttachmentCount; i++)
+		h.u32(subpass.pPreserveAttachments[i]);
+
+	for (uint32_t i = 0; i < subpass.colorAttachmentCount; i++)
+	{
+		h.u32(subpass.pColorAttachments[i].attachment);
+		h.u32(subpass.pColorAttachments[i].layout);
+	}
+
+	for (uint32_t i = 0; i < subpass.inputAttachmentCount; i++)
+	{
+		h.u32(subpass.pInputAttachments[i].attachment);
+		h.u32(subpass.pInputAttachments[i].layout);
+	}
+
+	if (subpass.pResolveAttachments)
+	{
+		for (uint32_t i = 0; i < subpass.colorAttachmentCount; i++)
+		{
+			h.u32(subpass.pResolveAttachments[i].attachment);
+			h.u32(subpass.pResolveAttachments[i].layout);
+		}
+	}
+
+	if (subpass.pDepthStencilAttachment)
+	{
+		h.u32(subpass.pDepthStencilAttachment->attachment);
+		h.u32(subpass.pDepthStencilAttachment->layout);
+	}
+	else
+		h.u32(0);
+}
+
+Hash compute_hash_render_pass(const StateRecorder &, const VkRenderPassCreateInfo &create_info)
 {
 	Hasher h;
+
+	h.u32(create_info.attachmentCount);
+	h.u32(create_info.dependencyCount);
+	h.u32(create_info.subpassCount);
+
+	for (uint32_t i = 0; i < create_info.attachmentCount; i++)
+	{
+		auto &att = create_info.pAttachments[i];
+		hash_attachment(h, att);
+	}
+
+	for (uint32_t i = 0; i < create_info.dependencyCount; i++)
+	{
+		auto &dep = create_info.pDependencies[i];
+		hash_dependency(h, dep);
+	}
+
+	for (uint32_t i = 0; i < create_info.subpassCount; i++)
+	{
+		auto &subpass = create_info.pSubpasses[i];
+		hash_subpass(h, subpass);
+	}
 
 	return h.get();
 }
