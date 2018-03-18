@@ -700,4 +700,75 @@ Hash StateRecorder::get_hash_for_render_pass(VkRenderPass render_pass) const
 		return render_passes[itr->second].hash;
 }
 
+VkShaderModuleCreateInfo StateRecorder::copy_shader_module(const VkShaderModuleCreateInfo &create_info)
+{
+	auto info = create_info;
+	info.pCode = copy(info.pCode, info.codeSize / sizeof(uint32_t));
+	return info;
+}
+
+VkSamplerCreateInfo StateRecorder::copy_sampler(const VkSamplerCreateInfo &create_info)
+{
+	return create_info;
+}
+
+VkDescriptorSetLayoutCreateInfo StateRecorder::copy_descriptor_set_layout(
+	const VkDescriptorSetLayoutCreateInfo &create_info)
+{
+	auto info = create_info;
+	info.pBindings = copy(info.pBindings, info.bindingCount);
+
+	for (uint32_t i = 0; i < info.bindingCount; i++)
+	{
+		auto &b = info.pBindings[i];
+		if (b.pImmutableSamplers &&
+		    (b.descriptorType == VK_DESCRIPTOR_TYPE_SAMPLER ||
+		     b.descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER))
+		{
+			const_cast<VkSampler *>(b.pImmutableSamplers)[i] =
+				reinterpret_cast<VkSampler>(uint64_t(sampler_to_index[b.pImmutableSamplers[i]] + 1));
+		}
+	}
+
+	return info;
+}
+
+VkPipelineLayoutCreateInfo StateRecorder::copy_pipeline_layout(const VkPipelineLayoutCreateInfo &create_info)
+{
+	auto info = create_info;
+	info.pPushConstantRanges = copy(info.pPushConstantRanges, info.pushConstantRangeCount);
+	info.pSetLayouts = copy(info.pSetLayouts, info.setLayoutCount);
+	for (uint32_t i = 0; i < info.setLayoutCount; i++)
+	{
+		const_cast<VkDescriptorSetLayout *>(info.pSetLayouts)[i] =
+			reinterpret_cast<VkDescriptorSetLayout>(uint64_t(descriptor_set_layout_to_index[info.pSetLayouts[i]] + 1));
+	}
+	return info;
+}
+
+VkRenderPassCreateInfo StateRecorder::copy_render_pass(const VkRenderPassCreateInfo &create_info)
+{
+	auto info = create_info;
+	info.pAttachments = copy(info.pAttachments, info.attachmentCount);
+	info.pSubpasses = copy(info.pSubpasses, info.subpassCount);
+	info.pDependencies = copy(info.pDependencies, info.dependencyCount);
+
+	for (uint32_t i = 0; i < info.subpassCount; i++)
+	{
+		auto &sub = const_cast<VkSubpassDescription &>(info.pSubpasses[i]);
+		if (sub.pDepthStencilAttachment)
+			sub.pDepthStencilAttachment = copy(sub.pDepthStencilAttachment, 1);
+		if (sub.pColorAttachments)
+			sub.pColorAttachments = copy(sub.pColorAttachments, sub.colorAttachmentCount);
+		if (sub.pResolveAttachments)
+			sub.pResolveAttachments = copy(sub.pResolveAttachments, sub.colorAttachmentCount);
+		if (sub.pInputAttachments)
+			sub.pInputAttachments = copy(sub.pInputAttachments, sub.inputAttachmentCount);
+		if (sub.pPreserveAttachments)
+			sub.pPreserveAttachments = copy(sub.pPreserveAttachments, sub.preserveAttachmentCount);
+	}
+
+	return info;
+}
+
 }
