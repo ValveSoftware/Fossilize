@@ -2,6 +2,7 @@
 #include "rapidjson/include/rapidjson/document.h"
 #include "rapidjson/include/rapidjson/prettywriter.h"
 using namespace rapidjson;
+#include "b64.h"
 
 #include "vulkan_pipeline_cache.hpp"
 #include <stdexcept>
@@ -848,8 +849,18 @@ bool StateRecorder::create_device(const VkPhysicalDeviceProperties &,
 
 static std::string encode_base64(const void *data, size_t size)
 {
-	return "";
+	char *buffer = b64_encode(static_cast<const unsigned char *>(data), size);
+	std::string ret(buffer);
+	free(buffer);
+	return ret;
+}
 
+static std::vector<uint8_t> decode_base64(const char *data, size_t size)
+{
+	unsigned char *buffer = b64_decode(data, strlen(data));
+	std::vector<uint8_t> ret(buffer, buffer + size);
+	free(buffer);
+	return ret;
 }
 
 std::string StateRecorder::serialize() const
@@ -952,6 +963,118 @@ std::string StateRecorder::serialize() const
 
 	Value render_passes(kArrayType);
 	doc.AddMember("renderPasses", render_passes, alloc);
+	for (auto &pass : this->render_passes)
+	{
+		Value p(kObjectType);
+		p.AddMember("hash", pass.hash, alloc);
+		p.AddMember("flags", pass.info.flags, alloc);
+
+		Value deps(kArrayType);
+		Value subpasses(kArrayType);
+		Value attachments(kArrayType);
+
+		for (uint32_t i = 0; i < pass.info.dependencyCount; i++)
+		{
+			auto &d = pass.info.pDependencies[i];
+			Value dep(kObjectType);
+			dep.AddMember("dependencyFlags", d.dependencyFlags, alloc);
+			dep.AddMember("dstAccessMask", d.dstAccessMask, alloc);
+			dep.AddMember("srcAccessMask", d.srcAccessMask, alloc);
+			dep.AddMember("dstStageMask", d.dstStageMask, alloc);
+			dep.AddMember("srcStageMask", d.srcStageMask, alloc);
+			dep.AddMember("dstSubpass", d.dstSubpass, alloc);
+			dep.AddMember("srcSubpass", d.srcSubpass, alloc);
+			deps.PushBack(dep, alloc);
+		}
+		p.AddMember("dependencies", deps, alloc);
+
+		for (uint32_t i = 0; i < pass.info.attachmentCount; i++)
+		{
+			auto &a = pass.info.pAttachments[i];
+			Value att(kObjectType);
+
+			att.AddMember("flags", a.flags, alloc);
+			att.AddMember("format", a.format, alloc);
+			att.AddMember("finalLayout", a.finalLayout, alloc);
+			att.AddMember("initialLayout", a.initialLayout, alloc);
+			att.AddMember("loadOp", a.loadOp, alloc);
+			att.AddMember("storeOp", a.storeOp, alloc);
+			att.AddMember("samples", a.samples, alloc);
+			att.AddMember("stencilLoadOp", a.stencilLoadOp, alloc);
+			att.AddMember("stencilStoreOp", a.stencilStoreOp, alloc);
+
+			attachments.PushBack(att, alloc);
+		}
+		p.AddMember("attachments", attachments, alloc);
+
+		for (uint32_t i = 0; i < pass.info.subpassCount; i++)
+		{
+			auto &sub = pass.info.pSubpasses[i];
+			Value p(kObjectType);
+			p.AddMember("flags", sub.flags, alloc);
+			p.AddMember("pipelineBindPoint", sub.pipelineBindPoint, alloc);
+
+			Value preserves(kArrayType);
+			for (uint32_t i = 0; i < sub.preserveAttachmentCount; i++)
+			{
+				Value preserve(kObjectType);
+				preserve.PushBack(sub.pPreserveAttachments[i], alloc);
+			}
+			p.AddMember("preserveAttachments", preserves, alloc);
+
+			Value inputs(kArrayType);
+			for (uint32_t i = 0; i < sub.inputAttachmentCount; i++)
+			{
+				Value input(kObjectType);
+				auto &ia = sub.pInputAttachments[i];
+				input.AddMember("attachment", ia.attachment, alloc);
+				input.AddMember("layout", ia.layout, alloc);
+				inputs.PushBack(input, alloc);
+			}
+			p.AddMember("inputAttachments", inputs, alloc);
+
+			Value colors(kArrayType);
+			for (uint32_t i = 0; i < sub.colorAttachmentCount; i++)
+			{
+				Value color(kObjectType);
+				auto &c = sub.pColorAttachments[i];
+				color.AddMember("attachment", c.attachment, alloc);
+				color.AddMember("layout", c.layout, alloc);
+				colors.PushBack(color, alloc);
+			}
+			p.AddMember("colorAttachments", colors, alloc);
+
+			if (sub.pResolveAttachments)
+			{
+				Value resolves(kArrayType);
+				for (uint32_t i = 0; i < sub.colorAttachmentCount; i++)
+				{
+					Value resolve(kObjectType);
+					auto &r = sub.pColorAttachments[i];
+					resolve.AddMember("attachment", r.attachment, alloc);
+					resolve.AddMember("layout", r.layout, alloc);
+					resolves.PushBack(resolve, alloc);
+				}
+				p.AddMember("resolveAttachments", resolves, alloc);
+			}
+
+			Value depth_stencil(kObjectType);
+			if (sub.pDepthStencilAttachment)
+			{
+				depth_stencil.AddMember("attachment", sub.pDepthStencilAttachment->attachment, alloc);
+				depth_stencil.AddMember("layout", sub.pDepthStencilAttachment->layout, alloc);
+			}
+			else
+			{
+				depth_stencil.AddMember("attachment", -1, alloc);
+				depth_stencil.AddMember("layout", VK_IMAGE_LAYOUT_UNDEFINED, alloc);
+			}
+
+			subpasses.PushBack(p, alloc);
+		}
+		p.AddMember("subpasses", subpasses, alloc);
+		render_passes.PushBack(p, alloc);
+	}
 
 	Value compute_pipelines(kArrayType);
 	doc.AddMember("computePipelines", compute_pipelines, alloc);

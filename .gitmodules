@@ -1,3 +1,6 @@
 [submodule "rapidjson"]
 	path = rapidjson
 	url = git://github.com/miloyip/rapidjson
+[submodule "b64.c"]
+	path = b64.c
+	url = git://github.com/littlstar/b64.c
