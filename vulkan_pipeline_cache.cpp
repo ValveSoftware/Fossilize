@@ -1077,9 +1077,76 @@ std::string StateRecorder::serialize() const
 	}
 
 	Value compute_pipelines(kArrayType);
+	for (auto &pipe : this->compute_pipelines)
+	{
+		Value p(kObjectType);
+		p.AddMember("hash", pipe.hash, alloc);
+		p.AddMember("flags", pipe.info.flags, alloc);
+		p.AddMember("layout", reinterpret_cast<uint64_t>(pipe.info.layout), alloc);
+		p.AddMember("basePipelineHandle", reinterpret_cast<uint64_t>(pipe.info.basePipelineHandle), alloc);
+		p.AddMember("basePipelineIndex", pipe.info.basePipelineIndex, alloc);
+		Value stage(kObjectType);
+		stage.AddMember("flags", pipe.info.stage.flags, alloc);
+		stage.AddMember("stage", pipe.info.stage.stage, alloc);
+		stage.AddMember("module", reinterpret_cast<uint64_t>(pipe.info.stage.module), alloc);
+		stage.AddMember("name", StringRef(pipe.info.stage.pName), alloc);
+		if (pipe.info.stage.pSpecializationInfo)
+		{
+			Value spec(kObjectType);
+			spec.AddMember("dataSize", pipe.info.stage.pSpecializationInfo->dataSize, alloc);
+			spec.AddMember("code",
+			               encode_base64(pipe.info.stage.pSpecializationInfo->pData,
+			                             pipe.info.stage.pSpecializationInfo->dataSize), alloc);
+			Value map_entries(kArrayType);
+			for (uint32_t i = 0; i < pipe.info.stage.pSpecializationInfo->mapEntryCount; i++)
+			{
+				auto &e = pipe.info.stage.pSpecializationInfo->pMapEntries[i];
+				Value map_entry(kObjectType);
+				map_entry.AddMember("offset", e.offset, alloc);
+				map_entry.AddMember("size", e.size, alloc);
+				map_entry.AddMember("constantID", e.constantID, alloc);
+				map_entries.PushBack(map_entry, alloc);
+			}
+			spec.AddMember("mapEntries", map_entries, alloc);
+			stage.AddMember("specializationInfo", spec, alloc);
+		}
+		p.AddMember("stage", stage, alloc);
+		compute_pipelines.PushBack(p, alloc);
+	}
 	doc.AddMember("computePipelines", compute_pipelines, alloc);
 
 	Value graphics_pipelines(kArrayType);
+	for (auto &pipe : this->graphics_pipelines)
+	{
+		Value p(kObjectType);
+		p.AddMember("hash", pipe.hash, alloc);
+		p.AddMember("flags", pipe.info.flags, alloc);
+		p.AddMember("basePipelineHandle", reinterpret_cast<uint64_t>(pipe.info.basePipelineHandle), alloc);
+		p.AddMember("basePipelineIndex", pipe.info.basePipelineIndex, alloc);
+		p.AddMember("layout", reinterpret_cast<uint64_t>(pipe.info.layout), alloc);
+		p.AddMember("renderPass", reinterpret_cast<uint64_t>(pipe.info.renderPass), alloc);
+		p.AddMember("subpass", pipe.info.subpass, alloc);
+
+		if (pipe.info.pTessellationState)
+		{
+			Value tess(kObjectType);
+			tess.AddMember("alloc", pipe.info.pTessellationState->flags, alloc);
+			tess.AddMember("patchControlPoints", pipe.info.pTessellationState->patchControlPoints, alloc);
+			p.AddMember("tessellationState", tess, alloc);
+		}
+
+		if (pipe.info.pDynamicState)
+		{
+			Value dyn(kObjectType);
+			dyn.AddMember("flags", pipe.info.pDynamicState->flags, alloc);
+			Value dynamics(kArrayType);
+			for (uint32_t i = 0; i < pipe.info.pDynamicState->dynamicStateCount; i++)
+				dynamics.PushBack(pipe.info.pDynamicState->pDynamicStates[i], alloc);
+			dyn.AddMember("dynamicState", dynamics, alloc);
+		}
+
+		graphics_pipelines.PushBack(p, alloc);
+	}
 	doc.AddMember("graphicsPipelines", graphics_pipelines, alloc);
 
 	StringBuffer buffer;
