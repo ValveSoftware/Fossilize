@@ -1219,6 +1219,81 @@ std::string StateRecorder::serialize() const
 			p.AddMember("rasterizationState", rs, alloc);
 		}
 
+		if (pipe.info.pInputAssemblyState)
+		{
+			Value ia(kObjectType);
+			ia.AddMember("flags", pipe.info.pInputAssemblyState->flags, alloc);
+			ia.AddMember("topology", pipe.info.pInputAssemblyState->topology, alloc);
+			ia.AddMember("primitiveRestartEnable", pipe.info.pInputAssemblyState->primitiveRestartEnable, alloc);
+			p.AddMember("inputAssemblyState", ia, alloc);
+		}
+
+		if (pipe.info.pColorBlendState)
+		{
+			Value cb(kObjectType);
+			cb.AddMember("flags", pipe.info.pColorBlendState->flags, alloc);
+			cb.AddMember("logicOp", pipe.info.pColorBlendState->logicOp, alloc);
+			cb.AddMember("logicOpEnable", pipe.info.pColorBlendState->logicOpEnable, alloc);
+			Value blend_constants(kArrayType);
+			for (uint32_t i = 0; i < 4; i++)
+				blend_constants.PushBack(pipe.info.pColorBlendState->blendConstants[i], alloc);
+			cb.AddMember("blendConstants", blend_constants, alloc);
+			Value attachments(kArrayType);
+			for (uint32_t i = 0; i < pipe.info.pColorBlendState->attachmentCount; i++)
+			{
+				auto &a = pipe.info.pColorBlendState->pAttachments[i];
+				Value att(kObjectType);
+				att.AddMember("dstAlphaBlendFactor", a.dstAlphaBlendFactor, alloc);
+				att.AddMember("srcAlphaBlendFactor", a.srcAlphaBlendFactor, alloc);
+				att.AddMember("dstColorBlendFactor", a.dstColorBlendFactor, alloc);
+				att.AddMember("srcColorBlendFactor", a.srcColorBlendFactor, alloc);
+				att.AddMember("colorWriteMask", a.colorWriteMask, alloc);
+				att.AddMember("alphaBlendOp", a.alphaBlendOp, alloc);
+				att.AddMember("colorBlendOp", a.colorBlendOp, alloc);
+				att.AddMember("blendEnable", a.blendEnable, alloc);
+			}
+			cb.AddMember("attachments", attachments, alloc);
+			p.AddMember("colorBlendState", cb, alloc);
+		}
+
+		if (pipe.info.pViewportState)
+		{
+			Value vp(kObjectType);
+			vp.AddMember("flags", pipe.info.pViewportState->flags, alloc);
+			if (pipe.info.pViewportState->pViewports)
+			{
+				Value viewports(kArrayType);
+				for (uint32_t i = 0; i < pipe.info.pViewportState->viewportCount; i++)
+				{
+					Value viewport(kObjectType);
+					viewport.AddMember("x", pipe.info.pViewportState->pViewports[i].x, alloc);
+					viewport.AddMember("y", pipe.info.pViewportState->pViewports[i].y, alloc);
+					viewport.AddMember("width", pipe.info.pViewportState->pViewports[i].width, alloc);
+					viewport.AddMember("height", pipe.info.pViewportState->pViewports[i].height, alloc);
+					viewport.AddMember("minDepth", pipe.info.pViewportState->pViewports[i].minDepth, alloc);
+					viewport.AddMember("maxDepth", pipe.info.pViewportState->pViewports[i].maxDepth, alloc);
+					viewports.PushBack(viewport, alloc);
+				}
+				vp.AddMember("viewports", viewports, alloc);
+			}
+
+			if (pipe.info.pViewportState->pScissors)
+			{
+				Value scissors(kArrayType);
+				for (uint32_t i = 0; i < pipe.info.pViewportState->scissorCount; i++)
+				{
+					Value scissor(kObjectType);
+					scissor.AddMember("x", pipe.info.pViewportState->pScissors[i].offset.x, alloc);
+					scissor.AddMember("y", pipe.info.pViewportState->pScissors[i].offset.y, alloc);
+					scissor.AddMember("width", pipe.info.pViewportState->pScissors[i].extent.width, alloc);
+					scissor.AddMember("height", pipe.info.pViewportState->pScissors[i].extent.height, alloc);
+					scissors.PushBack(scissor, alloc);
+				}
+				vp.AddMember("scissors", scissors, alloc);
+			}
+			p.AddMember("viewportState", vp, alloc);
+		}
+
 		graphics_pipelines.PushBack(p, alloc);
 	}
 	doc.AddMember("graphicsPipelines", graphics_pipelines, alloc);
