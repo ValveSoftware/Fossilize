@@ -1143,6 +1143,80 @@ std::string StateRecorder::serialize() const
 			for (uint32_t i = 0; i < pipe.info.pDynamicState->dynamicStateCount; i++)
 				dynamics.PushBack(pipe.info.pDynamicState->pDynamicStates[i], alloc);
 			dyn.AddMember("dynamicState", dynamics, alloc);
+			p.AddMember("dynamicState", dyn, alloc);
+		}
+
+		if (pipe.info.pMultisampleState)
+		{
+			Value ms(kObjectType);
+			ms.AddMember("flags", pipe.info.pMultisampleState->flags, alloc);
+			ms.AddMember("rasterizationSamples", pipe.info.pMultisampleState->rasterizationSamples, alloc);
+			ms.AddMember("sampleShadingEnable", pipe.info.pMultisampleState->sampleShadingEnable, alloc);
+			ms.AddMember("minSampleShading", pipe.info.pMultisampleState->minSampleShading, alloc);
+			ms.AddMember("alphaToOneEnable", pipe.info.pMultisampleState->alphaToOneEnable, alloc);
+			ms.AddMember("alphaToCoverageEnable", pipe.info.pMultisampleState->alphaToCoverageEnable, alloc);
+
+			Value sm(kArrayType);
+			if (pipe.info.pMultisampleState->pSampleMask)
+			{
+				auto entries = uint32_t(pipe.info.pMultisampleState->rasterizationSamples + 31) / 32;
+				for (uint32_t i = 0; i < entries; i++)
+					sm.PushBack(pipe.info.pMultisampleState->pSampleMask[i], alloc);
+				ms.AddMember("sampleMask", sm, alloc);
+			}
+
+			p.AddMember("multisampleState", ms, alloc);
+		}
+
+		if (pipe.info.pVertexInputState)
+		{
+			Value vi(kObjectType);
+
+			Value attribs(kArrayType);
+			Value bindings(kArrayType);
+			vi.AddMember("flags", pipe.info.pVertexInputState->flags, alloc);
+
+			for (uint32_t i = 0; i < pipe.info.pVertexInputState->vertexAttributeDescriptionCount; i++)
+			{
+				auto &a = pipe.info.pVertexInputState->pVertexAttributeDescriptions[i];
+				Value attrib(kObjectType);
+				attrib.AddMember("location", a.location, alloc);
+				attrib.AddMember("binding", a.binding, alloc);
+				attrib.AddMember("offset", a.offset, alloc);
+				attrib.AddMember("format", a.format, alloc);
+				attribs.PushBack(attrib, alloc);
+			}
+
+			for (uint32_t i = 0; i < pipe.info.pVertexInputState->vertexBindingDescriptionCount; i++)
+			{
+				auto &b = pipe.info.pVertexInputState->pVertexBindingDescriptions[i];
+				Value binding(kObjectType);
+				binding.AddMember("binding", b.binding, alloc);
+				binding.AddMember("stride", b.stride, alloc);
+				binding.AddMember("inputRate", b.inputRate, alloc);
+				bindings.PushBack(binding, alloc);
+			}
+			vi.AddMember("attributes", attribs, alloc);
+			vi.AddMember("bindings", bindings, alloc);
+
+			p.AddMember("vertexInputState", vi, alloc);
+		}
+
+		if (pipe.info.pRasterizationState)
+		{
+			Value rs(kObjectType);
+			rs.AddMember("flags", pipe.info.pRasterizationState->flags, alloc);
+			rs.AddMember("depthBiasConstantFactor", pipe.info.pRasterizationState->depthBiasConstantFactor, alloc);
+			rs.AddMember("depthBiasSlopeFactor", pipe.info.pRasterizationState->depthBiasSlopeFactor, alloc);
+			rs.AddMember("depthBiasClamp", pipe.info.pRasterizationState->depthBiasClamp, alloc);
+			rs.AddMember("depthBiasEnable", pipe.info.pRasterizationState->depthBiasEnable, alloc);
+			rs.AddMember("depthClampEnable", pipe.info.pRasterizationState->depthClampEnable, alloc);
+			rs.AddMember("polygonMode", pipe.info.pRasterizationState->polygonMode, alloc);
+			rs.AddMember("rasterizerDiscardEnable", pipe.info.pRasterizationState->rasterizerDiscardEnable, alloc);
+			rs.AddMember("frontFace", pipe.info.pRasterizationState->frontFace, alloc);
+			rs.AddMember("lineWidth", pipe.info.pRasterizationState->lineWidth, alloc);
+			rs.AddMember("cullMode", pipe.info.pRasterizationState->cullMode, alloc);
+			p.AddMember("rasterizationState", rs, alloc);
 		}
 
 		graphics_pipelines.PushBack(p, alloc);
