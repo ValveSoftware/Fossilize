@@ -1294,6 +1294,69 @@ std::string StateRecorder::serialize() const
 			p.AddMember("viewportState", vp, alloc);
 		}
 
+		if (pipe.info.pDepthStencilState)
+		{
+			Value ds(kObjectType);
+			ds.AddMember("flags", pipe.info.pDepthStencilState->flags, alloc);
+			ds.AddMember("stencilTestEnable", pipe.info.pDepthStencilState->stencilTestEnable, alloc);
+			ds.AddMember("maxDepthBounds", pipe.info.pDepthStencilState->maxDepthBounds, alloc);
+			ds.AddMember("minDepthBounds", pipe.info.pDepthStencilState->minDepthBounds, alloc);
+			ds.AddMember("depthBoundsTestEnable", pipe.info.pDepthStencilState->depthBoundsTestEnable, alloc);
+			ds.AddMember("depthWriteEnable", pipe.info.pDepthStencilState->depthWriteEnable, alloc);
+			ds.AddMember("depthTestEnable", pipe.info.pDepthStencilState->depthTestEnable, alloc);
+			ds.AddMember("depthCompareOp", pipe.info.pDepthStencilState->depthCompareOp, alloc);
+
+			const auto serialize_stencil = [&](Value &v, const VkStencilOpState &state) {
+				v.AddMember("compareOp", state.compareOp, alloc);
+				v.AddMember("writeMask", state.writeMask, alloc);
+				v.AddMember("reference", state.reference, alloc);
+				v.AddMember("compareMask", state.compareMask, alloc);
+				v.AddMember("passOp", state.passOp, alloc);
+				v.AddMember("failOp", state.failOp, alloc);
+				v.AddMember("depthFailOp", state.depthFailOp, alloc);
+			};
+			Value front(kObjectType);
+			Value back(kObjectType);
+			serialize_stencil(front, pipe.info.pDepthStencilState->front);
+			serialize_stencil(back, pipe.info.pDepthStencilState->back);
+			ds.AddMember("front", front, alloc);
+			ds.AddMember("back", back, alloc);
+			p.AddMember("depthStencilState", ds, alloc);
+		}
+
+		Value stages(kArrayType);
+		for (uint32_t i = 0; i < pipe.info.stageCount; i++)
+		{
+			auto &s = pipe.info.pStages[i];
+			Value stage(kObjectType);
+			stage.AddMember("flags", s.flags, alloc);
+			stage.AddMember("name", StringRef(s.pName), alloc);
+			stage.AddMember("module", reinterpret_cast<uint64_t>(s.module), alloc);
+			stage.AddMember("stage", s.stage, alloc);
+			if (s.pSpecializationInfo)
+			{
+				Value spec(kObjectType);
+				spec.AddMember("dataSize", s.pSpecializationInfo->dataSize, alloc);
+				spec.AddMember("code",
+				               encode_base64(s.pSpecializationInfo->pData,
+				                             s.pSpecializationInfo->dataSize), alloc);
+				Value map_entries(kArrayType);
+				for (uint32_t i = 0; i < s.pSpecializationInfo->mapEntryCount; i++)
+				{
+					auto &e = s.pSpecializationInfo->pMapEntries[i];
+					Value map_entry(kObjectType);
+					map_entry.AddMember("offset", e.offset, alloc);
+					map_entry.AddMember("size", e.size, alloc);
+					map_entry.AddMember("constantID", e.constantID, alloc);
+					map_entries.PushBack(map_entry, alloc);
+				}
+				spec.AddMember("mapEntries", map_entries, alloc);
+				stage.AddMember("specializationInfo", spec, alloc);
+			}
+			stages.PushBack(stage, alloc);
+		}
+		p.AddMember("stages", stages, alloc);
+
 		graphics_pipelines.PushBack(p, alloc);
 	}
 	doc.AddMember("graphicsPipelines", graphics_pipelines, alloc);
