@@ -94,12 +94,25 @@ public:
 	}
 
 	template <typename T>
+	T *allocate_cleared()
+	{
+		return static_cast<T *>(allocate_raw_cleared(sizeof(T), alignof(T)));
+	}
+
+	template <typename T>
 	T *allocate_n(size_t count)
 	{
 		return static_cast<T *>(allocate_raw(sizeof(T) * count, alignof(T)));
 	}
 
+	template <typename T>
+	T *allocate_n_cleared(size_t count)
+	{
+		return static_cast<T *>(allocate_raw_cleared(sizeof(T) * count, alignof(T)));
+	}
+
 	void *allocate_raw(size_t size, size_t alignment);
+	void *allocate_raw_cleared(size_t size, size_t alignment);
 
 private:
 	struct Block
@@ -112,6 +125,67 @@ private:
 	std::vector<Block> blocks;
 
 	void add_block(size_t minimum_size);
+};
+
+template <typename T>
+struct HashedInfo
+{
+	Hash hash;
+	T info;
+};
+
+class StateCreatorInterface
+{
+public:
+	virtual ~StateCreatorInterface() = default;
+	virtual bool set_num_samplers(unsigned /*count*/) { return true; }
+	virtual bool set_num_descriptor_set_layouts(unsigned /*count*/) { return true; }
+	virtual bool set_num_pipeline_layouts(unsigned /*count*/) { return true; }
+	virtual bool set_num_shader_modules(unsigned /*count*/) { return true; }
+	virtual bool set_num_render_passes(unsigned /*count*/) { return true; }
+	virtual bool set_num_compute_pipelines(unsigned /*count*/) { return true; }
+	virtual bool set_num_graphics_pipelines(unsigned /*count*/) { return true; }
+
+	virtual bool enqueue_create_sampler(Hash hash, unsigned index, const VkSamplerCreateInfo *create_info, VkSampler *sampler) = 0;
+	virtual bool enqueue_create_descriptor_set_layout(Hash hash, unsigned index, const VkDescriptorSetLayoutCreateInfo *create_info, VkDescriptorSetLayout *layout) = 0;
+	virtual bool enqueue_create_pipeline_layout(Hash hash, unsigned index, const VkPipelineLayoutCreateInfo *create_info, VkPipelineLayout *layout) = 0;
+	virtual bool enqueue_create_shader_module(Hash hash, unsigned index, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module) = 0;
+	virtual bool enqueue_create_render_pass(Hash hash, unsigned index, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass) = 0;
+	virtual bool enqueue_create_compute_pipeline(Hash hash, unsigned index, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) = 0;
+	virtual bool enqueue_create_graphics_pipeline(Hash hash, unsigned index, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline) = 0;
+	virtual void wait_enqueue() {}
+};
+
+class StateReplayer
+{
+public:
+	bool parse(StateCreatorInterface &iface, const char *str, size_t length);
+
+private:
+	ScratchAllocator allocator;
+	std::vector<HashedInfo<VkDescriptorSetLayoutCreateInfo>> descriptor_sets;
+	std::vector<HashedInfo<VkPipelineLayoutCreateInfo>> pipeline_layouts;
+	std::vector<HashedInfo<VkShaderModuleCreateInfo>> shader_modules;
+	std::vector<HashedInfo<VkGraphicsPipelineCreateInfo>> graphics_pipelines;
+	std::vector<HashedInfo<VkComputePipelineCreateInfo>> compute_pipelines;
+	std::vector<HashedInfo<VkRenderPassCreateInfo>> render_passes;
+	std::vector<HashedInfo<VkSamplerCreateInfo>> samplers;
+
+	std::vector<VkSampler> replayed_samplers;
+	std::vector<VkDescriptorSetLayout> replayed_descriptor_set_layouts;
+	std::vector<VkPipelineLayout> replayed_pipeline_layouts;
+	std::vector<VkShaderModule> replayed_shader_modules;
+	std::vector<VkRenderPass> replayed_render_passes;
+	std::vector<VkPipeline> replayed_compute_pipelines;
+	std::vector<VkPipeline> replayed_graphics_pipelines;
+
+	void parse_samplers(StateCreatorInterface &iface, const Value &samplers);
+	void parse_descriptor_set_layouts(StateCreatorInterface &iface, const Value &samplers);
+	VkDescriptorSetLayoutBinding *parse_descriptor_set_bindings(const Value &bindings);
+	VkSampler *parse_immutable_samplers(const Value &samplers);
+
+	template <typename T>
+	T *copy(const T *src, size_t count);
 };
 
 class StateRecorder
@@ -147,13 +221,6 @@ public:
 
 private:
 	ScratchAllocator allocator;
-
-	template <typename T>
-	struct HashedInfo
-	{
-		Hash hash;
-		T info;
-	};
 
 	std::vector<HashedInfo<VkDescriptorSetLayoutCreateInfo>> descriptor_sets;
 	std::vector<HashedInfo<VkPipelineLayoutCreateInfo>> pipeline_layouts;

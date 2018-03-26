@@ -516,6 +516,129 @@ Hash compute_hash_render_pass(const StateRecorder &, const VkRenderPassCreateInf
 }
 }
 
+VkSampler *StateReplayer::parse_immutable_samplers(const Value &samplers)
+{
+	auto *samps = allocator.allocate_n<VkSampler>(samplers.Size());
+	auto *ret = samps;
+	for (auto itr = samplers.Begin(); itr != samplers.End(); ++itr, samps++)
+	{
+		auto index = itr->GetUint64();
+		if (index > replayed_samplers.size())
+			throw logic_error("Sampler index out of range.");
+		else if (index > 0)
+			*samps = replayed_samplers[index - 1];
+		else
+			*samps = VK_NULL_HANDLE;
+	}
+
+	return ret;
+}
+
+VkDescriptorSetLayoutBinding *StateReplayer::parse_descriptor_set_bindings(const Value &bindings)
+{
+	auto *set_bindings = allocator.allocate_n_cleared<VkDescriptorSetLayoutBinding>(bindings.Size());
+	auto *ret = set_bindings;
+	for (auto itr = bindings.Begin(); itr != bindings.End(); ++itr, set_bindings++)
+	{
+		auto &b = *itr;
+		set_bindings->binding = b["binding"].GetUint();
+		set_bindings->descriptorCount = b["descriptorCount"].GetUint();
+		set_bindings->descriptorType = static_cast<VkDescriptorType>(b["descriptorType"].GetUint());
+		set_bindings->stageFlags = b["stageFlags"].GetUint();
+		if (b.HasMember("immutableSamplers"))
+			set_bindings->pImmutableSamplers = parse_immutable_samplers(b["immutableSamplers"]);
+	}
+	return ret;
+}
+
+void StateReplayer::parse_descriptor_set_layouts(StateCreatorInterface &iface, const Value &layouts)
+{
+	iface.set_num_descriptor_set_layouts(layouts.Size());
+	replayed_descriptor_set_layouts.resize(layouts.Size());
+	auto *infos = allocator.allocate_n_cleared<VkDescriptorSetLayoutCreateInfo>(layouts.Size());
+
+	unsigned index = 0;
+	for (auto itr = layouts.Begin(); itr != layouts.End(); ++itr, index++)
+	{
+		auto &obj = *itr;
+		auto &info = infos[index];
+		info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+
+		info.flags = obj["flags"].GetUint();
+		if (obj.HasMember("bindings"))
+		{
+			auto &bindings = obj["bindings"];
+			info.bindingCount = bindings.Size();
+			info.pBindings = parse_descriptor_set_bindings(bindings);
+		}
+
+		iface.enqueue_create_descriptor_set_layout(obj["hash"].GetUint64(), index, &info, &replayed_descriptor_set_layouts[index]);
+	}
+}
+
+void StateReplayer::parse_samplers(StateCreatorInterface &iface, const Value &samplers)
+{
+	iface.set_num_samplers(samplers.Size());
+	replayed_samplers.resize(samplers.Size());
+	auto *infos = allocator.allocate_n_cleared<VkSamplerCreateInfo>(samplers.Size());
+
+	unsigned index = 0;
+	for (auto itr = samplers.Begin(); itr != samplers.End(); ++itr, index++)
+	{
+		auto &obj = *itr;
+		auto &info = infos[index];
+		info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+
+		info.addressModeU = static_cast<VkSamplerAddressMode>(obj["addressModeU"].GetUint());
+		info.addressModeV = static_cast<VkSamplerAddressMode>(obj["addressModeV"].GetUint());
+		info.addressModeW = static_cast<VkSamplerAddressMode>(obj["addressModeW"].GetUint());
+		info.anisotropyEnable = obj["anisotropyEnable"].GetUint();
+		info.borderColor = static_cast<VkBorderColor>(obj["borderColor"].GetUint());
+		info.compareEnable = obj["compareEnable"].GetUint();
+		info.compareOp = static_cast<VkCompareOp>(obj["compareOp"].GetUint());
+		info.flags = obj["flags"].GetUint();
+		info.magFilter = static_cast<VkFilter>(obj["magFilter"].GetUint());
+		info.minFilter = static_cast<VkFilter>(obj["minFilter"].GetUint());
+		info.maxAnisotropy = obj["maxAnisotropy"].GetFloat();
+		info.mipmapMode = static_cast<VkSamplerMipmapMode>(obj["mipmapMode"].GetUint());
+		info.maxLod = obj["maxLod"].GetFloat();
+		info.minLod = obj["minLod"].GetFloat();
+		info.mipLodBias = obj["mipLodBias"].GetFloat();
+
+		iface.enqueue_create_sampler(obj["hash"].GetUint64(), index, &info, &replayed_samplers[index]);
+	}
+	iface.wait_enqueue();
+}
+
+bool StateReplayer::parse(StateCreatorInterface &iface, const char *str, size_t length)
+{
+	Document doc;
+	doc.Parse(str, length);
+	if (doc.HasParseError())
+		return false;
+
+	if (doc.HasMember("samplers"))
+		parse_samplers(iface, doc["samplers"]);
+	else
+		iface.set_num_samplers(0);
+
+	if (doc.HasMember("descriptorSetLayouts"))
+		parse_descriptor_set_layouts(iface, doc["descriptorSetLayouts"]);
+	else
+		iface.set_num_descriptor_set_layouts(0);
+
+	return true;
+}
+
+template <typename T>
+T *StateReplayer::copy(const T *src, size_t count)
+{
+	auto *new_data = allocator.allocate_n<T>(count);
+	if (new_data)
+		std::copy(src, src + count, new_data);
+	return new_data;
+}
+
 template <typename T>
 T *StateRecorder::copy(const T *src, size_t count)
 {
@@ -536,6 +659,14 @@ void ScratchAllocator::add_block(size_t minimum_size)
 	if (minimum_size < 64 * 1024)
 		minimum_size = 64 * 1024;
 	blocks.emplace_back(minimum_size);
+}
+
+void *ScratchAllocator::allocate_raw_cleared(size_t size, size_t alignment)
+{
+	void *ret = allocate_raw(size, alignment);
+	if (ret)
+		memset(ret, 0, size);
+	return ret;
 }
 
 void *ScratchAllocator::allocate_raw(size_t size, size_t alignment)
@@ -1235,8 +1366,8 @@ std::string StateRecorder::serialize() const
 			cb.AddMember("logicOp", pipe.info.pColorBlendState->logicOp, alloc);
 			cb.AddMember("logicOpEnable", pipe.info.pColorBlendState->logicOpEnable, alloc);
 			Value blend_constants(kArrayType);
-			for (uint32_t i = 0; i < 4; i++)
-				blend_constants.PushBack(pipe.info.pColorBlendState->blendConstants[i], alloc);
+			for (auto &c : pipe.info.pColorBlendState->blendConstants)
+				blend_constants.PushBack(c, alloc);
 			cb.AddMember("blendConstants", blend_constants, alloc);
 			Value attachments(kArrayType);
 			for (uint32_t i = 0; i < pipe.info.pColorBlendState->attachmentCount; i++)
