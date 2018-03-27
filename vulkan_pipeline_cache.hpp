@@ -102,12 +102,16 @@ public:
 	template <typename T>
 	T *allocate_n(size_t count)
 	{
+		if (count == 0)
+			return nullptr;
 		return static_cast<T *>(allocate_raw(sizeof(T) * count, alignof(T)));
 	}
 
 	template <typename T>
 	T *allocate_n_cleared(size_t count)
 	{
+		if (count == 0)
+			return nullptr;
 		return static_cast<T *>(allocate_raw_cleared(sizeof(T) * count, alignof(T)));
 	}
 
@@ -180,9 +184,20 @@ private:
 	std::vector<VkPipeline> replayed_graphics_pipelines;
 
 	void parse_samplers(StateCreatorInterface &iface, const Value &samplers);
-	void parse_descriptor_set_layouts(StateCreatorInterface &iface, const Value &samplers);
+	void parse_descriptor_set_layouts(StateCreatorInterface &iface, const Value &layouts);
+	void parse_pipeline_layouts(StateCreatorInterface &iface, const Value &layouts);
+	void parse_shader_modules(StateCreatorInterface &iface, const Value &modules);
+	void parse_render_passes(StateCreatorInterface &iface, const Value &passes);
+	VkPushConstantRange *parse_push_constant_ranges(const Value &ranges);
+	VkDescriptorSetLayout *parse_set_layouts(const Value &layouts);
 	VkDescriptorSetLayoutBinding *parse_descriptor_set_bindings(const Value &bindings);
 	VkSampler *parse_immutable_samplers(const Value &samplers);
+	VkAttachmentDescription *parse_render_pass_attachments(const Value &attachments);
+	VkSubpassDependency *parse_render_pass_dependencies(const Value &dependencies);
+	VkSubpassDescription *parse_render_pass_subpasses(const Value &subpass);
+	VkAttachmentReference *parse_attachment(const Value &value);
+	VkAttachmentReference *parse_attachments(const Value &attachments);
+	uint32_t *parse_uints(const Value &attachments);
 
 	template <typename T>
 	T *copy(const T *src, size_t count);

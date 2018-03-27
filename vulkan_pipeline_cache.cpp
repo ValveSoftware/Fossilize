@@ -516,6 +516,15 @@ Hash compute_hash_render_pass(const StateRecorder &, const VkRenderPassCreateInf
 }
 }
 
+static uint32_t *decode_base64(ScratchAllocator &allocator, const char *data, size_t size)
+{
+	unsigned char *buffer = b64_decode(data, strlen(data));
+	auto *ret = static_cast<uint32_t *>(allocator.allocate_raw(size, 4));
+	memcpy(ret, buffer, size);
+	free(buffer);
+	return ret;
+}
+
 VkSampler *StateReplayer::parse_immutable_samplers(const Value &samplers)
 {
 	auto *samps = allocator.allocate_n<VkSampler>(samplers.Size());
@@ -551,6 +560,93 @@ VkDescriptorSetLayoutBinding *StateReplayer::parse_descriptor_set_bindings(const
 	return ret;
 }
 
+VkPushConstantRange *StateReplayer::parse_push_constant_ranges(const Value &ranges)
+{
+	auto *infos = allocator.allocate_n_cleared<VkPushConstantRange>(ranges.Size());
+	auto *ret = infos;
+
+	for (auto itr = ranges.Begin(); itr != ranges.End(); ++itr, infos++)
+	{
+		auto &obj = *itr;
+		infos->stageFlags = obj["stageFlags"].GetUint();
+		infos->offset = obj["offset"].GetUint();
+		infos->size = obj["size"].GetUint();
+	}
+
+	return ret;
+}
+
+VkDescriptorSetLayout *StateReplayer::parse_set_layouts(const Value &layouts)
+{
+	auto *infos = allocator.allocate_n_cleared<VkDescriptorSetLayout>(layouts.Size());
+	auto *ret = infos;
+
+	for (auto itr = layouts.Begin(); itr != layouts.End(); ++itr, infos++)
+	{
+		auto index = itr->GetUint();
+		if (index > replayed_descriptor_set_layouts.size())
+			throw logic_error("Descriptor set index out of range.");
+		else if (index > 0)
+			*infos = replayed_descriptor_set_layouts[index - 1];
+		else
+			*infos = VK_NULL_HANDLE;
+	}
+
+	return ret;
+}
+
+void StateReplayer::parse_shader_modules(StateCreatorInterface &iface, const Value &modules)
+{
+	iface.set_num_shader_modules(modules.Size());
+	replayed_shader_modules.resize(modules.Size());
+	auto *infos = allocator.allocate_n_cleared<VkShaderModuleCreateInfo>(modules.Size());
+
+	unsigned index = 0;
+	for (auto itr = modules.Begin(); itr != modules.End(); ++itr, index++)
+	{
+		auto &obj = *itr;
+		auto &info = infos[index];
+		info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+		info.flags = obj["flags"].GetUint();
+		info.codeSize = obj["codeSize"].GetUint64();
+		info.pCode = decode_base64(allocator, obj["code"].GetString(), info.codeSize);
+		iface.enqueue_create_shader_module(obj["hash"].GetUint64(), index, &info, &replayed_shader_modules[index]);
+	}
+	iface.wait_enqueue();
+}
+
+void StateReplayer::parse_pipeline_layouts(StateCreatorInterface &iface, const Value &layouts)
+{
+	iface.set_num_pipeline_layouts(layouts.Size());
+	replayed_pipeline_layouts.resize(layouts.Size());
+	auto *infos = allocator.allocate_n_cleared<VkPipelineLayoutCreateInfo>(layouts.Size());
+
+	unsigned index = 0;
+	for (auto itr = layouts.Begin(); itr != layouts.End(); ++itr, index++)
+	{
+		auto &obj = *itr;
+		auto &info = infos[index];
+		info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+
+		info.flags = obj["flags"].GetUint();
+
+		if (obj.HasMember("pushConstantRanges"))
+		{
+			info.pushConstantRangeCount = obj["pushConstantRanges"].Size();
+			info.pPushConstantRanges = parse_push_constant_ranges(obj["pushConstantRanges"]);
+		}
+
+		if (obj.HasMember("setLayouts"))
+		{
+			info.setLayoutCount = obj["setLayouts"].Size();
+			info.pSetLayouts = parse_set_layouts(obj["setLayouts"]);
+		}
+
+		iface.enqueue_create_pipeline_layout(obj["hash"].GetUint64(), index, &info, &replayed_pipeline_layouts[index]);
+	}
+	iface.wait_enqueue();
+}
+
 void StateReplayer::parse_descriptor_set_layouts(StateCreatorInterface &iface, const Value &layouts)
 {
 	iface.set_num_descriptor_set_layouts(layouts.Size());
@@ -574,6 +670,7 @@ void StateReplayer::parse_descriptor_set_layouts(StateCreatorInterface &iface, c
 
 		iface.enqueue_create_descriptor_set_layout(obj["hash"].GetUint64(), index, &info, &replayed_descriptor_set_layouts[index]);
 	}
+	iface.wait_enqueue();
 }
 
 void StateReplayer::parse_samplers(StateCreatorInterface &iface, const Value &samplers)
@@ -610,6 +707,130 @@ void StateReplayer::parse_samplers(StateCreatorInterface &iface, const Value &sa
 	iface.wait_enqueue();
 }
 
+VkAttachmentDescription *StateReplayer::parse_render_pass_attachments(const Value &attachments)
+{
+	auto *infos = allocator.allocate_n_cleared<VkAttachmentDescription>(attachments.Size());
+	auto *ret = infos;
+
+	for (auto itr = attachments.Begin(); itr != attachments.End(); ++itr, infos++)
+	{
+		auto &obj = *itr;
+		infos->flags = obj["flags"].GetUint();
+		infos->finalLayout = static_cast<VkImageLayout>(obj["finalLayout"].GetUint());
+		infos->initialLayout = static_cast<VkImageLayout>(obj["initialLayout"].GetUint());
+		infos->format = static_cast<VkFormat>(obj["format"].GetUint());
+		infos->loadOp = static_cast<VkAttachmentLoadOp>(obj["loadOp"].GetUint());
+		infos->storeOp = static_cast<VkAttachmentStoreOp>(obj["storeOp"].GetUint());
+		infos->stencilLoadOp = static_cast<VkAttachmentLoadOp>(obj["stencilLoadOp"].GetUint());
+		infos->stencilStoreOp = static_cast<VkAttachmentStoreOp>(obj["stencilStoreOp"].GetUint());
+		infos->samples = static_cast<VkSampleCountFlagBits>(obj["samples"].GetUint());
+	}
+
+	return ret;
+}
+
+VkSubpassDependency *StateReplayer::parse_render_pass_dependencies(const Value &dependencies)
+{
+	auto *infos = allocator.allocate_n_cleared<VkSubpassDependency>(dependencies.Size());
+	auto *ret = infos;
+
+	for (auto itr = dependencies.Begin(); itr != dependencies.End(); ++itr, infos++)
+	{
+		auto &obj = *itr;
+		infos->dependencyFlags = obj["dependencyFlags"].GetUint();
+		infos->dstAccessMask = obj["dstAccessMask"].GetUint();
+		infos->srcAccessMask = obj["srcAccessMask"].GetUint();
+		infos->dstStageMask = obj["dstStageMask"].GetUint();
+		infos->srcStageMask = obj["srcStageMask"].GetUint();
+		infos->srcSubpass = obj["srcSubpass"].GetUint();
+		infos->dstSubpass = obj["dstSubpass"].GetUint();
+	}
+
+	return ret;
+}
+
+VkAttachmentReference *StateReplayer::parse_attachment(const Value &value)
+{
+	auto *ret = allocator.allocate_cleared<VkAttachmentReference>();
+	ret->attachment = value["attachment"].GetUint();
+	ret->layout = static_cast<VkImageLayout>(value["layout"].GetUint());
+	return ret;
+}
+
+VkAttachmentReference *StateReplayer::parse_attachments(const Value &attachments)
+{
+	auto *refs = allocator.allocate_cleared<VkAttachmentReference>();
+	auto *ret = refs;
+
+	for (auto itr = attachments.Begin(); itr != attachments.End(); ++itr, refs++)
+	{
+		auto &value = *itr;
+		refs->attachment = value["attachment"].GetUint();
+		refs->layout = static_cast<VkImageLayout>(value["layout"].GetUint());
+	}
+	return ret;
+}
+
+VkSubpassDescription *StateReplayer::parse_render_pass_subpasses(const Value &subpasses)
+{
+	auto *infos = allocator.allocate_n_cleared<VkSubpassDescription>(subpasses.Size());
+	auto *ret = infos;
+
+	for (auto itr = subpasses.Begin(); itr != subpasses.End(); ++itr, infos++)
+	{
+		auto &obj = *itr;
+		infos->flags = obj["flags"].GetUint();
+
+		if (obj.HasMember("depthStencilAttachment"))
+			infos->pDepthStencilAttachment = parse_attachment(obj["depthStencilAttachment"]);
+		if (obj.HasMember("resolveAttachments"))
+			infos->pResolveAttachments = parse_attachments(obj["resolveAttachments"]);
+		if (obj.HasMember("inputAttachments"))
+			infos->pInputAttachments = parse_attachments(obj["inputAttachments"]);
+	}
+
+	return ret;
+}
+
+void StateReplayer::parse_render_passes(StateCreatorInterface &iface, const Value &passes)
+{
+	iface.set_num_render_passes(passes.Size());
+	replayed_render_passes.resize(passes.Size());
+	auto *infos = allocator.allocate_n_cleared<VkRenderPassCreateInfo>(passes.Size());
+
+	unsigned index = 0;
+	for (auto itr = passes.Begin(); itr != passes.End(); ++itr, index++)
+	{
+		auto &obj = *itr;
+		auto &info = infos[index];
+		info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+
+		info.flags = obj["flags"].GetUint();
+
+		if (obj.HasMember("attachments"))
+		{
+			info.attachmentCount = obj["attachments"].Size();
+			info.pAttachments = parse_render_pass_attachments(obj["attachments"]);
+		}
+
+		if (obj.HasMember("dependencies"))
+		{
+			info.dependencyCount = obj["dependencies"].Size();
+			info.pDependencies = parse_render_pass_dependencies(obj["dependencies"]);
+		}
+
+		if (obj.HasMember("subpasses"))
+		{
+			info.subpassCount = obj["subpasses"].Size();
+			info.pSubpasses = parse_render_pass_subpasses(obj["subpasses"]);
+		}
+
+		iface.enqueue_create_render_pass(obj["hash"].GetUint64(), index, &info, &replayed_render_passes[index]);
+	}
+
+	iface.wait_enqueue();
+}
+
 bool StateReplayer::parse(StateCreatorInterface &iface, const char *str, size_t length)
 {
 	Document doc;
@@ -617,15 +838,37 @@ bool StateReplayer::parse(StateCreatorInterface &iface, const char *str, size_t 
 	if (doc.HasParseError())
 		return false;
 
-	if (doc.HasMember("samplers"))
-		parse_samplers(iface, doc["samplers"]);
-	else
-		iface.set_num_samplers(0);
+	try
+	{
+		if (doc.HasMember("shaderModules"))
+			parse_shader_modules(iface, doc["shaderModules"]);
+		else
+			iface.set_num_shader_modules(0);
 
-	if (doc.HasMember("descriptorSetLayouts"))
-		parse_descriptor_set_layouts(iface, doc["descriptorSetLayouts"]);
-	else
-		iface.set_num_descriptor_set_layouts(0);
+		if (doc.HasMember("samplers"))
+			parse_samplers(iface, doc["samplers"]);
+		else
+			iface.set_num_samplers(0);
+
+		if (doc.HasMember("descriptorSetLayouts"))
+			parse_descriptor_set_layouts(iface, doc["descriptorSetLayouts"]);
+		else
+			iface.set_num_descriptor_set_layouts(0);
+
+		if (doc.HasMember("pipelineLayouts"))
+			parse_pipeline_layouts(iface, doc["pipelineLayouts"]);
+		else
+			iface.set_num_pipeline_layouts(0);
+
+		if (doc.HasMember("renderPasses"))
+			parse_render_passes(iface, doc["renderPasses"]);
+		else
+			iface.set_num_render_passes(0);
+	}
+	catch (const exception &e)
+	{
+		return false;
+	}
 
 	return true;
 }
@@ -982,14 +1225,6 @@ static std::string encode_base64(const void *data, size_t size)
 {
 	char *buffer = b64_encode(static_cast<const unsigned char *>(data), size);
 	std::string ret(buffer);
-	free(buffer);
-	return ret;
-}
-
-static std::vector<uint8_t> decode_base64(const char *data, size_t size)
-{
-	unsigned char *buffer = b64_decode(data, strlen(data));
-	std::vector<uint8_t> ret(buffer, buffer + size);
 	free(buffer);
 	return ret;
 }
