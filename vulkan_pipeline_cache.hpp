@@ -1,9 +1,13 @@
 #pragma once
+
 #include "vulkan/vulkan.h"
 #include <stdint.h>
 #include <vector>
 #include <memory>
 #include <unordered_map>
+
+#define RAPIDJSON_HAS_STDSTRING 1
+#include "rapidjson/include/rapidjson/document.h"
 
 namespace VPC
 {
@@ -183,21 +187,38 @@ private:
 	std::vector<VkPipeline> replayed_compute_pipelines;
 	std::vector<VkPipeline> replayed_graphics_pipelines;
 
-	void parse_samplers(StateCreatorInterface &iface, const Value &samplers);
-	void parse_descriptor_set_layouts(StateCreatorInterface &iface, const Value &layouts);
-	void parse_pipeline_layouts(StateCreatorInterface &iface, const Value &layouts);
-	void parse_shader_modules(StateCreatorInterface &iface, const Value &modules);
-	void parse_render_passes(StateCreatorInterface &iface, const Value &passes);
-	VkPushConstantRange *parse_push_constant_ranges(const Value &ranges);
-	VkDescriptorSetLayout *parse_set_layouts(const Value &layouts);
-	VkDescriptorSetLayoutBinding *parse_descriptor_set_bindings(const Value &bindings);
-	VkSampler *parse_immutable_samplers(const Value &samplers);
-	VkAttachmentDescription *parse_render_pass_attachments(const Value &attachments);
-	VkSubpassDependency *parse_render_pass_dependencies(const Value &dependencies);
-	VkSubpassDescription *parse_render_pass_subpasses(const Value &subpass);
-	VkAttachmentReference *parse_attachment(const Value &value);
-	VkAttachmentReference *parse_attachments(const Value &attachments);
-	uint32_t *parse_uints(const Value &attachments);
+	void parse_samplers(StateCreatorInterface &iface, const rapidjson::Value &samplers);
+	void parse_descriptor_set_layouts(StateCreatorInterface &iface, const rapidjson::Value &layouts);
+	void parse_pipeline_layouts(StateCreatorInterface &iface, const rapidjson::Value &layouts);
+	void parse_shader_modules(StateCreatorInterface &iface, const rapidjson::Value &modules);
+	void parse_render_passes(StateCreatorInterface &iface, const rapidjson::Value &passes);
+	void parse_compute_pipelines(StateCreatorInterface &iface, const rapidjson::Value &pipelines);
+	void parse_graphics_pipelines(StateCreatorInterface &iface, const rapidjson::Value &pipelines);
+	VkPushConstantRange *parse_push_constant_ranges(const rapidjson::Value &ranges);
+	VkDescriptorSetLayout *parse_set_layouts(const rapidjson::Value &layouts);
+	VkDescriptorSetLayoutBinding *parse_descriptor_set_bindings(const rapidjson::Value &bindings);
+	VkSampler *parse_immutable_samplers(const rapidjson::Value &samplers);
+	VkAttachmentDescription *parse_render_pass_attachments(const rapidjson::Value &attachments);
+	VkSubpassDependency *parse_render_pass_dependencies(const rapidjson::Value &dependencies);
+	VkSubpassDescription *parse_render_pass_subpasses(const rapidjson::Value &subpass);
+	VkAttachmentReference *parse_attachment(const rapidjson::Value &value);
+	VkAttachmentReference *parse_attachments(const rapidjson::Value &attachments);
+	VkSpecializationInfo *parse_specialization_info(const rapidjson::Value &spec_info);
+	VkSpecializationMapEntry *parse_map_entries(const rapidjson::Value &map_entries);
+	VkPipelineVertexInputStateCreateInfo *parse_vertex_input_state(const rapidjson::Value &state);
+	VkPipelineColorBlendStateCreateInfo *parse_color_blend_state(const rapidjson::Value &state);
+	VkPipelineDepthStencilStateCreateInfo *parse_depth_stencil_state(const rapidjson::Value &state);
+	VkPipelineRasterizationStateCreateInfo *parse_rasterization_state(const rapidjson::Value &state);
+	VkPipelineInputAssemblyStateCreateInfo *parse_input_assembly_state(const rapidjson::Value &state);
+	VkPipelineMultisampleStateCreateInfo *parse_multisample_state(const rapidjson::Value &state);
+	VkPipelineViewportStateCreateInfo *parse_viewport_state(const rapidjson::Value &state);
+	VkPipelineDynamicStateCreateInfo *parse_dynamic_state(const rapidjson::Value &state);
+	VkPipelineTessellationStateCreateInfo *parse_tessellation_state(const rapidjson::Value &state);
+	VkPipelineShaderStageCreateInfo *parse_stages(const rapidjson::Value &stages);
+	VkVertexInputAttributeDescription *parse_vertex_attributes(const rapidjson::Value &attributes);
+	VkVertexInputBindingDescription *parse_vertex_bindings(const rapidjson::Value &bindings);
+	uint32_t *parse_uints(const rapidjson::Value &attachments);
+	const char *duplicate_string(const char *str, size_t len);
 
 	template <typename T>
 	T *copy(const T *src, size_t count);

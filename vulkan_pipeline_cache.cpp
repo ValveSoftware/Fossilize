@@ -1,15 +1,13 @@
-#define RAPIDJSON_HAS_STDSTRING 1
-#include "rapidjson/include/rapidjson/document.h"
-#include "rapidjson/include/rapidjson/prettywriter.h"
-using namespace rapidjson;
+#include <stddef.h>
 #include "b64.h"
-
 #include "vulkan_pipeline_cache.hpp"
 #include <stdexcept>
 #include <algorithm>
 #include <string.h>
+#include "rapidjson/include/rapidjson/prettywriter.h"
 
 using namespace std;
+using namespace rapidjson;
 
 namespace VPC
 {
@@ -79,12 +77,12 @@ Hash compute_hash_shader_module(const StateRecorder &, const VkShaderModuleCreat
 static void hash_specialization_info(Hasher &h, const VkSpecializationInfo &spec)
 {
 	h.data(static_cast<const uint8_t *>(spec.pData), spec.dataSize);
-	h.u32(spec.dataSize);
+	h.u64(spec.dataSize);
 	h.u32(spec.mapEntryCount);
 	for (uint32_t i = 0; i < spec.mapEntryCount; i++)
 	{
 		h.u32(spec.pMapEntries[i].offset);
-		h.u32(spec.pMapEntries[i].size);
+		h.u64(spec.pMapEntries[i].size);
 		h.u32(spec.pMapEntries[i].constantID);
 	}
 }
@@ -525,6 +523,14 @@ static uint32_t *decode_base64(ScratchAllocator &allocator, const char *data, si
 	return ret;
 }
 
+const char *StateReplayer::duplicate_string(const char *str, size_t len)
+{
+	auto *c = allocator.allocate_n<char>(len + 1);
+	memcpy(c, str, len);
+	c[len] = '\0';
+	return c;
+}
+
 VkSampler *StateReplayer::parse_immutable_samplers(const Value &samplers)
 {
 	auto *samps = allocator.allocate_n<VkSampler>(samplers.Size());
@@ -771,6 +777,15 @@ VkAttachmentReference *StateReplayer::parse_attachments(const Value &attachments
 	return ret;
 }
 
+uint32_t *StateReplayer::parse_uints(const Value &uints)
+{
+	auto *u32s = allocator.allocate_n<uint32_t>(uints.Size());
+	auto *ret = u32s;
+	for (auto itr = uints.Begin(); itr != uints.End(); ++itr, u32s++)
+		*u32s = itr->GetUint();
+	return ret;
+}
+
 VkSubpassDescription *StateReplayer::parse_render_pass_subpasses(const Value &subpasses)
 {
 	auto *infos = allocator.allocate_n_cleared<VkSubpassDescription>(subpasses.Size());
@@ -783,10 +798,27 @@ VkSubpassDescription *StateReplayer::parse_render_pass_subpasses(const Value &su
 
 		if (obj.HasMember("depthStencilAttachment"))
 			infos->pDepthStencilAttachment = parse_attachment(obj["depthStencilAttachment"]);
+
 		if (obj.HasMember("resolveAttachments"))
 			infos->pResolveAttachments = parse_attachments(obj["resolveAttachments"]);
+
 		if (obj.HasMember("inputAttachments"))
+		{
+			infos->inputAttachmentCount = obj["inputAttachments"].Size();
 			infos->pInputAttachments = parse_attachments(obj["inputAttachments"]);
+		}
+
+		if (obj.HasMember("colorAttachments"))
+		{
+			infos->colorAttachmentCount = obj["colorAttachments"].Size();
+			infos->pColorAttachments = parse_attachments(obj["colorAttachments"]);
+		}
+
+		if (obj.HasMember("preserveAttachments"))
+		{
+			infos->preserveAttachmentCount = obj["preserveAttachments"].GetUint();
+			infos->pPreserveAttachments = parse_uints(obj["preserveAttachments"]);
+		}
 	}
 
 	return ret;
@@ -831,6 +863,270 @@ void StateReplayer::parse_render_passes(StateCreatorInterface &iface, const Valu
 	iface.wait_enqueue();
 }
 
+VkSpecializationMapEntry *StateReplayer::parse_map_entries(const Value &map_entries)
+{
+	auto *entries = allocator.allocate_n_cleared<VkSpecializationMapEntry>(map_entries.Size());
+	auto *ret = entries;
+
+	for (auto itr = map_entries.Begin(); itr != map_entries.End(); ++itr, entries++)
+	{
+		auto &obj = *itr;
+		entries->constantID = obj["constantID"].GetUint();
+		entries->offset = obj["offset"].GetUint();
+		entries->size = obj["size"].GetUint();
+	}
+
+	return ret;
+}
+
+VkSpecializationInfo *StateReplayer::parse_specialization_info(const Value &spec_info)
+{
+	auto *spec = allocator.allocate_cleared<VkSpecializationInfo>();
+	spec->dataSize = spec_info["dataSize"].GetUint();
+	spec->pData = decode_base64(allocator, spec_info["data"].GetString(), spec->dataSize);
+	if (spec_info.HasMember("mapEntries"))
+	{
+		spec->mapEntryCount = spec_info["mapEntries"].Size();
+		spec->pMapEntries = parse_map_entries(spec_info["mapEntries"]);
+	}
+	return spec;
+}
+
+void StateReplayer::parse_compute_pipelines(StateCreatorInterface &iface, const Value &pipelines)
+{
+	iface.set_num_compute_pipelines(pipelines.Size());
+	replayed_compute_pipelines.resize(pipelines.Size());
+	auto *infos = allocator.allocate_n_cleared<VkComputePipelineCreateInfo>(pipelines.Size());
+
+	unsigned index = 0;
+	for (auto itr = pipelines.Begin(); itr != pipelines.End(); ++itr, index++)
+	{
+		auto &obj = *itr;
+		auto &info = infos[index];
+		info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+		info.flags = obj["flags"].GetUint();
+		info.basePipelineIndex = obj["basePipelineIndex"].GetUint();
+
+		auto pipeline = obj["basePipeline"].GetUint64();
+		if (pipeline > replayed_shader_modules.size())
+			throw logic_error("Base pipeline index out of range.");
+		else if (pipeline > 0)
+		{
+			iface.wait_enqueue();
+			info.basePipelineHandle = reinterpret_cast<VkPipeline>(replayed_compute_pipelines[pipeline - 1]);
+		}
+		else
+			info.basePipelineHandle = VK_NULL_HANDLE;
+
+		auto layout = obj["layout"].GetUint64();
+		if (layout > replayed_pipeline_layouts.size())
+			throw logic_error("Pipeline layout index out of range.");
+		else if (layout > 0)
+			info.layout = reinterpret_cast<VkPipelineLayout>(replayed_pipeline_layouts[layout - 1]);
+		else
+			info.layout = VK_NULL_HANDLE;
+
+		auto &stage = obj["stage"];
+		info.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		info.stage.stage = static_cast<VkShaderStageFlagBits>(stage["stage"].GetUint());
+
+		auto module = stage["module"].GetUint64();
+		if (module > replayed_shader_modules.size())
+			throw logic_error("Shader module index out of range.");
+		else if (module > 0)
+			info.stage.module = reinterpret_cast<VkShaderModule>(replayed_shader_modules[module - 1]);
+		else
+			info.stage.module = VK_NULL_HANDLE;
+
+		info.stage.pName = duplicate_string(stage["name"].GetString(), stage["name"].GetStringLength());
+		if (stage.HasMember("specializationInfo"))
+			info.stage.pSpecializationInfo = parse_specialization_info(stage["specializationInfo"]);
+
+		iface.enqueue_create_compute_pipeline(obj["hash"].GetUint64(), index, &info, &replayed_compute_pipelines[index]);
+	}
+	iface.wait_enqueue();
+}
+
+VkVertexInputAttributeDescription *StateReplayer::parse_vertex_attributes(const rapidjson::Value &attributes)
+{
+	auto *attribs = allocator.allocate_n_cleared<VkVertexInputAttributeDescription>(attributes.Size());
+	auto *ret = attribs;
+
+	for (auto itr = attributes.Begin(); itr != attributes.End(); ++itr, attribs++)
+	{
+		auto &obj = *itr;
+		attribs->location = obj["location"].GetUint();
+		attribs->binding = obj["binding"].GetUint();
+		attribs->offset = obj["offset"].GetUint();
+		attribs->format = static_cast<VkFormat>(obj["format"].GetUint());
+	}
+
+	return ret;
+}
+
+VkVertexInputBindingDescription *StateReplayer::parse_vertex_bindings(const rapidjson::Value &bindings)
+{
+	auto *binds = allocator.allocate_n_cleared<VkVertexInputBindingDescription>(bindings.Size());
+	auto *ret = binds;
+
+	for (auto itr = bindings.Begin(); itr != bindings.End(); ++itr, binds++)
+	{
+		auto &obj = *itr;
+		binds->binding = obj["binding"].GetUint();
+		binds->inputRate = static_cast<VkVertexInputRate>(obj["inputRate"].GetUint());
+		binds->stride = obj["stride"].GetUint();
+	}
+
+	return ret;
+}
+
+VkPipelineVertexInputStateCreateInfo *StateReplayer::parse_vertex_input_state(const rapidjson::Value &vi)
+{
+	auto *state = allocator.allocate_cleared<VkPipelineVertexInputStateCreateInfo>();
+	state->sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+	state->flags = vi["flags"].GetUint();
+
+	if (vi.HasMember("attributes"))
+	{
+		state->vertexAttributeDescriptionCount = vi["attributes"].Size();
+		state->pVertexAttributeDescriptions = parse_vertex_attributes(vi["attributes"]);
+	}
+
+	if (vi.HasMember("bindings"))
+	{
+		state->vertexBindingDescriptionCount = vi["bindings"].Size();
+		state->pVertexBindingDescriptions = parse_vertex_bindings(vi["bindings"]);
+	}
+
+	return state;
+}
+
+VkPipelineDepthStencilStateCreateInfo *StateReplayer::parse_depth_stencil_state(const rapidjson::Value &ds)
+{
+	auto *state = allocator.allocate_cleared<VkPipelineDepthStencilStateCreateInfo>();
+	state->sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+	state->flags = ds["flags"].GetUint();
+
+	state->depthBoundsTestEnable = ds["depthBoundsTestEnable"].GetUint();
+	state->depthCompareOp = static_cast<VkCompareOp>(ds["depthCompareOp"].GetUint());
+	state->depthTestEnable = ds["depthTestEnable"].GetUint();
+	state->depthWriteEnable = ds["depthWriteEnable"].GetUint();
+	state->minDepthBounds = ds["minDepthBounds"].GetFloat();
+	state->maxDepthBounds = ds["maxDepthBounds"].GetFloat();
+	state->stencilTestEnable = ds["stencilTestEnable"].GetUint();
+	state->front.compareMask = ds["front"]["compareMask"].GetUint();
+	state->front.compareOp = static_cast<VkCompareOp>(ds["front"]["compareOp"].GetUint());
+	state->front.depthFailOp = static_cast<VkStencilOp>(ds["front"]["depthFailOp"].GetUint());
+	state->front.passOp = static_cast<VkStencilOp>(ds["front"]["passOp"].GetUint());
+	state->front.failOp = static_cast<VkStencilOp>(ds["front"]["failOp"].GetUint());
+	state->front.reference = ds["front"]["reference"].GetUint();
+	state->front.writeMask = ds["front"]["writeMask"].GetUint();
+	state->back.compareMask = ds["back"]["compareMask"].GetUint();
+	state->back.compareOp = static_cast<VkCompareOp>(ds["back"]["compareOp"].GetUint());
+	state->back.depthFailOp = static_cast<VkStencilOp>(ds["back"]["depthFailOp"].GetUint());
+	state->back.passOp = static_cast<VkStencilOp>(ds["back"]["passOp"].GetUint());
+	state->back.failOp = static_cast<VkStencilOp>(ds["back"]["failOp"].GetUint());
+	state->back.reference = ds["back"]["reference"].GetUint();
+	state->back.writeMask = ds["back"]["writeMask"].GetUint();
+
+	return state;
+}
+
+VkPipelineRasterizationStateCreateInfo *StateReplayer::parse_rasterization_state(const rapidjson::Value &rs)
+{
+	auto *state = allocator.allocate_cleared<VkPipelineRasterizationStateCreateInfo>();
+	state->sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+	state->flags = rs["flags"].GetUint();
+
+	state->cullMode = static_cast<VkCullModeFlags>(rs["cullMode"].GetUint());
+	state->depthBiasClamp = rs["depthBiasClamp"].GetFloat();
+	state->depthBiasConstantFactor = rs["depthBiasConstantFactor"].GetFloat();
+	state->depthBiasSlopeFactor = rs["depthBiasSlopeFactor"].GetFloat();
+	state->lineWidth = rs["lineWidth"].GetFloat();
+	state->rasterizerDiscardEnable = rs["rasterizationDiscardEnable"].GetUint();
+	state->depthBiasEnable = rs["depthBiasEnable"].GetUint();
+	state->depthClampEnable = rs["depthClampEnable"].GetUint();
+	state->polygonMode = static_cast<VkPolygonMode>(rs["polygonMode"].GetUint());
+	state->frontFace = static_cast<VkFrontFace>(rs["frontFace"].GetUint());
+
+	return state;
+}
+
+void StateReplayer::parse_graphics_pipelines(StateCreatorInterface &iface, const Value &pipelines)
+{
+	iface.set_num_graphics_pipelines(pipelines.Size());
+	replayed_graphics_pipelines.resize(pipelines.Size());
+	auto *infos = allocator.allocate_n_cleared<VkGraphicsPipelineCreateInfo>(pipelines.Size());
+	unsigned index = 0;
+
+	for (auto itr = pipelines.Begin(); itr != pipelines.End(); ++itr, index++)
+	{
+		auto &obj = *itr;
+		auto &info = infos[index];
+		info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+		info.flags = obj["flags"].GetUint();
+		info.basePipelineIndex = obj["basePipelineIndex"].GetUint();
+
+		auto pipeline = obj["basePipeline"].GetUint64();
+		if (pipeline > replayed_shader_modules.size())
+			throw logic_error("Base pipeline index out of range.");
+		else if (pipeline > 0)
+		{
+			iface.wait_enqueue();
+			info.basePipelineHandle = reinterpret_cast<VkPipeline>(replayed_graphics_pipelines[pipeline - 1]);
+		}
+		else
+			info.basePipelineHandle = VK_NULL_HANDLE;
+
+		auto layout = obj["layout"].GetUint64();
+		if (layout > replayed_pipeline_layouts.size())
+			throw logic_error("Pipeline layout index out of range.");
+		else if (layout > 0)
+			info.layout = reinterpret_cast<VkPipelineLayout>(replayed_pipeline_layouts[layout - 1]);
+		else
+			info.layout = VK_NULL_HANDLE;
+
+		auto render_pass = obj["renderPass"].GetUint64();
+		if (render_pass > replayed_render_passes.size())
+			throw logic_error("Render pass index out of range.");
+		else if (render_pass > 0)
+			info.renderPass = reinterpret_cast<VkRenderPass>(replayed_render_passes[render_pass - 1]);
+		else
+			info.renderPass = VK_NULL_HANDLE;
+
+		info.subpass = obj["subpass"].GetUint();
+
+		if (obj.HasMember("stages"))
+		{
+			info.stageCount = obj["stages"].GetUint();
+			info.pStages = parse_stages(obj["stages"]);
+		}
+
+		if (obj.HasMember("rasterizationState"))
+			info.pRasterizationState = parse_rasterization_state(obj["rasterizationState"]);
+		if (obj.HasMember("tessellationState"))
+			info.pTessellationState = parse_tessellation_state(obj["tessellationState"]);
+		if (obj.HasMember("colorBlendState"))
+			info.pColorBlendState = parse_color_blend_state(obj["colorBlendState"]);
+		if (obj.HasMember("depthStencilState"))
+			info.pDepthStencilState = parse_depth_stencil_state(obj["depthStencilState"]);
+		if (obj.HasMember("dynamicState"))
+			info.pDynamicState = parse_dynamic_state(obj["dynamicState"]);
+		if (obj.HasMember("viewportState"))
+			info.pViewportState = parse_viewport_state(obj["viewportState"]);
+		if (obj.HasMember("multisampleState"))
+			info.pMultisampleState = parse_multisample_state(obj["multisampleState"]);
+		if (obj.HasMember("inputAssemblyState"))
+			info.pInputAssemblyState = parse_input_assembly_state(obj["inputAssemblyState"]);
+		if (obj.HasMember("vertexInputState"))
+			info.pVertexInputState = parse_vertex_input_state(obj["vertexInputState"]);
+
+		iface.enqueue_create_graphics_pipeline(obj["hash"].GetUint64(), index, &info, &replayed_graphics_pipelines[index]);
+	}
+
+	iface.wait_enqueue();
+}
+
 bool StateReplayer::parse(StateCreatorInterface &iface, const char *str, size_t length)
 {
 	Document doc;
@@ -864,9 +1160,20 @@ bool StateReplayer::parse(StateCreatorInterface &iface, const char *str, size_t 
 			parse_render_passes(iface, doc["renderPasses"]);
 		else
 			iface.set_num_render_passes(0);
+
+		if (doc.HasMember("computePipelines"))
+			parse_compute_pipelines(iface, doc["computePipelines"]);
+		else
+			iface.set_num_compute_pipelines(0);
+
+		if (doc.HasMember("graphicsPipelines"))
+			parse_graphics_pipelines(iface, doc["graphicsPipelines"]);
+		else
+			iface.set_num_graphics_pipelines(0);
 	}
 	catch (const exception &e)
 	{
+		fprintf(stderr, "Error caught: %s\n", e.what());
 		return false;
 	}
 
