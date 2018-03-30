@@ -217,6 +217,7 @@ private:
 	VkPipelineShaderStageCreateInfo *parse_stages(const rapidjson::Value &stages);
 	VkVertexInputAttributeDescription *parse_vertex_attributes(const rapidjson::Value &attributes);
 	VkVertexInputBindingDescription *parse_vertex_bindings(const rapidjson::Value &bindings);
+	VkPipelineColorBlendAttachmentState *parse_blend_attachments(const rapidjson::Value &attachments);
 	uint32_t *parse_uints(const rapidjson::Value &attachments);
 	const char *duplicate_string(const char *str, size_t len);
 

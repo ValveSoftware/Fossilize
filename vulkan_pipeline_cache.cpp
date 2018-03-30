@@ -1052,6 +1052,66 @@ VkPipelineRasterizationStateCreateInfo *StateReplayer::parse_rasterization_state
 	return state;
 }
 
+VkPipelineTessellationStateCreateInfo *StateReplayer::parse_tessellation_state(const rapidjson::Value &tess)
+{
+	auto *state = allocator.allocate_cleared<VkPipelineTessellationStateCreateInfo>();
+	state->sType = VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO;
+	state->flags = tess["flags"].GetUint();
+	state->patchControlPoints = tess["patchControlPoints"].GetUint();
+	return state;
+}
+
+VkPipelineInputAssemblyStateCreateInfo *StateReplayer::parse_input_assembly_state(const rapidjson::Value &ia)
+{
+	auto *state = allocator.allocate_cleared<VkPipelineInputAssemblyStateCreateInfo>();
+	state->sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+	state->flags = ia["flags"].GetUint();
+	state->primitiveRestartEnable = ia["primitiveRestartEnable"].GetUint();
+	state->topology = static_cast<VkPrimitiveTopology>(ia["topology"].GetUint());
+	return state;
+}
+
+VkPipelineColorBlendAttachmentState *StateReplayer::parse_blend_attachments(const rapidjson::Value &attachments)
+{
+	auto *att = allocator.allocate_n_cleared<VkPipelineColorBlendAttachmentState>(attachments.Size());
+	auto *ret = att;
+
+	for (auto itr = attachments.Begin(); itr != attachments.End(); ++itr, att++)
+	{
+		auto &obj = *itr;
+		att->blendEnable = obj["blendEnable"].GetUint();
+		att->colorWriteMask = obj["colorWriteMask"].GetUint();
+		att->alphaBlendOp = static_cast<VkBlendOp>(obj["alphaBlendOp"].GetUint());
+		att->colorBlendOp = static_cast<VkBlendOp>(obj["colorBlendOp"].GetUint());
+		att->srcColorBlendFactor = static_cast<VkBlendFactor>(obj["srcColorBlendFactor"].GetUint());
+		att->dstColorBlendFactor = static_cast<VkBlendFactor>(obj["dstColorBlendFactor"].GetUint());
+		att->srcAlphaBlendFactor = static_cast<VkBlendFactor>(obj["srcAlphaBlendFactor"].GetUint());
+		att->dstAlphaBlendFactor = static_cast<VkBlendFactor>(obj["dstAlphaBlendFactor"].GetUint());
+	}
+
+	return ret;
+}
+
+VkPipelineColorBlendStateCreateInfo *StateReplayer::parse_color_blend_state(const rapidjson::Value &blend)
+{
+	auto *state = allocator.allocate_cleared<VkPipelineColorBlendStateCreateInfo>();
+	state->sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+	state->flags = blend["flags"].GetUint();
+
+	state->logicOp = static_cast<VkLogicOp>(blend["logicOp"].GetUint());
+	state->logicOpEnable = blend["logicOpEnable"].GetUint();
+	for (unsigned i = 0; i < 4; i++)
+		state->blendConstants[i] = blend["blendConstants"][i].GetFloat();
+
+	if (blend.HasMember("attachments"))
+	{
+		state->attachmentCount = blend["attachments"].Size();
+		state->pAttachments = parse_blend_attachments(blend["attachments"]);
+	}
+
+	return state;
+}
+
 void StateReplayer::parse_graphics_pipelines(StateCreatorInterface &iface, const Value &pipelines)
 {
 	iface.set_num_graphics_pipelines(pipelines.Size());
