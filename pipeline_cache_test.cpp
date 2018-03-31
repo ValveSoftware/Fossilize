@@ -68,12 +68,23 @@ struct ReplayInterface : StateCreatorInterface
 			return false;
 
 		unsigned pass_index = recorder.register_render_pass(hash, *create_info);
-		*render_pass = fake_handle<VkRenderPass >(pass_index + 40000);
+		*render_pass = fake_handle<VkRenderPass>(pass_index + 40000);
 		recorder.set_render_pass_handle(pass_index, *render_pass);
 		return true;
 	}
 
-	bool enqueue_create_compute_pipeline(Hash hash, unsigned index, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) {}
+	bool enqueue_create_compute_pipeline(Hash hash, unsigned index, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline)
+	{
+		Hash recorded_hash = Hashing::compute_hash_compute_pipeline(recorder, *create_info);
+		if (recorded_hash != hash)
+			return false;
+
+		unsigned pipe_index = recorder.register_compute_pipeline(hash, *create_info);
+		*pipeline = fake_handle<VkPipeline>(pipe_index + 40000);
+		recorder.set_compute_pipeline_handle(pipe_index, *pipeline);
+		return true;
+	}
+
 	bool enqueue_create_graphics_pipeline(Hash hash, unsigned index, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline) {}
 };
 
@@ -255,6 +266,37 @@ static void record_render_passes(StateRecorder &recorder)
 	recorder.set_render_pass_handle(index, fake_handle<VkRenderPass>(30001));
 }
 
+static void record_compute_pipelines(StateRecorder &recorder)
+{
+	VkComputePipelineCreateInfo pipe = { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
+	pipe.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	pipe.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	pipe.stage.module = fake_handle<VkShaderModule>(5000);
+	pipe.stage.pName = "main";
+
+	VkSpecializationInfo spec = {};
+	spec.dataSize = 16;
+	static const float data[4] = { 1.0f, 2.0f, 3.0f, 4.0f };
+	spec.pData = data;
+	spec.mapEntryCount = 2;
+	static const VkSpecializationMapEntry entries[2] = {
+		{ 0, 4, 8 },
+		{ 4, 4, 16 },
+	};
+	spec.pMapEntries = entries;
+	pipe.stage.pSpecializationInfo = &spec;
+	pipe.layout = fake_handle<VkPipelineLayout>(10001);
+
+	unsigned index = recorder.register_compute_pipeline(Hashing::compute_hash_compute_pipeline(recorder, pipe), pipe);
+	recorder.set_compute_pipeline_handle(index, fake_handle<VkPipeline>(80000));
+
+	pipe.basePipelineHandle = fake_handle<VkPipeline>(80000);
+	pipe.basePipelineIndex = 10;
+	pipe.stage.pSpecializationInfo = nullptr;
+	index = recorder.register_compute_pipeline(Hashing::compute_hash_compute_pipeline(recorder, pipe), pipe);
+	recorder.set_compute_pipeline_handle(index, fake_handle<VkPipeline>(80001));
+}
+
 int main()
 {
 	StateRecorder recorder;
@@ -266,6 +308,7 @@ int main()
 	record_pipeline_layouts(recorder);
 	record_shader_modules(recorder);
 	record_render_passes(recorder);
+	record_compute_pipelines(recorder);
 
 	auto res = recorder.serialize();
 	fprintf(stderr, "Serialized: %s\n", res.c_str());

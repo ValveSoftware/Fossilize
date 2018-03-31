@@ -939,7 +939,7 @@ void StateReplayer::parse_compute_pipelines(StateCreatorInterface &iface, const 
 		info.flags = obj["flags"].GetUint();
 		info.basePipelineIndex = obj["basePipelineIndex"].GetUint();
 
-		auto pipeline = obj["basePipeline"].GetUint64();
+		auto pipeline = obj["basePipelineHandle"].GetUint64();
 		if (pipeline > replayed_shader_modules.size())
 			throw logic_error("Base pipeline index out of range.");
 		else if (pipeline > 0)
@@ -1661,9 +1661,11 @@ VkSpecializationInfo *StateRecorder::copy_specialization_info(const VkSpecializa
 VkComputePipelineCreateInfo StateRecorder::copy_compute_pipeline(const VkComputePipelineCreateInfo &create_info)
 {
 	auto info = create_info;
-	info.stage.pSpecializationInfo = copy_specialization_info(info.stage.pSpecializationInfo);
+	if (info.stage.pSpecializationInfo)
+		info.stage.pSpecializationInfo = copy_specialization_info(info.stage.pSpecializationInfo);
 	info.stage.module = reinterpret_cast<VkShaderModule>(uint64_t(shader_module_to_index[create_info.stage.module] + 1));
 	info.stage.pName = copy(info.stage.pName, strlen(info.stage.pName) + 1);
+	info.layout = reinterpret_cast<VkPipelineLayout>(uint64_t(pipeline_layout_to_index[info.layout] + 1));
 	if (info.basePipelineHandle != VK_NULL_HANDLE)
 		info.basePipelineHandle = reinterpret_cast<VkPipeline>(uint64_t(compute_pipeline_to_index[info.basePipelineHandle] + 1));
 	return info;
@@ -1685,6 +1687,7 @@ VkGraphicsPipelineCreateInfo StateRecorder::copy_graphics_pipeline(const VkGraph
 	info.pRasterizationState = copy(info.pRasterizationState, 1);
 	info.pDynamicState = copy(info.pDynamicState, 1);
 	info.renderPass = reinterpret_cast<VkRenderPass>(uint64_t(render_pass_to_index[info.renderPass] + 1));
+	info.layout = reinterpret_cast<VkPipelineLayout>(uint64_t(pipeline_layout_to_index[info.layout] + 1));
 	if (info.basePipelineHandle != VK_NULL_HANDLE)
 		info.basePipelineHandle = reinterpret_cast<VkPipeline>(uint64_t(graphics_pipeline_to_index[info.basePipelineHandle] + 1));
 
@@ -1993,7 +1996,7 @@ std::string StateRecorder::serialize() const
 		{
 			Value spec(kObjectType);
 			spec.AddMember("dataSize", pipe.info.stage.pSpecializationInfo->dataSize, alloc);
-			spec.AddMember("code",
+			spec.AddMember("data",
 			               encode_base64(pipe.info.stage.pSpecializationInfo->pData,
 			                             pipe.info.stage.pSpecializationInfo->dataSize), alloc);
 			Value map_entries(kArrayType);
