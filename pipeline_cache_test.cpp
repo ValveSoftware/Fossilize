@@ -85,7 +85,17 @@ struct ReplayInterface : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_graphics_pipeline(Hash hash, unsigned index, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline) {}
+	bool enqueue_create_graphics_pipeline(Hash hash, unsigned index, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline)
+	{
+		Hash recorded_hash = Hashing::compute_hash_graphics_pipeline(recorder, *create_info);
+		if (recorded_hash != hash)
+			return false;
+
+		unsigned pipe_index = recorder.register_graphics_pipeline(hash, *create_info);
+		*pipeline = fake_handle<VkPipeline>(pipe_index + 600000);
+		recorder.set_graphics_pipeline_handle(pipe_index, *pipeline);
+		return true;
+	}
 };
 
 static void record_samplers(StateRecorder &recorder)
@@ -297,6 +307,127 @@ static void record_compute_pipelines(StateRecorder &recorder)
 	recorder.set_compute_pipeline_handle(index, fake_handle<VkPipeline>(80001));
 }
 
+static void record_graphics_pipelines(StateRecorder &recorder)
+{
+	VkSpecializationInfo spec = {};
+	spec.dataSize = 16;
+	static const float data[4] = { 1.0f, 2.0f, 3.0f, 4.0f };
+	spec.pData = data;
+	spec.mapEntryCount = 2;
+	static const VkSpecializationMapEntry entries[2] = {
+		{ 0, 4, 8 },
+		{ 4, 4, 16 },
+	};
+	spec.pMapEntries = entries;
+
+	VkGraphicsPipelineCreateInfo pipe = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+	pipe.layout = fake_handle<VkPipelineLayout>(10002);
+	pipe.subpass = 1;
+	pipe.renderPass = fake_handle<VkRenderPass>(30001);
+	pipe.stageCount = 2;
+	VkPipelineShaderStageCreateInfo stages[2] = {};
+	stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+	stages[0].pName = "vert";
+	stages[0].module = fake_handle<VkShaderModule>(5000);
+	stages[0].pSpecializationInfo = &spec;
+	stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	stages[1].pName = "frag";
+	stages[1].module = fake_handle<VkShaderModule>(5001);
+	stages[1].pSpecializationInfo = &spec;
+	pipe.pStages = stages;
+
+	VkPipelineVertexInputStateCreateInfo vi = { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+	VkPipelineMultisampleStateCreateInfo ms = { VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
+	VkPipelineDynamicStateCreateInfo dyn = { VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
+	VkPipelineViewportStateCreateInfo vp = { VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
+	VkPipelineColorBlendStateCreateInfo blend = { VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
+	VkPipelineTessellationStateCreateInfo tess = { VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO };
+	VkPipelineDepthStencilStateCreateInfo ds = { VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
+	VkPipelineRasterizationStateCreateInfo rs = { VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
+	VkPipelineInputAssemblyStateCreateInfo ia = { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
+
+	static const VkVertexInputAttributeDescription attrs[2] = {
+		{ 2, 1, VK_FORMAT_R16G16_SFLOAT, 5 },
+		{ 9, 1, VK_FORMAT_R8_UINT, 5 },
+	};
+	static const VkVertexInputBindingDescription binds[2] = {
+		{ 8, 1, VK_VERTEX_INPUT_RATE_INSTANCE },
+		{ 9, 6, VK_VERTEX_INPUT_RATE_VERTEX },
+	};
+	vi.vertexBindingDescriptionCount = 2;
+	vi.vertexAttributeDescriptionCount = 2;
+	vi.pVertexBindingDescriptions = binds;
+	vi.pVertexAttributeDescriptions = attrs;
+
+	ms.rasterizationSamples = VK_SAMPLE_COUNT_16_BIT;
+	ms.sampleShadingEnable = VK_TRUE;
+	ms.minSampleShading = 0.5f;
+	ms.alphaToCoverageEnable = VK_TRUE;
+	ms.alphaToOneEnable = VK_TRUE;
+	static const uint32_t mask = 0xf;
+	ms.pSampleMask = &mask;
+
+	static const VkDynamicState dyn_states[3] = {
+			VK_DYNAMIC_STATE_BLEND_CONSTANTS,
+			VK_DYNAMIC_STATE_DEPTH_BIAS,
+			VK_DYNAMIC_STATE_LINE_WIDTH
+	};
+	dyn.dynamicStateCount = 3;
+	dyn.pDynamicStates = dyn_states;
+
+	static const VkViewport vps[2] = {
+		{ 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f },
+		{ 11.0f, 12.0f, 13.0f, 14.0f, 15.0f, 16.0f },
+	};
+	static const VkRect2D sci[2] = {
+		{ { 3, 4 }, { 8, 9 }},
+		{ { 13, 14 }, { 18, 19 }},
+	};
+	vp.viewportCount = 2;
+	vp.scissorCount = 2;
+	vp.pViewports = vps;
+	vp.pScissors = sci;
+
+	static const VkPipelineColorBlendAttachmentState blend_attachments[2] = {
+			{ VK_TRUE,
+			  VK_BLEND_FACTOR_DST_ALPHA, VK_BLEND_FACTOR_DST_ALPHA, VK_BLEND_OP_ADD,
+			  VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA, VK_BLEND_FACTOR_ONE_MINUS_SRC1_ALPHA, VK_BLEND_OP_SUBTRACT,
+			  0xf },
+			{ VK_TRUE,
+					VK_BLEND_FACTOR_SRC_ALPHA, VK_BLEND_FACTOR_SRC_ALPHA, VK_BLEND_OP_ADD,
+					VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA, VK_BLEND_FACTOR_ONE_MINUS_SRC1_ALPHA, VK_BLEND_OP_SUBTRACT,
+					0x3 },
+	};
+	blend.logicOpEnable = VK_TRUE;
+	blend.logicOp = VK_LOGIC_OP_AND_INVERTED;
+	blend.blendConstants[0] = 9.0f;
+	blend.blendConstants[1] = 19.0f;
+	blend.blendConstants[2] = 29.0f;
+	blend.blendConstants[3] = 39.0f;
+	blend.attachmentCount = 2;
+	blend.pAttachments = blend_attachments;
+
+	pipe.pVertexInputState = &vi;
+	pipe.pMultisampleState = &ms;
+	pipe.pDynamicState = &dyn;
+	pipe.pViewportState = &vp;
+	pipe.pColorBlendState = &blend;
+	pipe.pTessellationState = &tess;
+	pipe.pDepthStencilState = &ds;
+	pipe.pRasterizationState = &rs;
+	pipe.pInputAssemblyState = &ia;
+
+	unsigned index = recorder.register_graphics_pipeline(Hashing::compute_hash_graphics_pipeline(recorder, pipe), pipe);
+	recorder.set_graphics_pipeline_handle(index, fake_handle<VkPipeline>(100000));
+
+	pipe.basePipelineHandle = fake_handle<VkPipeline>(100000);
+	pipe.basePipelineIndex = 200;
+	index = recorder.register_graphics_pipeline(Hashing::compute_hash_graphics_pipeline(recorder, pipe), pipe);
+	recorder.set_graphics_pipeline_handle(index, fake_handle<VkPipeline>(100001));
+}
+
 int main()
 {
 	StateRecorder recorder;
@@ -309,6 +440,7 @@ int main()
 	record_shader_modules(recorder);
 	record_render_passes(recorder);
 	record_compute_pipelines(recorder);
+	record_graphics_pipelines(recorder);
 
 	auto res = recorder.serialize();
 	fprintf(stderr, "Serialized: %s\n", res.c_str());

@@ -1076,7 +1076,7 @@ VkPipelineRasterizationStateCreateInfo *StateReplayer::parse_rasterization_state
 	state->depthBiasConstantFactor = rs["depthBiasConstantFactor"].GetFloat();
 	state->depthBiasSlopeFactor = rs["depthBiasSlopeFactor"].GetFloat();
 	state->lineWidth = rs["lineWidth"].GetFloat();
-	state->rasterizerDiscardEnable = rs["rasterizationDiscardEnable"].GetUint();
+	state->rasterizerDiscardEnable = rs["rasterizerDiscardEnable"].GetUint();
 	state->depthBiasEnable = rs["depthBiasEnable"].GetUint();
 	state->depthClampEnable = rs["depthClampEnable"].GetUint();
 	state->polygonMode = static_cast<VkPolygonMode>(rs["polygonMode"].GetUint());
@@ -1170,11 +1170,11 @@ VkPipelineDynamicStateCreateInfo *StateReplayer::parse_dynamic_state(const rapid
 	state->sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
 	state->flags = dyn["flags"].GetUint();
 
-	if (dyn.HasMember("dynamicStates"))
+	if (dyn.HasMember("dynamicState"))
 	{
-		state->dynamicStateCount = dyn["dynamicStates"].Size();
+		state->dynamicStateCount = dyn["dynamicState"].Size();
 		static_assert(sizeof(VkDynamicState) == sizeof(uint32_t), "Enum size is not 32-bit.");
-		state->pDynamicStates = reinterpret_cast<VkDynamicState *>(parse_uints(dyn["dynamicStates"]));
+		state->pDynamicStates = reinterpret_cast<VkDynamicState *>(parse_uints(dyn["dynamicState"]));
 	}
 
 	return state;
@@ -1207,10 +1207,10 @@ VkRect2D *StateReplayer::parse_scissors(const rapidjson::Value &scissors)
 	for (auto itr = scissors.Begin(); itr != scissors.End(); ++itr, sci++)
 	{
 		auto &obj = *itr;
-		ret->offset.x = obj["x"].GetInt();
-		ret->offset.y = obj["y"].GetInt();
-		ret->extent.width = obj["width"].GetUint();
-		ret->extent.height = obj["height"].GetUint();
+		sci->offset.x = obj["x"].GetInt();
+		sci->offset.y = obj["y"].GetInt();
+		sci->extent.width = obj["width"].GetUint();
+		sci->extent.height = obj["height"].GetUint();
 	}
 
 	return ret;
@@ -1225,13 +1225,13 @@ VkPipelineViewportStateCreateInfo *StateReplayer::parse_viewport_state(const rap
 
 	if (vp.HasMember("scissors"))
 	{
-		state->scissorCount = vp["scissors"].GetUint();
+		state->scissorCount = vp["scissors"].Size();
 		state->pScissors = parse_scissors(vp["scissors"]);
 	}
 
 	if (vp.HasMember("viewports"))
 	{
-		state->viewportCount = vp["viewports"].GetUint();
+		state->viewportCount = vp["viewports"].Size();
 		state->pViewports = parse_viewports(vp["viewports"]);
 	}
 
@@ -1280,7 +1280,7 @@ void StateReplayer::parse_graphics_pipelines(StateCreatorInterface &iface, const
 		info.flags = obj["flags"].GetUint();
 		info.basePipelineIndex = obj["basePipelineIndex"].GetUint();
 
-		auto pipeline = obj["basePipeline"].GetUint64();
+		auto pipeline = obj["basePipelineHandle"].GetUint64();
 		if (pipeline > replayed_shader_modules.size())
 			throw logic_error("Base pipeline index out of range.");
 		else if (pipeline > 0)
@@ -1311,7 +1311,7 @@ void StateReplayer::parse_graphics_pipelines(StateCreatorInterface &iface, const
 
 		if (obj.HasMember("stages"))
 		{
-			info.stageCount = obj["stages"].GetUint();
+			info.stageCount = obj["stages"].Size();
 			info.pStages = parse_stages(obj["stages"]);
 		}
 
@@ -1676,16 +1676,26 @@ VkGraphicsPipelineCreateInfo StateRecorder::copy_graphics_pipeline(const VkGraph
 	auto info = create_info;
 
 	info.pStages = copy(info.pStages, info.stageCount);
-	info.pTessellationState = copy(info.pTessellationState, 1);
-	info.pColorBlendState = copy(info.pColorBlendState, 1);
-	info.pVertexInputState = copy(info.pVertexInputState, 1);
-	info.pMultisampleState = copy(info.pMultisampleState, 1);
-	info.pVertexInputState = copy(info.pVertexInputState, 1);
-	info.pViewportState = copy(info.pViewportState, 1);
-	info.pInputAssemblyState  = copy(info.pInputAssemblyState, 1);
-	info.pDepthStencilState = copy(info.pDepthStencilState, 1);
-	info.pRasterizationState = copy(info.pRasterizationState, 1);
-	info.pDynamicState = copy(info.pDynamicState, 1);
+	if (info.pTessellationState)
+		info.pTessellationState = copy(info.pTessellationState, 1);
+	if (info.pColorBlendState)
+		info.pColorBlendState = copy(info.pColorBlendState, 1);
+	if (info.pVertexInputState)
+		info.pVertexInputState = copy(info.pVertexInputState, 1);
+	if (info.pMultisampleState)
+		info.pMultisampleState = copy(info.pMultisampleState, 1);
+	if (info.pVertexInputState)
+		info.pVertexInputState = copy(info.pVertexInputState, 1);
+	if (info.pViewportState)
+		info.pViewportState = copy(info.pViewportState, 1);
+	if (info.pInputAssemblyState)
+		info.pInputAssemblyState  = copy(info.pInputAssemblyState, 1);
+	if (info.pDepthStencilState)
+		info.pDepthStencilState = copy(info.pDepthStencilState, 1);
+	if (info.pRasterizationState)
+		info.pRasterizationState = copy(info.pRasterizationState, 1);
+	if (info.pDynamicState)
+		info.pDynamicState = copy(info.pDynamicState, 1);
 	info.renderPass = reinterpret_cast<VkRenderPass>(uint64_t(render_pass_to_index[info.renderPass] + 1));
 	info.layout = reinterpret_cast<VkPipelineLayout>(uint64_t(pipeline_layout_to_index[info.layout] + 1));
 	if (info.basePipelineHandle != VK_NULL_HANDLE)
@@ -1699,19 +1709,31 @@ VkGraphicsPipelineCreateInfo StateRecorder::copy_graphics_pipeline(const VkGraph
 		stage.module = reinterpret_cast<VkShaderModule>(uint64_t(shader_module_to_index[stage.module] + 1));
 	}
 
-	auto &blend = const_cast<VkPipelineColorBlendStateCreateInfo &>(*info.pColorBlendState);
-	blend.pAttachments = copy(blend.pAttachments, blend.attachmentCount);
+	if (info.pColorBlendState)
+	{
+		auto &blend = const_cast<VkPipelineColorBlendStateCreateInfo &>(*info.pColorBlendState);
+		blend.pAttachments = copy(blend.pAttachments, blend.attachmentCount);
+	}
 
-	auto &vs = const_cast<VkPipelineVertexInputStateCreateInfo &>(*info.pVertexInputState);
-	vs.pVertexAttributeDescriptions = copy(vs.pVertexAttributeDescriptions, vs.vertexAttributeDescriptionCount);
-	vs.pVertexBindingDescriptions = copy(vs.pVertexBindingDescriptions, vs.vertexBindingDescriptionCount);
+	if (info.pVertexInputState)
+	{
+		auto &vs = const_cast<VkPipelineVertexInputStateCreateInfo &>(*info.pVertexInputState);
+		vs.pVertexAttributeDescriptions = copy(vs.pVertexAttributeDescriptions, vs.vertexAttributeDescriptionCount);
+		vs.pVertexBindingDescriptions = copy(vs.pVertexBindingDescriptions, vs.vertexBindingDescriptionCount);
+	}
 
-	auto &ms = const_cast<VkPipelineMultisampleStateCreateInfo &>(*info.pMultisampleState);
-	if (ms.pSampleMask)
-		ms.pSampleMask = copy(ms.pSampleMask, (ms.rasterizationSamples + 31) / 32);
+	if (info.pMultisampleState)
+	{
+		auto &ms = const_cast<VkPipelineMultisampleStateCreateInfo &>(*info.pMultisampleState);
+		if (ms.pSampleMask)
+			ms.pSampleMask = copy(ms.pSampleMask, (ms.rasterizationSamples + 31) / 32);
+	}
 
-	const_cast<VkPipelineDynamicStateCreateInfo *>(info.pDynamicState)->pDynamicStates =
-		copy(info.pDynamicState->pDynamicStates, info.pDynamicState->dynamicStateCount);
+	if (info.pDynamicState)
+	{
+		const_cast<VkPipelineDynamicStateCreateInfo *>(info.pDynamicState)->pDynamicStates =
+				copy(info.pDynamicState->pDynamicStates, info.pDynamicState->dynamicStateCount);
+	}
 
 	return info;
 }
@@ -2032,7 +2054,7 @@ std::string StateRecorder::serialize() const
 		if (pipe.info.pTessellationState)
 		{
 			Value tess(kObjectType);
-			tess.AddMember("alloc", pipe.info.pTessellationState->flags, alloc);
+			tess.AddMember("flags", pipe.info.pTessellationState->flags, alloc);
 			tess.AddMember("patchControlPoints", pipe.info.pTessellationState->patchControlPoints, alloc);
 			p.AddMember("tessellationState", tess, alloc);
 		}
@@ -2153,6 +2175,7 @@ std::string StateRecorder::serialize() const
 				att.AddMember("alphaBlendOp", a.alphaBlendOp, alloc);
 				att.AddMember("colorBlendOp", a.colorBlendOp, alloc);
 				att.AddMember("blendEnable", a.blendEnable, alloc);
+				attachments.PushBack(att, alloc);
 			}
 			cb.AddMember("attachments", attachments, alloc);
 			p.AddMember("colorBlendState", cb, alloc);
@@ -2239,7 +2262,7 @@ std::string StateRecorder::serialize() const
 			{
 				Value spec(kObjectType);
 				spec.AddMember("dataSize", s.pSpecializationInfo->dataSize, alloc);
-				spec.AddMember("code",
+				spec.AddMember("data",
 				               encode_base64(s.pSpecializationInfo->pData,
 				                             s.pSpecializationInfo->dataSize), alloc);
 				Value map_entries(kArrayType);
