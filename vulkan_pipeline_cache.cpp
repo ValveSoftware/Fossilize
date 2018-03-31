@@ -1845,6 +1845,7 @@ std::string StateRecorder::serialize() const
 		Value m(kObjectType);
 		m.AddMember("hash", module.hash, alloc);
 		m.AddMember("flags", module.info.flags, alloc);
+		m.AddMember("codeSize", module.info.codeSize, alloc);
 		m.AddMember("code", encode_base64(module.info.pCode, module.info.codeSize), alloc);
 		shader_modules.PushBack(m, alloc);
 	}
