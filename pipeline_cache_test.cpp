@@ -61,7 +61,18 @@ struct ReplayInterface : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_render_pass(Hash hash, unsigned index, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass) {}
+	bool enqueue_create_render_pass(Hash hash, unsigned index, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass)
+	{
+		Hash recorded_hash = Hashing::compute_hash_render_pass(recorder, *create_info);
+		if (recorded_hash != hash)
+			return false;
+
+		unsigned pass_index = recorder.register_render_pass(hash, *create_info);
+		*render_pass = fake_handle<VkRenderPass >(pass_index + 40000);
+		recorder.set_render_pass_handle(pass_index, *render_pass);
+		return true;
+	}
+
 	bool enqueue_create_compute_pipeline(Hash hash, unsigned index, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) {}
 	bool enqueue_create_graphics_pipeline(Hash hash, unsigned index, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline) {}
 };
@@ -178,6 +189,72 @@ static void record_shader_modules(StateRecorder &recorder)
 	recorder.set_shader_module_handle(index, fake_handle<VkShaderModule>(5001));
 }
 
+static void record_render_passes(StateRecorder &recorder)
+{
+	VkRenderPassCreateInfo pass = { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
+	VkSubpassDependency deps[2] = {};
+	VkSubpassDescription subpasses[2] = {};
+	VkAttachmentDescription att[2] = {};
+
+	deps[0].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+	deps[0].dstAccessMask = 49;
+	deps[0].srcAccessMask = 34;
+	deps[0].dstStageMask = 199;
+	deps[0].srcStageMask = 10;
+	deps[0].srcSubpass = 9;
+	deps[0].dstSubpass = 19;
+	deps[1].dependencyFlags = 19;
+	deps[1].dstAccessMask = 490;
+	deps[1].srcAccessMask = 340;
+	deps[1].dstStageMask = 1990;
+	deps[1].srcStageMask = 100;
+	deps[1].srcSubpass = 90;
+	deps[1].dstSubpass = 190;
+
+	att[0].format = VK_FORMAT_R16G16_SFLOAT;
+	att[0].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+	att[0].initialLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+	att[0].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+	att[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+	att[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+	att[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE;
+	att[0].samples = VK_SAMPLE_COUNT_16_BIT;
+
+	static const uint32_t preserves[4] = { 9, 4, 2, 3 };
+	static const VkAttachmentReference inputs[2] = { { 3, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL }, { 9, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL } };
+	static const VkAttachmentReference colors[2] = { { 8, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL }, { 1, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL } };
+	static const VkAttachmentReference resolves[2] = { { 1, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL }, { 3, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL } };
+	static const VkAttachmentReference ds = { 0, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL };
+	subpasses[0].preserveAttachmentCount = 4;
+	subpasses[0].pPreserveAttachments = preserves;
+	subpasses[0].inputAttachmentCount = 2;
+	subpasses[0].pInputAttachments = inputs;
+	subpasses[0].colorAttachmentCount = 2;
+	subpasses[0].pColorAttachments = colors;
+	subpasses[0].pipelineBindPoint = VK_PIPELINE_BIND_POINT_COMPUTE;
+	subpasses[0].pDepthStencilAttachment = &ds;
+	subpasses[0].pResolveAttachments = resolves;
+
+	subpasses[1].inputAttachmentCount = 1;
+	subpasses[1].pInputAttachments = inputs;
+	subpasses[1].colorAttachmentCount = 2;
+	subpasses[1].pColorAttachments = colors;
+	subpasses[1].pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+
+	pass.attachmentCount = 2;
+	pass.pAttachments = att;
+	pass.subpassCount = 1;
+	pass.pSubpasses = subpasses;
+	pass.dependencyCount = 0;
+	pass.pDependencies = deps;
+	unsigned index = recorder.register_render_pass(Hashing::compute_hash_render_pass(recorder, pass), pass);
+	recorder.set_render_pass_handle(index, fake_handle<VkRenderPass>(30000));
+
+	pass.dependencyCount = 0;
+	index = recorder.register_render_pass(Hashing::compute_hash_render_pass(recorder, pass), pass);
+	recorder.set_render_pass_handle(index, fake_handle<VkRenderPass>(30001));
+}
+
 int main()
 {
 	StateRecorder recorder;
@@ -188,6 +265,7 @@ int main()
 	record_set_layouts(recorder);
 	record_pipeline_layouts(recorder);
 	record_shader_modules(recorder);
+	record_render_passes(recorder);
 
 	auto res = recorder.serialize();
 	fprintf(stderr, "Serialized: %s\n", res.c_str());
