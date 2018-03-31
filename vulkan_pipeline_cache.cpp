@@ -13,6 +13,30 @@ namespace VPC
 {
 namespace Hashing
 {
+Hash compute_hash_sampler(const StateRecorder &, const VkSamplerCreateInfo &sampler)
+{
+	Hasher h;
+
+	h.u32(sampler.flags);
+	h.f32(sampler.maxAnisotropy);
+	h.f32(sampler.mipLodBias);
+	h.f32(sampler.minLod);
+	h.f32(sampler.maxLod);
+	h.u32(sampler.minFilter);
+	h.u32(sampler.magFilter);
+	h.u32(sampler.mipmapMode);
+	h.u32(sampler.compareEnable);
+	h.u32(sampler.compareOp);
+	h.u32(sampler.anisotropyEnable);
+	h.u32(sampler.addressModeU);
+	h.u32(sampler.addressModeV);
+	h.u32(sampler.addressModeW);
+	h.u32(sampler.borderColor);
+	h.u32(sampler.unnormalizedCoordinates);
+
+	return h.get();
+}
+
 Hash compute_hash_descriptor_set_layout(const StateRecorder &recorder, const VkDescriptorSetLayoutCreateInfo &layout)
 {
 	Hasher h;
@@ -616,7 +640,8 @@ void StateReplayer::parse_shader_modules(StateCreatorInterface &iface, const Val
 		info.flags = obj["flags"].GetUint();
 		info.codeSize = obj["codeSize"].GetUint64();
 		info.pCode = decode_base64(allocator, obj["code"].GetString(), info.codeSize);
-		iface.enqueue_create_shader_module(obj["hash"].GetUint64(), index, &info, &replayed_shader_modules[index]);
+		if (!iface.enqueue_create_shader_module(obj["hash"].GetUint64(), index, &info, &replayed_shader_modules[index]))
+			throw runtime_error("Failed ot create shader module.");
 	}
 	iface.wait_enqueue();
 }
@@ -648,7 +673,8 @@ void StateReplayer::parse_pipeline_layouts(StateCreatorInterface &iface, const V
 			info.pSetLayouts = parse_set_layouts(obj["setLayouts"]);
 		}
 
-		iface.enqueue_create_pipeline_layout(obj["hash"].GetUint64(), index, &info, &replayed_pipeline_layouts[index]);
+		if (!iface.enqueue_create_pipeline_layout(obj["hash"].GetUint64(), index, &info, &replayed_pipeline_layouts[index]))
+			throw runtime_error("Failed to create pipeline layout.");
 	}
 	iface.wait_enqueue();
 }
@@ -671,10 +697,12 @@ void StateReplayer::parse_descriptor_set_layouts(StateCreatorInterface &iface, c
 		{
 			auto &bindings = obj["bindings"];
 			info.bindingCount = bindings.Size();
-			info.pBindings = parse_descriptor_set_bindings(bindings);
+			auto *allocated_bindings = parse_descriptor_set_bindings(bindings);
+			info.pBindings = allocated_bindings;
 		}
 
-		iface.enqueue_create_descriptor_set_layout(obj["hash"].GetUint64(), index, &info, &replayed_descriptor_set_layouts[index]);
+		if (!iface.enqueue_create_descriptor_set_layout(obj["hash"].GetUint64(), index, &info, &replayed_descriptor_set_layouts[index]))
+			throw runtime_error("Failed to create descriptor set layout.");
 	}
 	iface.wait_enqueue();
 }
@@ -707,8 +735,10 @@ void StateReplayer::parse_samplers(StateCreatorInterface &iface, const Value &sa
 		info.maxLod = obj["maxLod"].GetFloat();
 		info.minLod = obj["minLod"].GetFloat();
 		info.mipLodBias = obj["mipLodBias"].GetFloat();
+		info.unnormalizedCoordinates = obj["unnormalizedCoordinates"].GetUint();
 
-		iface.enqueue_create_sampler(obj["hash"].GetUint64(), index, &info, &replayed_samplers[index]);
+		if (!iface.enqueue_create_sampler(obj["hash"].GetUint64(), index, &info, &replayed_samplers[index]))
+			throw runtime_error("Failed to create sampler.");
 	}
 	iface.wait_enqueue();
 }
@@ -857,7 +887,8 @@ void StateReplayer::parse_render_passes(StateCreatorInterface &iface, const Valu
 			info.pSubpasses = parse_render_pass_subpasses(obj["subpasses"]);
 		}
 
-		iface.enqueue_create_render_pass(obj["hash"].GetUint64(), index, &info, &replayed_render_passes[index]);
+		if (!iface.enqueue_create_render_pass(obj["hash"].GetUint64(), index, &info, &replayed_render_passes[index]))
+			throw runtime_error("Failed to create render pass.");
 	}
 
 	iface.wait_enqueue();
@@ -942,7 +973,8 @@ void StateReplayer::parse_compute_pipelines(StateCreatorInterface &iface, const 
 		if (stage.HasMember("specializationInfo"))
 			info.stage.pSpecializationInfo = parse_specialization_info(stage["specializationInfo"]);
 
-		iface.enqueue_create_compute_pipeline(obj["hash"].GetUint64(), index, &info, &replayed_compute_pipelines[index]);
+		if (!iface.enqueue_create_compute_pipeline(obj["hash"].GetUint64(), index, &info, &replayed_compute_pipelines[index]))
+			throw runtime_error("Failed to create compute pipeline.");
 	}
 	iface.wait_enqueue();
 }
@@ -1112,6 +1144,126 @@ VkPipelineColorBlendStateCreateInfo *StateReplayer::parse_color_blend_state(cons
 	return state;
 }
 
+VkPipelineMultisampleStateCreateInfo *StateReplayer::parse_multisample_state(const rapidjson::Value &ms)
+{
+	auto *state = allocator.allocate_cleared<VkPipelineMultisampleStateCreateInfo>();
+
+	state->sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+	state->flags = ms["flags"].GetUint();
+
+	state->alphaToCoverageEnable = ms["alphaToCoverageEnable"].GetUint();
+	state->alphaToOneEnable = ms["alphaToOneEnable"].GetUint();
+	state->minSampleShading = ms["minSampleShading"].GetFloat();
+	if (ms.HasMember("sampleMask"))
+		state->pSampleMask = parse_uints(ms["sampleMask"]);
+	state->sampleShadingEnable = ms["sampleShadingEnable"].GetUint();
+	state->rasterizationSamples = static_cast<VkSampleCountFlagBits>(ms["rasterizationSamples"].GetUint());
+
+	return state;
+}
+
+VkPipelineDynamicStateCreateInfo *StateReplayer::parse_dynamic_state(const rapidjson::Value &dyn)
+{
+	auto *state = allocator.allocate_cleared<VkPipelineDynamicStateCreateInfo>();
+
+	state->sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+	state->flags = dyn["flags"].GetUint();
+
+	if (dyn.HasMember("dynamicStates"))
+	{
+		state->dynamicStateCount = dyn["dynamicStates"].Size();
+		static_assert(sizeof(VkDynamicState) == sizeof(uint32_t), "Enum size is not 32-bit.");
+		state->pDynamicStates = reinterpret_cast<VkDynamicState *>(parse_uints(dyn["dynamicStates"]));
+	}
+
+	return state;
+}
+
+VkViewport *StateReplayer::parse_viewports(const rapidjson::Value &viewports)
+{
+	auto *vps = allocator.allocate_n_cleared<VkViewport>(viewports.Size());
+	auto *ret = vps;
+
+	for (auto itr = viewports.Begin(); itr != viewports.End(); ++itr, vps++)
+	{
+		auto &obj = *itr;
+		vps->x = obj["x"].GetFloat();
+		vps->y = obj["y"].GetFloat();
+		vps->width = obj["width"].GetFloat();
+		vps->height = obj["height"].GetFloat();
+		vps->minDepth = obj["minDepth"].GetFloat();
+		vps->maxDepth = obj["maxDepth"].GetFloat();
+	}
+
+	return ret;
+}
+
+VkRect2D *StateReplayer::parse_scissors(const rapidjson::Value &scissors)
+{
+	auto *sci = allocator.allocate_n_cleared<VkRect2D>(scissors.Size());
+	auto *ret = sci;
+
+	for (auto itr = scissors.Begin(); itr != scissors.End(); ++itr, sci++)
+	{
+		auto &obj = *itr;
+		ret->offset.x = obj["x"].GetInt();
+		ret->offset.y = obj["y"].GetInt();
+		ret->extent.width = obj["width"].GetUint();
+		ret->extent.height = obj["height"].GetUint();
+	}
+
+	return ret;
+}
+
+VkPipelineViewportStateCreateInfo *StateReplayer::parse_viewport_state(const rapidjson::Value &vp)
+{
+	auto *state = allocator.allocate_cleared<VkPipelineViewportStateCreateInfo>();
+
+	state->sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+	state->flags = vp["flags"].GetUint();
+
+	if (vp.HasMember("scissors"))
+	{
+		state->scissorCount = vp["scissors"].GetUint();
+		state->pScissors = parse_scissors(vp["scissors"]);
+	}
+
+	if (vp.HasMember("viewports"))
+	{
+		state->viewportCount = vp["viewports"].GetUint();
+		state->pViewports = parse_viewports(vp["viewports"]);
+	}
+
+	return state;
+}
+
+VkPipelineShaderStageCreateInfo *StateReplayer::parse_stages(const rapidjson::Value &stages)
+{
+	auto *state = allocator.allocate_n_cleared<VkPipelineShaderStageCreateInfo>(stages.Size());
+	auto *ret = state;
+
+	for (auto itr = stages.Begin(); itr != stages.End(); ++itr, state++)
+	{
+		auto &obj = *itr;
+		state->sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		state->flags = obj["flags"].GetUint();
+		state->stage = static_cast<VkShaderStageFlagBits>(obj["stage"].GetUint());
+		state->pName = duplicate_string(obj["name"].GetString(), obj["name"].GetStringLength());
+		if (obj.HasMember("specializationInfo"))
+			state->pSpecializationInfo = parse_specialization_info(obj["specializationInfo"]);
+
+		auto module = obj["module"].GetUint();
+		if (module > replayed_shader_modules.size())
+			throw logic_error("Shader module index is out of range.");
+		else if (module > 0)
+			state->module = replayed_shader_modules[module - 1];
+		else
+			state->module = VK_NULL_HANDLE;
+	}
+
+	return ret;
+}
+
 void StateReplayer::parse_graphics_pipelines(StateCreatorInterface &iface, const Value &pipelines)
 {
 	iface.set_num_graphics_pipelines(pipelines.Size());
@@ -1181,7 +1333,8 @@ void StateReplayer::parse_graphics_pipelines(StateCreatorInterface &iface, const
 		if (obj.HasMember("vertexInputState"))
 			info.pVertexInputState = parse_vertex_input_state(obj["vertexInputState"]);
 
-		iface.enqueue_create_graphics_pipeline(obj["hash"].GetUint64(), index, &info, &replayed_graphics_pipelines[index]);
+		if (!iface.enqueue_create_graphics_pipeline(obj["hash"].GetUint64(), index, &info, &replayed_graphics_pipelines[index]))
+			throw runtime_error("Failed to create graphics pipeline.");
 	}
 
 	iface.wait_enqueue();
@@ -1206,8 +1359,8 @@ bool StateReplayer::parse(StateCreatorInterface &iface, const char *str, size_t 
 		else
 			iface.set_num_samplers(0);
 
-		if (doc.HasMember("descriptorSetLayouts"))
-			parse_descriptor_set_layouts(iface, doc["descriptorSetLayouts"]);
+		if (doc.HasMember("setLayouts"))
+			parse_descriptor_set_layouts(iface, doc["setLayouts"]);
 		else
 			iface.set_num_descriptor_set_layouts(0);
 
@@ -1288,9 +1441,9 @@ void *ScratchAllocator::allocate_raw(size_t size, size_t alignment)
 	if (!block.blob)
 		return nullptr;
 
-	size_t offset = (block.offset + alignment - 1) & ~alignment;
+	size_t offset = (block.offset + alignment - 1) & ~(alignment - 1);
 	size_t required_size = offset + size;
-	if (required_size <= size)
+	if (required_size <= block.size)
 	{
 		void *ret = block.blob.get() + offset;
 		block.offset = required_size;
@@ -1468,13 +1621,15 @@ VkDescriptorSetLayoutCreateInfo StateRecorder::copy_descriptor_set_layout(
 
 	for (uint32_t i = 0; i < info.bindingCount; i++)
 	{
-		auto &b = info.pBindings[i];
+		auto &b = const_cast<VkDescriptorSetLayoutBinding &>(info.pBindings[i]);
 		if (b.pImmutableSamplers &&
 		    (b.descriptorType == VK_DESCRIPTOR_TYPE_SAMPLER ||
 		     b.descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER))
 		{
-			const_cast<VkSampler *>(b.pImmutableSamplers)[i] =
-				reinterpret_cast<VkSampler>(uint64_t(sampler_to_index[b.pImmutableSamplers[i]] + 1));
+			b.pImmutableSamplers = copy(b.pImmutableSamplers, b.descriptorCount);
+			auto *samplers = const_cast<VkSampler *>(b.pImmutableSamplers);
+			for (uint32_t j = 0; j < b.descriptorCount; j++)
+				samplers[j] = reinterpret_cast<VkSampler>(uint64_t(sampler_to_index[samplers[j]] + 1));
 		}
 	}
 
@@ -1606,6 +1761,7 @@ std::string StateRecorder::serialize() const
 	for (auto &sampler : this->samplers)
 	{
 		Value s(kObjectType);
+		s.AddMember("hash", sampler.hash, alloc);
 		s.AddMember("flags", sampler.info.flags, alloc);
 		s.AddMember("minFilter", sampler.info.minFilter, alloc);
 		s.AddMember("magFilter", sampler.info.magFilter, alloc);
@@ -1614,8 +1770,8 @@ std::string StateRecorder::serialize() const
 		s.AddMember("anisotropyEnable", sampler.info.anisotropyEnable, alloc);
 		s.AddMember("mipmapMode", sampler.info.mipmapMode, alloc);
 		s.AddMember("addressModeU", sampler.info.addressModeU, alloc);
-		s.AddMember("addressModeV", sampler.info.addressModeU, alloc);
-		s.AddMember("addressModeW", sampler.info.addressModeU, alloc);
+		s.AddMember("addressModeV", sampler.info.addressModeV, alloc);
+		s.AddMember("addressModeW", sampler.info.addressModeW, alloc);
 		s.AddMember("borderColor", sampler.info.borderColor, alloc);
 		s.AddMember("unnormalizedCoordinates", sampler.info.unnormalizedCoordinates, alloc);
 		s.AddMember("compareEnable", sampler.info.compareEnable, alloc);
@@ -1627,8 +1783,7 @@ std::string StateRecorder::serialize() const
 	doc.AddMember("samplers", samplers, alloc);
 
 	Value set_layouts(kArrayType);
-	doc.AddMember("setLayouts", set_layouts, alloc);
-	for (auto &layout : descriptor_sets)
+	for (auto &layout : this->descriptor_sets)
 	{
 		Value l(kObjectType);
 		l.AddMember("hash", layout.hash, alloc);
@@ -1656,6 +1811,7 @@ std::string StateRecorder::serialize() const
 
 		set_layouts.PushBack(l, alloc);
 	}
+	doc.AddMember("setLayouts", set_layouts, alloc);
 
 	Value pipeline_layouts(kArrayType);
 	for (auto &layout : this->pipeline_layouts)

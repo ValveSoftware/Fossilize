@@ -39,3 +39,7 @@ target_include_directories(vulkan-pipeline-cache PRIVATE
 
 target_compile_options(vulkan-pipeline-cache PUBLIC ${VPC_CXX_FLAGS})
 target_link_libraries(vulkan-pipeline-cache b64-lib)
+
+add_executable(pipeline-cache-test pipeline_cache_test.cpp)
+target_link_libraries(pipeline-cache-test vulkan-pipeline-cache)
+target_compile_options(pipeline-cache-test PRIVATE ${VPC_CXX_FLAGS})

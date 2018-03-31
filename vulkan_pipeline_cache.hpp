@@ -171,6 +171,7 @@ public:
 
 private:
 	ScratchAllocator allocator;
+#if 0
 	std::vector<HashedInfo<VkDescriptorSetLayoutCreateInfo>> descriptor_sets;
 	std::vector<HashedInfo<VkPipelineLayoutCreateInfo>> pipeline_layouts;
 	std::vector<HashedInfo<VkShaderModuleCreateInfo>> shader_modules;
@@ -178,6 +179,7 @@ private:
 	std::vector<HashedInfo<VkComputePipelineCreateInfo>> compute_pipelines;
 	std::vector<HashedInfo<VkRenderPassCreateInfo>> render_passes;
 	std::vector<HashedInfo<VkSamplerCreateInfo>> samplers;
+#endif
 
 	std::vector<VkSampler> replayed_samplers;
 	std::vector<VkDescriptorSetLayout> replayed_descriptor_set_layouts;
@@ -205,6 +207,8 @@ private:
 	VkAttachmentReference *parse_attachments(const rapidjson::Value &attachments);
 	VkSpecializationInfo *parse_specialization_info(const rapidjson::Value &spec_info);
 	VkSpecializationMapEntry *parse_map_entries(const rapidjson::Value &map_entries);
+	VkViewport *parse_viewports(const rapidjson::Value &viewports);
+	VkRect2D *parse_scissors(const rapidjson::Value &scissors);
 	VkPipelineVertexInputStateCreateInfo *parse_vertex_input_state(const rapidjson::Value &state);
 	VkPipelineColorBlendStateCreateInfo *parse_color_blend_state(const rapidjson::Value &state);
 	VkPipelineDepthStencilStateCreateInfo *parse_depth_stencil_state(const rapidjson::Value &state);
