@@ -1,4 +1,5 @@
 #include "vulkan_pipeline_cache.hpp"
+#include <stdexcept>
 
 using namespace VPC;
 
@@ -13,7 +14,7 @@ struct ReplayInterface : StateCreatorInterface
 {
 	StateRecorder recorder;
 
-	bool enqueue_create_sampler(Hash hash, unsigned index, const VkSamplerCreateInfo *create_info, VkSampler *sampler) override
+	bool enqueue_create_sampler(Hash hash, unsigned, const VkSamplerCreateInfo *create_info, VkSampler *sampler) override
 	{
 		Hash recorded_hash = Hashing::compute_hash_sampler(recorder, *create_info);
 		if (recorded_hash != hash)
@@ -25,7 +26,7 @@ struct ReplayInterface : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_descriptor_set_layout(Hash hash, unsigned index, const VkDescriptorSetLayoutCreateInfo *create_info, VkDescriptorSetLayout *layout)
+	bool enqueue_create_descriptor_set_layout(Hash hash, unsigned, const VkDescriptorSetLayoutCreateInfo *create_info, VkDescriptorSetLayout *layout)
 	{
 		Hash recorded_hash = Hashing::compute_hash_descriptor_set_layout(recorder, *create_info);
 		if (recorded_hash != hash)
@@ -37,7 +38,7 @@ struct ReplayInterface : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_pipeline_layout(Hash hash, unsigned index, const VkPipelineLayoutCreateInfo *create_info, VkPipelineLayout *layout)
+	bool enqueue_create_pipeline_layout(Hash hash, unsigned, const VkPipelineLayoutCreateInfo *create_info, VkPipelineLayout *layout)
 	{
 		Hash recorded_hash = Hashing::compute_hash_pipeline_layout(recorder, *create_info);
 		if (recorded_hash != hash)
@@ -49,7 +50,7 @@ struct ReplayInterface : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_shader_module(Hash hash, unsigned index, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module)
+	bool enqueue_create_shader_module(Hash hash, unsigned, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module)
 	{
 		Hash recorded_hash = Hashing::compute_hash_shader_module(recorder, *create_info);
 		if (recorded_hash != hash)
@@ -61,7 +62,7 @@ struct ReplayInterface : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_render_pass(Hash hash, unsigned index, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass)
+	bool enqueue_create_render_pass(Hash hash, unsigned, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass)
 	{
 		Hash recorded_hash = Hashing::compute_hash_render_pass(recorder, *create_info);
 		if (recorded_hash != hash)
@@ -73,7 +74,7 @@ struct ReplayInterface : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_compute_pipeline(Hash hash, unsigned index, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline)
+	bool enqueue_create_compute_pipeline(Hash hash, unsigned, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline)
 	{
 		Hash recorded_hash = Hashing::compute_hash_compute_pipeline(recorder, *create_info);
 		if (recorded_hash != hash)
@@ -85,7 +86,7 @@ struct ReplayInterface : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_graphics_pipeline(Hash hash, unsigned index, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline)
+	bool enqueue_create_graphics_pipeline(Hash hash, unsigned, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline)
 	{
 		Hash recorded_hash = Hashing::compute_hash_graphics_pipeline(recorder, *create_info);
 		if (recorded_hash != hash)
@@ -409,6 +410,44 @@ static void record_graphics_pipelines(StateRecorder &recorder)
 	blend.attachmentCount = 2;
 	blend.pAttachments = blend_attachments;
 
+	tess.patchControlPoints = 9;
+
+	ds.front.compareOp = VK_COMPARE_OP_GREATER;
+	ds.front.writeMask = 9;
+	ds.front.reference = 10;
+	ds.front.failOp = VK_STENCIL_OP_INCREMENT_AND_CLAMP;
+	ds.front.depthFailOp = VK_STENCIL_OP_INVERT;
+	ds.front.compareMask = 19;
+	ds.front.passOp = VK_STENCIL_OP_REPLACE;
+	ds.back.compareOp = VK_COMPARE_OP_LESS;
+	ds.back.writeMask = 79;
+	ds.back.reference = 80;
+	ds.back.failOp = VK_STENCIL_OP_INCREMENT_AND_WRAP;
+	ds.back.depthFailOp = VK_STENCIL_OP_ZERO;
+	ds.back.compareMask = 29;
+	ds.back.passOp = VK_STENCIL_OP_INCREMENT_AND_CLAMP;
+	ds.stencilTestEnable = VK_TRUE;
+	ds.minDepthBounds = 0.1f;
+	ds.maxDepthBounds = 0.2f;
+	ds.depthCompareOp = VK_COMPARE_OP_EQUAL;
+	ds.depthWriteEnable = VK_TRUE;
+	ds.depthTestEnable = VK_TRUE;
+	ds.depthBoundsTestEnable = VK_TRUE;
+
+	rs.frontFace = VK_FRONT_FACE_CLOCKWISE;
+	rs.polygonMode = VK_POLYGON_MODE_LINE;
+	rs.depthClampEnable = VK_TRUE;
+	rs.depthBiasEnable = VK_TRUE;
+	rs.depthBiasSlopeFactor = 0.3f;
+	rs.depthBiasConstantFactor = 0.8f;
+	rs.depthBiasClamp = 0.5f;
+	rs.rasterizerDiscardEnable = VK_TRUE;
+	rs.lineWidth = 0.1f;
+	rs.cullMode = VK_CULL_MODE_FRONT_AND_BACK;
+
+	ia.topology = VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
+	ia.primitiveRestartEnable = VK_TRUE;
+
 	pipe.pVertexInputState = &vi;
 	pipe.pMultisampleState = &ms;
 	pipe.pDynamicState = &dyn;
@@ -422,6 +461,8 @@ static void record_graphics_pipelines(StateRecorder &recorder)
 	unsigned index = recorder.register_graphics_pipeline(Hashing::compute_hash_graphics_pipeline(recorder, pipe), pipe);
 	recorder.set_graphics_pipeline_handle(index, fake_handle<VkPipeline>(100000));
 
+	vp.viewportCount = 0;
+	vp.scissorCount = 0;
 	pipe.basePipelineHandle = fake_handle<VkPipeline>(100000);
 	pipe.basePipelineIndex = 200;
 	index = recorder.register_graphics_pipeline(Hashing::compute_hash_graphics_pipeline(recorder, pipe), pipe);
@@ -430,20 +471,29 @@ static void record_graphics_pipelines(StateRecorder &recorder)
 
 int main()
 {
-	StateRecorder recorder;
-	StateReplayer replayer;
-	ReplayInterface iface;
+	try
+	{
+		StateRecorder recorder;
+		StateReplayer replayer;
+		ReplayInterface iface;
 
-	record_samplers(recorder);
-	record_set_layouts(recorder);
-	record_pipeline_layouts(recorder);
-	record_shader_modules(recorder);
-	record_render_passes(recorder);
-	record_compute_pipelines(recorder);
-	record_graphics_pipelines(recorder);
+		record_samplers(recorder);
+		record_set_layouts(recorder);
+		record_pipeline_layouts(recorder);
+		record_shader_modules(recorder);
+		record_render_passes(recorder);
+		record_compute_pipelines(recorder);
+		record_graphics_pipelines(recorder);
 
-	auto res = recorder.serialize();
-	fprintf(stderr, "Serialized: %s\n", res.c_str());
+		auto res = recorder.serialize();
+		fprintf(stderr, "Serialized: %s\n", res.c_str());
 
-	replayer.parse(iface, res.c_str(), res.size());
+		replayer.parse(iface, res.c_str(), res.size());
+		return EXIT_SUCCESS;
+	}
+	catch (const std::exception &e)
+	{
+		fprintf(stderr, "Error: %s\n", e.what());
+		return EXIT_FAILURE;
+	}
 }
