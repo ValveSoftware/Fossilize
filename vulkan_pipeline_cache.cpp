@@ -1298,17 +1298,13 @@ VkPipelineViewportStateCreateInfo *StateReplayer::parse_viewport_state(const rap
 	state->sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
 	state->flags = vp["flags"].GetUint();
 
+	state->scissorCount = vp["scissorCount"].GetUint();
 	if (vp.HasMember("scissors"))
-	{
-		state->scissorCount = vp["scissors"].Size();
 		state->pScissors = parse_scissors(vp["scissors"]);
-	}
 
+	state->viewportCount = vp["viewportCount"].GetUint();
 	if (vp.HasMember("viewports"))
-	{
-		state->viewportCount = vp["viewports"].Size();
 		state->pViewports = parse_viewports(vp["viewports"]);
-	}
 
 	return state;
 }
@@ -2305,6 +2301,8 @@ std::string StateRecorder::serialize() const
 		{
 			Value vp(kObjectType);
 			vp.AddMember("flags", pipe.info.pViewportState->flags, alloc);
+			vp.AddMember("viewportCount", pipe.info.pViewportState->viewportCount, alloc);
+			vp.AddMember("scissorCount", pipe.info.pViewportState->scissorCount, alloc);
 			if (pipe.info.pViewportState->pViewports)
 			{
 				Value viewports(kArrayType);
