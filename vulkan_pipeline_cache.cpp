@@ -425,10 +425,7 @@ Hash compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 		h.u32(stage.stage);
 		h.u64(recorder.get_hash_for_shader_module(stage.module));
 		if (stage.pSpecializationInfo)
-		{
 			hash_specialization_info(h, *stage.pSpecializationInfo);
-
-		}
 		else
 			h.u32(0);
 	}
@@ -1783,7 +1780,8 @@ VkGraphicsPipelineCreateInfo StateRecorder::copy_graphics_pipeline(const VkGraph
 	{
 		auto &stage = const_cast<VkPipelineShaderStageCreateInfo &>(info.pStages[i]);
 		stage.pName = copy(stage.pName, strlen(stage.pName) + 1);
-		stage.pSpecializationInfo = copy_specialization_info(stage.pSpecializationInfo);
+		if (stage.pSpecializationInfo)
+			stage.pSpecializationInfo = copy_specialization_info(stage.pSpecializationInfo);
 		stage.module = reinterpret_cast<VkShaderModule>(uint64_t(shader_module_to_index[stage.module] + 1));
 	}
 
