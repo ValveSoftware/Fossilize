@@ -538,13 +538,70 @@ Hash compute_hash_render_pass(const StateRecorder &, const VkRenderPassCreateInf
 }
 }
 
-static uint32_t *decode_base64(ScratchAllocator &allocator, const char *data, size_t size)
+static uint8_t *decode_base64(ScratchAllocator &allocator, const char *data, size_t length)
 {
-	unsigned char *buffer = b64_decode(data, strlen(data));
-	auto *ret = static_cast<uint32_t *>(allocator.allocate_raw(size, 4));
-	memcpy(ret, buffer, size);
-	free(buffer);
-	return ret;
+	auto *buf = static_cast<uint8_t *>(allocator.allocate_raw(length, 16));
+	auto *ptr = buf;
+
+	const auto base64_index = [](char c) -> uint32_t {
+		if (c >= 'A' && c <= 'Z')
+			return uint32_t(c - 'A');
+		else if (c >= 'a' && c <= 'z')
+			return uint32_t(c - 'a') + 26;
+		else if (c >= '0' && c <= '9')
+			return uint32_t(c - '0') + 52;
+		else if (c == '+')
+			return 62;
+		else if (c == '/')
+			return 63;
+		else
+			return 0;
+	};
+
+	for (uint64_t i = 0; i < length; )
+	{
+		char c0 = *data++;
+		if (c0 == '\0')
+			break;
+		char c1 = *data++;
+		if (c1 == '\0')
+			break;
+		char c2 = *data++;
+		if (c2 == '\0')
+			break;
+		char c3 = *data++;
+		if (c3 == '\0')
+			break;
+
+		uint32_t values =
+				(base64_index(c0) << 18) |
+				(base64_index(c1) << 12) |
+				(base64_index(c2) << 6) |
+				(base64_index(c3) << 0);
+
+		unsigned outbytes = 3;
+		if (c2 == '=' && c3 == '=')
+		{
+			outbytes = 1;
+			*ptr++ = uint8_t(values >> 16);
+		}
+		else if (c3 == '=')
+		{
+			outbytes = 2;
+			*ptr++ = uint8_t(values >> 16);
+			*ptr++ = uint8_t(values >> 8);
+		}
+		else
+		{
+			*ptr++ = uint8_t(values >> 16);
+			*ptr++ = uint8_t(values >> 8);
+			*ptr++ = uint8_t(values >> 0);
+		}
+
+		i += outbytes;
+	}
+
+	return buf;
 }
 
 const char *StateReplayer::duplicate_string(const char *str, size_t len)
@@ -639,9 +696,9 @@ void StateReplayer::parse_shader_modules(StateCreatorInterface &iface, const Val
 		info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
 		info.flags = obj["flags"].GetUint();
 		info.codeSize = obj["codeSize"].GetUint64();
-		info.pCode = decode_base64(allocator, obj["code"].GetString(), info.codeSize);
+		info.pCode = reinterpret_cast<uint32_t *>(decode_base64(allocator, obj["code"].GetString(), info.codeSize));
 		if (!iface.enqueue_create_shader_module(obj["hash"].GetUint64(), index, &info, &replayed_shader_modules[index]))
-			throw runtime_error("Failed ot create shader module.");
+			throw runtime_error("Failed to create shader module.");
 	}
 	iface.wait_enqueue();
 }
@@ -1769,11 +1826,55 @@ bool StateRecorder::create_device(const VkPhysicalDeviceProperties &,
 	return true;
 }
 
-static std::string encode_base64(const void *data, size_t size)
+static char base64(uint32_t v)
 {
-	char *buffer = b64_encode(static_cast<const unsigned char *>(data), size);
-	std::string ret(buffer);
-	free(buffer);
+	if (v == 63)
+		return '/';
+	else if (v == 62)
+		return '+';
+	else if (v >= 52)
+		return char('0' + (v - 52));
+	else if (v >= 26)
+		return char('a' + (v - 26));
+	else
+		return char('A' + v);
+}
+
+static std::string encode_base64(const void *data_, size_t size)
+{
+	auto *data = static_cast<const uint8_t *>(data_);
+	size_t num_chars = 4 * ((size + 2) / 3);
+	std::string ret;
+	ret.reserve(num_chars);
+
+	for (size_t i = 0; i < size; i += 3)
+	{
+		uint32_t code = data[i] << 16;
+		if (i + 1 < size)
+			code |= data[i + 1] << 8;
+		if (i + 2 < size)
+			code |= data[i + 2] << 0;
+
+		auto c0 = base64((code >> 18) & 63);
+		auto c1 = base64((code >> 12) & 63);
+		auto c2 = base64((code >>  6) & 63);
+		auto c3 = base64((code >>  0) & 63);
+
+		auto outbytes = std::min(size - i, size_t(3));
+		if (outbytes == 1)
+		{
+			c2 = '=';
+			c3 = '=';
+		}
+		else if (outbytes == 2)
+			c3 = '=';
+
+		ret.push_back(c0);
+		ret.push_back(c1);
+		ret.push_back(c2);
+		ret.push_back(c3);
+	}
+
 	return ret;
 }
 

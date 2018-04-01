@@ -22,13 +22,6 @@ if (VPC_SANITIZE_THREADS)
     set(VPC_LINK_FLAGS ${VPC_LINK_FLAGS} -fsanitize=thread)
 endif()
 
-add_library(b64-lib STATIC
-		b64.c/b64.h
-		b64.c/encode.c
-		b64.c/decode.c)
-target_compile_options(b64-lib PRIVATE ${VPC_CXX_FLAGS})
-target_include_directories(b64-lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/b64.c)
-
 add_library(vulkan-pipeline-cache STATIC
 	vulkan_pipeline_cache.hpp
 	vulkan_pipeline_cache.cpp)
@@ -38,8 +31,11 @@ target_include_directories(vulkan-pipeline-cache PRIVATE
 	${CMAKE_CURRENT_SOURCE_DIR}/khronos)
 
 target_compile_options(vulkan-pipeline-cache PUBLIC ${VPC_CXX_FLAGS})
-target_link_libraries(vulkan-pipeline-cache b64-lib)
+target_link_libraries(vulkan-pipeline-cache)
 
 add_executable(pipeline-cache-test pipeline_cache_test.cpp)
 target_link_libraries(pipeline-cache-test vulkan-pipeline-cache)
 target_compile_options(pipeline-cache-test PRIVATE ${VPC_CXX_FLAGS})
+
+enable_testing()
+add_test(NAME pipeline-cache-system-test COMMAND pipeline-cache-test)
