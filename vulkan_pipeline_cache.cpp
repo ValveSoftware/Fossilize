@@ -1,10 +1,9 @@
 #include <stddef.h>
-#include "b64.h"
 #include "vulkan_pipeline_cache.hpp"
 #include <stdexcept>
 #include <algorithm>
 #include <string.h>
-#include "rapidjson/include/rapidjson/prettywriter.h"
+#include "rapidjson/prettywriter.h"
 
 using namespace std;
 using namespace rapidjson;

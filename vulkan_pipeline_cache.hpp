@@ -7,7 +7,7 @@
 #include <unordered_map>
 
 #define RAPIDJSON_HAS_STDSTRING 1
-#include "rapidjson/include/rapidjson/document.h"
+#include "rapidjson/document.h"
 
 namespace VPC
 {

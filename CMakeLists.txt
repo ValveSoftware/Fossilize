@@ -31,7 +31,12 @@ target_include_directories(vulkan-pipeline-cache PRIVATE
 	${CMAKE_CURRENT_SOURCE_DIR}/khronos)
 
 target_compile_options(vulkan-pipeline-cache PUBLIC ${VPC_CXX_FLAGS})
-target_link_libraries(vulkan-pipeline-cache)
+option(VPC_RAPIDJSON_INCLUDE_PATH "Optional custom include path for rapidjson.")
+if (VPC_RAPIDJSON_INCLUDE_PATH)
+	target_include_directories(vulkan-pipeline-cache PUBLIC ${VPC_RAPIDJSON_INCLUDE_PATH})
+else()
+    target_include_directories(vulkan-pipeline-cache PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/rapidjson/include)
+endif()
 
 add_executable(pipeline-cache-test pipeline_cache_test.cpp)
 target_link_libraries(pipeline-cache-test vulkan-pipeline-cache)
