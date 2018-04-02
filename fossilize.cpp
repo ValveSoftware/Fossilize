@@ -32,6 +32,14 @@ using namespace rapidjson;
 
 namespace Fossilize
 {
+// reinterpret_cast does not work reliably on MSVC 2013 for Vulkan objects.
+template <typename T, typename U>
+static inline T api_object_cast(U obj)
+{
+	static_assert(sizeof(T) == sizeof(U), "Objects are not of same size.");
+	return (T)obj;
+}
+
 namespace Hashing
 {
 Hash compute_hash_sampler(const StateRecorder &, const VkSamplerCreateInfo &sampler)
@@ -1020,7 +1028,7 @@ void StateReplayer::parse_compute_pipelines(StateCreatorInterface &iface, const 
 		else if (pipeline > 0)
 		{
 			iface.wait_enqueue();
-			info.basePipelineHandle = reinterpret_cast<VkPipeline>(replayed_compute_pipelines[pipeline - 1]);
+			info.basePipelineHandle = replayed_compute_pipelines[pipeline - 1];
 		}
 		else
 			info.basePipelineHandle = VK_NULL_HANDLE;
@@ -1029,7 +1037,7 @@ void StateReplayer::parse_compute_pipelines(StateCreatorInterface &iface, const 
 		if (layout > replayed_pipeline_layouts.size())
 			throw logic_error("Pipeline layout index out of range.");
 		else if (layout > 0)
-			info.layout = reinterpret_cast<VkPipelineLayout>(replayed_pipeline_layouts[layout - 1]);
+			info.layout = replayed_pipeline_layouts[layout - 1];
 		else
 			info.layout = VK_NULL_HANDLE;
 
@@ -1041,7 +1049,7 @@ void StateReplayer::parse_compute_pipelines(StateCreatorInterface &iface, const 
 		if (module > replayed_shader_modules.size())
 			throw logic_error("Shader module index out of range.");
 		else if (module > 0)
-			info.stage.module = reinterpret_cast<VkShaderModule>(replayed_shader_modules[module - 1]);
+			info.stage.module = api_object_cast<VkShaderModule>(replayed_shader_modules[module - 1]);
 		else
 			info.stage.module = VK_NULL_HANDLE;
 
@@ -1357,7 +1365,7 @@ void StateReplayer::parse_graphics_pipelines(StateCreatorInterface &iface, const
 		else if (pipeline > 0)
 		{
 			iface.wait_enqueue();
-			info.basePipelineHandle = reinterpret_cast<VkPipeline>(replayed_graphics_pipelines[pipeline - 1]);
+			info.basePipelineHandle = replayed_graphics_pipelines[pipeline - 1];
 		}
 		else
 			info.basePipelineHandle = VK_NULL_HANDLE;
@@ -1366,7 +1374,7 @@ void StateReplayer::parse_graphics_pipelines(StateCreatorInterface &iface, const
 		if (layout > replayed_pipeline_layouts.size())
 			throw logic_error("Pipeline layout index out of range.");
 		else if (layout > 0)
-			info.layout = reinterpret_cast<VkPipelineLayout>(replayed_pipeline_layouts[layout - 1]);
+			info.layout = replayed_pipeline_layouts[layout - 1];
 		else
 			info.layout = VK_NULL_HANDLE;
 
@@ -1374,7 +1382,7 @@ void StateReplayer::parse_graphics_pipelines(StateCreatorInterface &iface, const
 		if (render_pass > replayed_render_passes.size())
 			throw logic_error("Render pass index out of range.");
 		else if (render_pass > 0)
-			info.renderPass = reinterpret_cast<VkRenderPass>(replayed_render_passes[render_pass - 1]);
+			info.renderPass = replayed_render_passes[render_pass - 1];
 		else
 			info.renderPass = VK_NULL_HANDLE;
 
@@ -1709,7 +1717,7 @@ VkDescriptorSetLayoutCreateInfo StateRecorder::copy_descriptor_set_layout(
 			b.pImmutableSamplers = copy(b.pImmutableSamplers, b.descriptorCount);
 			auto *samplers = const_cast<VkSampler *>(b.pImmutableSamplers);
 			for (uint32_t j = 0; j < b.descriptorCount; j++)
-				samplers[j] = reinterpret_cast<VkSampler>(uint64_t(sampler_to_index[samplers[j]] + 1));
+				samplers[j] = api_object_cast<VkSampler>(uint64_t(sampler_to_index[samplers[j]] + 1));
 		}
 	}
 
@@ -1724,7 +1732,7 @@ VkPipelineLayoutCreateInfo StateRecorder::copy_pipeline_layout(const VkPipelineL
 	for (uint32_t i = 0; i < info.setLayoutCount; i++)
 	{
 		const_cast<VkDescriptorSetLayout *>(info.pSetLayouts)[i] =
-			reinterpret_cast<VkDescriptorSetLayout>(uint64_t(descriptor_set_layout_to_index[info.pSetLayouts[i]] + 1));
+			api_object_cast<VkDescriptorSetLayout>(uint64_t(descriptor_set_layout_to_index[info.pSetLayouts[i]] + 1));
 	}
 	return info;
 }
@@ -1744,11 +1752,11 @@ VkComputePipelineCreateInfo StateRecorder::copy_compute_pipeline(const VkCompute
 		info.stage.pSpecializationInfo = copy_specialization_info(info.stage.pSpecializationInfo);
 	if (info.stage.pNext)
 		throw logic_error("pNext in VkPipelineShaderStageCreateInfo not supported.");
-	info.stage.module = reinterpret_cast<VkShaderModule>(uint64_t(shader_module_to_index[create_info.stage.module] + 1));
+	info.stage.module = api_object_cast<VkShaderModule>(uint64_t(shader_module_to_index[create_info.stage.module] + 1));
 	info.stage.pName = copy(info.stage.pName, strlen(info.stage.pName) + 1);
-	info.layout = reinterpret_cast<VkPipelineLayout>(uint64_t(pipeline_layout_to_index[info.layout] + 1));
+	info.layout = api_object_cast<VkPipelineLayout>(uint64_t(pipeline_layout_to_index[info.layout] + 1));
 	if (info.basePipelineHandle != VK_NULL_HANDLE)
-		info.basePipelineHandle = reinterpret_cast<VkPipeline>(uint64_t(compute_pipeline_to_index[info.basePipelineHandle] + 1));
+		info.basePipelineHandle = api_object_cast<VkPipeline>(uint64_t(compute_pipeline_to_index[info.basePipelineHandle] + 1));
 	return info;
 }
 
@@ -1827,10 +1835,10 @@ VkGraphicsPipelineCreateInfo StateRecorder::copy_graphics_pipeline(const VkGraph
 		info.pDynamicState = copy(info.pDynamicState, 1);
 	}
 
-	info.renderPass = reinterpret_cast<VkRenderPass>(uint64_t(render_pass_to_index[info.renderPass] + 1));
-	info.layout = reinterpret_cast<VkPipelineLayout>(uint64_t(pipeline_layout_to_index[info.layout] + 1));
+	info.renderPass = api_object_cast<VkRenderPass>(uint64_t(render_pass_to_index[info.renderPass] + 1));
+	info.layout = api_object_cast<VkPipelineLayout>(uint64_t(pipeline_layout_to_index[info.layout] + 1));
 	if (info.basePipelineHandle != VK_NULL_HANDLE)
-		info.basePipelineHandle = reinterpret_cast<VkPipeline>(uint64_t(graphics_pipeline_to_index[info.basePipelineHandle] + 1));
+		info.basePipelineHandle = api_object_cast<VkPipeline>(uint64_t(graphics_pipeline_to_index[info.basePipelineHandle] + 1));
 
 	for (uint32_t i = 0; i < info.stageCount; i++)
 	{
@@ -1840,7 +1848,7 @@ VkGraphicsPipelineCreateInfo StateRecorder::copy_graphics_pipeline(const VkGraph
 		stage.pName = copy(stage.pName, strlen(stage.pName) + 1);
 		if (stage.pSpecializationInfo)
 			stage.pSpecializationInfo = copy_specialization_info(stage.pSpecializationInfo);
-		stage.module = reinterpret_cast<VkShaderModule>(uint64_t(shader_module_to_index[stage.module] + 1));
+		stage.module = api_object_cast<VkShaderModule>(uint64_t(shader_module_to_index[stage.module] + 1));
 	}
 
 	if (info.pColorBlendState)
@@ -2000,7 +2008,7 @@ std::string StateRecorder::serialize() const
 			{
 				Value immutables(kArrayType);
 				for (uint32_t j = 0; j < b.descriptorCount; j++)
-					immutables.PushBack(reinterpret_cast<uint64_t>(b.pImmutableSamplers[j]), alloc);
+					immutables.PushBack(api_object_cast<uint64_t>(b.pImmutableSamplers[j]), alloc);
 				binding.AddMember("immutableSamplers", immutables, alloc);
 			}
 			bindings.PushBack(binding, alloc);
@@ -2030,7 +2038,7 @@ std::string StateRecorder::serialize() const
 
 		Value set_layouts(kArrayType);
 		for (uint32_t i = 0; i < layout.info.setLayoutCount; i++)
-			set_layouts.PushBack(reinterpret_cast<uint64_t>(layout.info.pSetLayouts[i]), alloc);
+			set_layouts.PushBack(api_object_cast<uint64_t>(layout.info.pSetLayouts[i]), alloc);
 		p.AddMember("setLayouts", set_layouts, alloc);
 
 		pipeline_layouts.PushBack(p, alloc);
@@ -2178,13 +2186,13 @@ std::string StateRecorder::serialize() const
 		Value p(kObjectType);
 		p.AddMember("hash", pipe.hash, alloc);
 		p.AddMember("flags", pipe.info.flags, alloc);
-		p.AddMember("layout", reinterpret_cast<uint64_t>(pipe.info.layout), alloc);
-		p.AddMember("basePipelineHandle", reinterpret_cast<uint64_t>(pipe.info.basePipelineHandle), alloc);
+		p.AddMember("layout", api_object_cast<uint64_t>(pipe.info.layout), alloc);
+		p.AddMember("basePipelineHandle", api_object_cast<uint64_t>(pipe.info.basePipelineHandle), alloc);
 		p.AddMember("basePipelineIndex", pipe.info.basePipelineIndex, alloc);
 		Value stage(kObjectType);
 		stage.AddMember("flags", pipe.info.stage.flags, alloc);
 		stage.AddMember("stage", pipe.info.stage.stage, alloc);
-		stage.AddMember("module", reinterpret_cast<uint64_t>(pipe.info.stage.module), alloc);
+		stage.AddMember("module", api_object_cast<uint64_t>(pipe.info.stage.module), alloc);
 		stage.AddMember("name", StringRef(pipe.info.stage.pName), alloc);
 		if (pipe.info.stage.pSpecializationInfo)
 		{
@@ -2217,10 +2225,10 @@ std::string StateRecorder::serialize() const
 		Value p(kObjectType);
 		p.AddMember("hash", pipe.hash, alloc);
 		p.AddMember("flags", pipe.info.flags, alloc);
-		p.AddMember("basePipelineHandle", reinterpret_cast<uint64_t>(pipe.info.basePipelineHandle), alloc);
+		p.AddMember("basePipelineHandle", api_object_cast<uint64_t>(pipe.info.basePipelineHandle), alloc);
 		p.AddMember("basePipelineIndex", pipe.info.basePipelineIndex, alloc);
-		p.AddMember("layout", reinterpret_cast<uint64_t>(pipe.info.layout), alloc);
-		p.AddMember("renderPass", reinterpret_cast<uint64_t>(pipe.info.renderPass), alloc);
+		p.AddMember("layout", api_object_cast<uint64_t>(pipe.info.layout), alloc);
+		p.AddMember("renderPass", api_object_cast<uint64_t>(pipe.info.renderPass), alloc);
 		p.AddMember("subpass", pipe.info.subpass, alloc);
 
 		if (pipe.info.pTessellationState)
@@ -2430,7 +2438,7 @@ std::string StateRecorder::serialize() const
 			Value stage(kObjectType);
 			stage.AddMember("flags", s.flags, alloc);
 			stage.AddMember("name", StringRef(s.pName), alloc);
-			stage.AddMember("module", reinterpret_cast<uint64_t>(s.module), alloc);
+			stage.AddMember("module", api_object_cast<uint64_t>(s.module), alloc);
 			stage.AddMember("stage", s.stage, alloc);
 			if (s.pSpecializationInfo)
 			{

@@ -29,7 +29,8 @@ template <typename T>
 static inline T fake_handle(uint64_t value)
 {
 	static_assert(sizeof(T) == sizeof(uint64_t), "Handle size is not 64-bit.");
-	return reinterpret_cast<T>(value);
+	// reinterpret_cast does not work reliably on MSVC 2013 for Vulkan objects.
+	return (T)value;
 }
 
 struct ReplayInterface : StateCreatorInterface
