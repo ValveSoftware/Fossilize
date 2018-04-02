@@ -1,11 +1,9 @@
 # Fossilize
 
-Fossilize is a simple library for serializing various persistent Vulkan objects which typically end up
-in hashmaps.
-
 **NOTE: The repo is under construction, do not use this yet.**
 
-CreateInfo structs for these Vulkan objects can be recorded and replayed.
+Fossilize is a simple library for serializing various persistent Vulkan objects which typically end up
+in hashmaps. CreateInfo structs for these Vulkan objects can be recorded and replayed.
 
 - VkSampler (immutable samplers in set layouts)
 - VkDescriptorSetLayout
