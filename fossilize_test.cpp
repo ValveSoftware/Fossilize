@@ -48,7 +48,7 @@ struct ReplayInterface : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_descriptor_set_layout(Hash hash, unsigned, const VkDescriptorSetLayoutCreateInfo *create_info, VkDescriptorSetLayout *layout)
+	bool enqueue_create_descriptor_set_layout(Hash hash, unsigned, const VkDescriptorSetLayoutCreateInfo *create_info, VkDescriptorSetLayout *layout) override
 	{
 		Hash recorded_hash = Hashing::compute_hash_descriptor_set_layout(recorder, *create_info);
 		if (recorded_hash != hash)
@@ -60,7 +60,7 @@ struct ReplayInterface : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_pipeline_layout(Hash hash, unsigned, const VkPipelineLayoutCreateInfo *create_info, VkPipelineLayout *layout)
+	bool enqueue_create_pipeline_layout(Hash hash, unsigned, const VkPipelineLayoutCreateInfo *create_info, VkPipelineLayout *layout) override
 	{
 		Hash recorded_hash = Hashing::compute_hash_pipeline_layout(recorder, *create_info);
 		if (recorded_hash != hash)
@@ -72,7 +72,7 @@ struct ReplayInterface : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_shader_module(Hash hash, unsigned, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module)
+	bool enqueue_create_shader_module(Hash hash, unsigned, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module) override
 	{
 		Hash recorded_hash = Hashing::compute_hash_shader_module(recorder, *create_info);
 		if (recorded_hash != hash)
@@ -84,7 +84,7 @@ struct ReplayInterface : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_render_pass(Hash hash, unsigned, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass)
+	bool enqueue_create_render_pass(Hash hash, unsigned, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass) override
 	{
 		Hash recorded_hash = Hashing::compute_hash_render_pass(recorder, *create_info);
 		if (recorded_hash != hash)
@@ -96,7 +96,7 @@ struct ReplayInterface : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_compute_pipeline(Hash hash, unsigned, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline)
+	bool enqueue_create_compute_pipeline(Hash hash, unsigned, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
 		Hash recorded_hash = Hashing::compute_hash_compute_pipeline(recorder, *create_info);
 		if (recorded_hash != hash)
@@ -108,7 +108,7 @@ struct ReplayInterface : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_graphics_pipeline(Hash hash, unsigned, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline)
+	bool enqueue_create_graphics_pipeline(Hash hash, unsigned, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
 		Hash recorded_hash = Hashing::compute_hash_graphics_pipeline(recorder, *create_info);
 		if (recorded_hash != hash)

@@ -113,16 +113,17 @@ private:
 class ScratchAllocator
 {
 public:
+	// alignof(T) doesn't work on MSVC 2013.
 	template <typename T>
 	T *allocate()
 	{
-		return static_cast<T *>(allocate_raw(sizeof(T), alignof(T)));
+		return static_cast<T *>(allocate_raw(sizeof(T), 16));
 	}
 
 	template <typename T>
 	T *allocate_cleared()
 	{
-		return static_cast<T *>(allocate_raw_cleared(sizeof(T), alignof(T)));
+		return static_cast<T *>(allocate_raw_cleared(sizeof(T), 16));
 	}
 
 	template <typename T>
@@ -130,7 +131,7 @@ public:
 	{
 		if (count == 0)
 			return nullptr;
-		return static_cast<T *>(allocate_raw(sizeof(T) * count, alignof(T)));
+		return static_cast<T *>(allocate_raw(sizeof(T) * count, 16));
 	}
 
 	template <typename T>
@@ -138,7 +139,7 @@ public:
 	{
 		if (count == 0)
 			return nullptr;
-		return static_cast<T *>(allocate_raw_cleared(sizeof(T) * count, alignof(T)));
+		return static_cast<T *>(allocate_raw_cleared(sizeof(T) * count, 16));
 	}
 
 	void *allocate_raw(size_t size, size_t alignment);

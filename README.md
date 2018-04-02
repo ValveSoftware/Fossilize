@@ -39,6 +39,12 @@ which requires sending more complete repro applications.
 
 ## Build
 
+### Supported compilers
+
+- GCC 4.8+
+- Clang
+- MSVC 2013/2015/2017+
+
 If rapidjson is not already bundled in your project, you need to check out the submodule.
 
 ```
