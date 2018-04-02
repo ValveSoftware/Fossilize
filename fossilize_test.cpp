@@ -26,7 +26,7 @@
 using namespace Fossilize;
 
 template <typename T>
-constexpr T fake_handle(uint64_t value)
+static inline T fake_handle(uint64_t value)
 {
 	static_assert(sizeof(T) == sizeof(uint64_t), "Handle size is not 64-bit.");
 	return reinterpret_cast<T>(value);
@@ -149,7 +149,7 @@ static void record_samplers(StateRecorder &recorder)
 static void record_set_layouts(StateRecorder &recorder)
 {
 	VkDescriptorSetLayoutBinding bindings[3] = {};
-	static const VkSampler immutable_samplers[] = {
+	const VkSampler immutable_samplers[] = {
 		fake_handle<VkSampler>(101),
 		fake_handle<VkSampler>(100),
 	};
@@ -183,11 +183,11 @@ static void record_set_layouts(StateRecorder &recorder)
 
 static void record_pipeline_layouts(StateRecorder &recorder)
 {
-	static const VkDescriptorSetLayout set_layouts0[2] = {
+	const VkDescriptorSetLayout set_layouts0[2] = {
 		fake_handle<VkDescriptorSetLayout>(1000),
 		fake_handle<VkDescriptorSetLayout>(1001),
 	};
-	static const VkDescriptorSetLayout set_layouts1[2] = {
+	const VkDescriptorSetLayout set_layouts1[2] = {
 		fake_handle<VkDescriptorSetLayout>(1001),
 		fake_handle<VkDescriptorSetLayout>(1000),
 	};
