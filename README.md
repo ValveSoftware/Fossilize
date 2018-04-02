@@ -14,18 +14,26 @@ in hashmaps. CreateInfo structs for these Vulkan objects can be recorded and rep
 
 The goal for this project is to cover some main use cases:
 
+### High priority
+
 - For internal engine use. Extend the notion of VkPipelineCache to also include these persistent objects,
 so they can be automatically created in load time rather than manually declaring everything up front.
-- Ideally, this serialized cache would be shipped, and applications can assume all persistent objects are already created.
+Ideally, this serialized cache could be shipped, and applications can assume all persistent objects are already created.
+- Create a Vulkan layer which can capture this cache for repro purposes.
+A paranoid mode would serialize the cache before every pipeline creation, to deal with crashing drivers.
 - Easy way of sending shader compilation repros to conformance. Capture internally or via a Vulkan layer and send it off.
 Normally, this is very difficult with normal debuggers because they generally rely on capturing frames or similar,
 which doesn't work if compilation segfaults the driver. Shader compilation in Vulkan requires a lot of state,
 which requires sending more complete repro applications.
-- Some convenience tools to modify/disassemble/spirv-opt parts of the cache.
-- Create a Vulkan layer which can capture this cache for repro purposes.
-- Serialize state in application once, replay on N devices to build up VkPipelineCache objects without having to run application.
 
-A paranoid mode would serialize the cache before every pipeline creation, to deal with crashing drivers.
+### Mid priority
+
+- Some convenience tools to modify/disassemble/spirv-opt parts of the cache.
+
+### Low priority
+
+- Serialize state in application once, replay on N devices to build up VkPipelineCache objects without having to run application.
+- Benchmark a pipeline offline by feeding it fake input.
 
 ## Build
 
@@ -77,7 +85,9 @@ void create_state()
         // TODO here: Add way to capture which extensions/physical device features were used to deal with exotic things
         // which require extensions when making repro cases.
 
-        VkDescriptorSetLayoutCreateInfo info = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+        VkDescriptorSetLayoutCreateInfo info = {
+            VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
+        };
 
         // Fill in stuff.
 
@@ -140,9 +150,8 @@ struct Device : Fossilize::StateCreatorInterface
     }
 };
 
-void replay_state()
+void replay_state(Device &device)
 {
-    Device device;
     try
     {
         Fossilize::Replayer replayer;

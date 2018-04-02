@@ -1577,6 +1577,9 @@ unsigned StateRecorder::register_pipeline_layout(Hash hash, const VkPipelineLayo
 
 unsigned StateRecorder::register_sampler(Hash hash, const VkSamplerCreateInfo &create_info)
 {
+	if (create_info.pNext)
+		throw logic_error("pNext in VkSamplerCreateInfo not supported.");
+
 	auto index = unsigned(samplers.size());
 	samplers.push_back({ hash, copy_sampler(create_info) });
 	return index;
@@ -1584,6 +1587,8 @@ unsigned StateRecorder::register_sampler(Hash hash, const VkSamplerCreateInfo &c
 
 unsigned StateRecorder::register_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo &create_info)
 {
+	if (create_info.pNext)
+		throw logic_error("pNext in VkGraphicsPipelineCreateInfo not supported.");
 	auto index = unsigned(graphics_pipelines.size());
 	graphics_pipelines.push_back({ hash, copy_graphics_pipeline(create_info) });
 	return index;
@@ -1591,6 +1596,8 @@ unsigned StateRecorder::register_graphics_pipeline(Hash hash, const VkGraphicsPi
 
 unsigned StateRecorder::register_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo &create_info)
 {
+	if (create_info.pNext)
+		throw logic_error("pNext in VkComputePipelineCreateInfo not supported.");
 	auto index = unsigned(compute_pipelines.size());
 	compute_pipelines.push_back({ hash, copy_compute_pipeline(create_info) });
 	return index;
@@ -1598,6 +1605,8 @@ unsigned StateRecorder::register_compute_pipeline(Hash hash, const VkComputePipe
 
 unsigned StateRecorder::register_render_pass(Hash hash, const VkRenderPassCreateInfo &create_info)
 {
+	if (create_info.pNext)
+		throw logic_error("pNext in VkRenderPassCreateInfo not supported.");
 	auto index = unsigned(render_passes.size());
 	render_passes.push_back({ hash, copy_render_pass(create_info) });
 	return index;
@@ -1605,6 +1614,8 @@ unsigned StateRecorder::register_render_pass(Hash hash, const VkRenderPassCreate
 
 unsigned StateRecorder::register_shader_module(Hash hash, const VkShaderModuleCreateInfo &create_info)
 {
+	if (create_info.pNext)
+		throw logic_error("pNext in VkShaderModuleCreateInfo not supported.");
 	auto index = unsigned(shader_modules.size());
 	shader_modules.push_back({ hash, copy_shader_module(create_info) });
 	return index;
@@ -1734,6 +1745,8 @@ VkComputePipelineCreateInfo StateRecorder::copy_compute_pipeline(const VkCompute
 	auto info = create_info;
 	if (info.stage.pSpecializationInfo)
 		info.stage.pSpecializationInfo = copy_specialization_info(info.stage.pSpecializationInfo);
+	if (info.stage.pNext)
+		throw logic_error("pNext in VkPipelineShaderStageCreateInfo not supported.");
 	info.stage.module = reinterpret_cast<VkShaderModule>(uint64_t(shader_module_to_index[create_info.stage.module] + 1));
 	info.stage.pName = copy(info.stage.pName, strlen(info.stage.pName) + 1);
 	info.layout = reinterpret_cast<VkPipelineLayout>(uint64_t(pipeline_layout_to_index[info.layout] + 1));
@@ -1748,25 +1761,75 @@ VkGraphicsPipelineCreateInfo StateRecorder::copy_graphics_pipeline(const VkGraph
 
 	info.pStages = copy(info.pStages, info.stageCount);
 	if (info.pTessellationState)
+	{
+		if (info.pTessellationState->pNext)
+			throw logic_error("pNext in VkPipelineTessellationStateCreateInfo not supported.");
 		info.pTessellationState = copy(info.pTessellationState, 1);
+	}
+
 	if (info.pColorBlendState)
+	{
+		if (info.pColorBlendState->pNext)
+			throw logic_error("pNext in VkPipelineColorBlendStateCreateInfo not supported.");
 		info.pColorBlendState = copy(info.pColorBlendState, 1);
+	}
+
 	if (info.pVertexInputState)
+	{
+		if (info.pColorBlendState->pNext)
+			throw logic_error("pNext in VkPipelineTessellationStateCreateInfo not supported.");
 		info.pVertexInputState = copy(info.pVertexInputState, 1);
+	}
+
 	if (info.pMultisampleState)
+	{
+		if (info.pMultisampleState->pNext)
+			throw logic_error("pNext in VkPipelineMultisampleStateCreateInfo not supported.");
 		info.pMultisampleState = copy(info.pMultisampleState, 1);
+	}
+
 	if (info.pVertexInputState)
+	{
+		if (info.pVertexInputState->pNext)
+			throw logic_error("pNext in VkPipelineVertexInputStateCreateInfo not supported.");
 		info.pVertexInputState = copy(info.pVertexInputState, 1);
+	}
+
 	if (info.pViewportState)
+	{
+		if (info.pViewportState->pNext)
+			throw logic_error("pNext in VkPipelineViewportStateCreateInfo not supported.");
 		info.pViewportState = copy(info.pViewportState, 1);
+	}
+
 	if (info.pInputAssemblyState)
-		info.pInputAssemblyState  = copy(info.pInputAssemblyState, 1);
+	{
+		if (info.pInputAssemblyState->pNext)
+			throw logic_error("pNext in VkPipelineInputAssemblyStateCreateInfo not supported.");
+		info.pInputAssemblyState = copy(info.pInputAssemblyState, 1);
+	}
+
 	if (info.pDepthStencilState)
+	{
+		if (info.pDepthStencilState->pNext)
+			throw logic_error("pNext in VkPipelineDepthStencilStateCreateInfo not supported.");
 		info.pDepthStencilState = copy(info.pDepthStencilState, 1);
+	}
+
 	if (info.pRasterizationState)
+	{
+		if (info.pRasterizationState->pNext)
+			throw logic_error("pNext in VkPipelineRasterizationCreateInfo not supported.");
 		info.pRasterizationState = copy(info.pRasterizationState, 1);
+	}
+
 	if (info.pDynamicState)
+	{
+		if (info.pDynamicState->pNext)
+			throw logic_error("pNext in VkPipelineDynamicStateCreateInfo not supported.");
 		info.pDynamicState = copy(info.pDynamicState, 1);
+	}
+
 	info.renderPass = reinterpret_cast<VkRenderPass>(uint64_t(render_pass_to_index[info.renderPass] + 1));
 	info.layout = reinterpret_cast<VkPipelineLayout>(uint64_t(pipeline_layout_to_index[info.layout] + 1));
 	if (info.basePipelineHandle != VK_NULL_HANDLE)
@@ -1775,6 +1838,8 @@ VkGraphicsPipelineCreateInfo StateRecorder::copy_graphics_pipeline(const VkGraph
 	for (uint32_t i = 0; i < info.stageCount; i++)
 	{
 		auto &stage = const_cast<VkPipelineShaderStageCreateInfo &>(info.pStages[i]);
+		if (stage.pNext)
+			throw logic_error("pNext in VkPipelineShaderStageCreateInfo not supported.");
 		stage.pName = copy(stage.pName, strlen(stage.pName) + 1);
 		if (stage.pSpecializationInfo)
 			stage.pSpecializationInfo = copy_specialization_info(stage.pSpecializationInfo);
