@@ -13,10 +13,16 @@ environment:
     - GENERATOR: "Visual Studio 14 2015 Win64"
       CONFIG: Release
 
-    - GENERATOR: "Visual Studio 15 2017 Win64"
+    - GENERATOR: "Visual Studio 12 2013"
       CONFIG: Debug
 
-    - GENERATOR: "Visual Studio 15 2017 Win64"
+    - GENERATOR: "Visual Studio 12 2013"
+      CONFIG: Release
+
+    - GENERATOR: "Visual Studio 14 2015"
+      CONFIG: Debug
+
+    - GENERATOR: "Visual Studio 14 2015"
       CONFIG: Release
 
 build_script:
