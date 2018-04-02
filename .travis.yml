@@ -1,0 +1,17 @@
+language: cpp
+os:
+  - linux
+
+# Use Ubuntu 14.04 LTS (Trusty) as the Linux testing environment.
+sudo: required
+dist: trusty
+
+before_script:
+  - git submodule update --init
+
+script:
+  - mkdir build
+  - cd build
+  - cmake ..
+  - cmake --build .
+  - ctest
