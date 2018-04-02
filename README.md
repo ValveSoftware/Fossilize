@@ -1,5 +1,7 @@
 # Fossilize
 
+[![Build Status](https://travis-ci.org/Themaister/Fossilize.svg?branch=master)](https://travis-ci.org/Themaister/Fossilize)
+
 **NOTE: The repo is under construction, do not use this yet.**
 
 Fossilize is a simple library for serializing various persistent Vulkan objects which typically end up
