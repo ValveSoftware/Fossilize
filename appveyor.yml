@@ -20,6 +20,7 @@ environment:
       CONFIG: Release
 
 build_script:
+  - git submodule update --init
   - cmake "-G%GENERATOR%" -H. -B_builds
   - cmake --build _builds --config "%CONFIG%"
 
