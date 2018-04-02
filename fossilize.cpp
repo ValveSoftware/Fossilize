@@ -1485,8 +1485,7 @@ T *StateRecorder::copy(const T *src, size_t count)
 
 ScratchAllocator::Block::Block(size_t size)
 {
-	blob.reset(new uint8_t[size]);
-	this->size = size;
+	blob.resize(size);
 }
 
 void ScratchAllocator::add_block(size_t minimum_size)
@@ -1510,14 +1509,12 @@ void *ScratchAllocator::allocate_raw(size_t size, size_t alignment)
 		add_block(size + alignment);
 
 	auto &block = blocks.back();
-	if (!block.blob)
-		return nullptr;
 
 	size_t offset = (block.offset + alignment - 1) & ~(alignment - 1);
 	size_t required_size = offset + size;
-	if (required_size <= block.size)
+	if (required_size <= block.blob.size())
 	{
-		void *ret = block.blob.get() + offset;
+		void *ret = block.blob.data() + offset;
 		block.offset = required_size;
 		return ret;
 	}

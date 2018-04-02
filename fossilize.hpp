@@ -150,8 +150,7 @@ private:
 	{
 		Block(size_t size);
 		size_t offset = 0;
-		size_t size = 0;
-		std::unique_ptr<uint8_t []> blob;
+		std::vector<uint8_t> blob;
 	};
 	std::vector<Block> blocks;
 
