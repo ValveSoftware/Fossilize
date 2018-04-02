@@ -193,15 +193,6 @@ public:
 
 private:
 	ScratchAllocator allocator;
-#if 0
-	std::vector<HashedInfo<VkDescriptorSetLayoutCreateInfo>> descriptor_sets;
-	std::vector<HashedInfo<VkPipelineLayoutCreateInfo>> pipeline_layouts;
-	std::vector<HashedInfo<VkShaderModuleCreateInfo>> shader_modules;
-	std::vector<HashedInfo<VkGraphicsPipelineCreateInfo>> graphics_pipelines;
-	std::vector<HashedInfo<VkComputePipelineCreateInfo>> compute_pipelines;
-	std::vector<HashedInfo<VkRenderPassCreateInfo>> render_passes;
-	std::vector<HashedInfo<VkSamplerCreateInfo>> samplers;
-#endif
 
 	std::vector<VkSampler> replayed_samplers;
 	std::vector<VkDescriptorSetLayout> replayed_descriptor_set_layouts;
@@ -254,7 +245,8 @@ private:
 class StateRecorder
 {
 public:
-	bool create_device(const VkPhysicalDeviceProperties &physical_device, const VkDeviceCreateInfo &create_info);
+	// TODO: create_device which can capture which features/exts are used to create the device.
+	// This can be relevant when using more exotic features.
 
 	unsigned register_descriptor_set_layout(Hash hash, const VkDescriptorSetLayoutCreateInfo &layout_info);
 	unsigned register_pipeline_layout(Hash hash, const VkPipelineLayoutCreateInfo &layout_info);

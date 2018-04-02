@@ -1835,12 +1835,6 @@ VkRenderPassCreateInfo StateRecorder::copy_render_pass(const VkRenderPassCreateI
 	return info;
 }
 
-bool StateRecorder::create_device(const VkPhysicalDeviceProperties &,
-                                  const VkDeviceCreateInfo &)
-{
-	return true;
-}
-
 static char base64(uint32_t v)
 {
 	if (v == 63)
