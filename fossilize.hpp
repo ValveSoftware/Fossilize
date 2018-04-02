@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include "vulkan/vulkan.h"
+#include "vulkan.h"
 #include <stdint.h>
 #include <vector>
 #include <memory>

@@ -23,7 +23,6 @@ if (FOSSILIZE_SANITIZE_THREADS)
 endif()
 
 add_library(fossilize STATIC fossilize.hpp fossilize.cpp)
-target_include_directories(fossilize PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/khronos)
 target_include_directories(fossilize PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_options(fossilize PUBLIC ${FOSSILIZE_CXX_FLAGS})
 
@@ -34,10 +33,17 @@ else()
     target_include_directories(fossilize PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/rapidjson/include)
 endif()
 
+option(FOSSILIZE_VULKAN_INCLUDE_PATH "Optional custom include path for Vulkan headers.")
+if (FOSSILIZE_VULKAN_INCLUDE_PATH)
+    target_include_directories(fossilize PUBLIC ${FOSSILIZE_VULKAN_INCLUDE_PATH})
+else()
+    target_include_directories(fossilize PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/khronos/vulkan)
+endif()
+
 add_executable(fossilize-test fossilize_test.cpp)
 target_link_libraries(fossilize-test fossilize)
 target_compile_options(fossilize-test PRIVATE ${FOSSILIZE_CXX_FLAGS})
 set_target_properties(fossilize-test PROPERTIES LINK_FLAGS "${FOSSILIZE_LINK_FLAGS}")
 
 enable_testing()
-add_test(NAME fossilize-system-test COMMAND fossilize-system-test)
+add_test(NAME fossilize-system-test COMMAND fossilize-test)

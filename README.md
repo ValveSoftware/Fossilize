@@ -36,6 +36,7 @@ git submodule update --init
 ```
 
 otherwise, you can set `FOSSILIZE_RAPIDJSON_INCLUDE_PATH` if building this library as part of your project.
+It is also possible to use `FOSSILIZE_VULKAN_INCLUDE_PATH` to override Vulkan header include paths.
 
 Standalone build:
 ```
