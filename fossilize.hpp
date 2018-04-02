@@ -31,7 +31,7 @@
 #define RAPIDJSON_HAS_STDSTRING 1
 #include "rapidjson/document.h"
 
-namespace VPC
+namespace Fossilize
 {
 using Hash = uint64_t;
 

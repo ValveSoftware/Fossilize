@@ -1,9 +1,11 @@
-# Vulkan-Pipeline-Cache
+# Fossilize
 
-Vulkan Pipeline Cache is a simple library for serializing various persistent Vulkan objects which typically end up
+Fossilize is a simple library for serializing various persistent Vulkan objects which typically end up
 in hashmaps.
 
 **NOTE: The repo is under construction, do not use this yet.**
+
+CreateInfo structs for these Vulkan objects can be recorded and replayed.
 
 - VkSampler (immutable samplers in set layouts)
 - VkDescriptorSetLayout
@@ -32,6 +34,7 @@ Simple JSON format which represents the various `Vk*CreateInfo` structures.
 When referring to other VK handle types like `pImmutableSamplers` in `VkDescriptorSetLayout`, or `VkRenderPass` in `VkPipeline`,
 a 1-indexed format is used. 0 represents `VK_NULL_HANDLE` and 1+, represents an array index into the respective array (off-by-one).
 Data blobs (specialization constant data, SPIR-V) are encoded in base64, but I'll likely need something smarter to deal with large applications which have half a trillion SPIR-V files.
+When recording or replaying, a mapping from and to real Vk object handles must be provided by the application so the offset-based indexing scheme can be resolved to real handles.
 
 ## Vulkan layer capture
 

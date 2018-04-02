@@ -20,10 +20,10 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#include "vulkan_pipeline_cache.hpp"
+#include "fossilize.hpp"
 #include <stdexcept>
 
-using namespace VPC;
+using namespace Fossilize;
 
 template <typename T>
 constexpr T fake_handle(uint64_t value)

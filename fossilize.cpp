@@ -21,7 +21,7 @@
  */
 
 #include <stddef.h>
-#include "vulkan_pipeline_cache.hpp"
+#include "fossilize.hpp"
 #include <stdexcept>
 #include <algorithm>
 #include <string.h>
@@ -30,7 +30,7 @@
 using namespace std;
 using namespace rapidjson;
 
-namespace VPC
+namespace Fossilize
 {
 namespace Hashing
 {
