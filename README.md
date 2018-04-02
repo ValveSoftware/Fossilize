@@ -113,30 +113,30 @@ void create_state()
 struct Device : Fossilize::StateCreatorInterface
 {
     // See header for other functions.
-	bool set_num_descriptor_set_layouts(unsigned count) override
-	{
-	    // Know a-head of time how many set layouts there will be, useful for multi-threading.
-	    return true;
+    bool set_num_descriptor_set_layouts(unsigned count) override
+    {
+        // Know a-head of time how many set layouts there will be, useful for multi-threading.
+        return true;
     }
 
-	bool enqueue_create_descriptor_set_layout(Hash hash, unsigned index,
+    bool enqueue_create_descriptor_set_layout(Hash hash, unsigned index,
                                               const VkDescriptorSetLayoutCreateInfo *create_info,
                                               VkDescriptorSetLayout *layout) override
-	{
-	    // Can queue this up for threaded creation (useful for pipelines).
-	    // create_info persists as long as Fossilize::Replayer exists.
+    {
+        // Can queue this up for threaded creation (useful for pipelines).
+        // create_info persists as long as Fossilize::Replayer exists.
         VkDescriptorSetLayout set_layout = populate_internal_hash_map(hash, create_info);
 
         // Let the replayer know how to fill in VkDescriptorSetLayout in upcoming pipeline creation calls.
         // Can use dummy values here if we don't care about using the create_info structs verbatim.
         *layout = set_layout;
         return true;
-	}
+    }
 
-	void wait_enqueue() override
-	{
-	    // If using multi-threaded creation, join all queued tasks here.
-	}
+    void wait_enqueue() override
+    {
+        // If using multi-threaded creation, join all queued tasks here.
+    }
 };
 
 void replay_state()
