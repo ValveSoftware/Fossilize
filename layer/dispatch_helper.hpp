@@ -22,9 +22,14 @@
 
 #pragma once
 
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
 #include <memory>
 #include <string.h>
 #include <unordered_map>
+#include <algorithm>
 #include "vk_layer.h"
 #include "vulkan.h"
 
