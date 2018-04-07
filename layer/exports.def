@@ -1,0 +1,8 @@
+LIBRARY VkLayer_fossilize
+EXPORTS
+vkGetInstanceProcAddr
+vkGetDeviceProcAddr
+vkEnumerateDeviceLayerProperties
+vkEnumerateInstanceLayerProperties
+vkEnumerateDeviceExtensionProperties
+vkEnumerateInstanceExtensionProperties

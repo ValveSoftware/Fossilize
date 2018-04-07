@@ -1,0 +1,11 @@
+{
+    "file_format_version" : "1.0.0",
+    "layer" : {
+        "name": "VK_LAYER_fossilize",
+        "type": "GLOBAL",
+        "library_path": ".\\VkLayer_fossilize.dll",
+        "api_version": "1.0.70",
+        "implementation_version": "1",
+        "description": "Fossilize capture layer"
+    }
+}
