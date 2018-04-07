@@ -69,6 +69,9 @@ add_subdirectory(fossilize)
 target_link_library(your-target fossilize)
 ```
 
+For Android, you can use the `android_build.sh` script. It builds the layer for armeabi-v7a and arm64-v8a.
+See the script for more details.
+
 ## Serialization format
 
 Simple JSON format which represents the various `Vk*CreateInfo` structures.
