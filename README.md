@@ -176,7 +176,40 @@ void replay_state(Device &device)
 
 ## Vulkan layer capture
 
-TBD. Will try Vulkan Layer Framework for this.
+Fossilize can also capture Vulkan application through the layer mechanism.
+The layer name is `VK_LAYER_fossilize`.
+
+To build, enable `FOSSILIZE_VULKAN_LAYER` CMake option. This is enabled by default.
+The layer and JSON is placed in `layer/` in the build folder.
+
+### Linux/Windows
+
+By default the layer will serialize to `fossilize.json` in the working directory on `vkDestroyDevice`.
+However, due to the nature of some drivers, there might be crashes in-between. For this, there are two other modes.
+
+#### `export FOSSILIZE_PARANOID_MODE=1`
+
+Before every call to `vkCreateComputePipelines` and `vkCreateGraphicsPipelines`, data is serialized to disk.
+This can be quite slow for application with lots of pipelines, so only use it if the method below doesn't work ...
+
+#### `export FOSSILIZE_DUMP_SIGSEGV=1`
+
+This only works on Linux. A SIGSEGV handler is registered, and the state is serialized to disk in the segfault handler.
+This is a bit sketchy, but should work well if drivers are crashing on pipeline creation (or just crashing in general).
+
+#### `export FOSSILIZE_DUMP_PATH=/my/custom/path`
+
+Custom file path for dumping state.
+
+### Android
+
+Options can be set through `setprop`.
+
+#### `setprop debug.fossilize.dump_path /custom/path`
+
+#### `setprop debug.fossilize.paranoid_mode 1`
+
+#### `setprop debug.fossilize.dump_sigsegv 1`
 
 ## Submit shader failure repro cases
 
