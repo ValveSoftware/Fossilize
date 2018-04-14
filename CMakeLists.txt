@@ -4,7 +4,7 @@ set(CMAKE_C_STANDARD 99)
 project(Fossilize LANGUAGES CXX C)
 
 if (CMAKE_COMPILER_IS_GNUCXX OR (${CMAKE_CXX_COMPILER_ID} MATCHES "Clang"))
-	set(FOSSILIZE_CXX_FLAGS -Wall -Wextra -pedantic -Wno-missing-field-initializers -Wno-empty-body)
+	set(FOSSILIZE_CXX_FLAGS -Wall -Wextra -Wno-missing-field-initializers -Wno-empty-body)
 elseif (MSVC)
 	set(FOSSILIZE_CXX_FLAGS /D_CRT_SECURE_NO_WARNINGS /D_SCL_SECURE_NO_WARNINGS /wd4267 /wd4244 /wd4309 /wd4005 /MP /DNOMINMAX)
 endif()
@@ -51,6 +51,7 @@ target_compile_options(fossilize-test PRIVATE ${FOSSILIZE_CXX_FLAGS})
 set_target_properties(fossilize-test PROPERTIES LINK_FLAGS "${FOSSILIZE_LINK_FLAGS}")
 
 add_subdirectory(layer)
+add_subdirectory(cli)
 
 enable_testing()
 add_test(NAME fossilize-system-test COMMAND fossilize-test)
