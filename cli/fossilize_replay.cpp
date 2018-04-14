@@ -112,7 +112,7 @@ struct DumbReplayer : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_sampler(Hash, unsigned index, const VkSamplerCreateInfo *create_info, VkSampler *sampler)
+	bool enqueue_create_sampler(Hash, unsigned index, const VkSamplerCreateInfo *create_info, VkSampler *sampler) override
 	{
 		LOGI("Creating sampler #%u\n", index);
 		if (vkCreateSampler(device.get_device(), create_info, nullptr, sampler) != VK_SUCCESS)
@@ -125,7 +125,7 @@ struct DumbReplayer : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_descriptor_set_layout(Hash, unsigned index, const VkDescriptorSetLayoutCreateInfo *create_info, VkDescriptorSetLayout *layout)
+	bool enqueue_create_descriptor_set_layout(Hash, unsigned index, const VkDescriptorSetLayoutCreateInfo *create_info, VkDescriptorSetLayout *layout) override
 	{
 		LOGI("Creating descriptor set layout #%u\n", index);
 		if (vkCreateDescriptorSetLayout(device.get_device(), create_info, nullptr, layout) != VK_SUCCESS)
@@ -138,7 +138,7 @@ struct DumbReplayer : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_pipeline_layout(Hash, unsigned index, const VkPipelineLayoutCreateInfo *create_info, VkPipelineLayout *layout)
+	bool enqueue_create_pipeline_layout(Hash, unsigned index, const VkPipelineLayoutCreateInfo *create_info, VkPipelineLayout *layout) override
 	{
 		LOGI("Creating pipeline layout #%u\n", index);
 		if (vkCreatePipelineLayout(device.get_device(), create_info, nullptr, layout) != VK_SUCCESS)
@@ -151,7 +151,7 @@ struct DumbReplayer : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_shader_module(Hash, unsigned index, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module)
+	bool enqueue_create_shader_module(Hash, unsigned index, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module) override
 	{
 		LOGI("Creating shader module #%u\n", index);
 		if (vkCreateShaderModule(device.get_device(), create_info, nullptr, module) != VK_SUCCESS)
@@ -164,7 +164,7 @@ struct DumbReplayer : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_render_pass(Hash, unsigned index, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass)
+	bool enqueue_create_render_pass(Hash, unsigned index, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass) override
 	{
 		LOGI("Creating render pass #%u\n", index);
 		if (vkCreateRenderPass(device.get_device(), create_info, nullptr, render_pass) != VK_SUCCESS)
@@ -177,7 +177,7 @@ struct DumbReplayer : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_compute_pipeline(Hash, unsigned index, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline)
+	bool enqueue_create_compute_pipeline(Hash, unsigned index, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
 		LOGI("Creating compute pipeline #%u\n", index);
 		if (vkCreateComputePipelines(device.get_device(), pipeline_cache, 1, create_info, nullptr, pipeline) != VK_SUCCESS)
@@ -190,7 +190,7 @@ struct DumbReplayer : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_graphics_pipeline(Hash, unsigned index, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline)
+	bool enqueue_create_graphics_pipeline(Hash, unsigned index, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
 		LOGI("Creating graphics pipeline #%u\n", index);
 		if (vkCreateGraphicsPipelines(device.get_device(), pipeline_cache, 1, create_info, nullptr, pipeline) != VK_SUCCESS)

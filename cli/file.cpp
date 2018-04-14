@@ -35,7 +35,7 @@ std::vector<char> load_json_from_file(const char *path)
 	long len = ftell(file);
 	rewind(file);
 	std::vector<char> ret(len);
-	if (fread(ret.data(), 1, len, file) != len)
+	if (fread(ret.data(), 1, len, file) != size_t(len))
 	{
 		fclose(file);
 		return {};

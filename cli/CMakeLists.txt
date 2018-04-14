@@ -9,6 +9,9 @@ add_library(cli-utils STATIC cli_parser.cpp cli_parser.hpp device.hpp device.cpp
 target_compile_options(cli-utils PRIVATE ${FOSSILIZE_CXX_FLAGS})
 target_include_directories(cli-utils PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(cli-utils volk)
+if (ANDROID)
+	target_link_libraries(cli-utils log)
+endif()
 
 function(add_fossilize_cli NAME)
 	add_executable(${NAME} ${ARGN})
