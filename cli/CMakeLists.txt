@@ -1,0 +1,22 @@
+add_library(volk STATIC volk/volk.c volk/volk.h)
+target_include_directories(volk PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/volk ${CMAKE_CURRENT_SOURCE_DIR}/../khronos)
+target_compile_options(volk PRIVATE ${FOSSILIZE_CXX_FLAGS})
+if (NOT WIN32)
+	target_link_libraries(volk dl)
+endif()
+
+add_library(cli-utils STATIC cli_parser.cpp cli_parser.hpp device.hpp device.cpp file.hpp file.cpp)
+target_compile_options(cli-utils PRIVATE ${FOSSILIZE_CXX_FLAGS})
+target_include_directories(cli-utils PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(cli-utils volk)
+
+function(add_fossilize_cli NAME)
+	add_executable(${NAME} ${ARGN})
+	target_compile_options(${NAME} PRIVATE ${FOSSILIZE_CXX_FLAGS})
+	target_link_libraries(${NAME} fossilize cli-utils)
+	if (FOSSILIZE_SANITIZE_ADDRESS OR FOSSILIZE_SANITIZE_THREADS)
+		set_target_properties(${NAME} PROPERTIES LINK_FLAGS "${FOSSILIZE_LINK_FLAGS}")
+	endif()
+endfunction()
+
+add_fossilize_cli(fossilize-replay fossilize_replay.cpp)

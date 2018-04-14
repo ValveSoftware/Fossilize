@@ -217,3 +217,8 @@ Options can be set through `setprop`.
 ## Submit shader failure repro cases
 
 TBD
+
+## External modules
+
+- [volk](https://github.com/zeux/volk)
+- [rapidjson](https://github.com/miloyip/rapidjson)
