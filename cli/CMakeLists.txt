@@ -5,6 +5,11 @@ if (NOT WIN32)
 	target_link_libraries(volk dl)
 endif()
 
+set(SPIRV-Headers_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/SPIRV-Headers" CACHE STRING "SPIRV-Headers path")
+set(SHADERC_SKIP_TESTS ON)
+add_subdirectory(SPIRV-Tools EXCLUDE_FROM_ALL)
+add_subdirectory(SPIRV-Cross EXCLUDE_FROM_ALL)
+
 add_library(cli-utils STATIC cli_parser.cpp cli_parser.hpp device.hpp device.cpp file.hpp file.cpp)
 target_compile_options(cli-utils PRIVATE ${FOSSILIZE_CXX_FLAGS})
 target_include_directories(cli-utils PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -23,3 +28,5 @@ function(add_fossilize_cli NAME)
 endfunction()
 
 add_fossilize_cli(fossilize-replay fossilize_replay.cpp)
+add_fossilize_cli(fossilize-disasm fossilize_disasm.cpp)
+target_link_libraries(fossilize-disasm SPIRV-Tools spirv-cross-glsl)

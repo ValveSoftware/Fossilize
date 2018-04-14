@@ -27,4 +27,5 @@
 namespace Fossilize
 {
 std::vector<char> load_json_from_file(const char *path);
+bool write_string_to_file(const char *path, const char *text);
 }

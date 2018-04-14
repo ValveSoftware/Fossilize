@@ -222,3 +222,5 @@ TBD
 
 - [volk](https://github.com/zeux/volk)
 - [rapidjson](https://github.com/miloyip/rapidjson)
+- [SPIRV-Tools](https://github.com/KhronosGroup/SPIRV-Tools)
+- [SPIRV-Cross](https://github.com/KhronosGroup/SPIRV-Cross)

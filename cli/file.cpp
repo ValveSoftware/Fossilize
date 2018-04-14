@@ -44,4 +44,20 @@ std::vector<char> load_json_from_file(const char *path)
 	fclose(file);
 	return ret;
 }
+
+bool write_string_to_file(const char *path, const char *text)
+{
+	FILE *file = fopen(path, "w");
+	if (!file)
+		return false;
+
+	if (fputs(text, file) == EOF)
+	{
+		fclose(file);
+		return false;
+	}
+
+	fclose(file);
+	return true;
+}
 }

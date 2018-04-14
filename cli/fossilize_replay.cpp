@@ -55,19 +55,26 @@ struct DumbReplayer : StateCreatorInterface
 		if (pipeline_cache)
 			vkDestroyPipelineCache(device.get_device(), pipeline_cache, nullptr);
 		for (auto &sampler : samplers)
-			vkDestroySampler(device.get_device(), sampler, nullptr);
+			if (sampler)
+				vkDestroySampler(device.get_device(), sampler, nullptr);
 		for (auto &layout : layouts)
-			vkDestroyDescriptorSetLayout(device.get_device(), layout, nullptr);
+			if (layout)
+				vkDestroyDescriptorSetLayout(device.get_device(), layout, nullptr);
 		for (auto &pipeline_layout : pipeline_layouts)
-			vkDestroyPipelineLayout(device.get_device(), pipeline_layout, nullptr);
+			if (pipeline_layout)
+				vkDestroyPipelineLayout(device.get_device(), pipeline_layout, nullptr);
 		for (auto &shader_module : shader_modules)
-			vkDestroyShaderModule(device.get_device(), shader_module, nullptr);
+			if (shader_module)
+				vkDestroyShaderModule(device.get_device(), shader_module, nullptr);
 		for (auto &render_pass : render_passes)
-			vkDestroyRenderPass(device.get_device(), render_pass, nullptr);
+			if (render_pass)
+				vkDestroyRenderPass(device.get_device(), render_pass, nullptr);
 		for (auto &pipeline : compute_pipelines)
-			vkDestroyPipeline(device.get_device(), pipeline, nullptr);
+			if (pipeline)
+				vkDestroyPipeline(device.get_device(), pipeline, nullptr);
 		for (auto &pipeline : graphics_pipelines)
-			vkDestroyPipeline(device.get_device(), pipeline, nullptr);
+			if (pipeline)
+				vkDestroyPipeline(device.get_device(), pipeline, nullptr);
 	}
 
 	bool set_num_samplers(unsigned count) override

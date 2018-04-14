@@ -4,3 +4,12 @@
 [submodule "cli/volk"]
 	path = cli/volk
 	url = git://github.com/zeux/volk
+[submodule "cli/SPIRV-Cross"]
+	path = cli/SPIRV-Cross
+	url = git://github.com/KhronosGroup/SPIRV-Cross
+[submodule "cli/SPIRV-Tools"]
+	path = cli/SPIRV-Tools
+	url = git://github.com/KhronosGroup/SPIRV-Tools
+[submodule "cli/SPIRV-Headers"]
+	path = cli/SPIRV-Headers
+	url = git://github.com/KhronosGroup/SPIRV-Headers
