@@ -303,6 +303,14 @@ private:
 
 	VkSpecializationInfo *copy_specialization_info(const VkSpecializationInfo *info);
 
+	VkSampler remap_sampler_handle(VkSampler sampler) const;
+	VkDescriptorSetLayout remap_descriptor_set_layout_handle(VkDescriptorSetLayout layout) const;
+	VkPipelineLayout remap_pipeline_layout_handle(VkPipelineLayout layout) const;
+	VkRenderPass remap_render_pass_handle(VkRenderPass render_pass) const;
+	VkShaderModule remap_shader_module_handle(VkShaderModule shader_module) const;
+	VkPipeline remap_compute_pipeline_handle(VkPipeline pipeline) const;
+	VkPipeline remap_graphics_pipeline_handle(VkPipeline pipeline) const;
+
 	template <typename T>
 	T *copy(const T *src, size_t count);
 };

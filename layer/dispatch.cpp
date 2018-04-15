@@ -128,7 +128,11 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(VkDevice device, V
 		auto res = layer->getTable()->CreateGraphicsPipelines(device, pipelineCache, 1, &pCreateInfos[i],
 		                                                      pAllocator, &pPipelines[i]);
 		if (res != VK_SUCCESS)
+		{
+			LOGE("Failed to create graphics pipeline, safety serialization ...\n");
+			layer->serializeToPath(layer->getSerializationPath());
 			return res;
+		}
 
 		if (registerHandle)
 			layer->getRecorder().set_compute_pipeline_handle(index, pPipelines[i]);
@@ -170,7 +174,11 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelines(VkDevice device, Vk
 		auto res = layer->getTable()->CreateComputePipelines(device, pipelineCache, 1, &pCreateInfos[i],
 		                                                     pAllocator, &pPipelines[i]);
 		if (res != VK_SUCCESS)
+		{
+			LOGE("Failed to create compute pipeline, safety serialization ...\n");
+			layer->serializeToPath(layer->getSerializationPath());
 			return res;
+		}
 
 		if (registerHandle)
 			layer->getRecorder().set_compute_pipeline_handle(index, pPipelines[i]);

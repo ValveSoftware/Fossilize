@@ -1717,7 +1717,7 @@ VkDescriptorSetLayoutCreateInfo StateRecorder::copy_descriptor_set_layout(
 			b.pImmutableSamplers = copy(b.pImmutableSamplers, b.descriptorCount);
 			auto *samplers = const_cast<VkSampler *>(b.pImmutableSamplers);
 			for (uint32_t j = 0; j < b.descriptorCount; j++)
-				samplers[j] = api_object_cast<VkSampler>(uint64_t(sampler_to_index[samplers[j]] + 1));
+				samplers[j] = remap_sampler_handle(samplers[j]);
 		}
 	}
 
@@ -1730,10 +1730,7 @@ VkPipelineLayoutCreateInfo StateRecorder::copy_pipeline_layout(const VkPipelineL
 	info.pPushConstantRanges = copy(info.pPushConstantRanges, info.pushConstantRangeCount);
 	info.pSetLayouts = copy(info.pSetLayouts, info.setLayoutCount);
 	for (uint32_t i = 0; i < info.setLayoutCount; i++)
-	{
-		const_cast<VkDescriptorSetLayout *>(info.pSetLayouts)[i] =
-			api_object_cast<VkDescriptorSetLayout>(uint64_t(descriptor_set_layout_to_index[info.pSetLayouts[i]] + 1));
-	}
+		const_cast<VkDescriptorSetLayout *>(info.pSetLayouts)[i] = remap_descriptor_set_layout_handle(info.pSetLayouts[i]);
 	return info;
 }
 
@@ -1752,11 +1749,11 @@ VkComputePipelineCreateInfo StateRecorder::copy_compute_pipeline(const VkCompute
 		info.stage.pSpecializationInfo = copy_specialization_info(info.stage.pSpecializationInfo);
 	if (info.stage.pNext)
 		throw logic_error("pNext in VkPipelineShaderStageCreateInfo not supported.");
-	info.stage.module = api_object_cast<VkShaderModule>(uint64_t(shader_module_to_index[create_info.stage.module] + 1));
+	info.stage.module = remap_shader_module_handle(info.stage.module);
 	info.stage.pName = copy(info.stage.pName, strlen(info.stage.pName) + 1);
-	info.layout = api_object_cast<VkPipelineLayout>(uint64_t(pipeline_layout_to_index[info.layout] + 1));
+	info.layout = remap_pipeline_layout_handle(info.layout);
 	if (info.basePipelineHandle != VK_NULL_HANDLE)
-		info.basePipelineHandle = api_object_cast<VkPipeline>(uint64_t(compute_pipeline_to_index[info.basePipelineHandle] + 1));
+		info.basePipelineHandle = remap_compute_pipeline_handle(info.basePipelineHandle);
 	return info;
 }
 
@@ -1835,10 +1832,10 @@ VkGraphicsPipelineCreateInfo StateRecorder::copy_graphics_pipeline(const VkGraph
 		info.pDynamicState = copy(info.pDynamicState, 1);
 	}
 
-	info.renderPass = api_object_cast<VkRenderPass>(uint64_t(render_pass_to_index[info.renderPass] + 1));
-	info.layout = api_object_cast<VkPipelineLayout>(uint64_t(pipeline_layout_to_index[info.layout] + 1));
+	info.renderPass = remap_render_pass_handle(info.renderPass);
+	info.layout = remap_pipeline_layout_handle(info.layout);
 	if (info.basePipelineHandle != VK_NULL_HANDLE)
-		info.basePipelineHandle = api_object_cast<VkPipeline>(uint64_t(graphics_pipeline_to_index[info.basePipelineHandle] + 1));
+		info.basePipelineHandle = remap_graphics_pipeline_handle(info.basePipelineHandle);
 
 	for (uint32_t i = 0; i < info.stageCount; i++)
 	{
@@ -1848,7 +1845,7 @@ VkGraphicsPipelineCreateInfo StateRecorder::copy_graphics_pipeline(const VkGraph
 		stage.pName = copy(stage.pName, strlen(stage.pName) + 1);
 		if (stage.pSpecializationInfo)
 			stage.pSpecializationInfo = copy_specialization_info(stage.pSpecializationInfo);
-		stage.module = api_object_cast<VkShaderModule>(uint64_t(shader_module_to_index[stage.module] + 1));
+		stage.module = remap_shader_module_handle(stage.module);
 	}
 
 	if (info.pColorBlendState)
@@ -1903,6 +1900,62 @@ VkRenderPassCreateInfo StateRecorder::copy_render_pass(const VkRenderPassCreateI
 	}
 
 	return info;
+}
+
+VkSampler StateRecorder::remap_sampler_handle(VkSampler sampler) const
+{
+	auto itr = sampler_to_index.find(sampler);
+	if (itr == end(sampler_to_index))
+		throw logic_error("Cannot find sampler in hashmap.");
+	return api_object_cast<VkSampler>(uint64_t(itr->second + 1));
+}
+
+VkDescriptorSetLayout StateRecorder::remap_descriptor_set_layout_handle(VkDescriptorSetLayout layout) const
+{
+	auto itr = descriptor_set_layout_to_index.find(layout);
+	if (itr == end(descriptor_set_layout_to_index))
+		throw logic_error("Cannot find descriptor set layout in hashmap.");
+	return api_object_cast<VkDescriptorSetLayout>(uint64_t(itr->second + 1));
+}
+
+VkPipelineLayout StateRecorder::remap_pipeline_layout_handle(VkPipelineLayout layout) const
+{
+	auto itr = pipeline_layout_to_index.find(layout);
+	if (itr == end(pipeline_layout_to_index))
+		throw logic_error("Cannot find pipeline layout in hashmap.");
+	return api_object_cast<VkPipelineLayout>(uint64_t(itr->second + 1));
+}
+
+VkShaderModule StateRecorder::remap_shader_module_handle(VkShaderModule module) const
+{
+	auto itr = shader_module_to_index.find(module);
+	if (itr == end(shader_module_to_index))
+		throw logic_error("Cannot find shader module in hashmap.");
+	return api_object_cast<VkShaderModule>(uint64_t(itr->second + 1));
+}
+
+VkRenderPass StateRecorder::remap_render_pass_handle(VkRenderPass render_pass) const
+{
+	auto itr = render_pass_to_index.find(render_pass);
+	if (itr == end(render_pass_to_index))
+		throw logic_error("Cannoot find render pass in hashmap.");
+	return api_object_cast<VkRenderPass>(uint64_t(itr->second + 1));
+}
+
+VkPipeline StateRecorder::remap_graphics_pipeline_handle(VkPipeline pipeline) const
+{
+	auto itr = graphics_pipeline_to_index.find(pipeline);
+	if (itr == end(graphics_pipeline_to_index))
+		throw logic_error("Cannoot find graphics pipeline in hashmap.");
+	return api_object_cast<VkPipeline>(uint64_t(itr->second + 1));
+}
+
+VkPipeline StateRecorder::remap_compute_pipeline_handle(VkPipeline pipeline) const
+{
+	auto itr = compute_pipeline_to_index.find(pipeline);
+	if (itr == end(compute_pipeline_to_index))
+		throw logic_error("Cannoot find compute pipeline in hashmap.");
+	return api_object_cast<VkPipeline>(uint64_t(itr->second + 1));
 }
 
 static char base64(uint32_t v)
