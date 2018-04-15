@@ -28,6 +28,7 @@
 #include "file.hpp"
 
 #include <string>
+#include <unordered_set>
 #include <stdlib.h>
 
 using namespace Fossilize;
@@ -40,8 +41,10 @@ struct DumbReplayer : StateCreatorInterface
 		bool pipeline_cache = false;
 	};
 
-	DumbReplayer(const VulkanDevice &device, const Options &opts)
-		: device(device)
+	DumbReplayer(const VulkanDevice &device, const Options &opts,
+	             const unordered_set<unsigned> &graphics,
+	             const unordered_set<unsigned> &compute)
+		: device(device), filter_graphics(graphics), filter_compute(compute)
 	{
 		if (opts.pipeline_cache)
 		{
@@ -186,31 +189,47 @@ struct DumbReplayer : StateCreatorInterface
 
 	bool enqueue_create_compute_pipeline(Hash, unsigned index, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
-		LOGI("Creating compute pipeline #%u\n", index);
-		if (vkCreateComputePipelines(device.get_device(), pipeline_cache, 1, create_info, nullptr, pipeline) != VK_SUCCESS)
+		if ((filter_compute.empty() && filter_graphics.empty()) || filter_compute.count(index))
 		{
-			LOGE(" ... Failed!\n");
-			return false;
+			LOGI("Creating compute pipeline #%u\n", index);
+			if (vkCreateComputePipelines(device.get_device(), pipeline_cache, 1, create_info, nullptr, pipeline) !=
+			    VK_SUCCESS)
+			{
+				LOGE(" ... Failed!\n");
+				return false;
+			}
+			LOGI(" ... Succeeded!\n");
 		}
+		else
+			*pipeline = VK_NULL_HANDLE;
+
 		compute_pipelines[index] = *pipeline;
-		LOGI(" ... Succeeded!\n");
 		return true;
 	}
 
 	bool enqueue_create_graphics_pipeline(Hash, unsigned index, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
-		LOGI("Creating graphics pipeline #%u\n", index);
-		if (vkCreateGraphicsPipelines(device.get_device(), pipeline_cache, 1, create_info, nullptr, pipeline) != VK_SUCCESS)
+		if ((filter_graphics.empty() && filter_compute.empty()) || filter_graphics.count(index))
 		{
-			LOGE(" ... Failed!\n");
-			return false;
+			LOGI("Creating graphics pipeline #%u\n", index);
+			if (vkCreateGraphicsPipelines(device.get_device(), pipeline_cache, 1, create_info, nullptr, pipeline) !=
+			    VK_SUCCESS)
+			{
+				LOGE(" ... Failed!\n");
+				return false;
+			}
+			LOGI(" ... Succeeded!\n");
 		}
+		else
+			*pipeline = VK_NULL_HANDLE;
+
 		graphics_pipelines[index] = *pipeline;
-		LOGI(" ... Succeeded!\n");
 		return true;
 	}
 
 	const VulkanDevice &device;
+	const unordered_set<unsigned> &filter_graphics;
+	const unordered_set<unsigned> &filter_compute;
 
 	vector<VkSampler> samplers;
 	vector<VkDescriptorSetLayout> layouts;
@@ -229,6 +248,9 @@ static void print_help()
 	     "\t[--device-index <index>]\n"
 	     "\t[--enable-validation]\n"
 	     "\t[--pipeline-cache]\n"
+	     "\t[--filter-compute <index>]\n"
+	     "\t[--filter-graphics <index>]\n"
+	     "\t[--pipeline-cache]\n"
 	     "\tstate.json\n");
 }
 
@@ -238,12 +260,17 @@ int main(int argc, char *argv[])
 	VulkanDevice::Options opts;
 	DumbReplayer::Options replayer_opts;
 
+	unordered_set<unsigned> filter_graphics;
+	unordered_set<unsigned> filter_compute;
+
 	CLICallbacks cbs;
 	cbs.default_handler = [&](const char *arg) { json_path = arg; };
 	cbs.add("--help", [](CLIParser &parser) { print_help(); parser.end(); });
 	cbs.add("--device-index", [&](CLIParser &parser) { opts.device_index = parser.next_uint(); });
 	cbs.add("--enable-validation", [&](CLIParser &) { opts.enable_validation = true; });
 	cbs.add("--pipeline-cache", [&](CLIParser &) { replayer_opts.pipeline_cache = true; });
+	cbs.add("--filter-compute", [&](CLIParser &parser) { filter_compute.insert(parser.next_uint()); });
+	cbs.add("--filter-graphics", [&](CLIParser &parser) { filter_graphics.insert(parser.next_uint()); });
 	cbs.error_handler = [] { print_help(); };
 
 	CLIParser parser(move(cbs), argc - 1, argv + 1);
@@ -265,7 +292,7 @@ int main(int argc, char *argv[])
 		if (!device.init_device(opts))
 			return EXIT_FAILURE;
 
-		DumbReplayer replayer(device, replayer_opts);
+		DumbReplayer replayer(device, replayer_opts, filter_graphics, filter_compute);
 		StateReplayer state_replayer;
 		auto state_json = load_json_from_file(json_path.c_str());
 		if (state_json.empty())
