@@ -22,7 +22,7 @@ if (FOSSILIZE_SANITIZE_THREADS)
 	set(FOSSILIZE_LINK_FLAGS ${FOSSILIZE_LINK_FLAGS} -fsanitize=thread)
 endif()
 
-add_library(fossilize STATIC fossilize.hpp fossilize.cpp)
+add_library(fossilize STATIC fossilize.hpp fossilize.cpp varint.cpp varint.hpp)
 target_include_directories(fossilize PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_options(fossilize PUBLIC ${FOSSILIZE_CXX_FLAGS})
 
@@ -45,7 +45,6 @@ else()
 	target_include_directories(fossilize PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/khronos/vulkan)
 endif()
 
-
 add_subdirectory(layer)
 
 option(FOSSILIZE_CLI "Enable Fossilize CLI support." ON)
@@ -55,11 +54,7 @@ endif()
 
 option(FOSSILIZE_TESTS "Enable Fossilize tests." ON)
 if (FOSSILIZE_TESTS)
-    enable_testing()
-    add_executable(fossilize-test fossilize_test.cpp)
-    target_link_libraries(fossilize-test fossilize)
-    target_compile_options(fossilize-test PRIVATE ${FOSSILIZE_CXX_FLAGS})
-    set_target_properties(fossilize-test PROPERTIES LINK_FLAGS "${FOSSILIZE_LINK_FLAGS}")
-    add_test(NAME fossilize-system-test COMMAND fossilize-test)
+	enable_testing()
+	add_subdirectory(test)
 endif()
 

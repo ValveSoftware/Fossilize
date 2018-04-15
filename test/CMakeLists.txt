@@ -1,0 +1,11 @@
+add_executable(fossilize-test fossilize_test.cpp)
+target_link_libraries(fossilize-test fossilize)
+target_compile_options(fossilize-test PRIVATE ${FOSSILIZE_CXX_FLAGS})
+set_target_properties(fossilize-test PROPERTIES LINK_FLAGS "${FOSSILIZE_LINK_FLAGS}")
+add_test(NAME fossilize-system-test COMMAND fossilize-test)
+
+add_executable(varint-test varint_test.cpp)
+target_link_libraries(varint-test fossilize)
+target_compile_options(varint-test PRIVATE ${FOSSILIZE_CXX_FLAGS})
+set_target_properties(varint-test PROPERTIES LINK_FLAGS "${FOSSILIZE_LINK_FLAGS}")
+add_test(NAME varint-system-test COMMAND varint-test)

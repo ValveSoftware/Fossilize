@@ -33,6 +33,11 @@
 
 namespace Fossilize
 {
+enum
+{
+	FOSSILIZE_FORMAT_VERSION = 1
+};
+
 using Hash = uint64_t;
 
 class Hasher

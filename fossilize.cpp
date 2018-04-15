@@ -1427,6 +1427,12 @@ bool StateReplayer::parse(StateCreatorInterface &iface, const char *str, size_t 
 	if (doc.HasParseError())
 		return false;
 
+	if (!doc.HasMember("version"))
+		return false;
+
+	if (doc["version"].GetInt() != FOSSILIZE_FORMAT_VERSION)
+		return false;
+
 	try
 	{
 		if (doc.HasMember("shaderModules"))
@@ -1938,7 +1944,7 @@ VkRenderPass StateRecorder::remap_render_pass_handle(VkRenderPass render_pass) c
 {
 	auto itr = render_pass_to_index.find(render_pass);
 	if (itr == end(render_pass_to_index))
-		throw logic_error("Cannoot find render pass in hashmap.");
+		throw logic_error("Cannot find render pass in hashmap.");
 	return api_object_cast<VkRenderPass>(uint64_t(itr->second + 1));
 }
 
@@ -1946,7 +1952,7 @@ VkPipeline StateRecorder::remap_graphics_pipeline_handle(VkPipeline pipeline) co
 {
 	auto itr = graphics_pipeline_to_index.find(pipeline);
 	if (itr == end(graphics_pipeline_to_index))
-		throw logic_error("Cannoot find graphics pipeline in hashmap.");
+		throw logic_error("Cannot find graphics pipeline in hashmap.");
 	return api_object_cast<VkPipeline>(uint64_t(itr->second + 1));
 }
 
@@ -1954,7 +1960,7 @@ VkPipeline StateRecorder::remap_compute_pipeline_handle(VkPipeline pipeline) con
 {
 	auto itr = compute_pipeline_to_index.find(pipeline);
 	if (itr == end(compute_pipeline_to_index))
-		throw logic_error("Cannoot find compute pipeline in hashmap.");
+		throw logic_error("Cannot find compute pipeline in hashmap.");
 	return api_object_cast<VkPipeline>(uint64_t(itr->second + 1));
 }
 
@@ -2015,6 +2021,8 @@ std::string StateRecorder::serialize() const
 	Document doc;
 	doc.SetObject();
 	auto &alloc = doc.GetAllocator();
+
+	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
 
 	Value samplers(kArrayType);
 	for (auto &sampler : this->samplers)
