@@ -224,7 +224,12 @@ struct DumbReplayer : StateCreatorInterface
 
 static void print_help()
 {
-	LOGI("fossilize-replay [--help] [--device-index <index>] [--enable-validation] [--pipeline-cache] state.json\n");
+	LOGI("fossilize-replay\n"
+	     "\t[--help]\n"
+	     "\t[--device-index <index>]\n"
+	     "\t[--enable-validation]\n"
+	     "\t[--pipeline-cache]\n"
+	     "\tstate.json\n");
 }
 
 int main(int argc, char *argv[])

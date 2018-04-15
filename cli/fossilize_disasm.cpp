@@ -453,14 +453,14 @@ static string disassemble_spirv(const VulkanDevice &device, VkPipeline pipeline,
 static void print_help()
 {
 	LOGI("fossilize-disasm\n"
-	     "[--help]\n"
-	     "[--device-index <index>]\n"
-	     "[--enable-validation]\n"
-	     "[--disasm-graphics-pipeline <index>]\n"
-	     "[--disasm-compute-pipeline <index>]\n"
-	     "[--stage vert/frag/comp/geom/tesc/tese]\n"
-	     "[--output <path>]\n"
-	     "[--disasm-target asm/glsl/amd]\n"
+	     "\t[--help]\n"
+	     "\t[--device-index <index>]\n"
+	     "\t[--enable-validation]\n"
+	     "\t[--graphics-pipeline <index>]\n"
+	     "\t[--compute-pipeline <index>]\n"
+	     "\t[--stage vert/frag/comp/geom/tesc/tese]\n"
+	     "\t[--output <path>]\n"
+	     "\t[--target asm/glsl/amd]\n"
 	     "state.json\n");
 }
 
@@ -480,11 +480,11 @@ int main(int argc, char *argv[])
 	cbs.add("--help", [](CLIParser &parser) { print_help(); parser.end(); });
 	cbs.add("--device-index", [&](CLIParser &parser) { opts.device_index = parser.next_uint(); });
 	cbs.add("--enable-validation", [&](CLIParser &) { opts.enable_validation = true; });
-	cbs.add("--disasm-graphics-pipeline", [&](CLIParser &parser) { graphics_index = parser.next_uint(); });
-	cbs.add("--disasm-compute-pipeline", [&](CLIParser &parser) { compute_index = parser.next_uint(); });
+	cbs.add("--graphics-pipeline", [&](CLIParser &parser) { graphics_index = parser.next_uint(); });
+	cbs.add("--compute-pipeline", [&](CLIParser &parser) { compute_index = parser.next_uint(); });
 	cbs.add("--stage", [&](CLIParser &parser) { stage = stage_from_string(parser.next_string()); });
 	cbs.add("--output", [&](CLIParser &parser) { output = parser.next_string(); });
-	cbs.add("--disasm-target", [&](CLIParser &parser) {
+	cbs.add("--target", [&](CLIParser &parser) {
 		method = method_from_string(parser.next_string());
 	});
 	cbs.error_handler = [] { print_help(); };
@@ -595,10 +595,7 @@ int main(int argc, char *argv[])
 
 	if (output.empty())
 	{
-		printf("Output:\n");
-		printf("==============\n");
 		printf("%s\n", disassembled.c_str());
-		printf("==============\n");
 	}
 	else
 	{
