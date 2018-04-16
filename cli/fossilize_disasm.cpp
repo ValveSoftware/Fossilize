@@ -513,7 +513,7 @@ int main(int argc, char *argv[])
 
 	if (((graphics_index >= 0 && compute_index >= 0)) || ((graphics_index < 0) && (compute_index < 0)))
 	{
-		LOGE("Use either --disasm-graphics-pipeline or --disasm-compute-pipeline.\n");
+		LOGE("Use either --graphics-pipeline or --compute-pipeline.\n");
 		return EXIT_FAILURE;
 	}
 

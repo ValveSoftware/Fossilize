@@ -60,4 +60,20 @@ bool write_string_to_file(const char *path, const char *text)
 	fclose(file);
 	return true;
 }
+
+bool write_buffer_to_file(const char *path, const void *data, size_t size)
+{
+	FILE *file = fopen(path, "wb");
+	if (!file)
+		return false;
+
+	if (fwrite(data, 1, size, file) != size)
+	{
+		fclose(file);
+		return false;
+	}
+
+	fclose(file);
+	return true;
+}
 }

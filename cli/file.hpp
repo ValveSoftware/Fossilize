@@ -29,4 +29,5 @@ namespace Fossilize
 {
 std::vector<uint8_t> load_buffer_from_file(const char *path);
 bool write_string_to_file(const char *path, const char *text);
+bool write_buffer_to_file(const char *path, const void *data, size_t size);
 }
