@@ -549,7 +549,7 @@ int main(int argc, char *argv[])
 	string disassembled;
 	if (compute_index >= 0)
 	{
-		if (size_t(compute_index) > replayer.compute_infos.size())
+		if (size_t(compute_index) >= replayer.compute_infos.size())
 		{
 			LOGE("Used compute index: %d, but there's only %u compute pipelines in the dump.\n",
 			     compute_index, unsigned(replayer.compute_infos.size()));
@@ -562,7 +562,7 @@ int main(int argc, char *argv[])
 	}
 	else if (graphics_index >= 0)
 	{
-		if (size_t(graphics_index) > replayer.graphics_infos.size())
+		if (size_t(graphics_index) >= replayer.graphics_infos.size())
 		{
 			LOGE("Used graphics index: %d, but there's only %u graphics pipelines in the dump.\n",
 			     graphics_index, unsigned(replayer.graphics_infos.size()));
