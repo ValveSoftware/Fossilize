@@ -576,10 +576,11 @@ int main(int argc, char *argv[])
 
 		for (uint32_t i = 0; i < info->stageCount; i++)
 		{
-			if (info->pStages[i].stage == static_cast<uint32_t>(stage))
+			if (info->pStages[i].stage == stage)
 			{
 				module = info->pStages[i].module;
 				entry = info->pStages[i].pName;
+				break;
 			}
 		}
 
