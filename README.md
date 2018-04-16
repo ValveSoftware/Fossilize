@@ -79,8 +79,12 @@ Overall, a binary format which combines JSON with varint-encoded SPIR-V (light c
 - Size of entire binary (64-bit LE)
 - JSON magic "JSON    " (8 bytes ASCII)
 - JSON size (64-bit LE)
+- JSON data (JSON size bytes)
 - SPIR-V magic "SPIR-V  " (8 bytes ASCII)
 - SPIR-V size (64-bit LE)
+- Varint-encoded SPIR-V words (SPIR-V size bytes)
+
+64-bit little-endian values are not necessarily aligned to 8 bytes.
 
 The JSON is a simple format which represents the various `Vk*CreateInfo` structures.
 `pNext` is currently not supported.
