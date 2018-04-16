@@ -44,7 +44,7 @@ which requires sending more complete repro applications.
 - Clang
 - MSVC 2013/2015/2017+
 
-If rapidjson is not already bundled in your project, you need to check out the submodule.
+If rapidjson is not already bundled in your project, you need to check out the submodules.
 
 ```
 git submodule update --init
@@ -53,6 +53,7 @@ git submodule update --init
 otherwise, you can set `FOSSILIZE_RAPIDJSON_INCLUDE_PATH` if building this library as part of your project.
 It is also possible to use `FOSSILIZE_VULKAN_INCLUDE_PATH` to override Vulkan header include paths.
 
+Normally, the CLI tools will be built. These require SPIRV-Tools and SPIRV-Cross submodules to be initialized, however, if you're only building Fossilize as a library/layer, you can use CMake options `-DFOSSILIZE_CLI=OFF` and `-DFOSSILIZE_TESTS=OFF` to disable all those requirements for submodules (assuming you have custom include path for rapidjson).
 Standalone build:
 ```
 mkdir build

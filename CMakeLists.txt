@@ -45,7 +45,9 @@ else()
 	target_include_directories(fossilize PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/khronos/vulkan)
 endif()
 
-add_subdirectory(layer)
+if (FOSSILIZE_VULKAN_LAYER)
+	add_subdirectory(layer)
+endif()
 
 option(FOSSILIZE_CLI "Enable Fossilize CLI support." ON)
 if (FOSSILIZE_CLI)
