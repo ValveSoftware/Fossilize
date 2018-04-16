@@ -3,8 +3,6 @@
 [![Build Status](https://travis-ci.org/Themaister/Fossilize.svg?branch=master)](https://travis-ci.org/Themaister/Fossilize)
 [![Build Status](https://ci.appveyor.com/api/projects/status/github/Themaister/Fossilize?svg=true&branch=master)](https://ci.appveyor.com/project/Themaister/fossilize)
 
-**NOTE: The repo is under construction, do not use this yet.**
-
 Fossilize is a simple library for serializing various persistent Vulkan objects which typically end up
 in hashmaps. CreateInfo structs for these Vulkan objects can be recorded and replayed.
 
