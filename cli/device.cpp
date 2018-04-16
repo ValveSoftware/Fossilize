@@ -135,6 +135,11 @@ bool VulkanDevice::init_device(const Options &opts)
 	instance_info.ppEnabledLayerNames = active_layers.empty() ? nullptr : active_layers.data();
 	instance_info.pApplicationInfo = &app;
 
+	for (uint32_t i = 0; i < instance_info.enabledLayerCount; i++)
+		LOGI("Enabling instance layer: %s\n", instance_info.ppEnabledLayerNames[i]);
+	for (uint32_t i = 0; i < instance_info.enabledExtensionCount; i++)
+		LOGI("Enabling instance extension: %s\n", instance_info.ppEnabledExtensionNames[i]);
+
 	if (vkCreateInstance(&instance_info, nullptr, &instance) != VK_SUCCESS)
 	{
 		LOGE("Failed to create instance.\n");
@@ -168,6 +173,18 @@ bool VulkanDevice::init_device(const Options &opts)
 
 	if (vkEnumeratePhysicalDevices(instance, &gpu_count, gpus.data()) != VK_SUCCESS)
 		return false;
+
+	for (uint32_t i = 0; i < gpu_count; i++)
+	{
+		VkPhysicalDeviceProperties gpu_props = {};
+		vkGetPhysicalDeviceProperties(gpus[i], &gpu_props);
+		LOGI("Enumerated GPU #%u:\n", i);
+		LOGI("  name: %s\n", gpu_props.deviceName);
+		LOGI("  apiVersion: %u.%u.%u\n",
+		     VK_VERSION_MAJOR(gpu_props.apiVersion),
+		     VK_VERSION_MINOR(gpu_props.apiVersion),
+		     VK_VERSION_PATCH(gpu_props.apiVersion));
+	}
 
 	if (opts.device_index >= 0)
 	{
@@ -260,6 +277,11 @@ bool VulkanDevice::init_device(const Options &opts)
 	device_info.ppEnabledLayerNames = active_device_layers.empty() ? nullptr : active_device_layers.data();
 	device_info.enabledExtensionCount = uint32_t(active_device_extensions.size());
 	device_info.ppEnabledExtensionNames = active_device_extensions.empty() ? nullptr : active_device_extensions.data();
+
+	for (uint32_t i = 0; i < device_info.enabledLayerCount; i++)
+		LOGI("Enabling device layer: %s\n", device_info.ppEnabledLayerNames[i]);
+	for (uint32_t i = 0; i < device_info.enabledExtensionCount; i++)
+		LOGI("Enabling device extension: %s\n", device_info.ppEnabledExtensionNames[i]);
 
 	if (vkCreateDevice(gpu, &device_info, nullptr, &device) != VK_NULL_HANDLE)
 	{
