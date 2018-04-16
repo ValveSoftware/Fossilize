@@ -141,13 +141,11 @@ void Device::serializeToPath(const std::string &path)
 	try
 	{
 		auto result = recorder.serialize();
-		FILE *file = fopen(path.c_str(), "w");
+		FILE *file = fopen(path.c_str(), "wb");
 		if (file)
 		{
-			if (fputs(result.c_str(), file) == EOF)
-			{
+			if (fwrite(result.data(), 1, result.size(), file) != result.size())
 				LOGE("Failed to write serialized state to disk.\n");
-			}
 			fclose(file);
 			LOGI("Serialized to \"%s\".\n", path.c_str());
 		}

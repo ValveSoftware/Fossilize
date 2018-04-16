@@ -74,12 +74,26 @@ See the script for more details.
 
 ## Serialization format
 
-Simple JSON format which represents the various `Vk*CreateInfo` structures.
+Overall, a binary format which combines JSON with varint-encoded SPIR-V (light compression).
+- Magic "FOSSILIZE0000001" (16 bytes ASCII)
+- Size of entire binary (64-bit LE)
+- JSON magic "JSON    " (8 bytes ASCII)
+- JSON size (64-bit LE)
+- SPIR-V magic "SPIR-V  " (8 bytes ASCII)
+- SPIR-V size (64-bit LE)
+
+The JSON is a simple format which represents the various `Vk*CreateInfo` structures.
 `pNext` is currently not supported.
 When referring to other VK handle types like `pImmutableSamplers` in `VkDescriptorSetLayout`, or `VkRenderPass` in `VkPipeline`,
 a 1-indexed format is used. 0 represents `VK_NULL_HANDLE` and 1+, represents an array index into the respective array (off-by-one).
 Data blobs (specialization constant data, SPIR-V) are encoded in base64, but I'll likely need something smarter to deal with large applications which have half a trillion SPIR-V files.
 When recording or replaying, a mapping from and to real Vk object handles must be provided by the application so the offset-based indexing scheme can be resolved to real handles.
+
+`VkShaderModuleCreateInfo` refers to an encoded buffer in the SPIR-V block by codeBinaryOffset and codeBinarySize.
+
+The varint encoding scheme encodes every 32-bit SPIR-V word by encoding 7 bits at a time starting with the LSBs,
+the MSB bit in an encoded byte is set if another byte needs to be read (7 bit) for the same SPIR-V word.
+Each SPIR-V word takes from 1 to 5 bytes with this scheme.
 
 ## Sample API usage
 
@@ -117,7 +131,7 @@ void create_state()
 
         // Do the same for render passes, pipelines, shader modules, samplers (if using immutable samplers) as necessary.
 
-        std::string serialized = recorder.serialize();
+        std::vector<uint8_t> serialized = recorder.serialize();
         save_to_disk(serialized);
     }
     catch (const std::exception &e)

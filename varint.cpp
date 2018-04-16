@@ -44,7 +44,7 @@ size_t compute_size_varint(const uint32_t *words, size_t word_count)
 	return size;
 }
 
-void encode_varint(uint8_t *buffer, const uint32_t *words, size_t word_count)
+uint8_t *encode_varint(uint8_t *buffer, const uint32_t *words, size_t word_count)
 {
 	for (size_t i = 0; i < word_count; i++)
 	{
@@ -78,9 +78,10 @@ void encode_varint(uint8_t *buffer, const uint32_t *words, size_t word_count)
 			*buffer++ = uint8_t((w >> 28) & 0x7f);
 		}
 	}
+	return buffer;
 }
 
-bool decode_varint(uint32_t *words, size_t words_size, uint8_t *buffer, size_t buffer_size)
+bool decode_varint(uint32_t *words, size_t words_size, const uint8_t *buffer, size_t buffer_size)
 {
 	size_t offset = 0;
 	for (size_t i = 0; i < words_size; i++)

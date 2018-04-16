@@ -33,6 +33,31 @@
 
 namespace Fossilize
 {
+
+class Exception : public std::exception
+{
+public:
+	Exception(const char *what)
+		: msg(what)
+	{
+	}
+
+	const char *what() const noexcept override
+	{
+		return msg;
+	}
+
+private:
+	const char *msg;
+};
+
+#define FOSSILIZE_THROW(x) throw ::Fossilize::Exception(x)
+
+#define FOSSILIZE_MAGIC "FOSSILIZE0000001"
+#define FOSSILIZE_JSON_MAGIC "JSON    "
+#define FOSSILIZE_SPIRV_MAGIC "SPIR-V  "
+#define FOSSILIZE_MAGIC_LEN 16
+
 enum
 {
 	FOSSILIZE_FORMAT_VERSION = 1
@@ -194,7 +219,7 @@ public:
 class StateReplayer
 {
 public:
-	bool parse(StateCreatorInterface &iface, const char *str, size_t length);
+	void parse(StateCreatorInterface &iface, const void *buffer, size_t size);
 
 private:
 	ScratchAllocator allocator;
@@ -210,7 +235,7 @@ private:
 	void parse_samplers(StateCreatorInterface &iface, const rapidjson::Value &samplers);
 	void parse_descriptor_set_layouts(StateCreatorInterface &iface, const rapidjson::Value &layouts);
 	void parse_pipeline_layouts(StateCreatorInterface &iface, const rapidjson::Value &layouts);
-	void parse_shader_modules(StateCreatorInterface &iface, const rapidjson::Value &modules);
+	void parse_shader_modules(StateCreatorInterface &iface, const rapidjson::Value &modules, const uint8_t *buffer, size_t size);
 	void parse_render_passes(StateCreatorInterface &iface, const rapidjson::Value &passes);
 	void parse_compute_pipelines(StateCreatorInterface &iface, const rapidjson::Value &pipelines);
 	void parse_graphics_pipelines(StateCreatorInterface &iface, const rapidjson::Value &pipelines);
@@ -277,7 +302,7 @@ public:
 	Hash get_hash_for_render_pass(VkRenderPass render_pass) const;
 	Hash get_hash_for_sampler(VkSampler sampler) const;
 
-	std::string serialize() const;
+	std::vector<uint8_t> serialize() const;
 
 private:
 	ScratchAllocator allocator;

@@ -294,7 +294,7 @@ int main(int argc, char *argv[])
 
 		DumbReplayer replayer(device, replayer_opts, filter_graphics, filter_compute);
 		StateReplayer state_replayer;
-		auto state_json = load_json_from_file(json_path.c_str());
+		auto state_json = load_buffer_from_file(json_path.c_str());
 		if (state_json.empty())
 		{
 			LOGE("Failed to load state JSON from disk.\n");

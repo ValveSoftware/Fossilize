@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <string.h>
 #include "rapidjson/prettywriter.h"
+#include "varint.hpp"
 
 using namespace std;
 using namespace rapidjson;
@@ -646,7 +647,7 @@ VkSampler *StateReplayer::parse_immutable_samplers(const Value &samplers)
 	{
 		auto index = itr->GetUint64();
 		if (index > replayed_samplers.size())
-			throw logic_error("Sampler index out of range.");
+			FOSSILIZE_THROW("Sampler index out of range.");
 		else if (index > 0)
 			*samps = replayed_samplers[index - 1];
 		else
@@ -698,7 +699,7 @@ VkDescriptorSetLayout *StateReplayer::parse_set_layouts(const Value &layouts)
 	{
 		auto index = itr->GetUint();
 		if (index > replayed_descriptor_set_layouts.size())
-			throw logic_error("Descriptor set index out of range.");
+			FOSSILIZE_THROW("Descriptor set index out of range.");
 		else if (index > 0)
 			*infos = replayed_descriptor_set_layouts[index - 1];
 		else
@@ -708,7 +709,7 @@ VkDescriptorSetLayout *StateReplayer::parse_set_layouts(const Value &layouts)
 	return ret;
 }
 
-void StateReplayer::parse_shader_modules(StateCreatorInterface &iface, const Value &modules)
+void StateReplayer::parse_shader_modules(StateCreatorInterface &iface, const Value &modules, const uint8_t *buffer, size_t size)
 {
 	iface.set_num_shader_modules(modules.Size());
 	replayed_shader_modules.resize(modules.Size());
@@ -722,9 +723,18 @@ void StateReplayer::parse_shader_modules(StateCreatorInterface &iface, const Val
 		info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
 		info.flags = obj["flags"].GetUint();
 		info.codeSize = obj["codeSize"].GetUint64();
-		info.pCode = reinterpret_cast<uint32_t *>(decode_base64(allocator, obj["code"].GetString(), info.codeSize));
+
+		uint64_t code_offset = obj["codeBinaryOffset"].GetUint64();
+		uint64_t code_size = obj["codeBinarySize"].GetUint64();
+		if (code_offset + code_size > size)
+			FOSSILIZE_THROW("Code buffer out of range.");
+		uint32_t *decode_buffer = allocator.allocate_n<uint32_t>(info.codeSize / sizeof(uint32_t));
+		info.pCode = decode_buffer;
+
+		if (!decode_varint(decode_buffer, info.codeSize / sizeof(uint32_t), buffer + code_offset, code_size))
+			FOSSILIZE_THROW("Failed to decode varint buffer.");
 		if (!iface.enqueue_create_shader_module(obj["hash"].GetUint64(), index, &info, &replayed_shader_modules[index]))
-			throw runtime_error("Failed to create shader module.");
+			FOSSILIZE_THROW("Failed to create shader module.");
 	}
 	iface.wait_enqueue();
 }
@@ -757,7 +767,7 @@ void StateReplayer::parse_pipeline_layouts(StateCreatorInterface &iface, const V
 		}
 
 		if (!iface.enqueue_create_pipeline_layout(obj["hash"].GetUint64(), index, &info, &replayed_pipeline_layouts[index]))
-			throw runtime_error("Failed to create pipeline layout.");
+			FOSSILIZE_THROW("Failed to create pipeline layout.");
 	}
 	iface.wait_enqueue();
 }
@@ -785,7 +795,7 @@ void StateReplayer::parse_descriptor_set_layouts(StateCreatorInterface &iface, c
 		}
 
 		if (!iface.enqueue_create_descriptor_set_layout(obj["hash"].GetUint64(), index, &info, &replayed_descriptor_set_layouts[index]))
-			throw runtime_error("Failed to create descriptor set layout.");
+			FOSSILIZE_THROW("Failed to create descriptor set layout.");
 	}
 	iface.wait_enqueue();
 }
@@ -821,7 +831,7 @@ void StateReplayer::parse_samplers(StateCreatorInterface &iface, const Value &sa
 		info.unnormalizedCoordinates = obj["unnormalizedCoordinates"].GetUint();
 
 		if (!iface.enqueue_create_sampler(obj["hash"].GetUint64(), index, &info, &replayed_samplers[index]))
-			throw runtime_error("Failed to create sampler.");
+			FOSSILIZE_THROW("Failed to create sampler.");
 	}
 	iface.wait_enqueue();
 }
@@ -972,7 +982,7 @@ void StateReplayer::parse_render_passes(StateCreatorInterface &iface, const Valu
 		}
 
 		if (!iface.enqueue_create_render_pass(obj["hash"].GetUint64(), index, &info, &replayed_render_passes[index]))
-			throw runtime_error("Failed to create render pass.");
+			FOSSILIZE_THROW("Failed to create render pass.");
 	}
 
 	iface.wait_enqueue();
@@ -1024,7 +1034,7 @@ void StateReplayer::parse_compute_pipelines(StateCreatorInterface &iface, const 
 
 		auto pipeline = obj["basePipelineHandle"].GetUint64();
 		if (pipeline > replayed_shader_modules.size())
-			throw logic_error("Base pipeline index out of range.");
+			FOSSILIZE_THROW("Base pipeline index out of range.");
 		else if (pipeline > 0)
 		{
 			iface.wait_enqueue();
@@ -1035,7 +1045,7 @@ void StateReplayer::parse_compute_pipelines(StateCreatorInterface &iface, const 
 
 		auto layout = obj["layout"].GetUint64();
 		if (layout > replayed_pipeline_layouts.size())
-			throw logic_error("Pipeline layout index out of range.");
+			FOSSILIZE_THROW("Pipeline layout index out of range.");
 		else if (layout > 0)
 			info.layout = replayed_pipeline_layouts[layout - 1];
 		else
@@ -1047,7 +1057,7 @@ void StateReplayer::parse_compute_pipelines(StateCreatorInterface &iface, const 
 
 		auto module = stage["module"].GetUint64();
 		if (module > replayed_shader_modules.size())
-			throw logic_error("Shader module index out of range.");
+			FOSSILIZE_THROW("Shader module index out of range.");
 		else if (module > 0)
 			info.stage.module = api_object_cast<VkShaderModule>(replayed_shader_modules[module - 1]);
 		else
@@ -1058,7 +1068,7 @@ void StateReplayer::parse_compute_pipelines(StateCreatorInterface &iface, const 
 			info.stage.pSpecializationInfo = parse_specialization_info(stage["specializationInfo"]);
 
 		if (!iface.enqueue_create_compute_pipeline(obj["hash"].GetUint64(), index, &info, &replayed_compute_pipelines[index]))
-			throw runtime_error("Failed to create compute pipeline.");
+			FOSSILIZE_THROW("Failed to create compute pipeline.");
 	}
 	iface.wait_enqueue();
 }
@@ -1334,7 +1344,7 @@ VkPipelineShaderStageCreateInfo *StateReplayer::parse_stages(const rapidjson::Va
 
 		auto module = obj["module"].GetUint();
 		if (module > replayed_shader_modules.size())
-			throw logic_error("Shader module index is out of range.");
+			FOSSILIZE_THROW("Shader module index is out of range.");
 		else if (module > 0)
 			state->module = replayed_shader_modules[module - 1];
 		else
@@ -1361,7 +1371,7 @@ void StateReplayer::parse_graphics_pipelines(StateCreatorInterface &iface, const
 
 		auto pipeline = obj["basePipelineHandle"].GetUint64();
 		if (pipeline > replayed_shader_modules.size())
-			throw logic_error("Base pipeline index out of range.");
+			FOSSILIZE_THROW("Base pipeline index out of range.");
 		else if (pipeline > 0)
 		{
 			iface.wait_enqueue();
@@ -1372,7 +1382,7 @@ void StateReplayer::parse_graphics_pipelines(StateCreatorInterface &iface, const
 
 		auto layout = obj["layout"].GetUint64();
 		if (layout > replayed_pipeline_layouts.size())
-			throw logic_error("Pipeline layout index out of range.");
+			FOSSILIZE_THROW("Pipeline layout index out of range.");
 		else if (layout > 0)
 			info.layout = replayed_pipeline_layouts[layout - 1];
 		else
@@ -1380,7 +1390,7 @@ void StateReplayer::parse_graphics_pipelines(StateCreatorInterface &iface, const
 
 		auto render_pass = obj["renderPass"].GetUint64();
 		if (render_pass > replayed_render_passes.size())
-			throw logic_error("Render pass index out of range.");
+			FOSSILIZE_THROW("Render pass index out of range.");
 		else if (render_pass > 0)
 			info.renderPass = replayed_render_passes[render_pass - 1];
 		else
@@ -1414,69 +1424,95 @@ void StateReplayer::parse_graphics_pipelines(StateCreatorInterface &iface, const
 			info.pVertexInputState = parse_vertex_input_state(obj["vertexInputState"]);
 
 		if (!iface.enqueue_create_graphics_pipeline(obj["hash"].GetUint64(), index, &info, &replayed_graphics_pipelines[index]))
-			throw runtime_error("Failed to create graphics pipeline.");
+			FOSSILIZE_THROW("Failed to create graphics pipeline.");
 	}
 
 	iface.wait_enqueue();
 }
 
-bool StateReplayer::parse(StateCreatorInterface &iface, const char *str, size_t length)
+void StateReplayer::parse(StateCreatorInterface &iface, const void *buffer_, size_t size)
 {
+	auto *buffer = static_cast<const uint8_t *>(buffer_);
+	auto *buffer_accum = buffer;
+	if (size < FOSSILIZE_MAGIC_LEN + 2 * sizeof(uint64_t))
+		FOSSILIZE_THROW("Buffer too small.");
+
+	if (memcmp(buffer_accum, FOSSILIZE_MAGIC, FOSSILIZE_MAGIC_LEN) != 0)
+		FOSSILIZE_THROW("Magic invalid.");
+	buffer_accum += FOSSILIZE_MAGIC_LEN;
+
+	uint64_t state_size = 0;
+	memcpy(&state_size, buffer_accum, sizeof(uint64_t));
+	if (state_size != size)
+		FOSSILIZE_THROW("Buffer size mismatch.");
+	buffer_accum += sizeof(uint64_t);
+
+	if (memcmp(buffer_accum, FOSSILIZE_JSON_MAGIC, sizeof(uint64_t)) != 0)
+		FOSSILIZE_THROW("JSON magic mismatch.");
+	buffer_accum += sizeof(uint64_t);
+
+	uint64_t json_size = 0;
+	memcpy(&json_size, buffer_accum, sizeof(uint64_t));
+	buffer_accum += sizeof(uint64_t);
+	if (uint64_t((buffer_accum + json_size) - buffer) > size)
+		FOSSILIZE_THROW("Buffer too small.");
+
 	Document doc;
-	doc.Parse(str, length);
+	doc.Parse(reinterpret_cast<const char *>(buffer_accum), json_size);
+
 	if (doc.HasParseError())
-		return false;
+		FOSSILIZE_THROW("JSON parse error.");
+
+	buffer_accum += json_size;
+	if (memcmp(buffer_accum, FOSSILIZE_SPIRV_MAGIC, sizeof(uint64_t)) != 0)
+		FOSSILIZE_THROW("SPIR-V magic mismatch.");
+	buffer_accum += sizeof(uint64_t);
+	uint64_t spirv_size = 0;
+	memcpy(&spirv_size, buffer_accum, sizeof(uint64_t));
+	buffer_accum += sizeof(uint64_t);
+	if (uint64_t((buffer_accum + spirv_size) - buffer) != size)
+		FOSSILIZE_THROW("Buffer size mismatch.");
 
 	if (!doc.HasMember("version"))
-		return false;
+		FOSSILIZE_THROW("JSON does not contain version.");
 
 	if (doc["version"].GetInt() != FOSSILIZE_FORMAT_VERSION)
-		return false;
+		FOSSILIZE_THROW("JSON version mismatches.");
 
-	try
-	{
-		if (doc.HasMember("shaderModules"))
-			parse_shader_modules(iface, doc["shaderModules"]);
-		else
-			iface.set_num_shader_modules(0);
+	if (doc.HasMember("shaderModules"))
+		parse_shader_modules(iface, doc["shaderModules"], buffer_accum, spirv_size);
+	else
+		iface.set_num_shader_modules(0);
 
-		if (doc.HasMember("samplers"))
-			parse_samplers(iface, doc["samplers"]);
-		else
-			iface.set_num_samplers(0);
+	if (doc.HasMember("samplers"))
+		parse_samplers(iface, doc["samplers"]);
+	else
+		iface.set_num_samplers(0);
 
-		if (doc.HasMember("setLayouts"))
-			parse_descriptor_set_layouts(iface, doc["setLayouts"]);
-		else
-			iface.set_num_descriptor_set_layouts(0);
+	if (doc.HasMember("setLayouts"))
+		parse_descriptor_set_layouts(iface, doc["setLayouts"]);
+	else
+		iface.set_num_descriptor_set_layouts(0);
 
-		if (doc.HasMember("pipelineLayouts"))
-			parse_pipeline_layouts(iface, doc["pipelineLayouts"]);
-		else
-			iface.set_num_pipeline_layouts(0);
+	if (doc.HasMember("pipelineLayouts"))
+		parse_pipeline_layouts(iface, doc["pipelineLayouts"]);
+	else
+		iface.set_num_pipeline_layouts(0);
 
-		if (doc.HasMember("renderPasses"))
-			parse_render_passes(iface, doc["renderPasses"]);
-		else
-			iface.set_num_render_passes(0);
+	if (doc.HasMember("renderPasses"))
+		parse_render_passes(iface, doc["renderPasses"]);
+	else
+		iface.set_num_render_passes(0);
 
-		if (doc.HasMember("computePipelines"))
-			parse_compute_pipelines(iface, doc["computePipelines"]);
-		else
-			iface.set_num_compute_pipelines(0);
+	if (doc.HasMember("computePipelines"))
+		parse_compute_pipelines(iface, doc["computePipelines"]);
+	else
+		iface.set_num_compute_pipelines(0);
 
-		if (doc.HasMember("graphicsPipelines"))
-			parse_graphics_pipelines(iface, doc["graphicsPipelines"]);
-		else
-			iface.set_num_graphics_pipelines(0);
-	}
-	catch (const exception &e)
-	{
-		fprintf(stderr, "Error caught: %s\n", e.what());
-		return false;
-	}
-
-	return true;
+	if (doc.HasMember("graphicsPipelines"))
+		parse_graphics_pipelines(iface, doc["graphicsPipelines"]);
+	else
+		iface.set_num_graphics_pipelines(0);
 }
 
 template <typename T>
@@ -1589,7 +1625,7 @@ unsigned StateRecorder::register_pipeline_layout(Hash hash, const VkPipelineLayo
 unsigned StateRecorder::register_sampler(Hash hash, const VkSamplerCreateInfo &create_info)
 {
 	if (create_info.pNext)
-		throw logic_error("pNext in VkSamplerCreateInfo not supported.");
+		FOSSILIZE_THROW("pNext in VkSamplerCreateInfo not supported.");
 
 	auto index = unsigned(samplers.size());
 	samplers.push_back({ hash, copy_sampler(create_info) });
@@ -1599,7 +1635,7 @@ unsigned StateRecorder::register_sampler(Hash hash, const VkSamplerCreateInfo &c
 unsigned StateRecorder::register_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo &create_info)
 {
 	if (create_info.pNext)
-		throw logic_error("pNext in VkGraphicsPipelineCreateInfo not supported.");
+		FOSSILIZE_THROW("pNext in VkGraphicsPipelineCreateInfo not supported.");
 	auto index = unsigned(graphics_pipelines.size());
 	graphics_pipelines.push_back({ hash, copy_graphics_pipeline(create_info) });
 	return index;
@@ -1608,7 +1644,7 @@ unsigned StateRecorder::register_graphics_pipeline(Hash hash, const VkGraphicsPi
 unsigned StateRecorder::register_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo &create_info)
 {
 	if (create_info.pNext)
-		throw logic_error("pNext in VkComputePipelineCreateInfo not supported.");
+		FOSSILIZE_THROW("pNext in VkComputePipelineCreateInfo not supported.");
 	auto index = unsigned(compute_pipelines.size());
 	compute_pipelines.push_back({ hash, copy_compute_pipeline(create_info) });
 	return index;
@@ -1617,7 +1653,7 @@ unsigned StateRecorder::register_compute_pipeline(Hash hash, const VkComputePipe
 unsigned StateRecorder::register_render_pass(Hash hash, const VkRenderPassCreateInfo &create_info)
 {
 	if (create_info.pNext)
-		throw logic_error("pNext in VkRenderPassCreateInfo not supported.");
+		FOSSILIZE_THROW("pNext in VkRenderPassCreateInfo not supported.");
 	auto index = unsigned(render_passes.size());
 	render_passes.push_back({ hash, copy_render_pass(create_info) });
 	return index;
@@ -1626,7 +1662,7 @@ unsigned StateRecorder::register_render_pass(Hash hash, const VkRenderPassCreate
 unsigned StateRecorder::register_shader_module(Hash hash, const VkShaderModuleCreateInfo &create_info)
 {
 	if (create_info.pNext)
-		throw logic_error("pNext in VkShaderModuleCreateInfo not supported.");
+		FOSSILIZE_THROW("pNext in VkShaderModuleCreateInfo not supported.");
 	auto index = unsigned(shader_modules.size());
 	shader_modules.push_back({ hash, copy_shader_module(create_info) });
 	return index;
@@ -1636,7 +1672,7 @@ Hash StateRecorder::get_hash_for_compute_pipeline_handle(VkPipeline pipeline) co
 {
 	auto itr = compute_pipeline_to_index.find(pipeline);
 	if (itr == end(compute_pipeline_to_index))
-		throw runtime_error("Handle is not registered.");
+		FOSSILIZE_THROW("Handle is not registered.");
 	else
 		return compute_pipelines[itr->second].hash;
 }
@@ -1645,7 +1681,7 @@ Hash StateRecorder::get_hash_for_graphics_pipeline_handle(VkPipeline pipeline) c
 {
 	auto itr = graphics_pipeline_to_index.find(pipeline);
 	if (itr == end(graphics_pipeline_to_index))
-		throw runtime_error("Handle is not registered.");
+		FOSSILIZE_THROW("Handle is not registered.");
 	else
 		return graphics_pipelines[itr->second].hash;
 }
@@ -1654,7 +1690,7 @@ Hash StateRecorder::get_hash_for_sampler(VkSampler sampler) const
 {
 	auto itr = sampler_to_index.find(sampler);
 	if (itr == end(sampler_to_index))
-		throw runtime_error("Handle is not registered.");
+		FOSSILIZE_THROW("Handle is not registered.");
 	else
 		return samplers[itr->second].hash;
 }
@@ -1663,7 +1699,7 @@ Hash StateRecorder::get_hash_for_shader_module(VkShaderModule module) const
 {
 	auto itr = shader_module_to_index.find(module);
 	if (itr == end(shader_module_to_index))
-		throw runtime_error("Handle is not registered.");
+		FOSSILIZE_THROW("Handle is not registered.");
 	else
 		return shader_modules[itr->second].hash;
 }
@@ -1672,7 +1708,7 @@ Hash StateRecorder::get_hash_for_pipeline_layout(VkPipelineLayout layout) const
 {
 	auto itr = pipeline_layout_to_index.find(layout);
 	if (itr == end(pipeline_layout_to_index))
-		throw runtime_error("Handle is not registered.");
+		FOSSILIZE_THROW("Handle is not registered.");
 	else
 		return pipeline_layouts[itr->second].hash;
 }
@@ -1681,7 +1717,7 @@ Hash StateRecorder::get_hash_for_descriptor_set_layout(VkDescriptorSetLayout lay
 {
 	auto itr = descriptor_set_layout_to_index.find(layout);
 	if (itr == end(descriptor_set_layout_to_index))
-		throw runtime_error("Handle is not registered.");
+		FOSSILIZE_THROW("Handle is not registered.");
 	else
 		return descriptor_sets[itr->second].hash;
 }
@@ -1690,7 +1726,7 @@ Hash StateRecorder::get_hash_for_render_pass(VkRenderPass render_pass) const
 {
 	auto itr = render_pass_to_index.find(render_pass);
 	if (itr == end(render_pass_to_index))
-		throw runtime_error("Handle is not registered.");
+		FOSSILIZE_THROW("Handle is not registered.");
 	else
 		return render_passes[itr->second].hash;
 }
@@ -1754,7 +1790,7 @@ VkComputePipelineCreateInfo StateRecorder::copy_compute_pipeline(const VkCompute
 	if (info.stage.pSpecializationInfo)
 		info.stage.pSpecializationInfo = copy_specialization_info(info.stage.pSpecializationInfo);
 	if (info.stage.pNext)
-		throw logic_error("pNext in VkPipelineShaderStageCreateInfo not supported.");
+		FOSSILIZE_THROW("pNext in VkPipelineShaderStageCreateInfo not supported.");
 	info.stage.module = remap_shader_module_handle(info.stage.module);
 	info.stage.pName = copy(info.stage.pName, strlen(info.stage.pName) + 1);
 	info.layout = remap_pipeline_layout_handle(info.layout);
@@ -1771,70 +1807,70 @@ VkGraphicsPipelineCreateInfo StateRecorder::copy_graphics_pipeline(const VkGraph
 	if (info.pTessellationState)
 	{
 		if (info.pTessellationState->pNext)
-			throw logic_error("pNext in VkPipelineTessellationStateCreateInfo not supported.");
+			FOSSILIZE_THROW("pNext in VkPipelineTessellationStateCreateInfo not supported.");
 		info.pTessellationState = copy(info.pTessellationState, 1);
 	}
 
 	if (info.pColorBlendState)
 	{
 		if (info.pColorBlendState->pNext)
-			throw logic_error("pNext in VkPipelineColorBlendStateCreateInfo not supported.");
+			FOSSILIZE_THROW("pNext in VkPipelineColorBlendStateCreateInfo not supported.");
 		info.pColorBlendState = copy(info.pColorBlendState, 1);
 	}
 
 	if (info.pVertexInputState)
 	{
 		if (info.pColorBlendState->pNext)
-			throw logic_error("pNext in VkPipelineTessellationStateCreateInfo not supported.");
+			FOSSILIZE_THROW("pNext in VkPipelineTessellationStateCreateInfo not supported.");
 		info.pVertexInputState = copy(info.pVertexInputState, 1);
 	}
 
 	if (info.pMultisampleState)
 	{
 		if (info.pMultisampleState->pNext)
-			throw logic_error("pNext in VkPipelineMultisampleStateCreateInfo not supported.");
+			FOSSILIZE_THROW("pNext in VkPipelineMultisampleStateCreateInfo not supported.");
 		info.pMultisampleState = copy(info.pMultisampleState, 1);
 	}
 
 	if (info.pVertexInputState)
 	{
 		if (info.pVertexInputState->pNext)
-			throw logic_error("pNext in VkPipelineVertexInputStateCreateInfo not supported.");
+			FOSSILIZE_THROW("pNext in VkPipelineVertexInputStateCreateInfo not supported.");
 		info.pVertexInputState = copy(info.pVertexInputState, 1);
 	}
 
 	if (info.pViewportState)
 	{
 		if (info.pViewportState->pNext)
-			throw logic_error("pNext in VkPipelineViewportStateCreateInfo not supported.");
+			FOSSILIZE_THROW("pNext in VkPipelineViewportStateCreateInfo not supported.");
 		info.pViewportState = copy(info.pViewportState, 1);
 	}
 
 	if (info.pInputAssemblyState)
 	{
 		if (info.pInputAssemblyState->pNext)
-			throw logic_error("pNext in VkPipelineInputAssemblyStateCreateInfo not supported.");
+			FOSSILIZE_THROW("pNext in VkPipelineInputAssemblyStateCreateInfo not supported.");
 		info.pInputAssemblyState = copy(info.pInputAssemblyState, 1);
 	}
 
 	if (info.pDepthStencilState)
 	{
 		if (info.pDepthStencilState->pNext)
-			throw logic_error("pNext in VkPipelineDepthStencilStateCreateInfo not supported.");
+			FOSSILIZE_THROW("pNext in VkPipelineDepthStencilStateCreateInfo not supported.");
 		info.pDepthStencilState = copy(info.pDepthStencilState, 1);
 	}
 
 	if (info.pRasterizationState)
 	{
 		if (info.pRasterizationState->pNext)
-			throw logic_error("pNext in VkPipelineRasterizationCreateInfo not supported.");
+			FOSSILIZE_THROW("pNext in VkPipelineRasterizationCreateInfo not supported.");
 		info.pRasterizationState = copy(info.pRasterizationState, 1);
 	}
 
 	if (info.pDynamicState)
 	{
 		if (info.pDynamicState->pNext)
-			throw logic_error("pNext in VkPipelineDynamicStateCreateInfo not supported.");
+			FOSSILIZE_THROW("pNext in VkPipelineDynamicStateCreateInfo not supported.");
 		info.pDynamicState = copy(info.pDynamicState, 1);
 	}
 
@@ -1847,7 +1883,7 @@ VkGraphicsPipelineCreateInfo StateRecorder::copy_graphics_pipeline(const VkGraph
 	{
 		auto &stage = const_cast<VkPipelineShaderStageCreateInfo &>(info.pStages[i]);
 		if (stage.pNext)
-			throw logic_error("pNext in VkPipelineShaderStageCreateInfo not supported.");
+			FOSSILIZE_THROW("pNext in VkPipelineShaderStageCreateInfo not supported.");
 		stage.pName = copy(stage.pName, strlen(stage.pName) + 1);
 		if (stage.pSpecializationInfo)
 			stage.pSpecializationInfo = copy_specialization_info(stage.pSpecializationInfo);
@@ -1912,7 +1948,7 @@ VkSampler StateRecorder::remap_sampler_handle(VkSampler sampler) const
 {
 	auto itr = sampler_to_index.find(sampler);
 	if (itr == end(sampler_to_index))
-		throw logic_error("Cannot find sampler in hashmap.");
+		FOSSILIZE_THROW("Cannot find sampler in hashmap.");
 	return api_object_cast<VkSampler>(uint64_t(itr->second + 1));
 }
 
@@ -1920,7 +1956,7 @@ VkDescriptorSetLayout StateRecorder::remap_descriptor_set_layout_handle(VkDescri
 {
 	auto itr = descriptor_set_layout_to_index.find(layout);
 	if (itr == end(descriptor_set_layout_to_index))
-		throw logic_error("Cannot find descriptor set layout in hashmap.");
+		FOSSILIZE_THROW("Cannot find descriptor set layout in hashmap.");
 	return api_object_cast<VkDescriptorSetLayout>(uint64_t(itr->second + 1));
 }
 
@@ -1928,7 +1964,7 @@ VkPipelineLayout StateRecorder::remap_pipeline_layout_handle(VkPipelineLayout la
 {
 	auto itr = pipeline_layout_to_index.find(layout);
 	if (itr == end(pipeline_layout_to_index))
-		throw logic_error("Cannot find pipeline layout in hashmap.");
+		FOSSILIZE_THROW("Cannot find pipeline layout in hashmap.");
 	return api_object_cast<VkPipelineLayout>(uint64_t(itr->second + 1));
 }
 
@@ -1936,7 +1972,7 @@ VkShaderModule StateRecorder::remap_shader_module_handle(VkShaderModule module) 
 {
 	auto itr = shader_module_to_index.find(module);
 	if (itr == end(shader_module_to_index))
-		throw logic_error("Cannot find shader module in hashmap.");
+		FOSSILIZE_THROW("Cannot find shader module in hashmap.");
 	return api_object_cast<VkShaderModule>(uint64_t(itr->second + 1));
 }
 
@@ -1944,7 +1980,7 @@ VkRenderPass StateRecorder::remap_render_pass_handle(VkRenderPass render_pass) c
 {
 	auto itr = render_pass_to_index.find(render_pass);
 	if (itr == end(render_pass_to_index))
-		throw logic_error("Cannot find render pass in hashmap.");
+		FOSSILIZE_THROW("Cannot find render pass in hashmap.");
 	return api_object_cast<VkRenderPass>(uint64_t(itr->second + 1));
 }
 
@@ -1952,7 +1988,7 @@ VkPipeline StateRecorder::remap_graphics_pipeline_handle(VkPipeline pipeline) co
 {
 	auto itr = graphics_pipeline_to_index.find(pipeline);
 	if (itr == end(graphics_pipeline_to_index))
-		throw logic_error("Cannot find graphics pipeline in hashmap.");
+		FOSSILIZE_THROW("Cannot find graphics pipeline in hashmap.");
 	return api_object_cast<VkPipeline>(uint64_t(itr->second + 1));
 }
 
@@ -1960,7 +1996,7 @@ VkPipeline StateRecorder::remap_compute_pipeline_handle(VkPipeline pipeline) con
 {
 	auto itr = compute_pipeline_to_index.find(pipeline);
 	if (itr == end(compute_pipeline_to_index))
-		throw logic_error("Cannot find compute pipeline in hashmap.");
+		FOSSILIZE_THROW("Cannot find compute pipeline in hashmap.");
 	return api_object_cast<VkPipeline>(uint64_t(itr->second + 1));
 }
 
@@ -2016,8 +2052,10 @@ static std::string encode_base64(const void *data_, size_t size)
 	return ret;
 }
 
-std::string StateRecorder::serialize() const
+vector<uint8_t> StateRecorder::serialize() const
 {
+	uint64_t varint_spirv_offset = 0;
+
 	Document doc;
 	doc.SetObject();
 	auto &alloc = doc.GetAllocator();
@@ -2113,7 +2151,10 @@ std::string StateRecorder::serialize() const
 		m.AddMember("hash", module.hash, alloc);
 		m.AddMember("flags", module.info.flags, alloc);
 		m.AddMember("codeSize", module.info.codeSize, alloc);
-		m.AddMember("code", encode_base64(module.info.pCode, module.info.codeSize), alloc);
+		m.AddMember("codeBinaryOffset", varint_spirv_offset, alloc);
+		size_t varint_size = compute_size_varint(module.info.pCode, module.info.codeSize / sizeof(uint32_t));
+		m.AddMember("codeBinarySize", varint_size, alloc);
+		varint_spirv_offset += varint_size;
 		shader_modules.PushBack(m, alloc);
 	}
 	doc.AddMember("shaderModules", shader_modules, alloc);
@@ -2532,7 +2573,46 @@ std::string StateRecorder::serialize() const
 	StringBuffer buffer;
 	PrettyWriter<StringBuffer> writer(buffer);
 	doc.Accept(writer);
-	return buffer.GetString();
+	const char *json = buffer.GetString();
+	uint64_t json_len = buffer.GetSize();
+
+	uint64_t serialized_size = FOSSILIZE_MAGIC_LEN;
+	serialized_size += sizeof(uint64_t); // Total size.
+	serialized_size += sizeof(uint64_t); // JSON magic.
+	serialized_size += sizeof(uint64_t); // JSON chunk size.
+	serialized_size += json_len; // JSON data.
+	serialized_size += sizeof(uint64_t); // SPIR-V chunk magic.
+	serialized_size += sizeof(uint64_t); // SPIR-V size.
+	serialized_size += varint_spirv_offset; // SPIR-V data.
+
+	// FIXME: Lazy native endian encoding.
+	vector<uint8_t> serialize_buffer(serialized_size);
+	auto *buf = serialize_buffer.data();
+
+	memcpy(buf, FOSSILIZE_MAGIC, FOSSILIZE_MAGIC_LEN);
+	buf += FOSSILIZE_MAGIC_LEN;
+	memcpy(buf, &serialized_size, sizeof(uint64_t));
+	buf += sizeof(uint64_t);
+
+	// Encode JSON block.
+	memcpy(buf, FOSSILIZE_JSON_MAGIC, sizeof(uint64_t));
+	buf += sizeof(uint64_t);
+	memcpy(buf, &json_len, sizeof(uint64_t));
+	buf += sizeof(uint64_t);
+	memcpy(buf, json, json_len);
+	buf += json_len;
+
+	// Encode SPIR-V block.
+	memcpy(buf, FOSSILIZE_SPIRV_MAGIC, sizeof(uint64_t));
+	buf += sizeof(uint64_t);
+	memcpy(buf, &varint_spirv_offset, sizeof(uint64_t));
+	buf += sizeof(uint64_t);
+
+	for (auto &module : this->shader_modules)
+		buf = encode_varint(buf, module.info.pCode, module.info.codeSize / sizeof(uint32_t));
+
+	assert(uint64_t(buf - serialize_buffer.data()) == serialized_size);
+	return serialize_buffer;
 }
 
 }

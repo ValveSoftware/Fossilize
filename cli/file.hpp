@@ -23,9 +23,10 @@
 #pragma once
 
 #include <vector>
+#include <stdint.h>
 
 namespace Fossilize
 {
-std::vector<char> load_json_from_file(const char *path);
+std::vector<uint8_t> load_buffer_from_file(const char *path);
 bool write_string_to_file(const char *path, const char *text);
 }

@@ -509,9 +509,7 @@ int main()
 		record_graphics_pipelines(recorder);
 
 		auto res = recorder.serialize();
-		fprintf(stderr, "Serialized: %s\n", res.c_str());
-
-		replayer.parse(iface, res.c_str(), res.size());
+		replayer.parse(iface, res.data(), res.size());
 		return EXIT_SUCCESS;
 	}
 	catch (const std::exception &e)

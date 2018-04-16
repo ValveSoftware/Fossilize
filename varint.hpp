@@ -27,6 +27,6 @@
 namespace Fossilize
 {
 size_t compute_size_varint(const uint32_t *words, size_t word_count);
-void encode_varint(uint8_t *buffer, const uint32_t *words, size_t word_count);
-bool decode_varint(uint32_t *words, size_t words_size, uint8_t *buffer, size_t buffer_size);
+uint8_t *encode_varint(uint8_t *buffer, const uint32_t *words, size_t word_count);
+bool decode_varint(uint32_t *words, size_t words_size, const uint8_t *buffer, size_t buffer_size);
 }

@@ -25,7 +25,7 @@
 
 namespace Fossilize
 {
-std::vector<char> load_json_from_file(const char *path)
+std::vector<uint8_t> load_buffer_from_file(const char *path)
 {
 	FILE *file = fopen(path, "rb");
 	if (!file)
@@ -34,7 +34,7 @@ std::vector<char> load_json_from_file(const char *path)
 	fseek(file, 0, SEEK_END);
 	long len = ftell(file);
 	rewind(file);
-	std::vector<char> ret(len);
+	std::vector<uint8_t> ret(len);
 	if (fread(ret.data(), 1, len, file) != size_t(len))
 	{
 		fclose(file);
