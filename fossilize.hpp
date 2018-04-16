@@ -31,7 +31,7 @@
 #define RAPIDJSON_HAS_STDSTRING 1
 #include "rapidjson/document.h"
 
-#if defined(_MSC_VER) && (_MSC_VER < 1800)
+#if defined(_MSC_VER) && (_MSC_VER <= 1800)
 #define FOSSILIZE_NOEXCEPT
 #else
 #define FOSSILIZE_NOEXCEPT noexcept
