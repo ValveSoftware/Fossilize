@@ -64,7 +64,7 @@ cmake --build .
 
 Link as part of other project:
 ```
-add_subdirectory(fossilize)
+add_subdirectory(fossilize EXCLUDE_FROM_ALL)
 target_link_library(your-target fossilize)
 ```
 
