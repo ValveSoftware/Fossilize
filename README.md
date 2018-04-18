@@ -219,17 +219,61 @@ This is a bit sketchy, but should work well if drivers are crashing on pipeline 
 
 #### `export FOSSILIZE_DUMP_PATH=/my/custom/path`
 
-Custom file path for dumping state.
+Custom file path for capturing state.
 
 ### Android
 
+By default the layer will serialize to `/sdcard/fossilize.json` on `vkDestroyDevice`.
+However, this path might not be writeable, so you will probably have to override your path to something like
+`/sdcard/Android/data/<package.name>/capture.json`.
+Make sure your app has external write permissions if using the default path.
+
+Due to the nature of some drivers, there might be crashes in-between. For this, there are two other modes.
 Options can be set through `setprop`.
 
-#### `setprop debug.fossilize.dump_path /custom/path`
+#### Setprop options
 
-#### `setprop debug.fossilize.paranoid_mode 1`
+- `setprop debug.fossilize.dump_path /custom/path`
+- `setprop debug.fossilize.paranoid_mode 1`
+- `setprop debug.fossilize.dump_sigsegv 1`
 
-#### `setprop debug.fossilize.dump_sigsegv 1`
+To force layer to be enabled outside application: `setprop debug.vulkan.layers "VK_LAYER_fossilize"`.
+The layer .so needs to be part of the APK for the loader to find the layer.
+
+Use `adb logcat -s Fossilize` to isolate log messages coming from Fossilize.
+You should see something like:
+```
+04-18 21:49:41.692 17444 17461 I Fossilize: Overriding serialization path: "/sdcard/fossilize.json".
+04-18 21:49:43.741 17444 17461 I Fossilize: Serialized to "/sdcard/fossilize.json".
+```
+if capturing is working correctly.
+
+## CLI
+
+The CLI currently has 3 tools available:
+
+### `fossilize-replay`
+
+This tool is for taking a capture, and replaying it on any device.
+Currently, all basic PhysicalDeviceFeatures (not PhysicalDeviceFeatures2 stuff) and extensions will be enabled
+to make sure a capture will validate properly. robustBufferAccess however is forced off.
+
+This tool serves as the main "repro" tool. After you have a capture, you should ideally be able to repro crashes using this tool.
+To make replay faster, use `--filter-compute` and `--filter-graphics` to isolate which pipelines are actually compiled.
+
+### `fossilize-disasm`
+
+This tool can disassemble any pipeline into something human readable. Three modes are provided:
+- ASM (using SPIRV-Tools)
+- Vulkan GLSL (using SPIRV-Cross)
+- AMD ISA (using `VK_AMD_shader_info` if available)
+
+TODO is disassembling more of the other state for quick introspection. Currently only SPIR-V disassembly is provided.
+
+### `fossilize-opt`
+
+Runs spirv-opt over all shader modules in the capture and serializes out an optimized version.
+Useful to sanity check that an optimized capture can compile on your driver.
 
 ## Submit shader failure repro cases
 

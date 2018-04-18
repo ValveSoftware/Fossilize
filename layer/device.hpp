@@ -64,7 +64,7 @@ private:
 	StateRecorder recorder;
 
 #ifdef ANDROID
-	std::string serializationPath = "/data/local/tmp/fossilize.json";
+	std::string serializationPath = "/sdcard/fossilize.json";
 #else
 	std::string serializationPath = "fossilize.json";
 #endif
