@@ -250,7 +250,7 @@ if capturing is working correctly.
 
 ## CLI
 
-The CLI currently has 3 tools available:
+The CLI currently has 3 tools available. These are found in `cli/` after build.
 
 ### `fossilize-replay`
 
@@ -274,6 +274,11 @@ TODO is disassembling more of the other state for quick introspection. Currently
 
 Runs spirv-opt over all shader modules in the capture and serializes out an optimized version.
 Useful to sanity check that an optimized capture can compile on your driver.
+
+### Android
+
+Running the CLI apps on Android is also supported.
+Push the binaries generated to `/data/local/tmp`, `chmod +x` them if needed, and use the binaries like regular Linux.
 
 ## Submit shader failure repro cases
 
