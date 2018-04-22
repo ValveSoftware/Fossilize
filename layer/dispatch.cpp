@@ -26,6 +26,12 @@
 #include "instance.hpp"
 #include <mutex>
 
+#ifdef _MSC_VER // For SEH access violation handling.
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <excpt.h>
+#endif
+
 using namespace std;
 
 namespace Fossilize
@@ -96,6 +102,65 @@ static VKAPI_ATTR void VKAPI_CALL DestroyInstance(VkInstance instance, const VkA
 	destroyLayerData(key, instanceData);
 }
 
+#ifdef _MSC_VER
+static bool filterSEHException(int code)
+{
+	return code == EXCEPTION_ACCESS_VIOLATION;
+}
+#endif
+
+static VkResult createGraphicsPipeline(Device *device, VkPipelineCache pipelineCache,
+                                       const VkGraphicsPipelineCreateInfo *pCreateInfo,
+                                       const VkAllocationCallbacks *pCallbacks,
+                                       VkPipeline *pipeline)
+{
+#ifdef _MSC_VER // Dunno how to do SIGSEGV handling on Windows, so ad-hoc SEH it is. This isn't supported on MinGW, so just MSVC for now.
+	__try
+#endif
+	{
+		return device->getTable()->CreateGraphicsPipelines(device->getDevice(), pipelineCache, 1, pCreateInfo, pCallbacks, pipeline);
+	}
+#ifdef _MSC_VER
+	__except (filterSEHException(GetExceptionCode()))
+	{
+		LOGE("Caught access violation in vkCreateGraphicsPipelines(), safety serialization before terminating ...\n");
+		bool success = device->serializeToPath(device->getSerializationPath());
+
+		if (success)
+			MessageBoxA(nullptr, "vkCreateGraphicsPipelines() triggered an access violation, the offending state has been serialized.", "CreateGraphicsPipeline Access Violation", 0);
+		else
+			MessageBoxA(nullptr, "vkCreateGraphicsPipelines() triggered an access violation, but the offending state failed to be serialized.", "CreateGraphicsPipeline Access Violation", 0);
+		std::terminate();
+	}
+#endif
+}
+
+static VkResult createComputePipeline(Device *device, VkPipelineCache pipelineCache,
+                                      const VkComputePipelineCreateInfo *pCreateInfo,
+                                      const VkAllocationCallbacks *pCallbacks,
+                                      VkPipeline *pipeline)
+{
+#ifdef _MSC_VER // Dunno how to do SIGSEGV handling on Windows, so ad-hoc SEH it is. This isn't supported on MinGW, so just MSVC for now.
+	__try
+#endif
+	{
+		return device->getTable()->CreateComputePipelines(device->getDevice(), pipelineCache, 1, pCreateInfo, pCallbacks, pipeline);
+	}
+#ifdef _MSC_VER
+	__except (filterSEHException(GetExceptionCode()))
+	{
+		LOGE("Caught access violation in vkCreateComputePipelines(), safety serialization before terminating ...\n");
+		bool success = device->serializeToPath(device->getSerializationPath());
+
+		if (success)
+			MessageBoxA(nullptr, "vkCreateComputePipelines() triggered an access violation, the offending state has been serialized.", "CreateComputePipeline Access Violation", 0);
+		else
+			MessageBoxA(nullptr, "vkCreateComputePipelines() triggered an access violation, but the offending state failed to be serialized.", "GraphicsComputePipeline Access Violation", 0);
+		std::terminate();
+	}
+#endif
+}
+
 static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
                                                               uint32_t createInfoCount,
                                                               const VkGraphicsPipelineCreateInfo *pCreateInfos,
@@ -125,8 +190,8 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(VkDevice device, V
 		if (layer->isParanoid())
 			layer->serializeToPath(layer->getSerializationPath());
 
-		auto res = layer->getTable()->CreateGraphicsPipelines(device, pipelineCache, 1, &pCreateInfos[i],
-		                                                      pAllocator, &pPipelines[i]);
+		auto res = createGraphicsPipeline(layer, pipelineCache, &pCreateInfos[i], pAllocator, &pPipelines[i]);
+
 		if (res != VK_SUCCESS)
 		{
 			LOGE("Failed to create graphics pipeline, safety serialization ...\n");
@@ -171,8 +236,8 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelines(VkDevice device, Vk
 
 		pPipelines[i] = VK_NULL_HANDLE;
 
-		auto res = layer->getTable()->CreateComputePipelines(device, pipelineCache, 1, &pCreateInfos[i],
-		                                                     pAllocator, &pPipelines[i]);
+		auto res = createComputePipeline(layer, pipelineCache, &pCreateInfos[i], pAllocator, &pPipelines[i]);
+
 		if (res != VK_SUCCESS)
 		{
 			LOGE("Failed to create compute pipeline, safety serialization ...\n");

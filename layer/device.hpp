@@ -44,7 +44,7 @@ public:
 		return recorder;
 	}
 
-	void serializeToPath(const std::string &path);
+	bool serializeToPath(const std::string &path);
 	const std::string &getSerializationPath() const
 	{
 		return serializationPath;
@@ -53,6 +53,11 @@ public:
 	bool isParanoid() const
 	{
 		return paranoidMode;
+	}
+
+	VkDevice getDevice() const
+	{
+		return device;
 	}
 
 private:
