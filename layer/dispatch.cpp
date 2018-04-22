@@ -103,9 +103,9 @@ static VKAPI_ATTR void VKAPI_CALL DestroyInstance(VkInstance instance, const VkA
 }
 
 #ifdef _MSC_VER
-static bool filterSEHException(int code)
+static int filterSEHException(int code)
 {
-	return code == EXCEPTION_ACCESS_VIOLATION;
+	return code == EXCEPTION_ACCESS_VIOLATION ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH;
 }
 #endif
 
