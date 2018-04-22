@@ -217,6 +217,12 @@ This can be quite slow for application with lots of pipelines, so only use it if
 This only works on Linux. A SIGSEGV handler is registered, and the state is serialized to disk in the segfault handler.
 This is a bit sketchy, but should work well if drivers are crashing on pipeline creation (or just crashing in general).
 
+On Windows, all `vkCreate*Pipelines` calls are always wrapped in SEH-style __try/__except blocks, which will catch access violations
+specifically inside those calls. If an access violation is triggered, a safety serialization is performed,
+a message box will appear, notifying user about this,
+and immediately terminate the process after. This functionality however, is only enabled when building with MSVC,
+as MinGW does not readily support the __try/__except extension. Patches welcome!
+
 #### `export FOSSILIZE_DUMP_PATH=/my/custom/path`
 
 Custom file path for capturing state.

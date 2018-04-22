@@ -136,7 +136,7 @@ void Device::installSegfaultHandler()
 }
 #endif
 
-void Device::serializeToPath(const std::string &path)
+bool Device::serializeToPath(const std::string &path)
 {
 	try
 	{
@@ -148,15 +148,18 @@ void Device::serializeToPath(const std::string &path)
 				LOGE("Failed to write serialized state to disk.\n");
 			fclose(file);
 			LOGI("Serialized to \"%s\".\n", path.c_str());
+			return true;
 		}
 		else
 		{
 			LOGE("Failed to open file for writing: \"%s\".\n", path.c_str());
+			return false;
 		}
 	}
 	catch (const std::exception &e)
 	{
 		LOGE("Failed to serialize: \"%s\".\n", e.what());
+		return false;
 	}
 }
 
