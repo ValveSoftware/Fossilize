@@ -24,15 +24,255 @@
 #include "fossilize.hpp"
 #include <stdexcept>
 #include <algorithm>
+#include <unordered_map>
 #include <string.h>
-#include "rapidjson/prettywriter.h"
 #include "varint.hpp"
+
+#define RAPIDJSON_HAS_STDSTRING 1
+#include "rapidjson/document.h"
+#include "rapidjson/prettywriter.h"
 
 using namespace std;
 using namespace rapidjson;
 
 namespace Fossilize
 {
+#define FOSSILIZE_THROW(x) throw ::Fossilize::Exception(x)
+
+#define FOSSILIZE_MAGIC "FOSSILIZE0000001"
+#define FOSSILIZE_JSON_MAGIC "JSON    "
+#define FOSSILIZE_SPIRV_MAGIC "SPIR-V  "
+#define FOSSILIZE_MAGIC_LEN 16
+
+enum
+{
+	FOSSILIZE_FORMAT_VERSION = 1
+};
+
+class Hasher
+{
+public:
+	explicit Hasher(Hash h)
+		: h(h)
+	{
+	}
+
+	Hasher() = default;
+
+	template <typename T>
+	inline void data(const T *data, size_t size)
+	{
+		size /= sizeof(*data);
+		for (size_t i = 0; i < size; i++)
+			h = (h * 0x100000001b3ull) ^ data[i];
+	}
+
+	inline void u32(uint32_t value)
+	{
+		h = (h * 0x100000001b3ull) ^ value;
+	}
+
+	inline void s32(int32_t value)
+	{
+		u32(uint32_t(value));
+	}
+
+	inline void f32(float value)
+	{
+		union
+		{
+			float f32;
+			uint32_t u32;
+		} u;
+		u.f32 = value;
+		u32(u.u32);
+	}
+
+	inline void u64(uint64_t value)
+	{
+		u32(value & 0xffffffffu);
+		u32(value >> 32);
+	}
+
+	template <typename T>
+	inline void pointer(T *ptr)
+	{
+		u64(reinterpret_cast<uintptr_t>(ptr));
+	}
+
+	inline void string(const char *str)
+	{
+		char c;
+		u32(0xff);
+		while ((c = *str++) != '\0')
+			u32(uint8_t(c));
+	}
+
+	inline void string(const std::string &str)
+	{
+		u32(0xff);
+		for (auto &c : str)
+			u32(uint8_t(c));
+	}
+
+	inline Hash get() const
+	{
+		return h;
+	}
+
+private:
+	Hash h = 0xcbf29ce484222325ull;
+};
+
+class ScratchAllocator
+{
+public:
+	// alignof(T) doesn't work on MSVC 2013.
+	template <typename T>
+	T *allocate()
+	{
+		return static_cast<T *>(allocate_raw(sizeof(T), 16));
+	}
+
+	template <typename T>
+	T *allocate_cleared()
+	{
+		return static_cast<T *>(allocate_raw_cleared(sizeof(T), 16));
+	}
+
+	template <typename T>
+	T *allocate_n(size_t count)
+	{
+		if (count == 0)
+			return nullptr;
+		return static_cast<T *>(allocate_raw(sizeof(T) * count, 16));
+	}
+
+	template <typename T>
+	T *allocate_n_cleared(size_t count)
+	{
+		if (count == 0)
+			return nullptr;
+		return static_cast<T *>(allocate_raw_cleared(sizeof(T) * count, 16));
+	}
+
+	void *allocate_raw(size_t size, size_t alignment);
+	void *allocate_raw_cleared(size_t size, size_t alignment);
+
+private:
+	struct Block
+	{
+		Block(size_t size);
+		size_t offset = 0;
+		std::vector<uint8_t> blob;
+	};
+	std::vector<Block> blocks;
+
+	void add_block(size_t minimum_size);
+};
+
+template <typename T>
+struct HashedInfo
+{
+	Hash hash;
+	T info;
+};
+
+struct StateReplayer::Impl
+{
+	void parse(StateCreatorInterface &iface, const void *buffer, size_t size);
+	ScratchAllocator allocator;
+
+	std::vector<VkSampler> replayed_samplers;
+	std::vector<VkDescriptorSetLayout> replayed_descriptor_set_layouts;
+	std::vector<VkPipelineLayout> replayed_pipeline_layouts;
+	std::vector<VkShaderModule> replayed_shader_modules;
+	std::vector<VkRenderPass> replayed_render_passes;
+	std::vector<VkPipeline> replayed_compute_pipelines;
+	std::vector<VkPipeline> replayed_graphics_pipelines;
+
+	void parse_samplers(StateCreatorInterface &iface, const Value &samplers);
+	void parse_descriptor_set_layouts(StateCreatorInterface &iface, const Value &layouts);
+	void parse_pipeline_layouts(StateCreatorInterface &iface, const Value &layouts);
+	void parse_shader_modules(StateCreatorInterface &iface, const Value &modules, const uint8_t *buffer, size_t size);
+	void parse_render_passes(StateCreatorInterface &iface, const Value &passes);
+	void parse_compute_pipelines(StateCreatorInterface &iface, const Value &pipelines);
+	void parse_graphics_pipelines(StateCreatorInterface &iface, const Value &pipelines);
+	VkPushConstantRange *parse_push_constant_ranges(const Value &ranges);
+	VkDescriptorSetLayout *parse_set_layouts(const Value &layouts);
+	VkDescriptorSetLayoutBinding *parse_descriptor_set_bindings(const Value &bindings);
+	VkSampler *parse_immutable_samplers(const Value &samplers);
+	VkAttachmentDescription *parse_render_pass_attachments(const Value &attachments);
+	VkSubpassDependency *parse_render_pass_dependencies(const Value &dependencies);
+	VkSubpassDescription *parse_render_pass_subpasses(const Value &subpass);
+	VkAttachmentReference *parse_attachment(const Value &value);
+	VkAttachmentReference *parse_attachments(const Value &attachments);
+	VkSpecializationInfo *parse_specialization_info(const Value &spec_info);
+	VkSpecializationMapEntry *parse_map_entries(const Value &map_entries);
+	VkViewport *parse_viewports(const Value &viewports);
+	VkRect2D *parse_scissors(const Value &scissors);
+	VkPipelineVertexInputStateCreateInfo *parse_vertex_input_state(const Value &state);
+	VkPipelineColorBlendStateCreateInfo *parse_color_blend_state(const Value &state);
+	VkPipelineDepthStencilStateCreateInfo *parse_depth_stencil_state(const Value &state);
+	VkPipelineRasterizationStateCreateInfo *parse_rasterization_state(const Value &state);
+	VkPipelineInputAssemblyStateCreateInfo *parse_input_assembly_state(const Value &state);
+	VkPipelineMultisampleStateCreateInfo *parse_multisample_state(const Value &state);
+	VkPipelineViewportStateCreateInfo *parse_viewport_state(const Value &state);
+	VkPipelineDynamicStateCreateInfo *parse_dynamic_state(const Value &state);
+	VkPipelineTessellationStateCreateInfo *parse_tessellation_state(const Value &state);
+	VkPipelineShaderStageCreateInfo *parse_stages(const Value &stages);
+	VkVertexInputAttributeDescription *parse_vertex_attributes(const Value &attributes);
+	VkVertexInputBindingDescription *parse_vertex_bindings(const Value &bindings);
+	VkPipelineColorBlendAttachmentState *parse_blend_attachments(const Value &attachments);
+	uint32_t *parse_uints(const Value &attachments);
+	const char *duplicate_string(const char *str, size_t len);
+
+	template <typename T>
+	T *copy(const T *src, size_t count);
+};
+
+struct StateRecorder::Impl
+{
+	ScratchAllocator allocator;
+
+	std::vector<HashedInfo<VkDescriptorSetLayoutCreateInfo>> descriptor_sets;
+	std::vector<HashedInfo<VkPipelineLayoutCreateInfo>> pipeline_layouts;
+	std::vector<HashedInfo<VkShaderModuleCreateInfo>> shader_modules;
+	std::vector<HashedInfo<VkGraphicsPipelineCreateInfo>> graphics_pipelines;
+	std::vector<HashedInfo<VkComputePipelineCreateInfo>> compute_pipelines;
+	std::vector<HashedInfo<VkRenderPassCreateInfo>> render_passes;
+	std::vector<HashedInfo<VkSamplerCreateInfo>> samplers;
+
+	std::unordered_map<VkDescriptorSetLayout, unsigned> descriptor_set_layout_to_index;
+	std::unordered_map<VkPipelineLayout, unsigned> pipeline_layout_to_index;
+	std::unordered_map<VkShaderModule, unsigned> shader_module_to_index;
+	std::unordered_map<VkPipeline, unsigned> graphics_pipeline_to_index;
+	std::unordered_map<VkPipeline, unsigned> compute_pipeline_to_index;
+	std::unordered_map<VkRenderPass, unsigned> render_pass_to_index;
+	std::unordered_map<VkSampler, unsigned> sampler_to_index;
+
+	VkDescriptorSetLayoutCreateInfo copy_descriptor_set_layout(const VkDescriptorSetLayoutCreateInfo &create_info);
+	VkPipelineLayoutCreateInfo copy_pipeline_layout(const VkPipelineLayoutCreateInfo &create_info);
+	VkShaderModuleCreateInfo copy_shader_module(const VkShaderModuleCreateInfo &create_info);
+	VkGraphicsPipelineCreateInfo copy_graphics_pipeline(const VkGraphicsPipelineCreateInfo &create_info);
+	VkComputePipelineCreateInfo copy_compute_pipeline(const VkComputePipelineCreateInfo &create_info);
+	VkSamplerCreateInfo copy_sampler(const VkSamplerCreateInfo &create_info);
+	VkRenderPassCreateInfo copy_render_pass(const VkRenderPassCreateInfo &create_info);
+
+	VkSpecializationInfo *copy_specialization_info(const VkSpecializationInfo *info);
+
+	VkSampler remap_sampler_handle(VkSampler sampler) const;
+	VkDescriptorSetLayout remap_descriptor_set_layout_handle(VkDescriptorSetLayout layout) const;
+	VkPipelineLayout remap_pipeline_layout_handle(VkPipelineLayout layout) const;
+	VkRenderPass remap_render_pass_handle(VkRenderPass render_pass) const;
+	VkShaderModule remap_shader_module_handle(VkShaderModule shader_module) const;
+	VkPipeline remap_compute_pipeline_handle(VkPipeline pipeline) const;
+	VkPipeline remap_graphics_pipeline_handle(VkPipeline pipeline) const;
+
+	template <typename T>
+	T *copy(const T *src, size_t count);
+};
+
 // reinterpret_cast does not work reliably on MSVC 2013 for Vulkan objects.
 template <typename T, typename U>
 static inline T api_object_cast(U obj)
@@ -631,7 +871,7 @@ static uint8_t *decode_base64(ScratchAllocator &allocator, const char *data, siz
 	return buf;
 }
 
-const char *StateReplayer::duplicate_string(const char *str, size_t len)
+const char *StateReplayer::Impl::duplicate_string(const char *str, size_t len)
 {
 	auto *c = allocator.allocate_n<char>(len + 1);
 	memcpy(c, str, len);
@@ -639,7 +879,7 @@ const char *StateReplayer::duplicate_string(const char *str, size_t len)
 	return c;
 }
 
-VkSampler *StateReplayer::parse_immutable_samplers(const Value &samplers)
+VkSampler *StateReplayer::Impl::parse_immutable_samplers(const Value &samplers)
 {
 	auto *samps = allocator.allocate_n<VkSampler>(samplers.Size());
 	auto *ret = samps;
@@ -657,7 +897,7 @@ VkSampler *StateReplayer::parse_immutable_samplers(const Value &samplers)
 	return ret;
 }
 
-VkDescriptorSetLayoutBinding *StateReplayer::parse_descriptor_set_bindings(const Value &bindings)
+VkDescriptorSetLayoutBinding *StateReplayer::Impl::parse_descriptor_set_bindings(const Value &bindings)
 {
 	auto *set_bindings = allocator.allocate_n_cleared<VkDescriptorSetLayoutBinding>(bindings.Size());
 	auto *ret = set_bindings;
@@ -674,7 +914,7 @@ VkDescriptorSetLayoutBinding *StateReplayer::parse_descriptor_set_bindings(const
 	return ret;
 }
 
-VkPushConstantRange *StateReplayer::parse_push_constant_ranges(const Value &ranges)
+VkPushConstantRange *StateReplayer::Impl::parse_push_constant_ranges(const Value &ranges)
 {
 	auto *infos = allocator.allocate_n_cleared<VkPushConstantRange>(ranges.Size());
 	auto *ret = infos;
@@ -690,7 +930,7 @@ VkPushConstantRange *StateReplayer::parse_push_constant_ranges(const Value &rang
 	return ret;
 }
 
-VkDescriptorSetLayout *StateReplayer::parse_set_layouts(const Value &layouts)
+VkDescriptorSetLayout *StateReplayer::Impl::parse_set_layouts(const Value &layouts)
 {
 	auto *infos = allocator.allocate_n_cleared<VkDescriptorSetLayout>(layouts.Size());
 	auto *ret = infos;
@@ -709,7 +949,7 @@ VkDescriptorSetLayout *StateReplayer::parse_set_layouts(const Value &layouts)
 	return ret;
 }
 
-void StateReplayer::parse_shader_modules(StateCreatorInterface &iface, const Value &modules, const uint8_t *buffer, size_t size)
+void StateReplayer::Impl::parse_shader_modules(StateCreatorInterface &iface, const Value &modules, const uint8_t *buffer, size_t size)
 {
 	iface.set_num_shader_modules(modules.Size());
 	replayed_shader_modules.resize(modules.Size());
@@ -739,7 +979,7 @@ void StateReplayer::parse_shader_modules(StateCreatorInterface &iface, const Val
 	iface.wait_enqueue();
 }
 
-void StateReplayer::parse_pipeline_layouts(StateCreatorInterface &iface, const Value &layouts)
+void StateReplayer::Impl::parse_pipeline_layouts(StateCreatorInterface &iface, const Value &layouts)
 {
 	iface.set_num_pipeline_layouts(layouts.Size());
 	replayed_pipeline_layouts.resize(layouts.Size());
@@ -772,7 +1012,7 @@ void StateReplayer::parse_pipeline_layouts(StateCreatorInterface &iface, const V
 	iface.wait_enqueue();
 }
 
-void StateReplayer::parse_descriptor_set_layouts(StateCreatorInterface &iface, const Value &layouts)
+void StateReplayer::Impl::parse_descriptor_set_layouts(StateCreatorInterface &iface, const Value &layouts)
 {
 	iface.set_num_descriptor_set_layouts(layouts.Size());
 	replayed_descriptor_set_layouts.resize(layouts.Size());
@@ -800,7 +1040,7 @@ void StateReplayer::parse_descriptor_set_layouts(StateCreatorInterface &iface, c
 	iface.wait_enqueue();
 }
 
-void StateReplayer::parse_samplers(StateCreatorInterface &iface, const Value &samplers)
+void StateReplayer::Impl::parse_samplers(StateCreatorInterface &iface, const Value &samplers)
 {
 	iface.set_num_samplers(samplers.Size());
 	replayed_samplers.resize(samplers.Size());
@@ -836,7 +1076,7 @@ void StateReplayer::parse_samplers(StateCreatorInterface &iface, const Value &sa
 	iface.wait_enqueue();
 }
 
-VkAttachmentDescription *StateReplayer::parse_render_pass_attachments(const Value &attachments)
+VkAttachmentDescription *StateReplayer::Impl::parse_render_pass_attachments(const Value &attachments)
 {
 	auto *infos = allocator.allocate_n_cleared<VkAttachmentDescription>(attachments.Size());
 	auto *ret = infos;
@@ -858,7 +1098,7 @@ VkAttachmentDescription *StateReplayer::parse_render_pass_attachments(const Valu
 	return ret;
 }
 
-VkSubpassDependency *StateReplayer::parse_render_pass_dependencies(const Value &dependencies)
+VkSubpassDependency *StateReplayer::Impl::parse_render_pass_dependencies(const Value &dependencies)
 {
 	auto *infos = allocator.allocate_n_cleared<VkSubpassDependency>(dependencies.Size());
 	auto *ret = infos;
@@ -878,7 +1118,7 @@ VkSubpassDependency *StateReplayer::parse_render_pass_dependencies(const Value &
 	return ret;
 }
 
-VkAttachmentReference *StateReplayer::parse_attachment(const Value &value)
+VkAttachmentReference *StateReplayer::Impl::parse_attachment(const Value &value)
 {
 	auto *ret = allocator.allocate_cleared<VkAttachmentReference>();
 	ret->attachment = value["attachment"].GetUint();
@@ -886,7 +1126,7 @@ VkAttachmentReference *StateReplayer::parse_attachment(const Value &value)
 	return ret;
 }
 
-VkAttachmentReference *StateReplayer::parse_attachments(const Value &attachments)
+VkAttachmentReference *StateReplayer::Impl::parse_attachments(const Value &attachments)
 {
 	auto *refs = allocator.allocate_n_cleared<VkAttachmentReference>(attachments.Size());
 	auto *ret = refs;
@@ -900,7 +1140,7 @@ VkAttachmentReference *StateReplayer::parse_attachments(const Value &attachments
 	return ret;
 }
 
-uint32_t *StateReplayer::parse_uints(const Value &uints)
+uint32_t *StateReplayer::Impl::parse_uints(const Value &uints)
 {
 	auto *u32s = allocator.allocate_n<uint32_t>(uints.Size());
 	auto *ret = u32s;
@@ -909,7 +1149,7 @@ uint32_t *StateReplayer::parse_uints(const Value &uints)
 	return ret;
 }
 
-VkSubpassDescription *StateReplayer::parse_render_pass_subpasses(const Value &subpasses)
+VkSubpassDescription *StateReplayer::Impl::parse_render_pass_subpasses(const Value &subpasses)
 {
 	auto *infos = allocator.allocate_n_cleared<VkSubpassDescription>(subpasses.Size());
 	auto *ret = infos;
@@ -948,7 +1188,7 @@ VkSubpassDescription *StateReplayer::parse_render_pass_subpasses(const Value &su
 	return ret;
 }
 
-void StateReplayer::parse_render_passes(StateCreatorInterface &iface, const Value &passes)
+void StateReplayer::Impl::parse_render_passes(StateCreatorInterface &iface, const Value &passes)
 {
 	iface.set_num_render_passes(passes.Size());
 	replayed_render_passes.resize(passes.Size());
@@ -988,7 +1228,7 @@ void StateReplayer::parse_render_passes(StateCreatorInterface &iface, const Valu
 	iface.wait_enqueue();
 }
 
-VkSpecializationMapEntry *StateReplayer::parse_map_entries(const Value &map_entries)
+VkSpecializationMapEntry *StateReplayer::Impl::parse_map_entries(const Value &map_entries)
 {
 	auto *entries = allocator.allocate_n_cleared<VkSpecializationMapEntry>(map_entries.Size());
 	auto *ret = entries;
@@ -1004,7 +1244,7 @@ VkSpecializationMapEntry *StateReplayer::parse_map_entries(const Value &map_entr
 	return ret;
 }
 
-VkSpecializationInfo *StateReplayer::parse_specialization_info(const Value &spec_info)
+VkSpecializationInfo *StateReplayer::Impl::parse_specialization_info(const Value &spec_info)
 {
 	auto *spec = allocator.allocate_cleared<VkSpecializationInfo>();
 	spec->dataSize = spec_info["dataSize"].GetUint();
@@ -1017,7 +1257,7 @@ VkSpecializationInfo *StateReplayer::parse_specialization_info(const Value &spec
 	return spec;
 }
 
-void StateReplayer::parse_compute_pipelines(StateCreatorInterface &iface, const Value &pipelines)
+void StateReplayer::Impl::parse_compute_pipelines(StateCreatorInterface &iface, const Value &pipelines)
 {
 	iface.set_num_compute_pipelines(pipelines.Size());
 	replayed_compute_pipelines.resize(pipelines.Size());
@@ -1073,7 +1313,7 @@ void StateReplayer::parse_compute_pipelines(StateCreatorInterface &iface, const 
 	iface.wait_enqueue();
 }
 
-VkVertexInputAttributeDescription *StateReplayer::parse_vertex_attributes(const rapidjson::Value &attributes)
+VkVertexInputAttributeDescription *StateReplayer::Impl::parse_vertex_attributes(const rapidjson::Value &attributes)
 {
 	auto *attribs = allocator.allocate_n_cleared<VkVertexInputAttributeDescription>(attributes.Size());
 	auto *ret = attribs;
@@ -1090,7 +1330,7 @@ VkVertexInputAttributeDescription *StateReplayer::parse_vertex_attributes(const 
 	return ret;
 }
 
-VkVertexInputBindingDescription *StateReplayer::parse_vertex_bindings(const rapidjson::Value &bindings)
+VkVertexInputBindingDescription *StateReplayer::Impl::parse_vertex_bindings(const rapidjson::Value &bindings)
 {
 	auto *binds = allocator.allocate_n_cleared<VkVertexInputBindingDescription>(bindings.Size());
 	auto *ret = binds;
@@ -1106,7 +1346,7 @@ VkVertexInputBindingDescription *StateReplayer::parse_vertex_bindings(const rapi
 	return ret;
 }
 
-VkPipelineVertexInputStateCreateInfo *StateReplayer::parse_vertex_input_state(const rapidjson::Value &vi)
+VkPipelineVertexInputStateCreateInfo *StateReplayer::Impl::parse_vertex_input_state(const rapidjson::Value &vi)
 {
 	auto *state = allocator.allocate_cleared<VkPipelineVertexInputStateCreateInfo>();
 	state->sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
@@ -1127,7 +1367,7 @@ VkPipelineVertexInputStateCreateInfo *StateReplayer::parse_vertex_input_state(co
 	return state;
 }
 
-VkPipelineDepthStencilStateCreateInfo *StateReplayer::parse_depth_stencil_state(const rapidjson::Value &ds)
+VkPipelineDepthStencilStateCreateInfo *StateReplayer::Impl::parse_depth_stencil_state(const rapidjson::Value &ds)
 {
 	auto *state = allocator.allocate_cleared<VkPipelineDepthStencilStateCreateInfo>();
 	state->sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
@@ -1158,7 +1398,7 @@ VkPipelineDepthStencilStateCreateInfo *StateReplayer::parse_depth_stencil_state(
 	return state;
 }
 
-VkPipelineRasterizationStateCreateInfo *StateReplayer::parse_rasterization_state(const rapidjson::Value &rs)
+VkPipelineRasterizationStateCreateInfo *StateReplayer::Impl::parse_rasterization_state(const rapidjson::Value &rs)
 {
 	auto *state = allocator.allocate_cleared<VkPipelineRasterizationStateCreateInfo>();
 	state->sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
@@ -1178,7 +1418,7 @@ VkPipelineRasterizationStateCreateInfo *StateReplayer::parse_rasterization_state
 	return state;
 }
 
-VkPipelineTessellationStateCreateInfo *StateReplayer::parse_tessellation_state(const rapidjson::Value &tess)
+VkPipelineTessellationStateCreateInfo *StateReplayer::Impl::parse_tessellation_state(const rapidjson::Value &tess)
 {
 	auto *state = allocator.allocate_cleared<VkPipelineTessellationStateCreateInfo>();
 	state->sType = VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO;
@@ -1187,7 +1427,7 @@ VkPipelineTessellationStateCreateInfo *StateReplayer::parse_tessellation_state(c
 	return state;
 }
 
-VkPipelineInputAssemblyStateCreateInfo *StateReplayer::parse_input_assembly_state(const rapidjson::Value &ia)
+VkPipelineInputAssemblyStateCreateInfo *StateReplayer::Impl::parse_input_assembly_state(const rapidjson::Value &ia)
 {
 	auto *state = allocator.allocate_cleared<VkPipelineInputAssemblyStateCreateInfo>();
 	state->sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
@@ -1197,7 +1437,7 @@ VkPipelineInputAssemblyStateCreateInfo *StateReplayer::parse_input_assembly_stat
 	return state;
 }
 
-VkPipelineColorBlendAttachmentState *StateReplayer::parse_blend_attachments(const rapidjson::Value &attachments)
+VkPipelineColorBlendAttachmentState *StateReplayer::Impl::parse_blend_attachments(const rapidjson::Value &attachments)
 {
 	auto *att = allocator.allocate_n_cleared<VkPipelineColorBlendAttachmentState>(attachments.Size());
 	auto *ret = att;
@@ -1218,7 +1458,7 @@ VkPipelineColorBlendAttachmentState *StateReplayer::parse_blend_attachments(cons
 	return ret;
 }
 
-VkPipelineColorBlendStateCreateInfo *StateReplayer::parse_color_blend_state(const rapidjson::Value &blend)
+VkPipelineColorBlendStateCreateInfo *StateReplayer::Impl::parse_color_blend_state(const rapidjson::Value &blend)
 {
 	auto *state = allocator.allocate_cleared<VkPipelineColorBlendStateCreateInfo>();
 	state->sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
@@ -1238,7 +1478,7 @@ VkPipelineColorBlendStateCreateInfo *StateReplayer::parse_color_blend_state(cons
 	return state;
 }
 
-VkPipelineMultisampleStateCreateInfo *StateReplayer::parse_multisample_state(const rapidjson::Value &ms)
+VkPipelineMultisampleStateCreateInfo *StateReplayer::Impl::parse_multisample_state(const rapidjson::Value &ms)
 {
 	auto *state = allocator.allocate_cleared<VkPipelineMultisampleStateCreateInfo>();
 
@@ -1256,7 +1496,7 @@ VkPipelineMultisampleStateCreateInfo *StateReplayer::parse_multisample_state(con
 	return state;
 }
 
-VkPipelineDynamicStateCreateInfo *StateReplayer::parse_dynamic_state(const rapidjson::Value &dyn)
+VkPipelineDynamicStateCreateInfo *StateReplayer::Impl::parse_dynamic_state(const rapidjson::Value &dyn)
 {
 	auto *state = allocator.allocate_cleared<VkPipelineDynamicStateCreateInfo>();
 
@@ -1273,7 +1513,7 @@ VkPipelineDynamicStateCreateInfo *StateReplayer::parse_dynamic_state(const rapid
 	return state;
 }
 
-VkViewport *StateReplayer::parse_viewports(const rapidjson::Value &viewports)
+VkViewport *StateReplayer::Impl::parse_viewports(const rapidjson::Value &viewports)
 {
 	auto *vps = allocator.allocate_n_cleared<VkViewport>(viewports.Size());
 	auto *ret = vps;
@@ -1292,7 +1532,7 @@ VkViewport *StateReplayer::parse_viewports(const rapidjson::Value &viewports)
 	return ret;
 }
 
-VkRect2D *StateReplayer::parse_scissors(const rapidjson::Value &scissors)
+VkRect2D *StateReplayer::Impl::parse_scissors(const rapidjson::Value &scissors)
 {
 	auto *sci = allocator.allocate_n_cleared<VkRect2D>(scissors.Size());
 	auto *ret = sci;
@@ -1309,7 +1549,7 @@ VkRect2D *StateReplayer::parse_scissors(const rapidjson::Value &scissors)
 	return ret;
 }
 
-VkPipelineViewportStateCreateInfo *StateReplayer::parse_viewport_state(const rapidjson::Value &vp)
+VkPipelineViewportStateCreateInfo *StateReplayer::Impl::parse_viewport_state(const rapidjson::Value &vp)
 {
 	auto *state = allocator.allocate_cleared<VkPipelineViewportStateCreateInfo>();
 
@@ -1327,7 +1567,7 @@ VkPipelineViewportStateCreateInfo *StateReplayer::parse_viewport_state(const rap
 	return state;
 }
 
-VkPipelineShaderStageCreateInfo *StateReplayer::parse_stages(const rapidjson::Value &stages)
+VkPipelineShaderStageCreateInfo *StateReplayer::Impl::parse_stages(const rapidjson::Value &stages)
 {
 	auto *state = allocator.allocate_n_cleared<VkPipelineShaderStageCreateInfo>(stages.Size());
 	auto *ret = state;
@@ -1354,7 +1594,7 @@ VkPipelineShaderStageCreateInfo *StateReplayer::parse_stages(const rapidjson::Va
 	return ret;
 }
 
-void StateReplayer::parse_graphics_pipelines(StateCreatorInterface &iface, const Value &pipelines)
+void StateReplayer::Impl::parse_graphics_pipelines(StateCreatorInterface &iface, const Value &pipelines)
 {
 	iface.set_num_graphics_pipelines(pipelines.Size());
 	replayed_graphics_pipelines.resize(pipelines.Size());
@@ -1430,7 +1670,21 @@ void StateReplayer::parse_graphics_pipelines(StateCreatorInterface &iface, const
 	iface.wait_enqueue();
 }
 
-void StateReplayer::parse(StateCreatorInterface &iface, const void *buffer_, size_t size)
+StateReplayer::StateReplayer()
+{
+	impl.reset(new Impl);
+}
+
+StateReplayer::~StateReplayer()
+{
+}
+
+void StateReplayer::parse(StateCreatorInterface &iface, const void *buffer, size_t size)
+{
+	impl->parse(iface, buffer, size);
+}
+
+void StateReplayer::Impl::parse(StateCreatorInterface &iface, const void *buffer_, size_t size)
 {
 	auto *buffer = static_cast<const uint8_t *>(buffer_);
 	auto *buffer_accum = buffer;
@@ -1516,7 +1770,7 @@ void StateReplayer::parse(StateCreatorInterface &iface, const void *buffer_, siz
 }
 
 template <typename T>
-T *StateReplayer::copy(const T *src, size_t count)
+T *StateReplayer::Impl::copy(const T *src, size_t count)
 {
 	auto *new_data = allocator.allocate_n<T>(count);
 	if (new_data)
@@ -1525,7 +1779,7 @@ T *StateReplayer::copy(const T *src, size_t count)
 }
 
 template <typename T>
-T *StateRecorder::copy(const T *src, size_t count)
+T *StateRecorder::Impl::copy(const T *src, size_t count)
 {
 	auto *new_data = allocator.allocate_n<T>(count);
 	if (new_data)
@@ -1575,50 +1829,50 @@ void *ScratchAllocator::allocate_raw(size_t size, size_t alignment)
 
 void StateRecorder::set_compute_pipeline_handle(unsigned index, VkPipeline pipeline)
 {
-	compute_pipeline_to_index[pipeline] = index;
+	impl->compute_pipeline_to_index[pipeline] = index;
 }
 
 void StateRecorder::set_descriptor_set_layout_handle(unsigned index, VkDescriptorSetLayout layout)
 {
-	descriptor_set_layout_to_index[layout] = index;
+	impl->descriptor_set_layout_to_index[layout] = index;
 }
 
 void StateRecorder::set_graphics_pipeline_handle(unsigned index, VkPipeline pipeline)
 {
-	graphics_pipeline_to_index[pipeline] = index;
+	impl->graphics_pipeline_to_index[pipeline] = index;
 }
 
 void StateRecorder::set_pipeline_layout_handle(unsigned index, VkPipelineLayout layout)
 {
-	pipeline_layout_to_index[layout] = index;
+	impl->pipeline_layout_to_index[layout] = index;
 }
 
 void StateRecorder::set_render_pass_handle(unsigned index, VkRenderPass render_pass)
 {
-	render_pass_to_index[render_pass] = index;
+	impl->render_pass_to_index[render_pass] = index;
 }
 
 void StateRecorder::set_shader_module_handle(unsigned index, VkShaderModule module)
 {
-	shader_module_to_index[module] = index;
+	impl->shader_module_to_index[module] = index;
 }
 
 void StateRecorder::set_sampler_handle(unsigned index, VkSampler sampler)
 {
-	sampler_to_index[sampler] = index;
+	impl->sampler_to_index[sampler] = index;
 }
 
 unsigned StateRecorder::register_descriptor_set_layout(Hash hash, const VkDescriptorSetLayoutCreateInfo &layout_info)
 {
-	auto index = unsigned(descriptor_sets.size());
-	descriptor_sets.push_back({ hash, copy_descriptor_set_layout(layout_info) });
+	auto index = unsigned(impl->descriptor_sets.size());
+	impl->descriptor_sets.push_back({ hash, impl->copy_descriptor_set_layout(layout_info) });
 	return index;
 }
 
 unsigned StateRecorder::register_pipeline_layout(Hash hash, const VkPipelineLayoutCreateInfo &layout_info)
 {
-	auto index = unsigned(pipeline_layouts.size());
-	pipeline_layouts.push_back({ hash, copy_pipeline_layout(layout_info) });
+	auto index = unsigned(impl->pipeline_layouts.size());
+	impl->pipeline_layouts.push_back({ hash, impl->copy_pipeline_layout(layout_info) });
 	return index;
 }
 
@@ -1627,8 +1881,8 @@ unsigned StateRecorder::register_sampler(Hash hash, const VkSamplerCreateInfo &c
 	if (create_info.pNext)
 		FOSSILIZE_THROW("pNext in VkSamplerCreateInfo not supported.");
 
-	auto index = unsigned(samplers.size());
-	samplers.push_back({ hash, copy_sampler(create_info) });
+	auto index = unsigned(impl->samplers.size());
+	impl->samplers.push_back({ hash, impl->copy_sampler(create_info) });
 	return index;
 }
 
@@ -1636,8 +1890,8 @@ unsigned StateRecorder::register_graphics_pipeline(Hash hash, const VkGraphicsPi
 {
 	if (create_info.pNext)
 		FOSSILIZE_THROW("pNext in VkGraphicsPipelineCreateInfo not supported.");
-	auto index = unsigned(graphics_pipelines.size());
-	graphics_pipelines.push_back({ hash, copy_graphics_pipeline(create_info) });
+	auto index = unsigned(impl->graphics_pipelines.size());
+	impl->graphics_pipelines.push_back({ hash, impl->copy_graphics_pipeline(create_info) });
 	return index;
 }
 
@@ -1645,8 +1899,8 @@ unsigned StateRecorder::register_compute_pipeline(Hash hash, const VkComputePipe
 {
 	if (create_info.pNext)
 		FOSSILIZE_THROW("pNext in VkComputePipelineCreateInfo not supported.");
-	auto index = unsigned(compute_pipelines.size());
-	compute_pipelines.push_back({ hash, copy_compute_pipeline(create_info) });
+	auto index = unsigned(impl->compute_pipelines.size());
+	impl->compute_pipelines.push_back({ hash, impl->copy_compute_pipeline(create_info) });
 	return index;
 }
 
@@ -1654,8 +1908,8 @@ unsigned StateRecorder::register_render_pass(Hash hash, const VkRenderPassCreate
 {
 	if (create_info.pNext)
 		FOSSILIZE_THROW("pNext in VkRenderPassCreateInfo not supported.");
-	auto index = unsigned(render_passes.size());
-	render_passes.push_back({ hash, copy_render_pass(create_info) });
+	auto index = unsigned(impl->render_passes.size());
+	impl->render_passes.push_back({ hash, impl->copy_render_pass(create_info) });
 	return index;
 }
 
@@ -1663,87 +1917,87 @@ unsigned StateRecorder::register_shader_module(Hash hash, const VkShaderModuleCr
 {
 	if (create_info.pNext)
 		FOSSILIZE_THROW("pNext in VkShaderModuleCreateInfo not supported.");
-	auto index = unsigned(shader_modules.size());
-	shader_modules.push_back({ hash, copy_shader_module(create_info) });
+	auto index = unsigned(impl->shader_modules.size());
+	impl->shader_modules.push_back({ hash, impl->copy_shader_module(create_info) });
 	return index;
 }
 
 Hash StateRecorder::get_hash_for_compute_pipeline_handle(VkPipeline pipeline) const
 {
-	auto itr = compute_pipeline_to_index.find(pipeline);
-	if (itr == end(compute_pipeline_to_index))
+	auto itr = impl->compute_pipeline_to_index.find(pipeline);
+	if (itr == end(impl->compute_pipeline_to_index))
 		FOSSILIZE_THROW("Handle is not registered.");
 	else
-		return compute_pipelines[itr->second].hash;
+		return impl->compute_pipelines[itr->second].hash;
 }
 
 Hash StateRecorder::get_hash_for_graphics_pipeline_handle(VkPipeline pipeline) const
 {
-	auto itr = graphics_pipeline_to_index.find(pipeline);
-	if (itr == end(graphics_pipeline_to_index))
+	auto itr = impl->graphics_pipeline_to_index.find(pipeline);
+	if (itr == end(impl->graphics_pipeline_to_index))
 		FOSSILIZE_THROW("Handle is not registered.");
 	else
-		return graphics_pipelines[itr->second].hash;
+		return impl->graphics_pipelines[itr->second].hash;
 }
 
 Hash StateRecorder::get_hash_for_sampler(VkSampler sampler) const
 {
-	auto itr = sampler_to_index.find(sampler);
-	if (itr == end(sampler_to_index))
+	auto itr = impl->sampler_to_index.find(sampler);
+	if (itr == end(impl->sampler_to_index))
 		FOSSILIZE_THROW("Handle is not registered.");
 	else
-		return samplers[itr->second].hash;
+		return impl->samplers[itr->second].hash;
 }
 
 Hash StateRecorder::get_hash_for_shader_module(VkShaderModule module) const
 {
-	auto itr = shader_module_to_index.find(module);
-	if (itr == end(shader_module_to_index))
+	auto itr = impl->shader_module_to_index.find(module);
+	if (itr == end(impl->shader_module_to_index))
 		FOSSILIZE_THROW("Handle is not registered.");
 	else
-		return shader_modules[itr->second].hash;
+		return impl->shader_modules[itr->second].hash;
 }
 
 Hash StateRecorder::get_hash_for_pipeline_layout(VkPipelineLayout layout) const
 {
-	auto itr = pipeline_layout_to_index.find(layout);
-	if (itr == end(pipeline_layout_to_index))
+	auto itr = impl->pipeline_layout_to_index.find(layout);
+	if (itr == end(impl->pipeline_layout_to_index))
 		FOSSILIZE_THROW("Handle is not registered.");
 	else
-		return pipeline_layouts[itr->second].hash;
+		return impl->pipeline_layouts[itr->second].hash;
 }
 
 Hash StateRecorder::get_hash_for_descriptor_set_layout(VkDescriptorSetLayout layout) const
 {
-	auto itr = descriptor_set_layout_to_index.find(layout);
-	if (itr == end(descriptor_set_layout_to_index))
+	auto itr = impl->descriptor_set_layout_to_index.find(layout);
+	if (itr == end(impl->descriptor_set_layout_to_index))
 		FOSSILIZE_THROW("Handle is not registered.");
 	else
-		return descriptor_sets[itr->second].hash;
+		return impl->descriptor_sets[itr->second].hash;
 }
 
 Hash StateRecorder::get_hash_for_render_pass(VkRenderPass render_pass) const
 {
-	auto itr = render_pass_to_index.find(render_pass);
-	if (itr == end(render_pass_to_index))
+	auto itr = impl->render_pass_to_index.find(render_pass);
+	if (itr == end(impl->render_pass_to_index))
 		FOSSILIZE_THROW("Handle is not registered.");
 	else
-		return render_passes[itr->second].hash;
+		return impl->render_passes[itr->second].hash;
 }
 
-VkShaderModuleCreateInfo StateRecorder::copy_shader_module(const VkShaderModuleCreateInfo &create_info)
+VkShaderModuleCreateInfo StateRecorder::Impl::copy_shader_module(const VkShaderModuleCreateInfo &create_info)
 {
 	auto info = create_info;
 	info.pCode = copy(info.pCode, info.codeSize / sizeof(uint32_t));
 	return info;
 }
 
-VkSamplerCreateInfo StateRecorder::copy_sampler(const VkSamplerCreateInfo &create_info)
+VkSamplerCreateInfo StateRecorder::Impl::copy_sampler(const VkSamplerCreateInfo &create_info)
 {
 	return create_info;
 }
 
-VkDescriptorSetLayoutCreateInfo StateRecorder::copy_descriptor_set_layout(
+VkDescriptorSetLayoutCreateInfo StateRecorder::Impl::copy_descriptor_set_layout(
 	const VkDescriptorSetLayoutCreateInfo &create_info)
 {
 	auto info = create_info;
@@ -1766,7 +2020,7 @@ VkDescriptorSetLayoutCreateInfo StateRecorder::copy_descriptor_set_layout(
 	return info;
 }
 
-VkPipelineLayoutCreateInfo StateRecorder::copy_pipeline_layout(const VkPipelineLayoutCreateInfo &create_info)
+VkPipelineLayoutCreateInfo StateRecorder::Impl::copy_pipeline_layout(const VkPipelineLayoutCreateInfo &create_info)
 {
 	auto info = create_info;
 	info.pPushConstantRanges = copy(info.pPushConstantRanges, info.pushConstantRangeCount);
@@ -1776,7 +2030,7 @@ VkPipelineLayoutCreateInfo StateRecorder::copy_pipeline_layout(const VkPipelineL
 	return info;
 }
 
-VkSpecializationInfo *StateRecorder::copy_specialization_info(const VkSpecializationInfo *info)
+VkSpecializationInfo *StateRecorder::Impl::copy_specialization_info(const VkSpecializationInfo *info)
 {
 	auto *ret = copy(info, 1);
 	ret->pMapEntries = copy(ret->pMapEntries, ret->mapEntryCount);
@@ -1784,7 +2038,7 @@ VkSpecializationInfo *StateRecorder::copy_specialization_info(const VkSpecializa
 	return ret;
 }
 
-VkComputePipelineCreateInfo StateRecorder::copy_compute_pipeline(const VkComputePipelineCreateInfo &create_info)
+VkComputePipelineCreateInfo StateRecorder::Impl::copy_compute_pipeline(const VkComputePipelineCreateInfo &create_info)
 {
 	auto info = create_info;
 	if (info.stage.pSpecializationInfo)
@@ -1799,7 +2053,7 @@ VkComputePipelineCreateInfo StateRecorder::copy_compute_pipeline(const VkCompute
 	return info;
 }
 
-VkGraphicsPipelineCreateInfo StateRecorder::copy_graphics_pipeline(const VkGraphicsPipelineCreateInfo &create_info)
+VkGraphicsPipelineCreateInfo StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateInfo &create_info)
 {
 	auto info = create_info;
 
@@ -1919,7 +2173,7 @@ VkGraphicsPipelineCreateInfo StateRecorder::copy_graphics_pipeline(const VkGraph
 	return info;
 }
 
-VkRenderPassCreateInfo StateRecorder::copy_render_pass(const VkRenderPassCreateInfo &create_info)
+VkRenderPassCreateInfo StateRecorder::Impl::copy_render_pass(const VkRenderPassCreateInfo &create_info)
 {
 	auto info = create_info;
 	info.pAttachments = copy(info.pAttachments, info.attachmentCount);
@@ -1944,7 +2198,7 @@ VkRenderPassCreateInfo StateRecorder::copy_render_pass(const VkRenderPassCreateI
 	return info;
 }
 
-VkSampler StateRecorder::remap_sampler_handle(VkSampler sampler) const
+VkSampler StateRecorder::Impl::remap_sampler_handle(VkSampler sampler) const
 {
 	auto itr = sampler_to_index.find(sampler);
 	if (itr == end(sampler_to_index))
@@ -1952,7 +2206,7 @@ VkSampler StateRecorder::remap_sampler_handle(VkSampler sampler) const
 	return api_object_cast<VkSampler>(uint64_t(itr->second + 1));
 }
 
-VkDescriptorSetLayout StateRecorder::remap_descriptor_set_layout_handle(VkDescriptorSetLayout layout) const
+VkDescriptorSetLayout StateRecorder::Impl::remap_descriptor_set_layout_handle(VkDescriptorSetLayout layout) const
 {
 	auto itr = descriptor_set_layout_to_index.find(layout);
 	if (itr == end(descriptor_set_layout_to_index))
@@ -1960,7 +2214,7 @@ VkDescriptorSetLayout StateRecorder::remap_descriptor_set_layout_handle(VkDescri
 	return api_object_cast<VkDescriptorSetLayout>(uint64_t(itr->second + 1));
 }
 
-VkPipelineLayout StateRecorder::remap_pipeline_layout_handle(VkPipelineLayout layout) const
+VkPipelineLayout StateRecorder::Impl::remap_pipeline_layout_handle(VkPipelineLayout layout) const
 {
 	auto itr = pipeline_layout_to_index.find(layout);
 	if (itr == end(pipeline_layout_to_index))
@@ -1968,7 +2222,7 @@ VkPipelineLayout StateRecorder::remap_pipeline_layout_handle(VkPipelineLayout la
 	return api_object_cast<VkPipelineLayout>(uint64_t(itr->second + 1));
 }
 
-VkShaderModule StateRecorder::remap_shader_module_handle(VkShaderModule module) const
+VkShaderModule StateRecorder::Impl::remap_shader_module_handle(VkShaderModule module) const
 {
 	auto itr = shader_module_to_index.find(module);
 	if (itr == end(shader_module_to_index))
@@ -1976,7 +2230,7 @@ VkShaderModule StateRecorder::remap_shader_module_handle(VkShaderModule module) 
 	return api_object_cast<VkShaderModule>(uint64_t(itr->second + 1));
 }
 
-VkRenderPass StateRecorder::remap_render_pass_handle(VkRenderPass render_pass) const
+VkRenderPass StateRecorder::Impl::remap_render_pass_handle(VkRenderPass render_pass) const
 {
 	auto itr = render_pass_to_index.find(render_pass);
 	if (itr == end(render_pass_to_index))
@@ -1984,7 +2238,7 @@ VkRenderPass StateRecorder::remap_render_pass_handle(VkRenderPass render_pass) c
 	return api_object_cast<VkRenderPass>(uint64_t(itr->second + 1));
 }
 
-VkPipeline StateRecorder::remap_graphics_pipeline_handle(VkPipeline pipeline) const
+VkPipeline StateRecorder::Impl::remap_graphics_pipeline_handle(VkPipeline pipeline) const
 {
 	auto itr = graphics_pipeline_to_index.find(pipeline);
 	if (itr == end(graphics_pipeline_to_index))
@@ -1992,7 +2246,7 @@ VkPipeline StateRecorder::remap_graphics_pipeline_handle(VkPipeline pipeline) co
 	return api_object_cast<VkPipeline>(uint64_t(itr->second + 1));
 }
 
-VkPipeline StateRecorder::remap_compute_pipeline_handle(VkPipeline pipeline) const
+VkPipeline StateRecorder::Impl::remap_compute_pipeline_handle(VkPipeline pipeline) const
 {
 	auto itr = compute_pipeline_to_index.find(pipeline);
 	if (itr == end(compute_pipeline_to_index))
@@ -2063,7 +2317,7 @@ vector<uint8_t> StateRecorder::serialize() const
 	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
 
 	Value samplers(kArrayType);
-	for (auto &sampler : this->samplers)
+	for (auto &sampler : impl->samplers)
 	{
 		Value s(kObjectType);
 		s.AddMember("hash", sampler.hash, alloc);
@@ -2088,7 +2342,7 @@ vector<uint8_t> StateRecorder::serialize() const
 	doc.AddMember("samplers", samplers, alloc);
 
 	Value set_layouts(kArrayType);
-	for (auto &layout : this->descriptor_sets)
+	for (auto &layout : impl->descriptor_sets)
 	{
 		Value l(kObjectType);
 		l.AddMember("hash", layout.hash, alloc);
@@ -2119,7 +2373,7 @@ vector<uint8_t> StateRecorder::serialize() const
 	doc.AddMember("setLayouts", set_layouts, alloc);
 
 	Value pipeline_layouts(kArrayType);
-	for (auto &layout : this->pipeline_layouts)
+	for (auto &layout : impl->pipeline_layouts)
 	{
 		Value p(kObjectType);
 		p.AddMember("hash", layout.hash, alloc);
@@ -2145,7 +2399,7 @@ vector<uint8_t> StateRecorder::serialize() const
 	doc.AddMember("pipelineLayouts", pipeline_layouts, alloc);
 
 	Value shader_modules(kArrayType);
-	for (auto &module : this->shader_modules)
+	for (auto &module : impl->shader_modules)
 	{
 		Value m(kObjectType);
 		m.AddMember("hash", module.hash, alloc);
@@ -2160,7 +2414,7 @@ vector<uint8_t> StateRecorder::serialize() const
 	doc.AddMember("shaderModules", shader_modules, alloc);
 
 	Value render_passes(kArrayType);
-	for (auto &pass : this->render_passes)
+	for (auto &pass : impl->render_passes)
 	{
 		Value p(kObjectType);
 		p.AddMember("hash", pass.hash, alloc);
@@ -2283,7 +2537,7 @@ vector<uint8_t> StateRecorder::serialize() const
 	doc.AddMember("renderPasses", render_passes, alloc);
 
 	Value compute_pipelines(kArrayType);
-	for (auto &pipe : this->compute_pipelines)
+	for (auto &pipe : impl->compute_pipelines)
 	{
 		Value p(kObjectType);
 		p.AddMember("hash", pipe.hash, alloc);
@@ -2322,7 +2576,7 @@ vector<uint8_t> StateRecorder::serialize() const
 	doc.AddMember("computePipelines", compute_pipelines, alloc);
 
 	Value graphics_pipelines(kArrayType);
-	for (auto &pipe : this->graphics_pipelines)
+	for (auto &pipe : impl->graphics_pipelines)
 	{
 		Value p(kObjectType);
 		p.AddMember("hash", pipe.hash, alloc);
@@ -2608,11 +2862,20 @@ vector<uint8_t> StateRecorder::serialize() const
 	memcpy(buf, &varint_spirv_offset, sizeof(uint64_t));
 	buf += sizeof(uint64_t);
 
-	for (auto &module : this->shader_modules)
+	for (auto &module : impl->shader_modules)
 		buf = encode_varint(buf, module.info.pCode, module.info.codeSize / sizeof(uint32_t));
 
 	assert(uint64_t(buf - serialize_buffer.data()) == serialized_size);
 	return serialize_buffer;
+}
+
+StateRecorder::StateRecorder()
+{
+	impl.reset(new Impl);
+}
+
+StateRecorder::~StateRecorder()
+{
 }
 
 }

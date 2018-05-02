@@ -24,6 +24,7 @@
 
 #include "dispatch_helper.hpp"
 #include "fossilize.hpp"
+#include <string>
 
 namespace Fossilize
 {
