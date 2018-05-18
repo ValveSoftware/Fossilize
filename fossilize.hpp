@@ -54,6 +54,53 @@ private:
 
 using Hash = uint64_t;
 
+class ScratchAllocator
+{
+public:
+	// alignof(T) doesn't work on MSVC 2013.
+	template <typename T>
+	T *allocate()
+	{
+		return static_cast<T *>(allocate_raw(sizeof(T), 16));
+	}
+
+	template <typename T>
+	T *allocate_cleared()
+	{
+		return static_cast<T *>(allocate_raw_cleared(sizeof(T), 16));
+	}
+
+	template <typename T>
+	T *allocate_n(size_t count)
+	{
+		if (count == 0)
+			return nullptr;
+		return static_cast<T *>(allocate_raw(sizeof(T) * count, 16));
+	}
+
+	template <typename T>
+	T *allocate_n_cleared(size_t count)
+	{
+		if (count == 0)
+			return nullptr;
+		return static_cast<T *>(allocate_raw_cleared(sizeof(T) * count, 16));
+	}
+
+	void *allocate_raw(size_t size, size_t alignment);
+	void *allocate_raw_cleared(size_t size, size_t alignment);
+
+private:
+	struct Block
+	{
+		Block(size_t size);
+		size_t offset = 0;
+		std::vector<uint8_t> blob;
+	};
+	std::vector<Block> blocks;
+
+	void add_block(size_t minimum_size);
+};
+
 class StateCreatorInterface
 {
 public:
@@ -82,6 +129,7 @@ public:
 	StateReplayer();
 	~StateReplayer();
 	void parse(StateCreatorInterface &iface, const void *buffer, size_t size);
+	ScratchAllocator &get_allocator();
 
 private:
 	struct Impl;
@@ -93,6 +141,7 @@ class StateRecorder
 public:
 	StateRecorder();
 	~StateRecorder();
+	ScratchAllocator &get_allocator();
 
 	// TODO: create_device which can capture which features/exts are used to create the device.
 	// This can be relevant when using more exotic features.

@@ -124,53 +124,6 @@ private:
 	Hash h = 0xcbf29ce484222325ull;
 };
 
-class ScratchAllocator
-{
-public:
-	// alignof(T) doesn't work on MSVC 2013.
-	template <typename T>
-	T *allocate()
-	{
-		return static_cast<T *>(allocate_raw(sizeof(T), 16));
-	}
-
-	template <typename T>
-	T *allocate_cleared()
-	{
-		return static_cast<T *>(allocate_raw_cleared(sizeof(T), 16));
-	}
-
-	template <typename T>
-	T *allocate_n(size_t count)
-	{
-		if (count == 0)
-			return nullptr;
-		return static_cast<T *>(allocate_raw(sizeof(T) * count, 16));
-	}
-
-	template <typename T>
-	T *allocate_n_cleared(size_t count)
-	{
-		if (count == 0)
-			return nullptr;
-		return static_cast<T *>(allocate_raw_cleared(sizeof(T) * count, 16));
-	}
-
-	void *allocate_raw(size_t size, size_t alignment);
-	void *allocate_raw_cleared(size_t size, size_t alignment);
-
-private:
-	struct Block
-	{
-		Block(size_t size);
-		size_t offset = 0;
-		std::vector<uint8_t> blob;
-	};
-	std::vector<Block> blocks;
-
-	void add_block(size_t minimum_size);
-};
-
 template <typename T>
 struct HashedInfo
 {
@@ -1679,6 +1632,11 @@ StateReplayer::~StateReplayer()
 {
 }
 
+ScratchAllocator &StateReplayer::get_allocator()
+{
+	return impl->allocator;
+}
+
 void StateReplayer::parse(StateCreatorInterface &iface, const void *buffer, size_t size)
 {
 	impl->parse(iface, buffer, size);
@@ -1825,6 +1783,11 @@ void *ScratchAllocator::allocate_raw(size_t size, size_t alignment)
 
 	add_block(size + alignment);
 	return allocate_raw(size, alignment);
+}
+
+ScratchAllocator &StateRecorder::get_allocator()
+{
+	return impl->allocator;
 }
 
 void StateRecorder::set_compute_pipeline_handle(unsigned index, VkPipeline pipeline)
