@@ -2247,6 +2247,493 @@ static Value uint64_string(const uint64_t value, Allocator &alloc)
 	return Value(str, alloc);
 }
 
+template <typename Allocator>
+static Value json_value(const VkSamplerCreateInfo& sampler, Allocator& alloc)
+{
+	Value s(kObjectType);
+	s.AddMember("flags", sampler.flags, alloc);
+	s.AddMember("minFilter", sampler.minFilter, alloc);
+	s.AddMember("magFilter", sampler.magFilter, alloc);
+	s.AddMember("maxAnisotropy", sampler.maxAnisotropy, alloc);
+	s.AddMember("compareOp", sampler.compareOp, alloc);
+	s.AddMember("anisotropyEnable", sampler.anisotropyEnable, alloc);
+	s.AddMember("mipmapMode", sampler.mipmapMode, alloc);
+	s.AddMember("addressModeU", sampler.addressModeU, alloc);
+	s.AddMember("addressModeV", sampler.addressModeV, alloc);
+	s.AddMember("addressModeW", sampler.addressModeW, alloc);
+	s.AddMember("borderColor", sampler.borderColor, alloc);
+	s.AddMember("unnormalizedCoordinates", sampler.unnormalizedCoordinates, alloc);
+	s.AddMember("compareEnable", sampler.compareEnable, alloc);
+	s.AddMember("mipLodBias", sampler.mipLodBias, alloc);
+	s.AddMember("minLod", sampler.minLod, alloc);
+	s.AddMember("maxLod", sampler.maxLod, alloc);
+	return s;
+}
+
+template <typename Allocator>
+static Value json_value(const VkDescriptorSetLayoutCreateInfo& layout, Allocator& alloc)
+{
+	Value l(kObjectType);
+	l.AddMember("flags", layout.flags, alloc);
+
+	Value bindings(kArrayType);
+	for (uint32_t i = 0; i < layout.bindingCount; i++)
+	{
+		auto &b = layout.pBindings[i];
+		Value binding(kObjectType);
+		binding.AddMember("descriptorType", b.descriptorType, alloc);
+		binding.AddMember("descriptorCount", b.descriptorCount, alloc);
+		binding.AddMember("stageFlags", b.stageFlags, alloc);
+		binding.AddMember("binding", b.binding, alloc);
+		if (b.pImmutableSamplers)
+		{
+			Value immutables(kArrayType);
+			for (uint32_t j = 0; j < b.descriptorCount; j++)
+				immutables.PushBack(uint64_string(api_object_cast<uint64_t>(b.pImmutableSamplers[j]), alloc), alloc);
+			binding.AddMember("immutableSamplers", immutables, alloc);
+		}
+		bindings.PushBack(binding, alloc);
+	}
+	l.AddMember("bindings", bindings, alloc);
+	return l;
+}
+
+template <typename Allocator>
+static Value json_value(const VkPipelineLayoutCreateInfo& layout, Allocator& alloc)
+{
+	Value p(kObjectType);
+	p.AddMember("flags", layout.flags, alloc);
+	Value push(kArrayType);
+	for (uint32_t i = 0; i < layout.pushConstantRangeCount; i++)
+	{
+		Value range(kObjectType);
+		range.AddMember("stageFlags", layout.pPushConstantRanges[i].stageFlags, alloc);
+		range.AddMember("size", layout.pPushConstantRanges[i].size, alloc);
+		range.AddMember("offset", layout.pPushConstantRanges[i].offset, alloc);
+		push.PushBack(range, alloc);
+	}
+	p.AddMember("pushConstantRanges", push, alloc);
+
+	Value set_layouts(kArrayType);
+	for (uint32_t i = 0; i < layout.setLayoutCount; i++)
+		set_layouts.PushBack(uint64_string(api_object_cast<uint64_t>(layout.pSetLayouts[i]), alloc), alloc);
+	p.AddMember("setLayouts", set_layouts, alloc);
+	return p;
+}
+
+template <typename Allocator>
+static Value json_value(const VkShaderModuleCreateInfo& module, Allocator& alloc)
+{
+	Value m(kObjectType);
+	m.AddMember("flags", module.flags, alloc);
+	m.AddMember("codeSize", module.codeSize, alloc);
+	return m;
+}
+
+template <typename Allocator>
+static Value json_value(const VkRenderPassCreateInfo& pass, Allocator& alloc)
+{
+	Value p(kObjectType);
+	p.AddMember("flags", pass.flags, alloc);
+
+	Value deps(kArrayType);
+	Value subpasses(kArrayType);
+	Value attachments(kArrayType);
+
+	if (pass.pDependencies)
+	{
+		for (uint32_t i = 0; i < pass.dependencyCount; i++)
+		{
+			auto &d = pass.pDependencies[i];
+			Value dep(kObjectType);
+			dep.AddMember("dependencyFlags", d.dependencyFlags, alloc);
+			dep.AddMember("dstAccessMask", d.dstAccessMask, alloc);
+			dep.AddMember("srcAccessMask", d.srcAccessMask, alloc);
+			dep.AddMember("dstStageMask", d.dstStageMask, alloc);
+			dep.AddMember("srcStageMask", d.srcStageMask, alloc);
+			dep.AddMember("dstSubpass", d.dstSubpass, alloc);
+			dep.AddMember("srcSubpass", d.srcSubpass, alloc);
+			deps.PushBack(dep, alloc);
+		}
+		p.AddMember("dependencies", deps, alloc);
+	}
+
+	if (pass.pAttachments)
+	{
+		for (uint32_t i = 0; i < pass.attachmentCount; i++)
+		{
+			auto &a = pass.pAttachments[i];
+			Value att(kObjectType);
+
+			att.AddMember("flags", a.flags, alloc);
+			att.AddMember("format", a.format, alloc);
+			att.AddMember("finalLayout", a.finalLayout, alloc);
+			att.AddMember("initialLayout", a.initialLayout, alloc);
+			att.AddMember("loadOp", a.loadOp, alloc);
+			att.AddMember("storeOp", a.storeOp, alloc);
+			att.AddMember("samples", a.samples, alloc);
+			att.AddMember("stencilLoadOp", a.stencilLoadOp, alloc);
+			att.AddMember("stencilStoreOp", a.stencilStoreOp, alloc);
+
+			attachments.PushBack(att, alloc);
+		}
+		p.AddMember("attachments", attachments, alloc);
+	}
+
+	for (uint32_t i = 0; i < pass.subpassCount; i++)
+	{
+		auto &sub = pass.pSubpasses[i];
+		Value p(kObjectType);
+		p.AddMember("flags", sub.flags, alloc);
+		p.AddMember("pipelineBindPoint", sub.pipelineBindPoint, alloc);
+
+		if (sub.pPreserveAttachments)
+		{
+			Value preserves(kArrayType);
+			for (uint32_t j = 0; j < sub.preserveAttachmentCount; j++)
+				preserves.PushBack(sub.pPreserveAttachments[j], alloc);
+			p.AddMember("preserveAttachments", preserves, alloc);
+		}
+
+		if (sub.pInputAttachments)
+		{
+			Value inputs(kArrayType);
+			for (uint32_t j = 0; j < sub.inputAttachmentCount; j++)
+			{
+				Value input(kObjectType);
+				auto &ia = sub.pInputAttachments[j];
+				input.AddMember("attachment", ia.attachment, alloc);
+				input.AddMember("layout", ia.layout, alloc);
+				inputs.PushBack(input, alloc);
+			}
+			p.AddMember("inputAttachments", inputs, alloc);
+		}
+
+		if (sub.pColorAttachments)
+		{
+			Value colors(kArrayType);
+			for (uint32_t j = 0; j < sub.colorAttachmentCount; j++)
+			{
+				Value color(kObjectType);
+				auto &c = sub.pColorAttachments[j];
+				color.AddMember("attachment", c.attachment, alloc);
+				color.AddMember("layout", c.layout, alloc);
+				colors.PushBack(color, alloc);
+			}
+			p.AddMember("colorAttachments", colors, alloc);
+		}
+
+		if (sub.pResolveAttachments)
+		{
+			Value resolves(kArrayType);
+			for (uint32_t j = 0; j < sub.colorAttachmentCount; j++)
+			{
+				Value resolve(kObjectType);
+				auto &r = sub.pResolveAttachments[j];
+				resolve.AddMember("attachment", r.attachment, alloc);
+				resolve.AddMember("layout", r.layout, alloc);
+				resolves.PushBack(resolve, alloc);
+			}
+			p.AddMember("resolveAttachments", resolves, alloc);
+		}
+
+		if (sub.pDepthStencilAttachment)
+		{
+			Value depth_stencil(kObjectType);
+			depth_stencil.AddMember("attachment", sub.pDepthStencilAttachment->attachment, alloc);
+			depth_stencil.AddMember("layout", sub.pDepthStencilAttachment->layout, alloc);
+			p.AddMember("depthStencilAttachment", depth_stencil, alloc);
+		}
+
+		subpasses.PushBack(p, alloc);
+	}
+	p.AddMember("subpasses", subpasses, alloc);
+	return p;
+}
+
+template <typename Allocator>
+static Value json_value(const VkComputePipelineCreateInfo& pipe, Allocator& alloc)
+{
+	Value p(kObjectType);
+	p.AddMember("flags", pipe.flags, alloc);
+	p.AddMember("layout", uint64_string(api_object_cast<uint64_t>(pipe.layout), alloc), alloc);
+	p.AddMember("basePipelineHandle", uint64_string(api_object_cast<uint64_t>(pipe.basePipelineHandle), alloc), alloc);
+	p.AddMember("basePipelineIndex", pipe.basePipelineIndex, alloc);
+	Value stage(kObjectType);
+	stage.AddMember("flags", pipe.stage.flags, alloc);
+	stage.AddMember("stage", pipe.stage.stage, alloc);
+	stage.AddMember("module", uint64_string(api_object_cast<uint64_t>(pipe.stage.module), alloc), alloc);
+	stage.AddMember("name", StringRef(pipe.stage.pName), alloc);
+	if (pipe.stage.pSpecializationInfo)
+	{
+		Value spec(kObjectType);
+		spec.AddMember("dataSize", pipe.stage.pSpecializationInfo->dataSize, alloc);
+		spec.AddMember("data",
+					   encode_base64(pipe.stage.pSpecializationInfo->pData,
+									 pipe.stage.pSpecializationInfo->dataSize), alloc);
+		Value map_entries(kArrayType);
+		for (uint32_t i = 0; i < pipe.stage.pSpecializationInfo->mapEntryCount; i++)
+		{
+			auto &e = pipe.stage.pSpecializationInfo->pMapEntries[i];
+			Value map_entry(kObjectType);
+			map_entry.AddMember("offset", e.offset, alloc);
+			map_entry.AddMember("size", e.size, alloc);
+			map_entry.AddMember("constantID", e.constantID, alloc);
+			map_entries.PushBack(map_entry, alloc);
+		}
+		spec.AddMember("mapEntries", map_entries, alloc);
+		stage.AddMember("specializationInfo", spec, alloc);
+	}
+	p.AddMember("stage", stage, alloc);
+	return p;
+}
+
+template <typename Allocator>
+static Value json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& alloc)
+{
+	Value p(kObjectType);
+	p.AddMember("flags", pipe.flags, alloc);
+	p.AddMember("basePipelineHandle", uint64_string(api_object_cast<uint64_t>(pipe.basePipelineHandle), alloc), alloc);
+	p.AddMember("basePipelineIndex", pipe.basePipelineIndex, alloc);
+	p.AddMember("layout", uint64_string(api_object_cast<uint64_t>(pipe.layout), alloc), alloc);
+	p.AddMember("renderPass", uint64_string(api_object_cast<uint64_t>(pipe.renderPass), alloc), alloc);
+	p.AddMember("subpass", pipe.subpass, alloc);
+
+	if (pipe.pTessellationState)
+	{
+		Value tess(kObjectType);
+		tess.AddMember("flags", pipe.pTessellationState->flags, alloc);
+		tess.AddMember("patchControlPoints", pipe.pTessellationState->patchControlPoints, alloc);
+		p.AddMember("tessellationState", tess, alloc);
+	}
+
+	if (pipe.pDynamicState)
+	{
+		Value dyn(kObjectType);
+		dyn.AddMember("flags", pipe.pDynamicState->flags, alloc);
+		Value dynamics(kArrayType);
+		for (uint32_t i = 0; i < pipe.pDynamicState->dynamicStateCount; i++)
+			dynamics.PushBack(pipe.pDynamicState->pDynamicStates[i], alloc);
+		dyn.AddMember("dynamicState", dynamics, alloc);
+		p.AddMember("dynamicState", dyn, alloc);
+	}
+
+	if (pipe.pMultisampleState)
+	{
+		Value ms(kObjectType);
+		ms.AddMember("flags", pipe.pMultisampleState->flags, alloc);
+		ms.AddMember("rasterizationSamples", pipe.pMultisampleState->rasterizationSamples, alloc);
+		ms.AddMember("sampleShadingEnable", pipe.pMultisampleState->sampleShadingEnable, alloc);
+		ms.AddMember("minSampleShading", pipe.pMultisampleState->minSampleShading, alloc);
+		ms.AddMember("alphaToOneEnable", pipe.pMultisampleState->alphaToOneEnable, alloc);
+		ms.AddMember("alphaToCoverageEnable", pipe.pMultisampleState->alphaToCoverageEnable, alloc);
+
+		Value sm(kArrayType);
+		if (pipe.pMultisampleState->pSampleMask)
+		{
+			auto entries = uint32_t(pipe.pMultisampleState->rasterizationSamples + 31) / 32;
+			for (uint32_t i = 0; i < entries; i++)
+				sm.PushBack(pipe.pMultisampleState->pSampleMask[i], alloc);
+			ms.AddMember("sampleMask", sm, alloc);
+		}
+
+		p.AddMember("multisampleState", ms, alloc);
+	}
+
+	if (pipe.pVertexInputState)
+	{
+		Value vi(kObjectType);
+
+		Value attribs(kArrayType);
+		Value bindings(kArrayType);
+		vi.AddMember("flags", pipe.pVertexInputState->flags, alloc);
+
+		for (uint32_t i = 0; i < pipe.pVertexInputState->vertexAttributeDescriptionCount; i++)
+		{
+			auto &a = pipe.pVertexInputState->pVertexAttributeDescriptions[i];
+			Value attrib(kObjectType);
+			attrib.AddMember("location", a.location, alloc);
+			attrib.AddMember("binding", a.binding, alloc);
+			attrib.AddMember("offset", a.offset, alloc);
+			attrib.AddMember("format", a.format, alloc);
+			attribs.PushBack(attrib, alloc);
+		}
+
+		for (uint32_t i = 0; i < pipe.pVertexInputState->vertexBindingDescriptionCount; i++)
+		{
+			auto &b = pipe.pVertexInputState->pVertexBindingDescriptions[i];
+			Value binding(kObjectType);
+			binding.AddMember("binding", b.binding, alloc);
+			binding.AddMember("stride", b.stride, alloc);
+			binding.AddMember("inputRate", b.inputRate, alloc);
+			bindings.PushBack(binding, alloc);
+		}
+		vi.AddMember("attributes", attribs, alloc);
+		vi.AddMember("bindings", bindings, alloc);
+
+		p.AddMember("vertexInputState", vi, alloc);
+	}
+
+	if (pipe.pRasterizationState)
+	{
+		Value rs(kObjectType);
+		rs.AddMember("flags", pipe.pRasterizationState->flags, alloc);
+		rs.AddMember("depthBiasConstantFactor", pipe.pRasterizationState->depthBiasConstantFactor, alloc);
+		rs.AddMember("depthBiasSlopeFactor", pipe.pRasterizationState->depthBiasSlopeFactor, alloc);
+		rs.AddMember("depthBiasClamp", pipe.pRasterizationState->depthBiasClamp, alloc);
+		rs.AddMember("depthBiasEnable", pipe.pRasterizationState->depthBiasEnable, alloc);
+		rs.AddMember("depthClampEnable", pipe.pRasterizationState->depthClampEnable, alloc);
+		rs.AddMember("polygonMode", pipe.pRasterizationState->polygonMode, alloc);
+		rs.AddMember("rasterizerDiscardEnable", pipe.pRasterizationState->rasterizerDiscardEnable, alloc);
+		rs.AddMember("frontFace", pipe.pRasterizationState->frontFace, alloc);
+		rs.AddMember("lineWidth", pipe.pRasterizationState->lineWidth, alloc);
+		rs.AddMember("cullMode", pipe.pRasterizationState->cullMode, alloc);
+		p.AddMember("rasterizationState", rs, alloc);
+	}
+
+	if (pipe.pInputAssemblyState)
+	{
+		Value ia(kObjectType);
+		ia.AddMember("flags", pipe.pInputAssemblyState->flags, alloc);
+		ia.AddMember("topology", pipe.pInputAssemblyState->topology, alloc);
+		ia.AddMember("primitiveRestartEnable", pipe.pInputAssemblyState->primitiveRestartEnable, alloc);
+		p.AddMember("inputAssemblyState", ia, alloc);
+	}
+
+	if (pipe.pColorBlendState)
+	{
+		Value cb(kObjectType);
+		cb.AddMember("flags", pipe.pColorBlendState->flags, alloc);
+		cb.AddMember("logicOp", pipe.pColorBlendState->logicOp, alloc);
+		cb.AddMember("logicOpEnable", pipe.pColorBlendState->logicOpEnable, alloc);
+		Value blend_constants(kArrayType);
+		for (auto &c : pipe.pColorBlendState->blendConstants)
+			blend_constants.PushBack(c, alloc);
+		cb.AddMember("blendConstants", blend_constants, alloc);
+		Value attachments(kArrayType);
+		for (uint32_t i = 0; i < pipe.pColorBlendState->attachmentCount; i++)
+		{
+			auto &a = pipe.pColorBlendState->pAttachments[i];
+			Value att(kObjectType);
+			att.AddMember("dstAlphaBlendFactor", a.dstAlphaBlendFactor, alloc);
+			att.AddMember("srcAlphaBlendFactor", a.srcAlphaBlendFactor, alloc);
+			att.AddMember("dstColorBlendFactor", a.dstColorBlendFactor, alloc);
+			att.AddMember("srcColorBlendFactor", a.srcColorBlendFactor, alloc);
+			att.AddMember("colorWriteMask", a.colorWriteMask, alloc);
+			att.AddMember("alphaBlendOp", a.alphaBlendOp, alloc);
+			att.AddMember("colorBlendOp", a.colorBlendOp, alloc);
+			att.AddMember("blendEnable", a.blendEnable, alloc);
+			attachments.PushBack(att, alloc);
+		}
+		cb.AddMember("attachments", attachments, alloc);
+		p.AddMember("colorBlendState", cb, alloc);
+	}
+
+	if (pipe.pViewportState)
+	{
+		Value vp(kObjectType);
+		vp.AddMember("flags", pipe.pViewportState->flags, alloc);
+		vp.AddMember("viewportCount", pipe.pViewportState->viewportCount, alloc);
+		vp.AddMember("scissorCount", pipe.pViewportState->scissorCount, alloc);
+		if (pipe.pViewportState->pViewports)
+		{
+			Value viewports(kArrayType);
+			for (uint32_t i = 0; i < pipe.pViewportState->viewportCount; i++)
+			{
+				Value viewport(kObjectType);
+				viewport.AddMember("x", pipe.pViewportState->pViewports[i].x, alloc);
+				viewport.AddMember("y", pipe.pViewportState->pViewports[i].y, alloc);
+				viewport.AddMember("width", pipe.pViewportState->pViewports[i].width, alloc);
+				viewport.AddMember("height", pipe.pViewportState->pViewports[i].height, alloc);
+				viewport.AddMember("minDepth", pipe.pViewportState->pViewports[i].minDepth, alloc);
+				viewport.AddMember("maxDepth", pipe.pViewportState->pViewports[i].maxDepth, alloc);
+				viewports.PushBack(viewport, alloc);
+			}
+			vp.AddMember("viewports", viewports, alloc);
+		}
+
+		if (pipe.pViewportState->pScissors)
+		{
+			Value scissors(kArrayType);
+			for (uint32_t i = 0; i < pipe.pViewportState->scissorCount; i++)
+			{
+				Value scissor(kObjectType);
+				scissor.AddMember("x", pipe.pViewportState->pScissors[i].offset.x, alloc);
+				scissor.AddMember("y", pipe.pViewportState->pScissors[i].offset.y, alloc);
+				scissor.AddMember("width", pipe.pViewportState->pScissors[i].extent.width, alloc);
+				scissor.AddMember("height", pipe.pViewportState->pScissors[i].extent.height, alloc);
+				scissors.PushBack(scissor, alloc);
+			}
+			vp.AddMember("scissors", scissors, alloc);
+		}
+		p.AddMember("viewportState", vp, alloc);
+	}
+
+	if (pipe.pDepthStencilState)
+	{
+		Value ds(kObjectType);
+		ds.AddMember("flags", pipe.pDepthStencilState->flags, alloc);
+		ds.AddMember("stencilTestEnable", pipe.pDepthStencilState->stencilTestEnable, alloc);
+		ds.AddMember("maxDepthBounds", pipe.pDepthStencilState->maxDepthBounds, alloc);
+		ds.AddMember("minDepthBounds", pipe.pDepthStencilState->minDepthBounds, alloc);
+		ds.AddMember("depthBoundsTestEnable", pipe.pDepthStencilState->depthBoundsTestEnable, alloc);
+		ds.AddMember("depthWriteEnable", pipe.pDepthStencilState->depthWriteEnable, alloc);
+		ds.AddMember("depthTestEnable", pipe.pDepthStencilState->depthTestEnable, alloc);
+		ds.AddMember("depthCompareOp", pipe.pDepthStencilState->depthCompareOp, alloc);
+
+		const auto serialize_stencil = [&](Value &v, const VkStencilOpState &state) {
+			v.AddMember("compareOp", state.compareOp, alloc);
+			v.AddMember("writeMask", state.writeMask, alloc);
+			v.AddMember("reference", state.reference, alloc);
+			v.AddMember("compareMask", state.compareMask, alloc);
+			v.AddMember("passOp", state.passOp, alloc);
+			v.AddMember("failOp", state.failOp, alloc);
+			v.AddMember("depthFailOp", state.depthFailOp, alloc);
+		};
+		Value front(kObjectType);
+		Value back(kObjectType);
+		serialize_stencil(front, pipe.pDepthStencilState->front);
+		serialize_stencil(back, pipe.pDepthStencilState->back);
+		ds.AddMember("front", front, alloc);
+		ds.AddMember("back", back, alloc);
+		p.AddMember("depthStencilState", ds, alloc);
+	}
+
+	Value stages(kArrayType);
+	for (uint32_t i = 0; i < pipe.stageCount; i++)
+	{
+		auto &s = pipe.pStages[i];
+		Value stage(kObjectType);
+		stage.AddMember("flags", s.flags, alloc);
+		stage.AddMember("name", StringRef(s.pName), alloc);
+		stage.AddMember("module", uint64_string(api_object_cast<uint64_t>(s.module), alloc), alloc);
+		stage.AddMember("stage", s.stage, alloc);
+		if (s.pSpecializationInfo)
+		{
+			Value spec(kObjectType);
+			spec.AddMember("dataSize", s.pSpecializationInfo->dataSize, alloc);
+			spec.AddMember("data",
+						   encode_base64(s.pSpecializationInfo->pData,
+										 s.pSpecializationInfo->dataSize), alloc);
+			Value map_entries(kArrayType);
+			for (uint32_t i = 0; i < s.pSpecializationInfo->mapEntryCount; i++)
+			{
+				auto &e = s.pSpecializationInfo->pMapEntries[i];
+				Value map_entry(kObjectType);
+				map_entry.AddMember("offset", e.offset, alloc);
+				map_entry.AddMember("size", e.size, alloc);
+				map_entry.AddMember("constantID", e.constantID, alloc);
+				map_entries.PushBack(map_entry, alloc);
+			}
+			spec.AddMember("mapEntries", map_entries, alloc);
+			stage.AddMember("specializationInfo", spec, alloc);
+		}
+		stages.PushBack(stage, alloc);
+	}
+	p.AddMember("stages", stages, alloc);
+	return p;
+}
+
 vector<uint8_t> StateRecorder::serialize() const
 {
 	uint64_t varint_spirv_offset = 0;
@@ -2260,53 +2747,15 @@ vector<uint8_t> StateRecorder::serialize() const
 	Value samplers(kObjectType);
 	for (auto &sampler : impl->samplers)
 	{
-		Value s(kObjectType);
-		s.AddMember("flags", sampler.second.flags, alloc);
-		s.AddMember("minFilter", sampler.second.minFilter, alloc);
-		s.AddMember("magFilter", sampler.second.magFilter, alloc);
-		s.AddMember("maxAnisotropy", sampler.second.maxAnisotropy, alloc);
-		s.AddMember("compareOp", sampler.second.compareOp, alloc);
-		s.AddMember("anisotropyEnable", sampler.second.anisotropyEnable, alloc);
-		s.AddMember("mipmapMode", sampler.second.mipmapMode, alloc);
-		s.AddMember("addressModeU", sampler.second.addressModeU, alloc);
-		s.AddMember("addressModeV", sampler.second.addressModeV, alloc);
-		s.AddMember("addressModeW", sampler.second.addressModeW, alloc);
-		s.AddMember("borderColor", sampler.second.borderColor, alloc);
-		s.AddMember("unnormalizedCoordinates", sampler.second.unnormalizedCoordinates, alloc);
-		s.AddMember("compareEnable", sampler.second.compareEnable, alloc);
-		s.AddMember("mipLodBias", sampler.second.mipLodBias, alloc);
-		s.AddMember("minLod", sampler.second.minLod, alloc);
-		s.AddMember("maxLod", sampler.second.maxLod, alloc);
-		samplers.AddMember(uint64_string(sampler.first, alloc), s, alloc);
+		auto s = json_value(sampler.second, alloc);
+		samplers.AddMember(uint64_string(sampler.first, alloc), json_value(sampler.second, alloc), alloc);
 	}
 	doc.AddMember("samplers", samplers, alloc);
 
 	Value set_layouts(kObjectType);
 	for (auto &layout : impl->descriptor_sets)
 	{
-		Value l(kObjectType);
-		l.AddMember("flags", layout.second.flags, alloc);
-
-		Value bindings(kArrayType);
-		for (uint32_t i = 0; i < layout.second.bindingCount; i++)
-		{
-			auto &b = layout.second.pBindings[i];
-			Value binding(kObjectType);
-			binding.AddMember("descriptorType", b.descriptorType, alloc);
-			binding.AddMember("descriptorCount", b.descriptorCount, alloc);
-			binding.AddMember("stageFlags", b.stageFlags, alloc);
-			binding.AddMember("binding", b.binding, alloc);
-			if (b.pImmutableSamplers)
-			{
-				Value immutables(kArrayType);
-				for (uint32_t j = 0; j < b.descriptorCount; j++)
-					immutables.PushBack(uint64_string(api_object_cast<uint64_t>(b.pImmutableSamplers[j]), alloc), alloc);
-				binding.AddMember("immutableSamplers", immutables, alloc);
-			}
-			bindings.PushBack(binding, alloc);
-		}
-		l.AddMember("bindings", bindings, alloc);
-
+		auto l = json_value(layout.second, alloc);
 		set_layouts.AddMember(uint64_string(layout.first, alloc), l, alloc);
 	}
 	doc.AddMember("setLayouts", set_layouts, alloc);
@@ -2314,24 +2763,7 @@ vector<uint8_t> StateRecorder::serialize() const
 	Value pipeline_layouts(kObjectType);
 	for (auto &layout : impl->pipeline_layouts)
 	{
-		Value p(kObjectType);
-		p.AddMember("flags", layout.second.flags, alloc);
-		Value push(kArrayType);
-		for (uint32_t i = 0; i < layout.second.pushConstantRangeCount; i++)
-		{
-			Value range(kObjectType);
-			range.AddMember("stageFlags", layout.second.pPushConstantRanges[i].stageFlags, alloc);
-			range.AddMember("size", layout.second.pPushConstantRanges[i].size, alloc);
-			range.AddMember("offset", layout.second.pPushConstantRanges[i].offset, alloc);
-			push.PushBack(range, alloc);
-		}
-		p.AddMember("pushConstantRanges", push, alloc);
-
-		Value set_layouts(kArrayType);
-		for (uint32_t i = 0; i < layout.second.setLayoutCount; i++)
-			set_layouts.PushBack(uint64_string(api_object_cast<uint64_t>(layout.second.pSetLayouts[i]), alloc), alloc);
-		p.AddMember("setLayouts", set_layouts, alloc);
-
+		auto p = json_value(layout.second, alloc);
 		pipeline_layouts.AddMember(uint64_string(layout.first, alloc), p, alloc);
 	}
 	doc.AddMember("pipelineLayouts", pipeline_layouts, alloc);
@@ -2339,9 +2771,7 @@ vector<uint8_t> StateRecorder::serialize() const
 	Value shader_modules(kObjectType);
 	for (auto &module : impl->shader_modules)
 	{
-		Value m(kObjectType);
-		m.AddMember("flags", module.second.flags, alloc);
-		m.AddMember("codeSize", module.second.codeSize, alloc);
+		auto m = json_value(module.second, alloc);
 		m.AddMember("codeBinaryOffset", varint_spirv_offset, alloc);
 		size_t varint_size = compute_size_varint(module.second.pCode, module.second.codeSize / sizeof(uint32_t));
 		m.AddMember("codeBinarySize", varint_size, alloc);
@@ -2353,121 +2783,7 @@ vector<uint8_t> StateRecorder::serialize() const
 	Value render_passes(kObjectType);
 	for (auto &pass : impl->render_passes)
 	{
-		Value p(kObjectType);
-		p.AddMember("flags", pass.second.flags, alloc);
-
-		Value deps(kArrayType);
-		Value subpasses(kArrayType);
-		Value attachments(kArrayType);
-
-		if (pass.second.pDependencies)
-		{
-			for (uint32_t i = 0; i < pass.second.dependencyCount; i++)
-			{
-				auto &d = pass.second.pDependencies[i];
-				Value dep(kObjectType);
-				dep.AddMember("dependencyFlags", d.dependencyFlags, alloc);
-				dep.AddMember("dstAccessMask", d.dstAccessMask, alloc);
-				dep.AddMember("srcAccessMask", d.srcAccessMask, alloc);
-				dep.AddMember("dstStageMask", d.dstStageMask, alloc);
-				dep.AddMember("srcStageMask", d.srcStageMask, alloc);
-				dep.AddMember("dstSubpass", d.dstSubpass, alloc);
-				dep.AddMember("srcSubpass", d.srcSubpass, alloc);
-				deps.PushBack(dep, alloc);
-			}
-			p.AddMember("dependencies", deps, alloc);
-		}
-
-		if (pass.second.pAttachments)
-		{
-			for (uint32_t i = 0; i < pass.second.attachmentCount; i++)
-			{
-				auto &a = pass.second.pAttachments[i];
-				Value att(kObjectType);
-
-				att.AddMember("flags", a.flags, alloc);
-				att.AddMember("format", a.format, alloc);
-				att.AddMember("finalLayout", a.finalLayout, alloc);
-				att.AddMember("initialLayout", a.initialLayout, alloc);
-				att.AddMember("loadOp", a.loadOp, alloc);
-				att.AddMember("storeOp", a.storeOp, alloc);
-				att.AddMember("samples", a.samples, alloc);
-				att.AddMember("stencilLoadOp", a.stencilLoadOp, alloc);
-				att.AddMember("stencilStoreOp", a.stencilStoreOp, alloc);
-
-				attachments.PushBack(att, alloc);
-			}
-			p.AddMember("attachments", attachments, alloc);
-		}
-
-		for (uint32_t i = 0; i < pass.second.subpassCount; i++)
-		{
-			auto &sub = pass.second.pSubpasses[i];
-			Value p(kObjectType);
-			p.AddMember("flags", sub.flags, alloc);
-			p.AddMember("pipelineBindPoint", sub.pipelineBindPoint, alloc);
-
-			if (sub.pPreserveAttachments)
-			{
-				Value preserves(kArrayType);
-				for (uint32_t j = 0; j < sub.preserveAttachmentCount; j++)
-					preserves.PushBack(sub.pPreserveAttachments[j], alloc);
-				p.AddMember("preserveAttachments", preserves, alloc);
-			}
-
-			if (sub.pInputAttachments)
-			{
-				Value inputs(kArrayType);
-				for (uint32_t j = 0; j < sub.inputAttachmentCount; j++)
-				{
-					Value input(kObjectType);
-					auto &ia = sub.pInputAttachments[j];
-					input.AddMember("attachment", ia.attachment, alloc);
-					input.AddMember("layout", ia.layout, alloc);
-					inputs.PushBack(input, alloc);
-				}
-				p.AddMember("inputAttachments", inputs, alloc);
-			}
-
-			if (sub.pColorAttachments)
-			{
-				Value colors(kArrayType);
-				for (uint32_t j = 0; j < sub.colorAttachmentCount; j++)
-				{
-					Value color(kObjectType);
-					auto &c = sub.pColorAttachments[j];
-					color.AddMember("attachment", c.attachment, alloc);
-					color.AddMember("layout", c.layout, alloc);
-					colors.PushBack(color, alloc);
-				}
-				p.AddMember("colorAttachments", colors, alloc);
-			}
-
-			if (sub.pResolveAttachments)
-			{
-				Value resolves(kArrayType);
-				for (uint32_t j = 0; j < sub.colorAttachmentCount; j++)
-				{
-					Value resolve(kObjectType);
-					auto &r = sub.pResolveAttachments[j];
-					resolve.AddMember("attachment", r.attachment, alloc);
-					resolve.AddMember("layout", r.layout, alloc);
-					resolves.PushBack(resolve, alloc);
-				}
-				p.AddMember("resolveAttachments", resolves, alloc);
-			}
-
-			if (sub.pDepthStencilAttachment)
-			{
-				Value depth_stencil(kObjectType);
-				depth_stencil.AddMember("attachment", sub.pDepthStencilAttachment->attachment, alloc);
-				depth_stencil.AddMember("layout", sub.pDepthStencilAttachment->layout, alloc);
-				p.AddMember("depthStencilAttachment", depth_stencil, alloc);
-			}
-
-			subpasses.PushBack(p, alloc);
-		}
-		p.AddMember("subpasses", subpasses, alloc);
+		auto p = json_value(pass.second, alloc);
 		render_passes.AddMember(uint64_string(pass.first, alloc), p, alloc);
 	}
 	doc.AddMember("renderPasses", render_passes, alloc);
@@ -2475,37 +2791,7 @@ vector<uint8_t> StateRecorder::serialize() const
 	Value compute_pipelines(kObjectType);
 	for (auto &pipe : impl->compute_pipelines)
 	{
-		Value p(kObjectType);
-		p.AddMember("flags", pipe.second.flags, alloc);
-		p.AddMember("layout", uint64_string(api_object_cast<uint64_t>(pipe.second.layout), alloc), alloc);
-		p.AddMember("basePipelineHandle", uint64_string(api_object_cast<uint64_t>(pipe.second.basePipelineHandle), alloc), alloc);
-		p.AddMember("basePipelineIndex", pipe.second.basePipelineIndex, alloc);
-		Value stage(kObjectType);
-		stage.AddMember("flags", pipe.second.stage.flags, alloc);
-		stage.AddMember("stage", pipe.second.stage.stage, alloc);
-		stage.AddMember("module", uint64_string(api_object_cast<uint64_t>(pipe.second.stage.module), alloc), alloc);
-		stage.AddMember("name", StringRef(pipe.second.stage.pName), alloc);
-		if (pipe.second.stage.pSpecializationInfo)
-		{
-			Value spec(kObjectType);
-			spec.AddMember("dataSize", pipe.second.stage.pSpecializationInfo->dataSize, alloc);
-			spec.AddMember("data",
-			               encode_base64(pipe.second.stage.pSpecializationInfo->pData,
-			                             pipe.second.stage.pSpecializationInfo->dataSize), alloc);
-			Value map_entries(kArrayType);
-			for (uint32_t i = 0; i < pipe.second.stage.pSpecializationInfo->mapEntryCount; i++)
-			{
-				auto &e = pipe.second.stage.pSpecializationInfo->pMapEntries[i];
-				Value map_entry(kObjectType);
-				map_entry.AddMember("offset", e.offset, alloc);
-				map_entry.AddMember("size", e.size, alloc);
-				map_entry.AddMember("constantID", e.constantID, alloc);
-				map_entries.PushBack(map_entry, alloc);
-			}
-			spec.AddMember("mapEntries", map_entries, alloc);
-			stage.AddMember("specializationInfo", spec, alloc);
-		}
-		p.AddMember("stage", stage, alloc);
+		auto p = json_value(pipe.second, alloc);
 		compute_pipelines.AddMember(uint64_string(pipe.first, alloc), p, alloc);
 	}
 	doc.AddMember("computePipelines", compute_pipelines, alloc);
@@ -2513,247 +2799,7 @@ vector<uint8_t> StateRecorder::serialize() const
 	Value graphics_pipelines(kObjectType);
 	for (auto &pipe : impl->graphics_pipelines)
 	{
-		Value p(kObjectType);
-		p.AddMember("flags", pipe.second.flags, alloc);
-		p.AddMember("basePipelineHandle", uint64_string(api_object_cast<uint64_t>(pipe.second.basePipelineHandle), alloc), alloc);
-		p.AddMember("basePipelineIndex", pipe.second.basePipelineIndex, alloc);
-		p.AddMember("layout", uint64_string(api_object_cast<uint64_t>(pipe.second.layout), alloc), alloc);
-		p.AddMember("renderPass", uint64_string(api_object_cast<uint64_t>(pipe.second.renderPass), alloc), alloc);
-		p.AddMember("subpass", pipe.second.subpass, alloc);
-
-		if (pipe.second.pTessellationState)
-		{
-			Value tess(kObjectType);
-			tess.AddMember("flags", pipe.second.pTessellationState->flags, alloc);
-			tess.AddMember("patchControlPoints", pipe.second.pTessellationState->patchControlPoints, alloc);
-			p.AddMember("tessellationState", tess, alloc);
-		}
-
-		if (pipe.second.pDynamicState)
-		{
-			Value dyn(kObjectType);
-			dyn.AddMember("flags", pipe.second.pDynamicState->flags, alloc);
-			Value dynamics(kArrayType);
-			for (uint32_t i = 0; i < pipe.second.pDynamicState->dynamicStateCount; i++)
-				dynamics.PushBack(pipe.second.pDynamicState->pDynamicStates[i], alloc);
-			dyn.AddMember("dynamicState", dynamics, alloc);
-			p.AddMember("dynamicState", dyn, alloc);
-		}
-
-		if (pipe.second.pMultisampleState)
-		{
-			Value ms(kObjectType);
-			ms.AddMember("flags", pipe.second.pMultisampleState->flags, alloc);
-			ms.AddMember("rasterizationSamples", pipe.second.pMultisampleState->rasterizationSamples, alloc);
-			ms.AddMember("sampleShadingEnable", pipe.second.pMultisampleState->sampleShadingEnable, alloc);
-			ms.AddMember("minSampleShading", pipe.second.pMultisampleState->minSampleShading, alloc);
-			ms.AddMember("alphaToOneEnable", pipe.second.pMultisampleState->alphaToOneEnable, alloc);
-			ms.AddMember("alphaToCoverageEnable", pipe.second.pMultisampleState->alphaToCoverageEnable, alloc);
-
-			Value sm(kArrayType);
-			if (pipe.second.pMultisampleState->pSampleMask)
-			{
-				auto entries = uint32_t(pipe.second.pMultisampleState->rasterizationSamples + 31) / 32;
-				for (uint32_t i = 0; i < entries; i++)
-					sm.PushBack(pipe.second.pMultisampleState->pSampleMask[i], alloc);
-				ms.AddMember("sampleMask", sm, alloc);
-			}
-
-			p.AddMember("multisampleState", ms, alloc);
-		}
-
-		if (pipe.second.pVertexInputState)
-		{
-			Value vi(kObjectType);
-
-			Value attribs(kArrayType);
-			Value bindings(kArrayType);
-			vi.AddMember("flags", pipe.second.pVertexInputState->flags, alloc);
-
-			for (uint32_t i = 0; i < pipe.second.pVertexInputState->vertexAttributeDescriptionCount; i++)
-			{
-				auto &a = pipe.second.pVertexInputState->pVertexAttributeDescriptions[i];
-				Value attrib(kObjectType);
-				attrib.AddMember("location", a.location, alloc);
-				attrib.AddMember("binding", a.binding, alloc);
-				attrib.AddMember("offset", a.offset, alloc);
-				attrib.AddMember("format", a.format, alloc);
-				attribs.PushBack(attrib, alloc);
-			}
-
-			for (uint32_t i = 0; i < pipe.second.pVertexInputState->vertexBindingDescriptionCount; i++)
-			{
-				auto &b = pipe.second.pVertexInputState->pVertexBindingDescriptions[i];
-				Value binding(kObjectType);
-				binding.AddMember("binding", b.binding, alloc);
-				binding.AddMember("stride", b.stride, alloc);
-				binding.AddMember("inputRate", b.inputRate, alloc);
-				bindings.PushBack(binding, alloc);
-			}
-			vi.AddMember("attributes", attribs, alloc);
-			vi.AddMember("bindings", bindings, alloc);
-
-			p.AddMember("vertexInputState", vi, alloc);
-		}
-
-		if (pipe.second.pRasterizationState)
-		{
-			Value rs(kObjectType);
-			rs.AddMember("flags", pipe.second.pRasterizationState->flags, alloc);
-			rs.AddMember("depthBiasConstantFactor", pipe.second.pRasterizationState->depthBiasConstantFactor, alloc);
-			rs.AddMember("depthBiasSlopeFactor", pipe.second.pRasterizationState->depthBiasSlopeFactor, alloc);
-			rs.AddMember("depthBiasClamp", pipe.second.pRasterizationState->depthBiasClamp, alloc);
-			rs.AddMember("depthBiasEnable", pipe.second.pRasterizationState->depthBiasEnable, alloc);
-			rs.AddMember("depthClampEnable", pipe.second.pRasterizationState->depthClampEnable, alloc);
-			rs.AddMember("polygonMode", pipe.second.pRasterizationState->polygonMode, alloc);
-			rs.AddMember("rasterizerDiscardEnable", pipe.second.pRasterizationState->rasterizerDiscardEnable, alloc);
-			rs.AddMember("frontFace", pipe.second.pRasterizationState->frontFace, alloc);
-			rs.AddMember("lineWidth", pipe.second.pRasterizationState->lineWidth, alloc);
-			rs.AddMember("cullMode", pipe.second.pRasterizationState->cullMode, alloc);
-			p.AddMember("rasterizationState", rs, alloc);
-		}
-
-		if (pipe.second.pInputAssemblyState)
-		{
-			Value ia(kObjectType);
-			ia.AddMember("flags", pipe.second.pInputAssemblyState->flags, alloc);
-			ia.AddMember("topology", pipe.second.pInputAssemblyState->topology, alloc);
-			ia.AddMember("primitiveRestartEnable", pipe.second.pInputAssemblyState->primitiveRestartEnable, alloc);
-			p.AddMember("inputAssemblyState", ia, alloc);
-		}
-
-		if (pipe.second.pColorBlendState)
-		{
-			Value cb(kObjectType);
-			cb.AddMember("flags", pipe.second.pColorBlendState->flags, alloc);
-			cb.AddMember("logicOp", pipe.second.pColorBlendState->logicOp, alloc);
-			cb.AddMember("logicOpEnable", pipe.second.pColorBlendState->logicOpEnable, alloc);
-			Value blend_constants(kArrayType);
-			for (auto &c : pipe.second.pColorBlendState->blendConstants)
-				blend_constants.PushBack(c, alloc);
-			cb.AddMember("blendConstants", blend_constants, alloc);
-			Value attachments(kArrayType);
-			for (uint32_t i = 0; i < pipe.second.pColorBlendState->attachmentCount; i++)
-			{
-				auto &a = pipe.second.pColorBlendState->pAttachments[i];
-				Value att(kObjectType);
-				att.AddMember("dstAlphaBlendFactor", a.dstAlphaBlendFactor, alloc);
-				att.AddMember("srcAlphaBlendFactor", a.srcAlphaBlendFactor, alloc);
-				att.AddMember("dstColorBlendFactor", a.dstColorBlendFactor, alloc);
-				att.AddMember("srcColorBlendFactor", a.srcColorBlendFactor, alloc);
-				att.AddMember("colorWriteMask", a.colorWriteMask, alloc);
-				att.AddMember("alphaBlendOp", a.alphaBlendOp, alloc);
-				att.AddMember("colorBlendOp", a.colorBlendOp, alloc);
-				att.AddMember("blendEnable", a.blendEnable, alloc);
-				attachments.PushBack(att, alloc);
-			}
-			cb.AddMember("attachments", attachments, alloc);
-			p.AddMember("colorBlendState", cb, alloc);
-		}
-
-		if (pipe.second.pViewportState)
-		{
-			Value vp(kObjectType);
-			vp.AddMember("flags", pipe.second.pViewportState->flags, alloc);
-			vp.AddMember("viewportCount", pipe.second.pViewportState->viewportCount, alloc);
-			vp.AddMember("scissorCount", pipe.second.pViewportState->scissorCount, alloc);
-			if (pipe.second.pViewportState->pViewports)
-			{
-				Value viewports(kArrayType);
-				for (uint32_t i = 0; i < pipe.second.pViewportState->viewportCount; i++)
-				{
-					Value viewport(kObjectType);
-					viewport.AddMember("x", pipe.second.pViewportState->pViewports[i].x, alloc);
-					viewport.AddMember("y", pipe.second.pViewportState->pViewports[i].y, alloc);
-					viewport.AddMember("width", pipe.second.pViewportState->pViewports[i].width, alloc);
-					viewport.AddMember("height", pipe.second.pViewportState->pViewports[i].height, alloc);
-					viewport.AddMember("minDepth", pipe.second.pViewportState->pViewports[i].minDepth, alloc);
-					viewport.AddMember("maxDepth", pipe.second.pViewportState->pViewports[i].maxDepth, alloc);
-					viewports.PushBack(viewport, alloc);
-				}
-				vp.AddMember("viewports", viewports, alloc);
-			}
-
-			if (pipe.second.pViewportState->pScissors)
-			{
-				Value scissors(kArrayType);
-				for (uint32_t i = 0; i < pipe.second.pViewportState->scissorCount; i++)
-				{
-					Value scissor(kObjectType);
-					scissor.AddMember("x", pipe.second.pViewportState->pScissors[i].offset.x, alloc);
-					scissor.AddMember("y", pipe.second.pViewportState->pScissors[i].offset.y, alloc);
-					scissor.AddMember("width", pipe.second.pViewportState->pScissors[i].extent.width, alloc);
-					scissor.AddMember("height", pipe.second.pViewportState->pScissors[i].extent.height, alloc);
-					scissors.PushBack(scissor, alloc);
-				}
-				vp.AddMember("scissors", scissors, alloc);
-			}
-			p.AddMember("viewportState", vp, alloc);
-		}
-
-		if (pipe.second.pDepthStencilState)
-		{
-			Value ds(kObjectType);
-			ds.AddMember("flags", pipe.second.pDepthStencilState->flags, alloc);
-			ds.AddMember("stencilTestEnable", pipe.second.pDepthStencilState->stencilTestEnable, alloc);
-			ds.AddMember("maxDepthBounds", pipe.second.pDepthStencilState->maxDepthBounds, alloc);
-			ds.AddMember("minDepthBounds", pipe.second.pDepthStencilState->minDepthBounds, alloc);
-			ds.AddMember("depthBoundsTestEnable", pipe.second.pDepthStencilState->depthBoundsTestEnable, alloc);
-			ds.AddMember("depthWriteEnable", pipe.second.pDepthStencilState->depthWriteEnable, alloc);
-			ds.AddMember("depthTestEnable", pipe.second.pDepthStencilState->depthTestEnable, alloc);
-			ds.AddMember("depthCompareOp", pipe.second.pDepthStencilState->depthCompareOp, alloc);
-
-			const auto serialize_stencil = [&](Value &v, const VkStencilOpState &state) {
-				v.AddMember("compareOp", state.compareOp, alloc);
-				v.AddMember("writeMask", state.writeMask, alloc);
-				v.AddMember("reference", state.reference, alloc);
-				v.AddMember("compareMask", state.compareMask, alloc);
-				v.AddMember("passOp", state.passOp, alloc);
-				v.AddMember("failOp", state.failOp, alloc);
-				v.AddMember("depthFailOp", state.depthFailOp, alloc);
-			};
-			Value front(kObjectType);
-			Value back(kObjectType);
-			serialize_stencil(front, pipe.second.pDepthStencilState->front);
-			serialize_stencil(back, pipe.second.pDepthStencilState->back);
-			ds.AddMember("front", front, alloc);
-			ds.AddMember("back", back, alloc);
-			p.AddMember("depthStencilState", ds, alloc);
-		}
-
-		Value stages(kArrayType);
-		for (uint32_t i = 0; i < pipe.second.stageCount; i++)
-		{
-			auto &s = pipe.second.pStages[i];
-			Value stage(kObjectType);
-			stage.AddMember("flags", s.flags, alloc);
-			stage.AddMember("name", StringRef(s.pName), alloc);
-			stage.AddMember("module", uint64_string(api_object_cast<uint64_t>(s.module), alloc), alloc);
-			stage.AddMember("stage", s.stage, alloc);
-			if (s.pSpecializationInfo)
-			{
-				Value spec(kObjectType);
-				spec.AddMember("dataSize", s.pSpecializationInfo->dataSize, alloc);
-				spec.AddMember("data",
-				               encode_base64(s.pSpecializationInfo->pData,
-				                             s.pSpecializationInfo->dataSize), alloc);
-				Value map_entries(kArrayType);
-				for (uint32_t i = 0; i < s.pSpecializationInfo->mapEntryCount; i++)
-				{
-					auto &e = s.pSpecializationInfo->pMapEntries[i];
-					Value map_entry(kObjectType);
-					map_entry.AddMember("offset", e.offset, alloc);
-					map_entry.AddMember("size", e.size, alloc);
-					map_entry.AddMember("constantID", e.constantID, alloc);
-					map_entries.PushBack(map_entry, alloc);
-				}
-				spec.AddMember("mapEntries", map_entries, alloc);
-				stage.AddMember("specializationInfo", spec, alloc);
-			}
-			stages.PushBack(stage, alloc);
-		}
-		p.AddMember("stages", stages, alloc);
-
+		auto p = json_value(pipe.second, alloc);
 		graphics_pipelines.AddMember(uint64_string(pipe.first, alloc), p, alloc);
 	}
 	doc.AddMember("graphicsPipelines", graphics_pipelines, alloc);
