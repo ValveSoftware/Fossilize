@@ -27,6 +27,7 @@
 #include "logging.hpp"
 #include "file.hpp"
 
+#include <cinttypes>
 #include <string>
 #include <unordered_set>
 #include <stdlib.h>
@@ -58,73 +59,73 @@ struct DumbReplayer : StateCreatorInterface
 		if (pipeline_cache)
 			vkDestroyPipelineCache(device.get_device(), pipeline_cache, nullptr);
 		for (auto &sampler : samplers)
-			if (sampler)
-				vkDestroySampler(device.get_device(), sampler, nullptr);
+			if (sampler.second)
+				vkDestroySampler(device.get_device(), sampler.second, nullptr);
 		for (auto &layout : layouts)
-			if (layout)
-				vkDestroyDescriptorSetLayout(device.get_device(), layout, nullptr);
+			if (layout.second)
+				vkDestroyDescriptorSetLayout(device.get_device(), layout.second, nullptr);
 		for (auto &pipeline_layout : pipeline_layouts)
-			if (pipeline_layout)
-				vkDestroyPipelineLayout(device.get_device(), pipeline_layout, nullptr);
+			if (pipeline_layout.second)
+				vkDestroyPipelineLayout(device.get_device(), pipeline_layout.second, nullptr);
 		for (auto &shader_module : shader_modules)
-			if (shader_module)
-				vkDestroyShaderModule(device.get_device(), shader_module, nullptr);
+			if (shader_module.second)
+				vkDestroyShaderModule(device.get_device(), shader_module.second, nullptr);
 		for (auto &render_pass : render_passes)
-			if (render_pass)
-				vkDestroyRenderPass(device.get_device(), render_pass, nullptr);
+			if (render_pass.second)
+				vkDestroyRenderPass(device.get_device(), render_pass.second, nullptr);
 		for (auto &pipeline : compute_pipelines)
-			if (pipeline)
-				vkDestroyPipeline(device.get_device(), pipeline, nullptr);
+			if (pipeline.second)
+				vkDestroyPipeline(device.get_device(), pipeline.second, nullptr);
 		for (auto &pipeline : graphics_pipelines)
-			if (pipeline)
-				vkDestroyPipeline(device.get_device(), pipeline, nullptr);
+			if (pipeline.second)
+				vkDestroyPipeline(device.get_device(), pipeline.second, nullptr);
 	}
 
 	bool set_num_samplers(unsigned count) override
 	{
-		samplers.resize(count);
+		samplers.reserve(count);
 		return true;
 	}
 
 	bool set_num_descriptor_set_layouts(unsigned count) override
 	{
-		layouts.resize(count);
+		layouts.reserve(count);
 		return true;
 	}
 
 	bool set_num_pipeline_layouts(unsigned count) override
 	{
-		pipeline_layouts.resize(count);
+		pipeline_layouts.reserve(count);
 		return true;
 	}
 
 	bool set_num_shader_modules(unsigned count) override
 	{
-		shader_modules.resize(count);
+		shader_modules.reserve(count);
 		return true;
 	}
 
 	bool set_num_render_passes(unsigned count) override
 	{
-		render_passes.resize(count);
+		render_passes.reserve(count);
 		return true;
 	}
 
 	bool set_num_compute_pipelines(unsigned count) override
 	{
-		compute_pipelines.resize(count);
+		compute_pipelines.reserve(count);
 		return true;
 	}
 
 	bool set_num_graphics_pipelines(unsigned count) override
 	{
-		graphics_pipelines.resize(count);
+		graphics_pipelines.reserve(count);
 		return true;
 	}
 
-	bool enqueue_create_sampler(Hash, unsigned index, const VkSamplerCreateInfo *create_info, VkSampler *sampler) override
+	bool enqueue_create_sampler(Hash index, const VkSamplerCreateInfo *create_info, VkSampler *sampler) override
 	{
-		LOGI("Creating sampler #%u\n", index);
+		LOGI("Creating sampler %0" PRIX64 "\n", index);
 		if (vkCreateSampler(device.get_device(), create_info, nullptr, sampler) != VK_SUCCESS)
 		{
 			LOGE(" ... Failed!\n");
@@ -135,9 +136,9 @@ struct DumbReplayer : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_descriptor_set_layout(Hash, unsigned index, const VkDescriptorSetLayoutCreateInfo *create_info, VkDescriptorSetLayout *layout) override
+	bool enqueue_create_descriptor_set_layout(Hash index, const VkDescriptorSetLayoutCreateInfo *create_info, VkDescriptorSetLayout *layout) override
 	{
-		LOGI("Creating descriptor set layout #%u\n", index);
+		LOGI("Creating descriptor set layout %0" PRIX64 "\n", index);
 		if (vkCreateDescriptorSetLayout(device.get_device(), create_info, nullptr, layout) != VK_SUCCESS)
 		{
 			LOGE(" ... Failed!\n");
@@ -148,9 +149,9 @@ struct DumbReplayer : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_pipeline_layout(Hash, unsigned index, const VkPipelineLayoutCreateInfo *create_info, VkPipelineLayout *layout) override
+	bool enqueue_create_pipeline_layout(Hash index, const VkPipelineLayoutCreateInfo *create_info, VkPipelineLayout *layout) override
 	{
-		LOGI("Creating pipeline layout #%u\n", index);
+		LOGI("Creating pipeline layout %0" PRIX64 "\n", index);
 		if (vkCreatePipelineLayout(device.get_device(), create_info, nullptr, layout) != VK_SUCCESS)
 		{
 			LOGE(" ... Failed!\n");
@@ -161,9 +162,9 @@ struct DumbReplayer : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_shader_module(Hash, unsigned index, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module) override
+	bool enqueue_create_shader_module(Hash index, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module) override
 	{
-		LOGI("Creating shader module #%u\n", index);
+		LOGI("Creating shader module %0" PRIX64 "\n", index);
 		if (vkCreateShaderModule(device.get_device(), create_info, nullptr, module) != VK_SUCCESS)
 		{
 			LOGE(" ... Failed!\n");
@@ -174,9 +175,9 @@ struct DumbReplayer : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_render_pass(Hash, unsigned index, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass) override
+	bool enqueue_create_render_pass(Hash index, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass) override
 	{
-		LOGI("Creating render pass #%u\n", index);
+		LOGI("Creating render pass %0" PRIX64 "\n", index);
 		if (vkCreateRenderPass(device.get_device(), create_info, nullptr, render_pass) != VK_SUCCESS)
 		{
 			LOGE(" ... Failed!\n");
@@ -187,11 +188,11 @@ struct DumbReplayer : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_compute_pipeline(Hash, unsigned index, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) override
+	bool enqueue_create_compute_pipeline(Hash index, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
 		if ((filter_compute.empty() && filter_graphics.empty()) || filter_compute.count(index))
 		{
-			LOGI("Creating compute pipeline #%u\n", index);
+			LOGI("Creating compute pipeline %0" PRIX64 "\n", index);
 			if (vkCreateComputePipelines(device.get_device(), pipeline_cache, 1, create_info, nullptr, pipeline) !=
 			    VK_SUCCESS)
 			{
@@ -207,11 +208,11 @@ struct DumbReplayer : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_graphics_pipeline(Hash, unsigned index, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline) override
+	bool enqueue_create_graphics_pipeline(Hash index, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
 		if ((filter_graphics.empty() && filter_compute.empty()) || filter_graphics.count(index))
 		{
-			LOGI("Creating graphics pipeline #%u\n", index);
+			LOGI("Creating graphics pipeline %0" PRIX64 "\n", index);
 			if (vkCreateGraphicsPipelines(device.get_device(), pipeline_cache, 1, create_info, nullptr, pipeline) !=
 			    VK_SUCCESS)
 			{
@@ -231,13 +232,13 @@ struct DumbReplayer : StateCreatorInterface
 	const unordered_set<unsigned> &filter_graphics;
 	const unordered_set<unsigned> &filter_compute;
 
-	vector<VkSampler> samplers;
-	vector<VkDescriptorSetLayout> layouts;
-	vector<VkPipelineLayout> pipeline_layouts;
-	vector<VkShaderModule> shader_modules;
-	vector<VkRenderPass> render_passes;
-	vector<VkPipeline> compute_pipelines;
-	vector<VkPipeline> graphics_pipelines;
+	std::unordered_map<Hash, VkSampler> samplers;
+	std::unordered_map<Hash, VkDescriptorSetLayout> layouts;
+	std::unordered_map<Hash, VkPipelineLayout> pipeline_layouts;
+	std::unordered_map<Hash, VkShaderModule> shader_modules;
+	std::unordered_map<Hash, VkRenderPass> render_passes;
+	std::unordered_map<Hash, VkPipeline> compute_pipelines;
+	std::unordered_map<Hash, VkPipeline> graphics_pipelines;
 	VkPipelineCache pipeline_cache = VK_NULL_HANDLE;
 };
 

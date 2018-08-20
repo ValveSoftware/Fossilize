@@ -113,13 +113,13 @@ public:
 	virtual bool set_num_compute_pipelines(unsigned /*count*/) { return true; }
 	virtual bool set_num_graphics_pipelines(unsigned /*count*/) { return true; }
 
-	virtual bool enqueue_create_sampler(Hash hash, unsigned index, const VkSamplerCreateInfo *create_info, VkSampler *sampler) = 0;
-	virtual bool enqueue_create_descriptor_set_layout(Hash hash, unsigned index, const VkDescriptorSetLayoutCreateInfo *create_info, VkDescriptorSetLayout *layout) = 0;
-	virtual bool enqueue_create_pipeline_layout(Hash hash, unsigned index, const VkPipelineLayoutCreateInfo *create_info, VkPipelineLayout *layout) = 0;
-	virtual bool enqueue_create_shader_module(Hash hash, unsigned index, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module) = 0;
-	virtual bool enqueue_create_render_pass(Hash hash, unsigned index, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass) = 0;
-	virtual bool enqueue_create_compute_pipeline(Hash hash, unsigned index, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) = 0;
-	virtual bool enqueue_create_graphics_pipeline(Hash hash, unsigned index, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline) = 0;
+	virtual bool enqueue_create_sampler(Hash index, const VkSamplerCreateInfo *create_info, VkSampler *sampler) = 0;
+	virtual bool enqueue_create_descriptor_set_layout(Hash index, const VkDescriptorSetLayoutCreateInfo *create_info, VkDescriptorSetLayout *layout) = 0;
+	virtual bool enqueue_create_pipeline_layout(Hash index, const VkPipelineLayoutCreateInfo *create_info, VkPipelineLayout *layout) = 0;
+	virtual bool enqueue_create_shader_module(Hash index, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module) = 0;
+	virtual bool enqueue_create_render_pass(Hash index, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass) = 0;
+	virtual bool enqueue_create_compute_pipeline(Hash index, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) = 0;
+	virtual bool enqueue_create_graphics_pipeline(Hash index, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline) = 0;
 	virtual void wait_enqueue() {}
 };
 
@@ -146,21 +146,21 @@ public:
 	// TODO: create_device which can capture which features/exts are used to create the device.
 	// This can be relevant when using more exotic features.
 
-	unsigned register_descriptor_set_layout(Hash hash, const VkDescriptorSetLayoutCreateInfo &layout_info);
-	unsigned register_pipeline_layout(Hash hash, const VkPipelineLayoutCreateInfo &layout_info);
-	unsigned register_shader_module(Hash hash, const VkShaderModuleCreateInfo &create_info);
-	unsigned register_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo &create_info);
-	unsigned register_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo &create_info);
-	unsigned register_render_pass(Hash hash, const VkRenderPassCreateInfo &create_info);
-	unsigned register_sampler(Hash hash, const VkSamplerCreateInfo &create_info);
+	Hash register_descriptor_set_layout(Hash hash, const VkDescriptorSetLayoutCreateInfo &layout_info);
+	Hash register_pipeline_layout(Hash hash, const VkPipelineLayoutCreateInfo &layout_info);
+	Hash register_shader_module(Hash hash, const VkShaderModuleCreateInfo &create_info);
+	Hash register_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo &create_info);
+	Hash register_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo &create_info);
+	Hash register_render_pass(Hash hash, const VkRenderPassCreateInfo &create_info);
+	Hash register_sampler(Hash hash, const VkSamplerCreateInfo &create_info);
 
-	void set_descriptor_set_layout_handle(unsigned index, VkDescriptorSetLayout layout);
-	void set_pipeline_layout_handle(unsigned index, VkPipelineLayout layout);
-	void set_shader_module_handle(unsigned index, VkShaderModule module);
-	void set_graphics_pipeline_handle(unsigned index, VkPipeline pipeline);
-	void set_compute_pipeline_handle(unsigned index, VkPipeline pipeline);
-	void set_render_pass_handle(unsigned index, VkRenderPass render_pass);
-	void set_sampler_handle(unsigned index, VkSampler sampler);
+	void set_descriptor_set_layout_handle(Hash index, VkDescriptorSetLayout layout);
+	void set_pipeline_layout_handle(Hash index, VkPipelineLayout layout);
+	void set_shader_module_handle(Hash index, VkShaderModule module);
+	void set_graphics_pipeline_handle(Hash index, VkPipeline pipeline);
+	void set_compute_pipeline_handle(Hash index, VkPipeline pipeline);
+	void set_render_pass_handle(Hash index, VkRenderPass render_pass);
+	void set_sampler_handle(Hash index, VkSampler sampler);
 
 	Hash get_hash_for_descriptor_set_layout(VkDescriptorSetLayout layout) const;
 	Hash get_hash_for_pipeline_layout(VkPipelineLayout layout) const;

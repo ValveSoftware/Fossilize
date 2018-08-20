@@ -133,7 +133,7 @@ struct DisasmReplayer : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_sampler(Hash, unsigned index, const VkSamplerCreateInfo *create_info, VkSampler *sampler) override
+	bool enqueue_create_sampler(Hash index, const VkSamplerCreateInfo *create_info, VkSampler *sampler) override
 	{
 		if (device)
 		{
@@ -154,7 +154,7 @@ struct DisasmReplayer : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_descriptor_set_layout(Hash, unsigned index, const VkDescriptorSetLayoutCreateInfo *create_info, VkDescriptorSetLayout *layout) override
+	bool enqueue_create_descriptor_set_layout(Hash index, const VkDescriptorSetLayoutCreateInfo *create_info, VkDescriptorSetLayout *layout) override
 	{
 		if (device)
 		{
@@ -175,7 +175,7 @@ struct DisasmReplayer : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_pipeline_layout(Hash, unsigned index, const VkPipelineLayoutCreateInfo *create_info, VkPipelineLayout *layout) override
+	bool enqueue_create_pipeline_layout(Hash index, const VkPipelineLayoutCreateInfo *create_info, VkPipelineLayout *layout) override
 	{
 		if (device)
 		{
@@ -196,7 +196,7 @@ struct DisasmReplayer : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_shader_module(Hash, unsigned index, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module) override
+	bool enqueue_create_shader_module(Hash index, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module) override
 	{
 		if (device)
 		{
@@ -217,7 +217,7 @@ struct DisasmReplayer : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_render_pass(Hash, unsigned index, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass) override
+	bool enqueue_create_render_pass(Hash index, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass) override
 	{
 		if (device)
 		{
@@ -238,7 +238,7 @@ struct DisasmReplayer : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_compute_pipeline(Hash, unsigned index, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) override
+	bool enqueue_create_compute_pipeline(Hash index, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
 		if (device)
 		{
@@ -260,7 +260,7 @@ struct DisasmReplayer : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_graphics_pipeline(Hash, unsigned index, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline) override
+	bool enqueue_create_graphics_pipeline(Hash index, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
 		if (device)
 		{

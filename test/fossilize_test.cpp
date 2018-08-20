@@ -37,85 +37,85 @@ struct ReplayInterface : StateCreatorInterface
 {
 	StateRecorder recorder;
 
-	bool enqueue_create_sampler(Hash hash, unsigned, const VkSamplerCreateInfo *create_info, VkSampler *sampler) override
+	bool enqueue_create_sampler(Hash hash, const VkSamplerCreateInfo *create_info, VkSampler *sampler) override
 	{
 		Hash recorded_hash = Hashing::compute_hash_sampler(recorder, *create_info);
 		if (recorded_hash != hash)
 			return false;
 
-		unsigned sampler_index = recorder.register_sampler(hash, *create_info);
+		Hash sampler_index = recorder.register_sampler(hash, *create_info);
 		*sampler = fake_handle<VkSampler>(sampler_index + 1000);
 		recorder.set_sampler_handle(sampler_index, *sampler);
 		return true;
 	}
 
-	bool enqueue_create_descriptor_set_layout(Hash hash, unsigned, const VkDescriptorSetLayoutCreateInfo *create_info, VkDescriptorSetLayout *layout) override
+	bool enqueue_create_descriptor_set_layout(Hash hash, const VkDescriptorSetLayoutCreateInfo *create_info, VkDescriptorSetLayout *layout) override
 	{
 		Hash recorded_hash = Hashing::compute_hash_descriptor_set_layout(recorder, *create_info);
 		if (recorded_hash != hash)
 			return false;
 
-		unsigned set_index = recorder.register_descriptor_set_layout(hash, *create_info);
+		Hash set_index = recorder.register_descriptor_set_layout(hash, *create_info);
 		*layout = fake_handle<VkDescriptorSetLayout>(set_index + 10000);
 		recorder.set_descriptor_set_layout_handle(set_index, *layout);
 		return true;
 	}
 
-	bool enqueue_create_pipeline_layout(Hash hash, unsigned, const VkPipelineLayoutCreateInfo *create_info, VkPipelineLayout *layout) override
+	bool enqueue_create_pipeline_layout(Hash hash, const VkPipelineLayoutCreateInfo *create_info, VkPipelineLayout *layout) override
 	{
 		Hash recorded_hash = Hashing::compute_hash_pipeline_layout(recorder, *create_info);
 		if (recorded_hash != hash)
 			return false;
 
-		unsigned layout_index = recorder.register_pipeline_layout(hash, *create_info);
+		Hash layout_index = recorder.register_pipeline_layout(hash, *create_info);
 		*layout = fake_handle<VkPipelineLayout>(layout_index + 10000);
 		recorder.set_pipeline_layout_handle(layout_index, *layout);
 		return true;
 	}
 
-	bool enqueue_create_shader_module(Hash hash, unsigned, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module) override
+	bool enqueue_create_shader_module(Hash hash, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module) override
 	{
 		Hash recorded_hash = Hashing::compute_hash_shader_module(recorder, *create_info);
 		if (recorded_hash != hash)
 			return false;
 
-		unsigned module_index = recorder.register_shader_module(hash, *create_info);
+		Hash module_index = recorder.register_shader_module(hash, *create_info);
 		*module = fake_handle<VkShaderModule>(module_index + 20000);
 		recorder.set_shader_module_handle(module_index, *module);
 		return true;
 	}
 
-	bool enqueue_create_render_pass(Hash hash, unsigned, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass) override
+	bool enqueue_create_render_pass(Hash hash, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass) override
 	{
 		Hash recorded_hash = Hashing::compute_hash_render_pass(recorder, *create_info);
 		if (recorded_hash != hash)
 			return false;
 
-		unsigned pass_index = recorder.register_render_pass(hash, *create_info);
+		Hash pass_index = recorder.register_render_pass(hash, *create_info);
 		*render_pass = fake_handle<VkRenderPass>(pass_index + 40000);
 		recorder.set_render_pass_handle(pass_index, *render_pass);
 		return true;
 	}
 
-	bool enqueue_create_compute_pipeline(Hash hash, unsigned, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) override
+	bool enqueue_create_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
 		Hash recorded_hash = Hashing::compute_hash_compute_pipeline(recorder, *create_info);
 		if (recorded_hash != hash)
 			return false;
 
-		unsigned pipe_index = recorder.register_compute_pipeline(hash, *create_info);
+		Hash pipe_index = recorder.register_compute_pipeline(hash, *create_info);
 		*pipeline = fake_handle<VkPipeline>(pipe_index + 40000);
 		recorder.set_compute_pipeline_handle(pipe_index, *pipeline);
 		return true;
 	}
 
-	bool enqueue_create_graphics_pipeline(Hash hash, unsigned, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline) override
+	bool enqueue_create_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
 		Hash recorded_hash = Hashing::compute_hash_graphics_pipeline(recorder, *create_info);
 		if (recorded_hash != hash)
 			return false;
 
-		unsigned pipe_index = recorder.register_graphics_pipeline(hash, *create_info);
+		Hash pipe_index = recorder.register_graphics_pipeline(hash, *create_info);
 		*pipeline = fake_handle<VkPipeline>(pipe_index + 600000);
 		recorder.set_graphics_pipeline_handle(pipe_index, *pipeline);
 		return true;
@@ -140,7 +140,7 @@ static void record_samplers(StateRecorder &recorder)
 	sampler.magFilter = VK_FILTER_NEAREST;
 	sampler.minLod = 10.0f;
 	sampler.maxLod = 20.0f;
-	unsigned index = recorder.register_sampler(Hashing::compute_hash_sampler(recorder, sampler), sampler);
+	Hash index = recorder.register_sampler(Hashing::compute_hash_sampler(recorder, sampler), sampler);
 	recorder.set_sampler_handle(index, fake_handle<VkSampler>(100));
 	sampler.minLod = 11.0f;
 	index = recorder.register_sampler(Hashing::compute_hash_sampler(recorder, sampler), sampler);
@@ -173,7 +173,7 @@ static void record_set_layouts(StateRecorder &recorder)
 	bindings[2].descriptorCount = 3;
 	bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 	bindings[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-	unsigned index = recorder.register_descriptor_set_layout(Hashing::compute_hash_descriptor_set_layout(recorder, layout), layout);
+	Hash index = recorder.register_descriptor_set_layout(Hashing::compute_hash_descriptor_set_layout(recorder, layout), layout);
 	recorder.set_descriptor_set_layout_handle(index, fake_handle<VkDescriptorSetLayout>(1000));
 
 	layout.bindingCount = 2;
@@ -203,7 +203,7 @@ static void record_pipeline_layouts(StateRecorder &recorder)
 	};
 	layout.pushConstantRangeCount = 2;
 	layout.pPushConstantRanges = ranges;
-	unsigned index = recorder.register_pipeline_layout(Hashing::compute_hash_pipeline_layout(recorder, layout), layout);
+	Hash index = recorder.register_pipeline_layout(Hashing::compute_hash_pipeline_layout(recorder, layout), layout);
 	recorder.set_pipeline_layout_handle(index, fake_handle<VkPipelineLayout>(10000));
 
 	VkPipelineLayoutCreateInfo layout2 = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
@@ -224,7 +224,7 @@ static void record_shader_modules(StateRecorder &recorder)
 	info.pCode = code;
 	info.codeSize = sizeof(code);
 
-	unsigned index = recorder.register_shader_module(Hashing::compute_hash_shader_module(recorder, info), info);
+	Hash index = recorder.register_shader_module(Hashing::compute_hash_shader_module(recorder, info), info);
 	recorder.set_shader_module_handle(index, fake_handle<VkShaderModule>(5000));
 
 	static const uint32_t code2[] = { 0xabba1337, 0xbabba100, 0xdeadbeef, 0xcafebabe };
@@ -292,7 +292,7 @@ static void record_render_passes(StateRecorder &recorder)
 	pass.pSubpasses = subpasses;
 	pass.dependencyCount = 0;
 	pass.pDependencies = deps;
-	unsigned index = recorder.register_render_pass(Hashing::compute_hash_render_pass(recorder, pass), pass);
+	Hash index = recorder.register_render_pass(Hashing::compute_hash_render_pass(recorder, pass), pass);
 	recorder.set_render_pass_handle(index, fake_handle<VkRenderPass>(30000));
 
 	pass.dependencyCount = 0;
@@ -321,10 +321,10 @@ static void record_compute_pipelines(StateRecorder &recorder)
 	pipe.stage.pSpecializationInfo = &spec;
 	pipe.layout = fake_handle<VkPipelineLayout>(10001);
 
-	unsigned index = recorder.register_compute_pipeline(Hashing::compute_hash_compute_pipeline(recorder, pipe), pipe);
+	Hash index = recorder.register_compute_pipeline(Hashing::compute_hash_compute_pipeline(recorder, pipe), pipe);
 	recorder.set_compute_pipeline_handle(index, fake_handle<VkPipeline>(80000));
 
-	pipe.basePipelineHandle = fake_handle<VkPipeline>(80000);
+	//pipe.basePipelineHandle = fake_handle<VkPipeline>(80000);
 	pipe.basePipelineIndex = 10;
 	pipe.stage.pSpecializationInfo = nullptr;
 	index = recorder.register_compute_pipeline(Hashing::compute_hash_compute_pipeline(recorder, pipe), pipe);
@@ -481,7 +481,7 @@ static void record_graphics_pipelines(StateRecorder &recorder)
 	pipe.pRasterizationState = &rs;
 	pipe.pInputAssemblyState = &ia;
 
-	unsigned index = recorder.register_graphics_pipeline(Hashing::compute_hash_graphics_pipeline(recorder, pipe), pipe);
+	Hash index = recorder.register_graphics_pipeline(Hashing::compute_hash_graphics_pipeline(recorder, pipe), pipe);
 	recorder.set_graphics_pipeline_handle(index, fake_handle<VkPipeline>(100000));
 
 	vp.viewportCount = 0;

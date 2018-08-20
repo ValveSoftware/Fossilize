@@ -39,31 +39,31 @@ struct OptimizeReplayer : StateCreatorInterface
 {
 	StateRecorder recorder;
 
-	bool enqueue_create_sampler(Hash hash, unsigned index, const VkSamplerCreateInfo *create_info, VkSampler *sampler) override
+	bool enqueue_create_sampler(Hash hash, const VkSamplerCreateInfo *create_info, VkSampler *sampler) override
 	{
-		unsigned record_index = recorder.register_sampler(hash, *create_info);
-		*sampler = fake_handle<VkSampler>(index + 1);
+		Hash record_index = recorder.register_sampler(hash, *create_info);
+		*sampler = fake_handle<VkSampler>(hash);
 		recorder.set_sampler_handle(record_index, *sampler);
 		return true;
 	}
 
-	bool enqueue_create_descriptor_set_layout(Hash hash, unsigned index, const VkDescriptorSetLayoutCreateInfo *create_info, VkDescriptorSetLayout *layout) override
+	bool enqueue_create_descriptor_set_layout(Hash hash, const VkDescriptorSetLayoutCreateInfo *create_info, VkDescriptorSetLayout *layout) override
 	{
-		unsigned record_index = recorder.register_descriptor_set_layout(hash, *create_info);
-		*layout = fake_handle<VkDescriptorSetLayout>(index + 1);
+		Hash record_index = recorder.register_descriptor_set_layout(hash, *create_info);
+		*layout = fake_handle<VkDescriptorSetLayout>(hash);
 		recorder.set_descriptor_set_layout_handle(record_index, *layout);
 		return true;
 	}
 
-	bool enqueue_create_pipeline_layout(Hash hash, unsigned index, const VkPipelineLayoutCreateInfo *create_info, VkPipelineLayout *layout) override
+	bool enqueue_create_pipeline_layout(Hash hash, const VkPipelineLayoutCreateInfo *create_info, VkPipelineLayout *layout) override
 	{
-		unsigned record_index = recorder.register_pipeline_layout(hash, *create_info);
-		*layout = fake_handle<VkPipelineLayout>(index + 1);
+		Hash record_index = recorder.register_pipeline_layout(hash, *create_info);
+		*layout = fake_handle<VkPipelineLayout>(hash);
 		recorder.set_pipeline_layout_handle(record_index, *layout);
 		return true;
 	}
 
-	bool enqueue_create_shader_module(Hash hash, unsigned index, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module) override
+	bool enqueue_create_shader_module(Hash hash, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module) override
 	{
 		vector<uint32_t> compiled_spirv;
 		spvtools::Optimizer optimizer(SPV_ENV_VULKAN_1_0);
@@ -74,32 +74,32 @@ struct OptimizeReplayer : StateCreatorInterface
 		info.pCode = compiled_spirv.data();
 		info.codeSize = compiled_spirv.size() * sizeof(uint32_t);
 
-		unsigned record_index = recorder.register_shader_module(hash, info);
-		*module = fake_handle<VkShaderModule>(index + 1);
+		Hash record_index = recorder.register_shader_module(hash, info);
+		*module = fake_handle<VkShaderModule>(hash);
 		recorder.set_shader_module_handle(record_index, *module);
 		return true;
 	}
 
-	bool enqueue_create_render_pass(Hash hash, unsigned index, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass) override
+	bool enqueue_create_render_pass(Hash hash, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass) override
 	{
-		unsigned record_index = recorder.register_render_pass(hash, *create_info);
-		*render_pass = fake_handle<VkRenderPass>(index + 1);
+		Hash record_index = recorder.register_render_pass(hash, *create_info);
+		*render_pass = fake_handle<VkRenderPass>(hash);
 		recorder.set_render_pass_handle(record_index, *render_pass);
 		return true;
 	}
 
-	bool enqueue_create_compute_pipeline(Hash hash, unsigned index, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) override
+	bool enqueue_create_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
-		unsigned record_index = recorder.register_compute_pipeline(hash, *create_info);
-		*pipeline = fake_handle<VkPipeline>(index + 1);
+		Hash record_index = recorder.register_compute_pipeline(hash, *create_info);
+		*pipeline = fake_handle<VkPipeline>(hash);
 		recorder.set_compute_pipeline_handle(record_index, *pipeline);
 		return true;
 	}
 
-	bool enqueue_create_graphics_pipeline(Hash hash, unsigned index, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline) override
+	bool enqueue_create_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
-		unsigned record_index = recorder.register_graphics_pipeline(hash, *create_info);
-		*pipeline = fake_handle<VkPipeline>(index + 1);
+		Hash record_index = recorder.register_graphics_pipeline(hash, *create_info);
+		*pipeline = fake_handle<VkPipeline>(hash);
 		recorder.set_graphics_pipeline_handle(record_index, *pipeline);
 		return true;
 	}

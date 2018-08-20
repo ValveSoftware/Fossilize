@@ -174,7 +174,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(VkDevice device, V
 	for (uint32_t i = 0; i < createInfoCount; i++)
 	{
 		bool registerHandle = false;
-		unsigned index;
+		Hash index;
 		try
 		{
 			index = layer->getRecorder().register_graphics_pipeline(
@@ -219,7 +219,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelines(VkDevice device, Vk
 	for (uint32_t i = 0; i < createInfoCount; i++)
 	{
 		bool registerHandle = false;
-		unsigned index;
+		Hash index;
 		try
 		{
 			index = layer->getRecorder().register_compute_pipeline(
@@ -262,7 +262,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(VkDevice device,
 	auto *layer = getLayerData(key, deviceData);
 
 	bool registerHandle = false;
-	unsigned index;
+	Hash index;
 	try
 	{
 		index = layer->getRecorder().register_pipeline_layout(
@@ -292,7 +292,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(VkDevice device,
 	auto *layer = getLayerData(key, deviceData);
 
 	bool registerHandle = false;
-	unsigned index;
+	Hash index;
 	try
 	{
 		index = layer->getRecorder().register_descriptor_set_layout(
@@ -352,7 +352,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateSampler(VkDevice device, const VkSam
 	auto *layer = getLayerData(key, deviceData);
 
 	bool registerHandle = false;
-	unsigned index;
+	Hash index;
 	try
 	{
 		index = layer->getRecorder().register_sampler(
@@ -381,7 +381,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateShaderModule(VkDevice device, const 
 	auto *layer = getLayerData(key, deviceData);
 
 	bool registerHandle = false;
-	unsigned index;
+	Hash index;
 	try
 	{
 		index = layer->getRecorder().register_shader_module(
@@ -409,7 +409,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass(VkDevice device, const Vk
 	auto *layer = getLayerData(key, deviceData);
 
 	bool registerHandle = false;
-	unsigned index;
+	Hash index;
 	try
 	{
 		index = layer->getRecorder().register_render_pass(
