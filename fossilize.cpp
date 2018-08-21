@@ -147,7 +147,7 @@ struct StateReplayer::Impl
 	void parse_samplers(StateCreatorInterface &iface, const Value &samplers);
 	void parse_descriptor_set_layouts(StateCreatorInterface &iface, const Value &layouts);
 	void parse_pipeline_layouts(StateCreatorInterface &iface, const Value &layouts);
-	void parse_shader_modules(StateCreatorInterface &iface, const Value &modules, const uint8_t *buffer, size_t size);
+	void parse_shader_modules(StateCreatorInterface &iface, const Value &modules);
 	void parse_render_passes(StateCreatorInterface &iface, const Value &passes);
 	void parse_compute_pipelines(StateCreatorInterface &iface, const Value &pipelines);
 	void parse_graphics_pipelines(StateCreatorInterface &iface, const Value &pipelines);
@@ -900,7 +900,7 @@ VkDescriptorSetLayout *StateReplayer::Impl::parse_set_layouts(const Value &layou
 	return ret;
 }
 
-void StateReplayer::Impl::parse_shader_modules(StateCreatorInterface &iface, const Value &modules, const uint8_t *buffer, size_t size)
+void StateReplayer::Impl::parse_shader_modules(StateCreatorInterface &iface, const Value &modules)
 {
 	iface.set_num_shader_modules(modules.MemberCount());
 	replayed_shader_modules.reserve(modules.MemberCount());
@@ -915,16 +915,7 @@ void StateReplayer::Impl::parse_shader_modules(StateCreatorInterface &iface, con
 		info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
 		info.flags = obj["flags"].GetUint();
 		info.codeSize = obj["codeSize"].GetUint64();
-
-		uint64_t code_offset = obj["codeBinaryOffset"].GetUint64();
-		uint64_t code_size = obj["codeBinarySize"].GetUint64();
-		if (code_offset + code_size > size)
-			FOSSILIZE_THROW("Code buffer out of range.");
-		uint32_t *decode_buffer = allocator.allocate_n<uint32_t>(info.codeSize / sizeof(uint32_t));
-		info.pCode = decode_buffer;
-
-		if (!decode_varint(decode_buffer, info.codeSize / sizeof(uint32_t), buffer + code_offset, code_size))
-			FOSSILIZE_THROW("Failed to decode varint buffer.");
+		info.pCode = reinterpret_cast<uint32_t*>(decode_base64(allocator, obj["code"].GetString(), info.codeSize));
 		if (!iface.enqueue_create_shader_module(hash, &info, &replayed_shader_modules[hash]))
 			FOSSILIZE_THROW("Failed to create shader module.");
 	}
@@ -1621,55 +1612,17 @@ void StateReplayer::parse(StateCreatorInterface &iface, const void *buffer, size
 
 void StateReplayer::Impl::parse(StateCreatorInterface &iface, const void *buffer_, size_t size)
 {
-	auto *buffer = static_cast<const uint8_t *>(buffer_);
-	auto *buffer_accum = buffer;
-	if (size < FOSSILIZE_MAGIC_LEN + 2 * sizeof(uint64_t))
-		FOSSILIZE_THROW("Buffer too small.");
-
-	if (memcmp(buffer_accum, FOSSILIZE_MAGIC, FOSSILIZE_MAGIC_LEN) != 0)
-		FOSSILIZE_THROW("Magic invalid.");
-	buffer_accum += FOSSILIZE_MAGIC_LEN;
-
-	uint64_t state_size = 0;
-	memcpy(&state_size, buffer_accum, sizeof(uint64_t));
-	if (state_size != size)
-		FOSSILIZE_THROW("Buffer size mismatch.");
-	buffer_accum += sizeof(uint64_t);
-
-	if (memcmp(buffer_accum, FOSSILIZE_JSON_MAGIC, sizeof(uint64_t)) != 0)
-		FOSSILIZE_THROW("JSON magic mismatch.");
-	buffer_accum += sizeof(uint64_t);
-
-	uint64_t json_size = 0;
-	memcpy(&json_size, buffer_accum, sizeof(uint64_t));
-	buffer_accum += sizeof(uint64_t);
-	if (uint64_t((buffer_accum + json_size) - buffer) > size)
-		FOSSILIZE_THROW("Buffer too small.");
-
 	Document doc;
-	doc.Parse(reinterpret_cast<const char *>(buffer_accum), json_size);
+	doc.Parse(reinterpret_cast<const char *>(buffer_), size);
 
 	if (doc.HasParseError())
 		FOSSILIZE_THROW("JSON parse error.");
-
-	buffer_accum += json_size;
-	if (memcmp(buffer_accum, FOSSILIZE_SPIRV_MAGIC, sizeof(uint64_t)) != 0)
-		FOSSILIZE_THROW("SPIR-V magic mismatch.");
-	buffer_accum += sizeof(uint64_t);
-	uint64_t spirv_size = 0;
-	memcpy(&spirv_size, buffer_accum, sizeof(uint64_t));
-	buffer_accum += sizeof(uint64_t);
-	if (uint64_t((buffer_accum + spirv_size) - buffer) != size)
-		FOSSILIZE_THROW("Buffer size mismatch.");
-
-	if (!doc.HasMember("version"))
-		FOSSILIZE_THROW("JSON does not contain version.");
 
 	if (doc["version"].GetInt() != FOSSILIZE_FORMAT_VERSION)
 		FOSSILIZE_THROW("JSON version mismatches.");
 
 	if (doc.HasMember("shaderModules"))
-		parse_shader_modules(iface, doc["shaderModules"], buffer_accum, spirv_size);
+		parse_shader_modules(iface, doc["shaderModules"]);
 	else
 		iface.set_num_shader_modules(0);
 
@@ -2327,6 +2280,7 @@ static Value json_value(const VkShaderModuleCreateInfo& module, Allocator& alloc
 	Value m(kObjectType);
 	m.AddMember("flags", module.flags, alloc);
 	m.AddMember("codeSize", module.codeSize, alloc);
+	m.AddMember("code", encode_base64(module.pCode, module.codeSize), alloc);
 	return m;
 }
 
@@ -2772,10 +2726,6 @@ vector<uint8_t> StateRecorder::serialize() const
 	for (auto &module : impl->shader_modules)
 	{
 		auto m = json_value(module.second, alloc);
-		m.AddMember("codeBinaryOffset", varint_spirv_offset, alloc);
-		size_t varint_size = compute_size_varint(module.second.pCode, module.second.codeSize / sizeof(uint32_t));
-		m.AddMember("codeBinarySize", varint_size, alloc);
-		varint_spirv_offset += varint_size;
 		shader_modules.AddMember(uint64_string(module.first, alloc), m, alloc);
 	}
 	doc.AddMember("shaderModules", shader_modules, alloc);
@@ -2807,45 +2757,9 @@ vector<uint8_t> StateRecorder::serialize() const
 	StringBuffer buffer;
 	PrettyWriter<StringBuffer> writer(buffer);
 	doc.Accept(writer);
-	const char *json = buffer.GetString();
-	uint64_t json_len = buffer.GetSize();
 
-	uint64_t serialized_size = FOSSILIZE_MAGIC_LEN;
-	serialized_size += sizeof(uint64_t); // Total size.
-	serialized_size += sizeof(uint64_t); // JSON magic.
-	serialized_size += sizeof(uint64_t); // JSON chunk size.
-	serialized_size += json_len; // JSON data.
-	serialized_size += sizeof(uint64_t); // SPIR-V chunk magic.
-	serialized_size += sizeof(uint64_t); // SPIR-V size.
-	serialized_size += varint_spirv_offset; // SPIR-V data.
-
-	// FIXME: Lazy native endian encoding.
-	vector<uint8_t> serialize_buffer(serialized_size);
-	auto *buf = serialize_buffer.data();
-
-	memcpy(buf, FOSSILIZE_MAGIC, FOSSILIZE_MAGIC_LEN);
-	buf += FOSSILIZE_MAGIC_LEN;
-	memcpy(buf, &serialized_size, sizeof(uint64_t));
-	buf += sizeof(uint64_t);
-
-	// Encode JSON block.
-	memcpy(buf, FOSSILIZE_JSON_MAGIC, sizeof(uint64_t));
-	buf += sizeof(uint64_t);
-	memcpy(buf, &json_len, sizeof(uint64_t));
-	buf += sizeof(uint64_t);
-	memcpy(buf, json, json_len);
-	buf += json_len;
-
-	// Encode SPIR-V block.
-	memcpy(buf, FOSSILIZE_SPIRV_MAGIC, sizeof(uint64_t));
-	buf += sizeof(uint64_t);
-	memcpy(buf, &varint_spirv_offset, sizeof(uint64_t));
-	buf += sizeof(uint64_t);
-
-	for (auto &module : impl->shader_modules)
-		buf = encode_varint(buf, module.second.pCode, module.second.codeSize / sizeof(uint32_t));
-
-	assert(uint64_t(buf - serialize_buffer.data()) == serialized_size);
+	vector<uint8_t> serialize_buffer(buffer.GetSize());
+	memcpy(serialize_buffer.data(), buffer.GetString(), buffer.GetSize());
 	return serialize_buffer;
 }
 
