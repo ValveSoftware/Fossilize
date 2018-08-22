@@ -170,6 +170,8 @@ public:
 	Hash get_hash_for_render_pass(VkRenderPass render_pass) const;
 	Hash get_hash_for_sampler(VkSampler sampler) const;
 
+	std::vector<uint8_t> serialize_graphics_pipeline(Hash hash) const;
+	std::vector<uint8_t> serialize_compute_pipeline(Hash hash) const;
 	std::vector<uint8_t> serialize() const;
 
 private:

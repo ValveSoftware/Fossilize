@@ -22,6 +22,7 @@
 
 #include "device.hpp"
 #include "utils.hpp"
+#include <cinttypes>
 #include <stdlib.h>
 
 #ifndef _WIN32
@@ -135,6 +136,64 @@ void Device::installSegfaultHandler()
 		LOGE("Failed to install SIGSEGV handler!\n");
 }
 #endif
+
+bool Device::serializeGraphicsPipeline(Hash hash)
+{
+	try
+	{
+		auto result = recorder.serialize_graphics_pipeline(hash);
+		char path[22]; // 16 digits + ".json" + null
+		sprintf(path, "%016" PRIX64 ".json", hash);
+		FILE *file = fopen(path, "wb");
+		if (file)
+		{
+			if (fwrite(result.data(), 1, result.size(), file) != result.size())
+				LOGE("Failed to write serialized state to disk.\n");
+			fclose(file);
+			LOGI("Serialized to \"%s\".\n", path);
+			return true;
+		}
+		else
+		{
+			LOGE("Failed to open file for writing: \"%s\".\n", path);
+			return false;
+		}
+	}
+	catch (const std::exception &e)
+	{
+		LOGE("Failed to serialize: \"%s\".\n", e.what());
+		return false;
+	}
+}
+
+bool Device::serializeComputePipeline(Hash hash)
+{
+	try
+	{
+		auto result = recorder.serialize_compute_pipeline(hash);
+		char path[22]; // 16 digits + ".json" + null
+		sprintf(path, "%016" PRIX64 ".json", hash);
+		FILE *file = fopen(path, "wb");
+		if (file)
+		{
+			if (fwrite(result.data(), 1, result.size(), file) != result.size())
+				LOGE("Failed to write serialized state to disk.\n");
+			fclose(file);
+			LOGI("Serialized to \"%s\".\n", path);
+			return true;
+		}
+		else
+		{
+			LOGE("Failed to open file for writing: \"%s\".\n", path);
+			return false;
+		}
+	}
+	catch (const std::exception &e)
+	{
+		LOGE("Failed to serialize: \"%s\".\n", e.what());
+		return false;
+	}
+}
 
 bool Device::serializeToPath(const std::string &path)
 {

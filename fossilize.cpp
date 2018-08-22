@@ -2688,6 +2688,133 @@ static Value json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& all
 	return p;
 }
 
+template <typename ObjType, typename CreateType, typename AllocType>
+static inline const CreateType* serialize_obj(ObjType obj, std::unordered_map<Hash, CreateType>& ci_map, Value& json_map, AllocType& alloc)
+{
+	auto iter = ci_map.find(api_object_cast<Hash>(obj));
+	if (iter != ci_map.end()) {
+		auto hash = uint64_string(api_object_cast<uint64_t>(obj), alloc);
+		if (!json_map.HasMember(hash)) {
+			json_map.AddMember(hash, json_value(iter->second, alloc), alloc);
+		}
+		return &iter->second;
+	}
+	return nullptr;
+}
+
+vector<uint8_t> StateRecorder::serialize_graphics_pipeline(Hash hash) const
+{
+	Document doc;
+	doc.SetObject();
+	auto &alloc = doc.GetAllocator();
+
+	Value samplers(kObjectType);
+	Value set_layouts(kObjectType);
+	Value pipeline_layouts(kObjectType);
+	Value shader_modules(kObjectType);
+	Value render_passes(kObjectType);
+	Value graphics_pipelines(kObjectType);
+
+	if (auto pipe = serialize_obj(hash, impl->graphics_pipelines, graphics_pipelines, alloc))
+	{
+		if (auto pipeline_layout = serialize_obj(pipe->layout, impl->pipeline_layouts, pipeline_layouts, alloc))
+		{
+			for (uint32_t i = 0; i < pipeline_layout->setLayoutCount; i++)
+			{
+				if (auto set_layout = serialize_obj(pipeline_layout->pSetLayouts[i], impl->descriptor_sets, set_layouts, alloc))
+				{
+					for (uint32_t j = 0; j < set_layout->bindingCount; j++)
+					{
+						auto& binding = set_layout->pBindings[j];
+						if (binding.pImmutableSamplers &&
+							(binding.descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ||
+								binding.descriptorType == VK_DESCRIPTOR_TYPE_SAMPLER))
+						{
+							for (uint32_t k = 0; k < binding.descriptorCount; k++)
+								serialize_obj(binding.pImmutableSamplers[k], impl->samplers, samplers, alloc);
+						}
+					}
+				}
+			}
+		}
+
+		serialize_obj(pipe->renderPass, impl->render_passes, render_passes, alloc);
+
+		for (uint32_t i = 0; i < pipe->stageCount; i++)
+			serialize_obj(pipe->pStages[i].module, impl->shader_modules, shader_modules, alloc);
+	}
+
+	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
+	doc.AddMember("samplers", samplers, alloc);
+	doc.AddMember("setLayouts", set_layouts, alloc);
+	doc.AddMember("pipelineLayouts", pipeline_layouts, alloc);
+	doc.AddMember("shaderModules", shader_modules, alloc);
+	doc.AddMember("renderPasses", render_passes, alloc);
+	doc.AddMember("graphicsPipelines", graphics_pipelines, alloc);
+
+	StringBuffer buffer;
+	PrettyWriter<StringBuffer> writer(buffer);
+	doc.Accept(writer);
+
+	vector<uint8_t> serialize_buffer(buffer.GetSize());
+	memcpy(serialize_buffer.data(), buffer.GetString(), buffer.GetSize());
+	return serialize_buffer;
+}
+
+vector<uint8_t> StateRecorder::serialize_compute_pipeline(Hash hash) const
+{
+	Document doc;
+	doc.SetObject();
+	auto &alloc = doc.GetAllocator();
+
+	Value samplers(kObjectType);
+	Value set_layouts(kObjectType);
+	Value pipeline_layouts(kObjectType);
+	Value shader_modules(kObjectType);
+	Value compute_pipelines(kObjectType);
+	
+	if (auto pipe = serialize_obj(hash, impl->compute_pipelines, compute_pipelines, alloc))
+	{
+		if (auto pipeline_layout = serialize_obj(pipe->layout, impl->pipeline_layouts, pipeline_layouts, alloc))
+		{
+			for (uint32_t i = 0; i < pipeline_layout->setLayoutCount; i++)
+			{
+				if (auto set_layout = serialize_obj(pipeline_layout->pSetLayouts[i], impl->descriptor_sets, set_layouts, alloc))
+				{
+					for (uint32_t j = 0; j < set_layout->bindingCount; j++)
+					{
+						auto& binding = set_layout->pBindings[j];
+						if (binding.pImmutableSamplers &&
+							(binding.descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ||
+								binding.descriptorType == VK_DESCRIPTOR_TYPE_SAMPLER))
+						{
+							for (uint32_t k = 0; k < binding.descriptorCount; k++)
+								serialize_obj(binding.pImmutableSamplers[k], impl->samplers, samplers, alloc);
+						}
+					}
+				}
+			}
+		}
+
+		serialize_obj(pipe->stage.module, impl->shader_modules, shader_modules, alloc);
+	}
+
+	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
+	doc.AddMember("samplers", samplers, alloc);
+	doc.AddMember("setLayouts", set_layouts, alloc);
+	doc.AddMember("pipelineLayouts", pipeline_layouts, alloc);
+	doc.AddMember("shaderModules", shader_modules, alloc);
+	doc.AddMember("computePipelines", compute_pipelines, alloc);
+
+	StringBuffer buffer;
+	PrettyWriter<StringBuffer> writer(buffer);
+	doc.Accept(writer);
+
+	vector<uint8_t> serialize_buffer(buffer.GetSize());
+	memcpy(serialize_buffer.data(), buffer.GetString(), buffer.GetSize());
+	return serialize_buffer;
+}
+
 vector<uint8_t> StateRecorder::serialize() const
 {
 	uint64_t varint_spirv_offset = 0;

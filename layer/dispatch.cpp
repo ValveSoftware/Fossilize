@@ -199,8 +199,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(VkDevice device, V
 			return res;
 		}
 
-		if (registerHandle)
+		if (registerHandle) {
 			layer->getRecorder().set_compute_pipeline_handle(index, pPipelines[i]);
+			layer->serializeGraphicsPipeline(index);
+		}
 	}
 
 	return VK_SUCCESS;
@@ -245,8 +247,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelines(VkDevice device, Vk
 			return res;
 		}
 
-		if (registerHandle)
+		if (registerHandle) {
 			layer->getRecorder().set_compute_pipeline_handle(index, pPipelines[i]);
+			layer->serializeComputePipeline(index);
+		}
 	}
 
 	return VK_SUCCESS;
