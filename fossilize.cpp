@@ -1224,7 +1224,10 @@ void StateReplayer::Impl::parse_compute_pipelines(StateCreatorInterface &iface, 
 		if (pipeline > 0)
 		{
 			iface.wait_enqueue();
-			info.basePipelineHandle = replayed_compute_pipelines[pipeline];
+			auto pipeline_iter = replayed_compute_pipelines.find(pipeline);
+			if (pipeline_iter == replayed_compute_pipelines.end())
+				FOSSILIZE_THROW("Failed to find referenced compute pipeline");
+			info.basePipelineHandle = pipeline_iter->second;
 		}
 
 		auto layout = string_to_uint64(obj["layout"].GetString());
@@ -1237,7 +1240,12 @@ void StateReplayer::Impl::parse_compute_pipelines(StateCreatorInterface &iface, 
 
 		auto module = string_to_uint64(stage["module"].GetString());
 		if (module > 0)
-			info.stage.module = api_object_cast<VkShaderModule>(replayed_shader_modules[module]);
+		{
+			auto module_iter = replayed_shader_modules.find(module);
+			if (module_iter == replayed_shader_modules.end())
+				FOSSILIZE_THROW("Failed find referenced shader module");
+			info.stage.module = module_iter->second;
+		}
 
 		info.stage.pName = duplicate_string(stage["name"].GetString(), stage["name"].GetStringLength());
 		if (stage.HasMember("specializationInfo"))
@@ -1520,7 +1528,12 @@ VkPipelineShaderStageCreateInfo *StateReplayer::Impl::parse_stages(const rapidjs
 
 		auto module = string_to_uint64(obj["module"].GetString());
 		if (module > 0)
-			state->module = replayed_shader_modules[module];
+		{
+			auto module_iter = replayed_shader_modules.find(module);
+			if (module_iter == replayed_shader_modules.end())
+				FOSSILIZE_THROW("Failed to find referenced shader module");
+			state->module = module_iter->second;
+		}
 	}
 
 	return ret;
@@ -1546,7 +1559,10 @@ void StateReplayer::Impl::parse_graphics_pipelines(StateCreatorInterface &iface,
 		if (pipeline > 0)
 		{
 			iface.wait_enqueue();
-			info.basePipelineHandle = replayed_graphics_pipelines[pipeline];
+			auto pipeline_iter = replayed_graphics_pipelines.find(pipeline);
+			if (pipeline_iter == replayed_graphics_pipelines.end())
+				FOSSILIZE_THROW("Failed to find referenced graphics pipeline");
+			info.basePipelineHandle = pipeline_iter->second;
 		}
 
 		auto layout = string_to_uint64(obj["layout"].GetString());
