@@ -27,6 +27,7 @@
 #include "logging.hpp"
 #include "file.hpp"
 
+#include <cinttypes>
 #include <string>
 #include <unordered_map>
 #include <stdlib.h>
@@ -137,7 +138,7 @@ struct DisasmReplayer : StateCreatorInterface
 	{
 		if (device)
 		{
-			LOGI("Creating sampler #%u\n", index);
+			LOGI("Creating sampler #%0" PRIX64 "\n", index);
 			if (vkCreateSampler(device->get_device(), create_info, nullptr, sampler) != VK_SUCCESS)
 			{
 				LOGE(" ... Failed!\n");
@@ -158,7 +159,7 @@ struct DisasmReplayer : StateCreatorInterface
 	{
 		if (device)
 		{
-			LOGI("Creating descriptor set layout #%u\n", index);
+			LOGI("Creating descriptor set layout #0%" PRIX64 "\n", index);
 			if (vkCreateDescriptorSetLayout(device->get_device(), create_info, nullptr, layout) != VK_SUCCESS)
 			{
 				LOGE(" ... Failed!\n");
@@ -179,7 +180,7 @@ struct DisasmReplayer : StateCreatorInterface
 	{
 		if (device)
 		{
-			LOGI("Creating pipeline layout #%u\n", index);
+			LOGI("Creating pipeline layout #0%" PRIX64 "\n", index);
 			if (vkCreatePipelineLayout(device->get_device(), create_info, nullptr, layout) != VK_SUCCESS)
 			{
 				LOGE(" ... Failed!\n");
@@ -200,7 +201,7 @@ struct DisasmReplayer : StateCreatorInterface
 	{
 		if (device)
 		{
-			LOGI("Creating shader module #%u\n", index);
+			LOGI("Creating shader module #0%" PRIX64 "\n", index);
 			if (vkCreateShaderModule(device->get_device(), create_info, nullptr, module) != VK_SUCCESS)
 			{
 				LOGE(" ... Failed!\n");
@@ -221,7 +222,7 @@ struct DisasmReplayer : StateCreatorInterface
 	{
 		if (device)
 		{
-			LOGI("Creating render pass #%u\n", index);
+			LOGI("Creating render pass #%0" PRIX64 "\n", index);
 			if (vkCreateRenderPass(device->get_device(), create_info, nullptr, render_pass) != VK_SUCCESS)
 			{
 				LOGE(" ... Failed!\n");
@@ -242,7 +243,7 @@ struct DisasmReplayer : StateCreatorInterface
 	{
 		if (device)
 		{
-			LOGI("Creating compute pipeline #%u\n", index);
+			LOGI("Creating compute pipeline #0%" PRIX64 "\n", index);
 			if (vkCreateComputePipelines(device->get_device(), pipeline_cache, 1, create_info, nullptr, pipeline) !=
 			    VK_SUCCESS)
 			{
@@ -264,7 +265,7 @@ struct DisasmReplayer : StateCreatorInterface
 	{
 		if (device)
 		{
-			LOGI("Creating graphics pipeline #%u\n", index);
+			LOGI("Creating graphics pipeline #%0" PRIX64 "\n", index);
 			if (vkCreateGraphicsPipelines(device->get_device(), pipeline_cache, 1, create_info, nullptr, pipeline) !=
 			    VK_SUCCESS)
 			{
