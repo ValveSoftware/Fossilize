@@ -400,8 +400,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateShaderModule(VkDevice device, const 
 
 	auto res = layer->getTable()->CreateShaderModule(device, pCreateInfo, pCallbacks, pShaderModule);
 
-	if (registerHandle)
+	if (registerHandle) {
 		layer->getRecorder().set_shader_module_handle(index, *pShaderModule);
+		layer->serializeShaderModule(index);
+	}
 	return res;
 }
 

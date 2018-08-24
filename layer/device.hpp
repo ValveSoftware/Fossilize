@@ -47,6 +47,7 @@ public:
 
 	bool serializeGraphicsPipeline(Hash hash);
 	bool serializeComputePipeline(Hash hash);
+	bool serializeShaderModule(Hash hash);
 	bool serializeToPath(const std::string &path);
 	const std::string &getSerializationPath() const
 	{

@@ -172,6 +172,7 @@ public:
 
 	std::vector<uint8_t> serialize_graphics_pipeline(Hash hash) const;
 	std::vector<uint8_t> serialize_compute_pipeline(Hash hash) const;
+	std::vector<uint8_t> serialize_shader_module(Hash hash) const;
 	std::vector<uint8_t> serialize() const;
 
 private:

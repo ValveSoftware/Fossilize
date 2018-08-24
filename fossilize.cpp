@@ -2755,16 +2755,12 @@ vector<uint8_t> StateRecorder::serialize_graphics_pipeline(Hash hash) const
 		}
 
 		serialize_obj(pipe->renderPass, impl->render_passes, render_passes, alloc);
-
-		for (uint32_t i = 0; i < pipe->stageCount; i++)
-			serialize_obj(pipe->pStages[i].module, impl->shader_modules, shader_modules, alloc);
 	}
 
 	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
 	doc.AddMember("samplers", samplers, alloc);
 	doc.AddMember("setLayouts", set_layouts, alloc);
 	doc.AddMember("pipelineLayouts", pipeline_layouts, alloc);
-	doc.AddMember("shaderModules", shader_modules, alloc);
 	doc.AddMember("renderPasses", render_passes, alloc);
 	doc.AddMember("graphicsPipelines", graphics_pipelines, alloc);
 
@@ -2811,16 +2807,34 @@ vector<uint8_t> StateRecorder::serialize_compute_pipeline(Hash hash) const
 				}
 			}
 		}
-
-		serialize_obj(pipe->stage.module, impl->shader_modules, shader_modules, alloc);
 	}
 
 	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
 	doc.AddMember("samplers", samplers, alloc);
 	doc.AddMember("setLayouts", set_layouts, alloc);
 	doc.AddMember("pipelineLayouts", pipeline_layouts, alloc);
-	doc.AddMember("shaderModules", shader_modules, alloc);
 	doc.AddMember("computePipelines", compute_pipelines, alloc);
+
+	StringBuffer buffer;
+	PrettyWriter<StringBuffer> writer(buffer);
+	doc.Accept(writer);
+
+	vector<uint8_t> serialize_buffer(buffer.GetSize());
+	memcpy(serialize_buffer.data(), buffer.GetString(), buffer.GetSize());
+	return serialize_buffer;
+}
+
+vector<uint8_t> StateRecorder::serialize_shader_module(Hash hash) const
+{
+	Document doc;
+	doc.SetObject();
+	auto &alloc = doc.GetAllocator();
+
+	Value shader_modules(kObjectType);
+	if (auto pipe = serialize_obj(hash, impl->shader_modules, shader_modules, alloc))
+
+	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
+	doc.AddMember("shaderModules", shader_modules, alloc);
 
 	StringBuffer buffer;
 	PrettyWriter<StringBuffer> writer(buffer);
