@@ -133,7 +133,7 @@ struct HashedInfo
 
 struct StateReplayer::Impl
 {
-	void parse(StateCreatorInterface &iface, const void *buffer, size_t size);
+	void parse(StateCreatorInterface &iface, ResolverInterface &resolver, const void *buffer, size_t size);
 	ScratchAllocator allocator;
 
 	std::unordered_map<Hash, VkSampler> replayed_samplers;
@@ -149,8 +149,8 @@ struct StateReplayer::Impl
 	void parse_pipeline_layouts(StateCreatorInterface &iface, const Value &layouts);
 	void parse_shader_modules(StateCreatorInterface &iface, const Value &modules);
 	void parse_render_passes(StateCreatorInterface &iface, const Value &passes);
-	void parse_compute_pipelines(StateCreatorInterface &iface, const Value &pipelines);
-	void parse_graphics_pipelines(StateCreatorInterface &iface, const Value &pipelines);
+	void parse_compute_pipelines(StateCreatorInterface &iface, ResolverInterface &resolver, const Value &pipelines);
+	void parse_graphics_pipelines(StateCreatorInterface &iface, ResolverInterface &resolver, const Value &pipelines);
 	VkPushConstantRange *parse_push_constant_ranges(const Value &ranges);
 	VkDescriptorSetLayout *parse_set_layouts(const Value &layouts);
 	VkDescriptorSetLayoutBinding *parse_descriptor_set_bindings(const Value &bindings);
@@ -173,7 +173,7 @@ struct StateReplayer::Impl
 	VkPipelineViewportStateCreateInfo *parse_viewport_state(const Value &state);
 	VkPipelineDynamicStateCreateInfo *parse_dynamic_state(const Value &state);
 	VkPipelineTessellationStateCreateInfo *parse_tessellation_state(const Value &state);
-	VkPipelineShaderStageCreateInfo *parse_stages(const Value &stages);
+	VkPipelineShaderStageCreateInfo *parse_stages(StateCreatorInterface &iface, ResolverInterface &resolver, const Value &stages);
 	VkVertexInputAttributeDescription *parse_vertex_attributes(const Value &attributes);
 	VkVertexInputBindingDescription *parse_vertex_bindings(const Value &bindings);
 	VkPipelineColorBlendAttachmentState *parse_blend_attachments(const Value &attachments);
@@ -1204,7 +1204,7 @@ VkSpecializationInfo *StateReplayer::Impl::parse_specialization_info(const Value
 	return spec;
 }
 
-void StateReplayer::Impl::parse_compute_pipelines(StateCreatorInterface &iface, const Value &pipelines)
+void StateReplayer::Impl::parse_compute_pipelines(StateCreatorInterface &iface, ResolverInterface &resolver, const Value &pipelines)
 {
 	iface.set_num_compute_pipelines(pipelines.MemberCount());
 	replayed_compute_pipelines.reserve(pipelines.MemberCount());
@@ -1226,7 +1226,15 @@ void StateReplayer::Impl::parse_compute_pipelines(StateCreatorInterface &iface, 
 			iface.wait_enqueue();
 			auto pipeline_iter = replayed_compute_pipelines.find(pipeline);
 			if (pipeline_iter == replayed_compute_pipelines.end())
-				FOSSILIZE_THROW("Failed to find referenced compute pipeline");
+			{
+				auto external_state = resolver.resolve(pipeline);
+				if (external_state.empty())
+					FOSSILIZE_THROW("Failed to find referenced compute pipeline");
+				this->parse(iface, resolver, external_state.data(), external_state.size());
+				pipeline_iter = replayed_compute_pipelines.find(pipeline);
+				if (pipeline_iter == replayed_compute_pipelines.end())
+					FOSSILIZE_THROW("Failed to find referenced compute pipeline");
+			}
 			info.basePipelineHandle = pipeline_iter->second;
 		}
 
@@ -1243,7 +1251,15 @@ void StateReplayer::Impl::parse_compute_pipelines(StateCreatorInterface &iface, 
 		{
 			auto module_iter = replayed_shader_modules.find(module);
 			if (module_iter == replayed_shader_modules.end())
-				FOSSILIZE_THROW("Failed find referenced shader module");
+			{
+				auto external_state = resolver.resolve(module);
+				if (external_state.empty())
+					FOSSILIZE_THROW("Failed to find referenced shader");
+				this->parse(iface, resolver, external_state.data(), external_state.size());
+				module_iter = replayed_shader_modules.find(module);
+				if (module_iter == replayed_shader_modules.end())
+					FOSSILIZE_THROW("Failed find referenced shader module");
+			}
 			info.stage.module = module_iter->second;
 		}
 
@@ -1511,7 +1527,7 @@ VkPipelineViewportStateCreateInfo *StateReplayer::Impl::parse_viewport_state(con
 	return state;
 }
 
-VkPipelineShaderStageCreateInfo *StateReplayer::Impl::parse_stages(const rapidjson::Value &stages)
+VkPipelineShaderStageCreateInfo *StateReplayer::Impl::parse_stages(StateCreatorInterface &iface, ResolverInterface &resolver, const rapidjson::Value &stages)
 {
 	auto *state = allocator.allocate_n_cleared<VkPipelineShaderStageCreateInfo>(stages.Size());
 	auto *ret = state;
@@ -1531,7 +1547,15 @@ VkPipelineShaderStageCreateInfo *StateReplayer::Impl::parse_stages(const rapidjs
 		{
 			auto module_iter = replayed_shader_modules.find(module);
 			if (module_iter == replayed_shader_modules.end())
-				FOSSILIZE_THROW("Failed to find referenced shader module");
+			{
+				auto external_state = resolver.resolve(module);
+				if (external_state.empty())
+					FOSSILIZE_THROW("Failed to find referenced shader");
+				this->parse(iface, resolver, external_state.data(), external_state.size());
+				module_iter = replayed_shader_modules.find(module);
+				if (module_iter == replayed_shader_modules.end())
+					FOSSILIZE_THROW("Failed to find referenced shader module");
+			}
 			state->module = module_iter->second;
 		}
 	}
@@ -1539,7 +1563,7 @@ VkPipelineShaderStageCreateInfo *StateReplayer::Impl::parse_stages(const rapidjs
 	return ret;
 }
 
-void StateReplayer::Impl::parse_graphics_pipelines(StateCreatorInterface &iface, const Value &pipelines)
+void StateReplayer::Impl::parse_graphics_pipelines(StateCreatorInterface &iface, ResolverInterface &resolver, const Value &pipelines)
 {
 	iface.set_num_graphics_pipelines(pipelines.MemberCount());
 	replayed_graphics_pipelines.reserve(pipelines.MemberCount());
@@ -1561,7 +1585,15 @@ void StateReplayer::Impl::parse_graphics_pipelines(StateCreatorInterface &iface,
 			iface.wait_enqueue();
 			auto pipeline_iter = replayed_graphics_pipelines.find(pipeline);
 			if (pipeline_iter == replayed_graphics_pipelines.end())
-				FOSSILIZE_THROW("Failed to find referenced graphics pipeline");
+			{
+				auto external_state = resolver.resolve(pipeline);
+				if (external_state.empty())
+					FOSSILIZE_THROW("Failed to find referenced graphics pipeline");
+				this->parse(iface, resolver, external_state.data(), external_state.size());
+				pipeline_iter = replayed_graphics_pipelines.find(pipeline);
+				if (pipeline_iter == replayed_graphics_pipelines.end())
+					FOSSILIZE_THROW("Failed to find referenced graphics pipeline");
+			}
 			info.basePipelineHandle = pipeline_iter->second;
 		}
 
@@ -1578,7 +1610,7 @@ void StateReplayer::Impl::parse_graphics_pipelines(StateCreatorInterface &iface,
 		if (obj.HasMember("stages"))
 		{
 			info.stageCount = obj["stages"].Size();
-			info.pStages = parse_stages(obj["stages"]);
+			info.pStages = parse_stages(iface, resolver, obj["stages"]);
 		}
 
 		if (obj.HasMember("rasterizationState"))
@@ -1621,12 +1653,12 @@ ScratchAllocator &StateReplayer::get_allocator()
 	return impl->allocator;
 }
 
-void StateReplayer::parse(StateCreatorInterface &iface, const void *buffer, size_t size)
+void StateReplayer::parse(StateCreatorInterface &iface, ResolverInterface &resolver, const void *buffer, size_t size)
 {
-	impl->parse(iface, buffer, size);
+	impl->parse(iface, resolver, buffer, size);
 }
 
-void StateReplayer::Impl::parse(StateCreatorInterface &iface, const void *buffer_, size_t size)
+void StateReplayer::Impl::parse(StateCreatorInterface &iface, ResolverInterface &resolver, const void *buffer_, size_t size)
 {
 	Document doc;
 	doc.Parse(reinterpret_cast<const char *>(buffer_), size);
@@ -1663,12 +1695,12 @@ void StateReplayer::Impl::parse(StateCreatorInterface &iface, const void *buffer
 		iface.set_num_render_passes(0);
 
 	if (doc.HasMember("computePipelines"))
-		parse_compute_pipelines(iface, doc["computePipelines"]);
+		parse_compute_pipelines(iface, resolver, doc["computePipelines"]);
 	else
 		iface.set_num_compute_pipelines(0);
 
 	if (doc.HasMember("graphicsPipelines"))
-		parse_graphics_pipelines(iface, doc["graphicsPipelines"]);
+		parse_graphics_pipelines(iface, resolver, doc["graphicsPipelines"]);
 	else
 		iface.set_num_graphics_pipelines(0);
 }

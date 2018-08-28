@@ -31,6 +31,8 @@
 #include <string>
 #include <unordered_set>
 #include <stdlib.h>
+#include <filesystem>
+#include <fstream>
 
 using namespace Fossilize;
 using namespace std;
@@ -242,6 +244,39 @@ struct DumbReplayer : StateCreatorInterface
 	VkPipelineCache pipeline_cache = VK_NULL_HANDLE;
 };
 
+struct DirectoryResolver : ResolverInterface
+{
+	DirectoryResolver(const std::string &_directory) {
+		directory = _directory;
+		directory.remove_filename();
+	};
+
+	vector<uint8_t> resolve(Hash hash)
+	{
+		char filename[22];
+		sprintf(filename, "%016" PRIX64 ".json", hash);
+		auto path = directory / filename;
+
+		if (std::filesystem::is_regular_file(path))
+		{
+			std::ifstream file(path, std::ios::binary);
+
+			file.seekg(0, std::ios::end);
+			auto file_size = file.tellg();
+			file.seekg(0, std::ios::beg);
+
+			std::vector<uint8_t> file_data(file_size);
+			file.read(reinterpret_cast<char *>(file_data.data()), file_size);
+
+			return file_data;
+		}
+		return {};
+	}
+
+
+	std::filesystem::path directory;
+};
+
 static void print_help()
 {
 	LOGI("fossilize-replay\n"
@@ -294,6 +329,7 @@ int main(int argc, char *argv[])
 			return EXIT_FAILURE;
 
 		DumbReplayer replayer(device, replayer_opts, filter_graphics, filter_compute);
+		DirectoryResolver resolver(json_path);
 		StateReplayer state_replayer;
 		auto state_json = load_buffer_from_file(json_path.c_str());
 		if (state_json.empty())
@@ -302,7 +338,7 @@ int main(int argc, char *argv[])
 			return EXIT_FAILURE;
 		}
 
-		state_replayer.parse(replayer, state_json.data(), state_json.size());
+		state_replayer.parse(replayer, resolver, state_json.data(), state_json.size());
 	}
 	catch (const exception &e)
 	{

@@ -123,12 +123,21 @@ public:
 	virtual void wait_enqueue() {}
 };
 
+class ResolverInterface
+{
+public:
+	virtual ~ResolverInterface() = default;
+	virtual std::vector<uint8_t> resolve(Hash hash) {
+		return {};
+	}
+};
+
 class StateReplayer
 {
 public:
 	StateReplayer();
 	~StateReplayer();
-	void parse(StateCreatorInterface &iface, const void *buffer, size_t size);
+	void parse(StateCreatorInterface &iface, ResolverInterface &resolver, const void *buffer, size_t size);
 	ScratchAllocator &get_allocator();
 
 private:

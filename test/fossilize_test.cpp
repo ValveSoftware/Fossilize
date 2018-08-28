@@ -499,6 +499,7 @@ int main()
 		StateRecorder recorder;
 		StateReplayer replayer;
 		ReplayInterface iface;
+		ResolverInterface resolver;
 
 		record_samplers(recorder);
 		record_set_layouts(recorder);
@@ -509,7 +510,7 @@ int main()
 		record_graphics_pipelines(recorder);
 
 		auto res = recorder.serialize();
-		replayer.parse(iface, res.data(), res.size());
+		replayer.parse(iface, resolver, res.data(), res.size());
 		return EXIT_SUCCESS;
 	}
 	catch (const std::exception &e)
