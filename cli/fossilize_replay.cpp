@@ -244,12 +244,27 @@ struct DumbReplayer : StateCreatorInterface
 	VkPipelineCache pipeline_cache = VK_NULL_HANDLE;
 };
 
+static std::vector<uint8_t> load_buffer_from_path(std::filesystem::path path)
+{
+	if (std::filesystem::is_regular_file(path))
+	{
+		std::ifstream file(path, std::ios::binary);
+
+		file.seekg(0, std::ios::end);
+		auto file_size = file.tellg();
+		file.seekg(0, std::ios::beg);
+
+		std::vector<uint8_t> file_data(file_size);
+		file.read(reinterpret_cast<char *>(file_data.data()), file_size);
+
+		return file_data;
+	}
+	return {};
+}
+
 struct DirectoryResolver : ResolverInterface
 {
-	DirectoryResolver(const std::string &_directory) {
-		directory = _directory;
-		directory.remove_filename();
-	};
+	DirectoryResolver(const std::string &_directory) : directory(_directory) {};
 
 	vector<uint8_t> resolve(Hash hash)
 	{
@@ -257,22 +272,8 @@ struct DirectoryResolver : ResolverInterface
 		sprintf(filename, "%016" PRIX64 ".json", hash);
 		auto path = directory / filename;
 
-		if (std::filesystem::is_regular_file(path))
-		{
-			std::ifstream file(path, std::ios::binary);
-
-			file.seekg(0, std::ios::end);
-			auto file_size = file.tellg();
-			file.seekg(0, std::ios::beg);
-
-			std::vector<uint8_t> file_data(file_size);
-			file.read(reinterpret_cast<char *>(file_data.data()), file_size);
-
-			return file_data;
-		}
-		return {};
+		return load_buffer_from_path(path);
 	}
-
 
 	std::filesystem::path directory;
 };
@@ -328,17 +329,39 @@ int main(int argc, char *argv[])
 		if (!device.init_device(opts))
 			return EXIT_FAILURE;
 
-		DumbReplayer replayer(device, replayer_opts, filter_graphics, filter_compute);
-		DirectoryResolver resolver(json_path);
-		StateReplayer state_replayer;
-		auto state_json = load_buffer_from_file(json_path.c_str());
-		if (state_json.empty())
+		if (!std::filesystem::is_directory(json_path))
 		{
-			LOGE("Failed to load state JSON from disk.\n");
+			LOGE("Invalid path to serialized state provided.\n");
 			return EXIT_FAILURE;
 		}
 
-		state_replayer.parse(replayer, resolver, state_json.data(), state_json.size());
+		for (auto& entry : std::filesystem::directory_iterator(json_path))
+		{
+			// check that filename is 16 char hex with json extension
+			auto stem = entry.path().stem().string();
+			if (stem.size() != 16)
+				continue;
+			for (auto c : stem)
+			{
+				if (!isxdigit(c))
+					continue;
+			}
+			if (entry.path().extension() != ".json")
+				continue;
+
+			DumbReplayer replayer(device, replayer_opts, filter_graphics, filter_compute);
+			DirectoryResolver resolver(json_path);
+			StateReplayer state_replayer;
+
+			auto state_json = load_buffer_from_path(entry);
+			if (state_json.empty())
+			{
+				LOGE("Failed to load state JSON from disk.\n");
+				return EXIT_FAILURE;
+			}
+
+			state_replayer.parse(replayer, resolver, state_json.data(), state_json.size());
+		}
 	}
 	catch (const exception &e)
 	{
