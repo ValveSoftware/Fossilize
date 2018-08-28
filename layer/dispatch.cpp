@@ -201,7 +201,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(VkDevice device, V
 
 		if (registerHandle) {
 			layer->getRecorder().set_compute_pipeline_handle(index, pPipelines[i]);
-			layer->serializeGraphicsPipeline(index);
+			layer->serializeGraphicsPipeline(layer->getSerializationPath(), index);
 		}
 	}
 
@@ -249,7 +249,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelines(VkDevice device, Vk
 
 		if (registerHandle) {
 			layer->getRecorder().set_compute_pipeline_handle(index, pPipelines[i]);
-			layer->serializeComputePipeline(index);
+			layer->serializeComputePipeline(layer->getSerializationPath(), index);
 		}
 	}
 
@@ -342,8 +342,6 @@ static VKAPI_ATTR void VKAPI_CALL DestroyDevice(VkDevice device, const VkAllocat
 	void *key = getDispatchKey(device);
 	auto *layer = getLayerData(key, deviceData);
 
-	layer->serializeToPath(layer->getSerializationPath());
-
 	layer->getTable()->DestroyDevice(device, pAllocator);
 	destroyLayerData(key, deviceData);
 }
@@ -402,7 +400,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateShaderModule(VkDevice device, const 
 
 	if (registerHandle) {
 		layer->getRecorder().set_shader_module_handle(index, *pShaderModule);
-		layer->serializeShaderModule(index);
+		layer->serializeShaderModule(layer->getSerializationPath(), index);
 	}
 	return res;
 }

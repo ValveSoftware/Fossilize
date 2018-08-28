@@ -45,10 +45,10 @@ public:
 		return recorder;
 	}
 
-	bool serializeGraphicsPipeline(Hash hash);
-	bool serializeComputePipeline(Hash hash);
-	bool serializeShaderModule(Hash hash);
-	bool serializeToPath(const std::string &path);
+	bool serializeGraphicsPipeline(const std::string &json_dir, Hash hash);
+	bool serializeComputePipeline(const std::string &json_dir, Hash hash);
+	bool serializeShaderModule(const std::string &json_dir, Hash hash);
+	bool serializeToPath(const std::string &json_dir);
 	const std::string &getSerializationPath() const
 	{
 		return serializationPath;
@@ -73,9 +73,9 @@ private:
 	StateRecorder recorder;
 
 #ifdef ANDROID
-	std::string serializationPath = "/sdcard/fossilize.json";
+	std::string serializationPath = "/sdcard/";
 #else
-	std::string serializationPath = "fossilize.json";
+	std::string serializationPath = "";
 #endif
 
 	bool paranoidMode = false;

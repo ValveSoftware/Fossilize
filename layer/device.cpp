@@ -137,25 +137,26 @@ void Device::installSegfaultHandler()
 }
 #endif
 
-bool Device::serializeGraphicsPipeline(Hash hash)
+bool Device::serializeGraphicsPipeline(const std::string &json_dir, Hash hash)
 {
 	try
 	{
 		auto result = recorder.serialize_graphics_pipeline(hash);
-		char path[22]; // 16 digits + ".json" + null
-		sprintf(path, "%016" PRIX64 ".json", hash);
-		FILE *file = fopen(path, "wb");
+		char filename[22]; // 16 digits + ".json" + null
+		sprintf(filename, "%016" PRIX64 ".json", hash);
+		auto path = json_dir + filename;
+		FILE *file = fopen(path.c_str(), "wb");
 		if (file)
 		{
 			if (fwrite(result.data(), 1, result.size(), file) != result.size())
 				LOGE("Failed to write serialized state to disk.\n");
 			fclose(file);
-			LOGI("Serialized to \"%s\".\n", path);
+			LOGI("Serialized to \"%s\".\n", path.c_str());
 			return true;
 		}
 		else
 		{
-			LOGE("Failed to open file for writing: \"%s\".\n", path);
+			LOGE("Failed to open file for writing: \"%s\".\n", path.c_str());
 			return false;
 		}
 	}
@@ -166,25 +167,26 @@ bool Device::serializeGraphicsPipeline(Hash hash)
 	}
 }
 
-bool Device::serializeComputePipeline(Hash hash)
+bool Device::serializeComputePipeline(const std::string &json_dir, Hash hash)
 {
 	try
 	{
 		auto result = recorder.serialize_compute_pipeline(hash);
-		char path[22]; // 16 digits + ".json" + null
-		sprintf(path, "%016" PRIX64 ".json", hash);
-		FILE *file = fopen(path, "wb");
+		char filename[22]; // 16 digits + ".json" + null
+		sprintf(filename, "%016" PRIX64 ".json", hash);
+		auto path = json_dir + filename;
+		FILE *file = fopen(path.c_str(), "wb");
 		if (file)
 		{
 			if (fwrite(result.data(), 1, result.size(), file) != result.size())
 				LOGE("Failed to write serialized state to disk.\n");
 			fclose(file);
-			LOGI("Serialized to \"%s\".\n", path);
+			LOGI("Serialized to \"%s\".\n", path.c_str());
 			return true;
 		}
 		else
 		{
-			LOGE("Failed to open file for writing: \"%s\".\n", path);
+			LOGE("Failed to open file for writing: \"%s\".\n", path.c_str());
 			return false;
 		}
 	}
@@ -195,25 +197,26 @@ bool Device::serializeComputePipeline(Hash hash)
 	}
 }
 
-bool Device::serializeShaderModule(Hash hash)
+bool Device::serializeShaderModule(const std::string &json_dir, Hash hash)
 {
 	try
 	{
 		auto result = recorder.serialize_shader_module(hash);
-		char path[22]; // 16 digits + ".json" + null
-		sprintf(path, "%016" PRIX64 ".json", hash);
-		FILE *file = fopen(path, "wb");
+		char filename[22]; // 16 digits + ".json" + null
+		sprintf(filename, "%016" PRIX64 ".json", hash);
+		auto path = json_dir + filename;
+		FILE *file = fopen(path.c_str(), "wb");
 		if (file)
 		{
 			if (fwrite(result.data(), 1, result.size(), file) != result.size())
 				LOGE("Failed to write serialized state to disk.\n");
 			fclose(file);
-			LOGI("Serialized to \"%s\".\n", path);
+			LOGI("Serialized to \"%s\".\n", path.c_str());
 			return true;
 		}
 		else
 		{
-			LOGE("Failed to open file for writing: \"%s\".\n", path);
+			LOGE("Failed to open file for writing: \"%s\".\n", path.c_str());
 			return false;
 		}
 	}
@@ -224,10 +227,11 @@ bool Device::serializeShaderModule(Hash hash)
 	}
 }
 
-bool Device::serializeToPath(const std::string &path)
+bool Device::serializeToPath(const std::string &json_dir)
 {
 	try
 	{
+		auto path = json_dir + "fossilize.json";
 		auto result = recorder.serialize();
 		FILE *file = fopen(path.c_str(), "wb");
 		if (file)
