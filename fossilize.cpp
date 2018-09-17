@@ -19,14 +19,18 @@
  * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
-
+#include <atomic>
+#include <mutex>
+#include <thread>
 #include <stddef.h>
 #include "fossilize.hpp"
 #include <stdexcept>
 #include <algorithm>
 #include <unordered_map>
+#include <queue>
 #include <string.h>
 #include "varint.hpp"
+#include "layer/utils.hpp"
 
 #define RAPIDJSON_HAS_STDSTRING 1
 #include "rapidjson/document.h"
@@ -184,6 +188,13 @@ struct StateReplayer::Impl
 	T *copy(const T *src, size_t count);
 };
 
+struct WorkItem
+{
+	VkStructureType type;
+	uint64_t handle;
+	void* create_info;
+};
+
 struct StateRecorder::Impl
 {
 	ScratchAllocator allocator;
@@ -204,13 +215,13 @@ struct StateRecorder::Impl
 	std::unordered_map<VkRenderPass, Hash> render_pass_to_index;
 	std::unordered_map<VkSampler, Hash> sampler_to_index;
 
-	VkDescriptorSetLayoutCreateInfo copy_descriptor_set_layout(const VkDescriptorSetLayoutCreateInfo &create_info);
-	VkPipelineLayoutCreateInfo copy_pipeline_layout(const VkPipelineLayoutCreateInfo &create_info);
-	VkShaderModuleCreateInfo copy_shader_module(const VkShaderModuleCreateInfo &create_info);
-	VkGraphicsPipelineCreateInfo copy_graphics_pipeline(const VkGraphicsPipelineCreateInfo &create_info);
-	VkComputePipelineCreateInfo copy_compute_pipeline(const VkComputePipelineCreateInfo &create_info);
-	VkSamplerCreateInfo copy_sampler(const VkSamplerCreateInfo &create_info);
-	VkRenderPassCreateInfo copy_render_pass(const VkRenderPassCreateInfo &create_info);
+	VkDescriptorSetLayoutCreateInfo *copy_descriptor_set_layout(const VkDescriptorSetLayoutCreateInfo *create_info);
+	VkPipelineLayoutCreateInfo *copy_pipeline_layout(const VkPipelineLayoutCreateInfo *create_info);
+	VkShaderModuleCreateInfo *copy_shader_module(const VkShaderModuleCreateInfo *create_info);
+	VkGraphicsPipelineCreateInfo *copy_graphics_pipeline(const VkGraphicsPipelineCreateInfo *create_info);
+	VkComputePipelineCreateInfo *copy_compute_pipeline(const VkComputePipelineCreateInfo *create_info);
+	VkSamplerCreateInfo *copy_sampler(const VkSamplerCreateInfo *create_info);
+	VkRenderPassCreateInfo *copy_render_pass(const VkRenderPassCreateInfo *create_info);
 
 	VkSpecializationInfo *copy_specialization_info(const VkSpecializationInfo *info);
 
@@ -221,6 +232,21 @@ struct StateRecorder::Impl
 	VkShaderModule remap_shader_module_handle(VkShaderModule shader_module) const;
 	VkPipeline remap_compute_pipeline_handle(VkPipeline pipeline) const;
 	VkPipeline remap_graphics_pipeline_handle(VkPipeline pipeline) const;
+
+	void remap_descriptor_set_layout_ci(VkDescriptorSetLayoutCreateInfo *create_info);
+	void remap_pipeline_layout_ci(VkPipelineLayoutCreateInfo *create_info);
+	void remap_shader_module_ci(VkShaderModuleCreateInfo *create_info);
+	void remap_graphics_pipeline_ci(VkGraphicsPipelineCreateInfo *create_info);
+	void remap_compute_pipeline_ci(VkComputePipelineCreateInfo *create_info);
+	void remap_sampler_ci(VkSamplerCreateInfo *create_info);
+	void remap_render_pass_ci(VkRenderPassCreateInfo *create_info);
+
+	std::mutex record_lock;
+	std::queue<WorkItem> record_queue;
+	std::atomic<bool> record_done;
+	std::thread worker_thread;
+
+	static void record_task(StateRecorder *recorder);
 
 	template <typename T>
 	T *copy(const T *src, size_t count);
@@ -1768,92 +1794,56 @@ ScratchAllocator &StateRecorder::get_allocator()
 	return impl->allocator;
 }
 
-void StateRecorder::set_compute_pipeline_handle(Hash index, VkPipeline pipeline)
+void StateRecorder::register_descriptor_set_layout(VkDescriptorSetLayout set_layout, const VkDescriptorSetLayoutCreateInfo &create_info)
 {
-	impl->compute_pipeline_to_index[pipeline] = index;
+	std::lock_guard<std::mutex> lock(impl->record_lock);
+	impl->record_queue.push({ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, api_object_cast<uint64_t>(set_layout), reinterpret_cast<void *>(impl->copy_descriptor_set_layout(&create_info)) });
 }
 
-void StateRecorder::set_descriptor_set_layout_handle(Hash index, VkDescriptorSetLayout layout)
+void StateRecorder::register_pipeline_layout(VkPipelineLayout pipeline_layout, const VkPipelineLayoutCreateInfo &create_info)
 {
-	impl->descriptor_set_layout_to_index[layout] = index;
+	std::lock_guard<std::mutex> lock(impl->record_lock);
+	impl->record_queue.push({ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, api_object_cast<uint64_t>(pipeline_layout), (void *)impl->copy_pipeline_layout(&create_info) });
 }
 
-void StateRecorder::set_graphics_pipeline_handle(Hash index, VkPipeline pipeline)
-{
-	impl->graphics_pipeline_to_index[pipeline] = index;
-}
-
-void StateRecorder::set_pipeline_layout_handle(Hash index, VkPipelineLayout layout)
-{
-	impl->pipeline_layout_to_index[layout] = index;
-}
-
-void StateRecorder::set_render_pass_handle(Hash index, VkRenderPass render_pass)
-{
-	impl->render_pass_to_index[render_pass] = index;
-}
-
-void StateRecorder::set_shader_module_handle(Hash index, VkShaderModule module)
-{
-	impl->shader_module_to_index[module] = index;
-}
-
-void StateRecorder::set_sampler_handle(Hash index, VkSampler sampler)
-{
-	impl->sampler_to_index[sampler] = index;
-}
-
-Hash StateRecorder::register_descriptor_set_layout(Hash hash, const VkDescriptorSetLayoutCreateInfo &layout_info)
-{
-	impl->descriptor_sets[hash] = impl->copy_descriptor_set_layout(layout_info);
-	return hash;
-}
-
-Hash StateRecorder::register_pipeline_layout(Hash hash, const VkPipelineLayoutCreateInfo &layout_info)
-{
-	impl->pipeline_layouts[hash] = impl->copy_pipeline_layout(layout_info);
-	return hash;
-}
-
-Hash StateRecorder::register_sampler(Hash hash, const VkSamplerCreateInfo &create_info)
+void StateRecorder::register_sampler(VkSampler sampler, const VkSamplerCreateInfo &create_info)
 {
 	if (create_info.pNext)
 		FOSSILIZE_THROW("pNext in VkSamplerCreateInfo not supported.");
-
-	impl->samplers[hash] = impl->copy_sampler(create_info);
-	return hash;
+	std::lock_guard<std::mutex> lock(impl->record_lock);
+	impl->record_queue.push({ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO, api_object_cast<uint64_t>(sampler), (void *)impl->copy_sampler(&create_info) });
 }
 
-Hash StateRecorder::register_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo &create_info)
+void StateRecorder::register_graphics_pipeline(VkPipeline pipeline, const VkGraphicsPipelineCreateInfo &create_info)
 {
 	if (create_info.pNext)
 		FOSSILIZE_THROW("pNext in VkGraphicsPipelineCreateInfo not supported.");
-	impl->graphics_pipelines[hash] = impl->copy_graphics_pipeline(create_info);
-	return hash;
+	std::lock_guard<std::mutex> lock(impl->record_lock);
+	impl->record_queue.push({ VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, api_object_cast<uint64_t>(pipeline), (void *)impl->copy_graphics_pipeline(&create_info) });
 }
 
-Hash StateRecorder::register_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo &create_info)
+void StateRecorder::register_compute_pipeline(VkPipeline pipeline, const VkComputePipelineCreateInfo &create_info)
 {
 	if (create_info.pNext)
 		FOSSILIZE_THROW("pNext in VkComputePipelineCreateInfo not supported.");
-	impl->compute_pipelines[hash] = impl->copy_compute_pipeline(create_info);
-	return hash;
+	std::lock_guard<std::mutex> lock(impl->record_lock);
+	impl->record_queue.push({ VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO, api_object_cast<uint64_t>(pipeline), (void *)impl->copy_compute_pipeline(&create_info) });
 }
 
-Hash StateRecorder::register_render_pass(Hash hash, const VkRenderPassCreateInfo &create_info)
+void StateRecorder::register_render_pass(VkRenderPass render_pass, const VkRenderPassCreateInfo &create_info)
 {
 	if (create_info.pNext)
 		FOSSILIZE_THROW("pNext in VkRenderPassCreateInfo not supported.");
-	impl->render_passes[hash] = impl->copy_render_pass(create_info);
-	return hash;
+	std::lock_guard<std::mutex> lock(impl->record_lock);
+	impl->record_queue.push({ VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO, (uint64_t)render_pass, (void *)impl->copy_render_pass(&create_info) });
 }
 
-Hash StateRecorder::register_shader_module(Hash hash, const VkShaderModuleCreateInfo &create_info)
+void StateRecorder::register_shader_module(VkShaderModule module, const VkShaderModuleCreateInfo &create_info)
 {
 	if (create_info.pNext)
 		FOSSILIZE_THROW("pNext in VkShaderModuleCreateInfo not supported.");
-	impl->shader_modules[hash] = impl->copy_shader_module(create_info);
-	return hash;
+	std::lock_guard<std::mutex> lock(impl->record_lock);
+	impl->record_queue.push({ VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, (uint64_t)module, (void *)impl->copy_shader_module(&create_info) });
 }
 
 Hash StateRecorder::get_hash_for_compute_pipeline_handle(VkPipeline pipeline) const
@@ -1919,48 +1909,43 @@ Hash StateRecorder::get_hash_for_render_pass(VkRenderPass render_pass) const
 		return itr->second;
 }
 
-VkShaderModuleCreateInfo StateRecorder::Impl::copy_shader_module(const VkShaderModuleCreateInfo &create_info)
+VkShaderModuleCreateInfo *StateRecorder::Impl::copy_shader_module(const VkShaderModuleCreateInfo *create_info)
 {
-	auto info = create_info;
-	info.pCode = copy(info.pCode, info.codeSize / sizeof(uint32_t));
+	auto *info = copy(create_info, 1);
+	info->pCode = copy(info->pCode, info->codeSize / sizeof(uint32_t));
 	return info;
 }
 
-VkSamplerCreateInfo StateRecorder::Impl::copy_sampler(const VkSamplerCreateInfo &create_info)
+VkSamplerCreateInfo *StateRecorder::Impl::copy_sampler(const VkSamplerCreateInfo *create_info)
 {
-	return create_info;
+	return copy(create_info, 1);
 }
 
-VkDescriptorSetLayoutCreateInfo StateRecorder::Impl::copy_descriptor_set_layout(
-	const VkDescriptorSetLayoutCreateInfo &create_info)
+VkDescriptorSetLayoutCreateInfo *StateRecorder::Impl::copy_descriptor_set_layout(
+	const VkDescriptorSetLayoutCreateInfo *create_info)
 {
-	auto info = create_info;
-	info.pBindings = copy(info.pBindings, info.bindingCount);
+	auto *info = copy(create_info, 1);
+	info->pBindings = copy(info->pBindings, info->bindingCount);
 
-	for (uint32_t i = 0; i < info.bindingCount; i++)
+	for (uint32_t i = 0; i < info->bindingCount; i++)
 	{
-		auto &b = const_cast<VkDescriptorSetLayoutBinding &>(info.pBindings[i]);
+		auto &b = const_cast<VkDescriptorSetLayoutBinding &>(info->pBindings[i]);
 		if (b.pImmutableSamplers &&
 		    (b.descriptorType == VK_DESCRIPTOR_TYPE_SAMPLER ||
 		     b.descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER))
 		{
 			b.pImmutableSamplers = copy(b.pImmutableSamplers, b.descriptorCount);
-			auto *samplers = const_cast<VkSampler *>(b.pImmutableSamplers);
-			for (uint32_t j = 0; j < b.descriptorCount; j++)
-				samplers[j] = remap_sampler_handle(samplers[j]);
 		}
 	}
 
 	return info;
 }
 
-VkPipelineLayoutCreateInfo StateRecorder::Impl::copy_pipeline_layout(const VkPipelineLayoutCreateInfo &create_info)
+VkPipelineLayoutCreateInfo *StateRecorder::Impl::copy_pipeline_layout(const VkPipelineLayoutCreateInfo *create_info)
 {
-	auto info = create_info;
-	info.pPushConstantRanges = copy(info.pPushConstantRanges, info.pushConstantRangeCount);
-	info.pSetLayouts = copy(info.pSetLayouts, info.setLayoutCount);
-	for (uint32_t i = 0; i < info.setLayoutCount; i++)
-		const_cast<VkDescriptorSetLayout *>(info.pSetLayouts)[i] = remap_descriptor_set_layout_handle(info.pSetLayouts[i]);
+	auto *info = copy(create_info, 1);
+	info->pPushConstantRanges = copy(info->pPushConstantRanges, info->pushConstantRangeCount);
+	info->pSetLayouts = copy(info->pSetLayouts, info->setLayoutCount);
 	return info;
 }
 
@@ -1972,151 +1957,141 @@ VkSpecializationInfo *StateRecorder::Impl::copy_specialization_info(const VkSpec
 	return ret;
 }
 
-VkComputePipelineCreateInfo StateRecorder::Impl::copy_compute_pipeline(const VkComputePipelineCreateInfo &create_info)
+VkComputePipelineCreateInfo *StateRecorder::Impl::copy_compute_pipeline(const VkComputePipelineCreateInfo *create_info)
 {
-	auto info = create_info;
-	if (info.stage.pSpecializationInfo)
-		info.stage.pSpecializationInfo = copy_specialization_info(info.stage.pSpecializationInfo);
-	if (info.stage.pNext)
+	auto *info = copy(create_info, 1);
+	if (info->stage.pSpecializationInfo)
+		info->stage.pSpecializationInfo = copy_specialization_info(info->stage.pSpecializationInfo);
+	if (info->stage.pNext)
 		FOSSILIZE_THROW("pNext in VkPipelineShaderStageCreateInfo not supported.");
-	info.stage.module = remap_shader_module_handle(info.stage.module);
-	info.stage.pName = copy(info.stage.pName, strlen(info.stage.pName) + 1);
-	info.layout = remap_pipeline_layout_handle(info.layout);
-	if (info.basePipelineHandle != VK_NULL_HANDLE)
-		info.basePipelineHandle = remap_compute_pipeline_handle(info.basePipelineHandle);
+	info->stage.pName = copy(info->stage.pName, strlen(info->stage.pName) + 1);
 	return info;
 }
 
-VkGraphicsPipelineCreateInfo StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateInfo &create_info)
+VkGraphicsPipelineCreateInfo *StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateInfo *create_info)
 {
-	auto info = create_info;
+	auto *info = copy(create_info, 1);
 
-	info.pStages = copy(info.pStages, info.stageCount);
-	if (info.pTessellationState)
+	info->pStages = copy(info->pStages, info->stageCount);
+	if (info->pTessellationState)
 	{
-		if (info.pTessellationState->pNext)
+		if (info->pTessellationState->pNext)
 			FOSSILIZE_THROW("pNext in VkPipelineTessellationStateCreateInfo not supported.");
-		info.pTessellationState = copy(info.pTessellationState, 1);
+		info->pTessellationState = copy(info->pTessellationState, 1);
 	}
 
-	if (info.pColorBlendState)
+	if (info->pColorBlendState)
 	{
-		if (info.pColorBlendState->pNext)
+		if (info->pColorBlendState->pNext)
 			FOSSILIZE_THROW("pNext in VkPipelineColorBlendStateCreateInfo not supported.");
-		info.pColorBlendState = copy(info.pColorBlendState, 1);
+		info->pColorBlendState = copy(info->pColorBlendState, 1);
 	}
 
-	if (info.pVertexInputState)
+	if (info->pVertexInputState)
 	{
-		if (info.pColorBlendState->pNext)
+		if (info->pColorBlendState->pNext)
 			FOSSILIZE_THROW("pNext in VkPipelineTessellationStateCreateInfo not supported.");
-		info.pVertexInputState = copy(info.pVertexInputState, 1);
+		info->pVertexInputState = copy(info->pVertexInputState, 1);
 	}
 
-	if (info.pMultisampleState)
+	if (info->pMultisampleState)
 	{
-		if (info.pMultisampleState->pNext)
+		if (info->pMultisampleState->pNext)
 			FOSSILIZE_THROW("pNext in VkPipelineMultisampleStateCreateInfo not supported.");
-		info.pMultisampleState = copy(info.pMultisampleState, 1);
+		info->pMultisampleState = copy(info->pMultisampleState, 1);
 	}
 
-	if (info.pVertexInputState)
+	if (info->pVertexInputState)
 	{
-		if (info.pVertexInputState->pNext)
+		if (info->pVertexInputState->pNext)
 			FOSSILIZE_THROW("pNext in VkPipelineVertexInputStateCreateInfo not supported.");
-		info.pVertexInputState = copy(info.pVertexInputState, 1);
+		info->pVertexInputState = copy(info->pVertexInputState, 1);
 	}
 
-	if (info.pViewportState)
+	if (info->pViewportState)
 	{
-		if (info.pViewportState->pNext)
+		if (info->pViewportState->pNext)
 			FOSSILIZE_THROW("pNext in VkPipelineViewportStateCreateInfo not supported.");
-		info.pViewportState = copy(info.pViewportState, 1);
+		info->pViewportState = copy(info->pViewportState, 1);
 	}
 
-	if (info.pInputAssemblyState)
+	if (info->pInputAssemblyState)
 	{
-		if (info.pInputAssemblyState->pNext)
+		if (info->pInputAssemblyState->pNext)
 			FOSSILIZE_THROW("pNext in VkPipelineInputAssemblyStateCreateInfo not supported.");
-		info.pInputAssemblyState = copy(info.pInputAssemblyState, 1);
+		info->pInputAssemblyState = copy(info->pInputAssemblyState, 1);
 	}
 
-	if (info.pDepthStencilState)
+	if (info->pDepthStencilState)
 	{
-		if (info.pDepthStencilState->pNext)
+		if (info->pDepthStencilState->pNext)
 			FOSSILIZE_THROW("pNext in VkPipelineDepthStencilStateCreateInfo not supported.");
-		info.pDepthStencilState = copy(info.pDepthStencilState, 1);
+		info->pDepthStencilState = copy(info->pDepthStencilState, 1);
 	}
 
-	if (info.pRasterizationState)
+	if (info->pRasterizationState)
 	{
-		if (info.pRasterizationState->pNext)
+		if (info->pRasterizationState->pNext)
 			FOSSILIZE_THROW("pNext in VkPipelineRasterizationCreateInfo not supported.");
-		info.pRasterizationState = copy(info.pRasterizationState, 1);
+		info->pRasterizationState = copy(info->pRasterizationState, 1);
 	}
 
-	if (info.pDynamicState)
+	if (info->pDynamicState)
 	{
-		if (info.pDynamicState->pNext)
+		if (info->pDynamicState->pNext)
 			FOSSILIZE_THROW("pNext in VkPipelineDynamicStateCreateInfo not supported.");
-		info.pDynamicState = copy(info.pDynamicState, 1);
+		info->pDynamicState = copy(info->pDynamicState, 1);
 	}
 
-	info.renderPass = remap_render_pass_handle(info.renderPass);
-	info.layout = remap_pipeline_layout_handle(info.layout);
-	if (info.basePipelineHandle != VK_NULL_HANDLE)
-		info.basePipelineHandle = remap_graphics_pipeline_handle(info.basePipelineHandle);
-
-	for (uint32_t i = 0; i < info.stageCount; i++)
+	for (uint32_t i = 0; i < info->stageCount; i++)
 	{
-		auto &stage = const_cast<VkPipelineShaderStageCreateInfo &>(info.pStages[i]);
+		auto &stage = const_cast<VkPipelineShaderStageCreateInfo &>(info->pStages[i]);
 		if (stage.pNext)
 			FOSSILIZE_THROW("pNext in VkPipelineShaderStageCreateInfo not supported.");
 		stage.pName = copy(stage.pName, strlen(stage.pName) + 1);
 		if (stage.pSpecializationInfo)
 			stage.pSpecializationInfo = copy_specialization_info(stage.pSpecializationInfo);
-		stage.module = remap_shader_module_handle(stage.module);
 	}
 
-	if (info.pColorBlendState)
+	if (info->pColorBlendState)
 	{
-		auto &blend = const_cast<VkPipelineColorBlendStateCreateInfo &>(*info.pColorBlendState);
+		auto &blend = const_cast<VkPipelineColorBlendStateCreateInfo &>(*info->pColorBlendState);
 		blend.pAttachments = copy(blend.pAttachments, blend.attachmentCount);
 	}
 
-	if (info.pVertexInputState)
+	if (info->pVertexInputState)
 	{
-		auto &vs = const_cast<VkPipelineVertexInputStateCreateInfo &>(*info.pVertexInputState);
+		auto &vs = const_cast<VkPipelineVertexInputStateCreateInfo &>(*info->pVertexInputState);
 		vs.pVertexAttributeDescriptions = copy(vs.pVertexAttributeDescriptions, vs.vertexAttributeDescriptionCount);
 		vs.pVertexBindingDescriptions = copy(vs.pVertexBindingDescriptions, vs.vertexBindingDescriptionCount);
 	}
 
-	if (info.pMultisampleState)
+	if (info->pMultisampleState)
 	{
-		auto &ms = const_cast<VkPipelineMultisampleStateCreateInfo &>(*info.pMultisampleState);
+		auto &ms = const_cast<VkPipelineMultisampleStateCreateInfo &>(*info->pMultisampleState);
 		if (ms.pSampleMask)
 			ms.pSampleMask = copy(ms.pSampleMask, (ms.rasterizationSamples + 31) / 32);
 	}
 
-	if (info.pDynamicState)
+	if (info->pDynamicState)
 	{
-		const_cast<VkPipelineDynamicStateCreateInfo *>(info.pDynamicState)->pDynamicStates =
-				copy(info.pDynamicState->pDynamicStates, info.pDynamicState->dynamicStateCount);
+		const_cast<VkPipelineDynamicStateCreateInfo *>(info->pDynamicState)->pDynamicStates =
+				copy(info->pDynamicState->pDynamicStates, info->pDynamicState->dynamicStateCount);
 	}
 
 	return info;
 }
 
-VkRenderPassCreateInfo StateRecorder::Impl::copy_render_pass(const VkRenderPassCreateInfo &create_info)
+VkRenderPassCreateInfo *StateRecorder::Impl::copy_render_pass(const VkRenderPassCreateInfo *create_info)
 {
-	auto info = create_info;
-	info.pAttachments = copy(info.pAttachments, info.attachmentCount);
-	info.pSubpasses = copy(info.pSubpasses, info.subpassCount);
-	info.pDependencies = copy(info.pDependencies, info.dependencyCount);
+	auto *info = copy(create_info, 1);
+	info->pAttachments = copy(info->pAttachments, info->attachmentCount);
+	info->pSubpasses = copy(info->pSubpasses, info->subpassCount);
+	info->pDependencies = copy(info->pDependencies, info->dependencyCount);
 
-	for (uint32_t i = 0; i < info.subpassCount; i++)
+	for (uint32_t i = 0; i < info->subpassCount; i++)
 	{
-		auto &sub = const_cast<VkSubpassDescription &>(info.pSubpasses[i]);
+		auto &sub = const_cast<VkSubpassDescription &>(info->pSubpasses[i]);
 		if (sub.pDepthStencilAttachment)
 			sub.pDepthStencilAttachment = copy(sub.pDepthStencilAttachment, 1);
 		if (sub.pColorAttachments)
@@ -2186,6 +2161,180 @@ VkPipeline StateRecorder::Impl::remap_compute_pipeline_handle(VkPipeline pipelin
 	if (itr == end(compute_pipeline_to_index))
 		FOSSILIZE_THROW("Cannot find compute pipeline in hashmap.");
 	return api_object_cast<VkPipeline>(uint64_t(itr->second));
+}
+
+void StateRecorder::Impl::remap_descriptor_set_layout_ci(VkDescriptorSetLayoutCreateInfo *info)
+{
+	for (uint32_t i = 0; i < info->bindingCount; i++)
+	{
+		auto &b = const_cast<VkDescriptorSetLayoutBinding &>(info->pBindings[i]);
+		if (b.pImmutableSamplers &&
+		    (b.descriptorType == VK_DESCRIPTOR_TYPE_SAMPLER ||
+		     b.descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER))
+		{
+			auto *samplers = const_cast<VkSampler *>(b.pImmutableSamplers);
+			for (uint32_t j = 0; j < b.descriptorCount; j++)
+				samplers[j] = remap_sampler_handle(samplers[j]);
+		}
+	}
+}
+
+void StateRecorder::Impl::remap_pipeline_layout_ci(VkPipelineLayoutCreateInfo *info)
+{
+	for (uint32_t i = 0; i < info->setLayoutCount; i++)
+		const_cast<VkDescriptorSetLayout *>(info->pSetLayouts)[i] = remap_descriptor_set_layout_handle(info->pSetLayouts[i]);
+}
+
+void StateRecorder::Impl::remap_shader_module_ci(VkShaderModuleCreateInfo *info)
+{
+	// nothing to do
+}
+
+void StateRecorder::Impl::remap_graphics_pipeline_ci(VkGraphicsPipelineCreateInfo *info)
+{
+	info->renderPass = remap_render_pass_handle(info->renderPass);
+	info->layout = remap_pipeline_layout_handle(info->layout);
+	if (info->basePipelineHandle != VK_NULL_HANDLE)
+		info->basePipelineHandle = remap_graphics_pipeline_handle(info->basePipelineHandle);
+
+	for (uint32_t i = 0; i < info->stageCount; i++)
+	{
+		auto &stage = const_cast<VkPipelineShaderStageCreateInfo &>(info->pStages[i]);
+		stage.module = remap_shader_module_handle(stage.module);
+	}
+}
+
+void StateRecorder::Impl::remap_compute_pipeline_ci(VkComputePipelineCreateInfo *info)
+{
+	info->stage.module = remap_shader_module_handle(info->stage.module);
+
+	if (info->basePipelineHandle != VK_NULL_HANDLE)
+		info->basePipelineHandle = remap_compute_pipeline_handle(info->basePipelineHandle);
+
+	info->layout = remap_pipeline_layout_handle(info->layout);
+}
+
+void StateRecorder::Impl::remap_sampler_ci(VkSamplerCreateInfo *info)
+{
+	// nothing to do
+}
+
+void StateRecorder::Impl::remap_render_pass_ci(VkRenderPassCreateInfo *create_info)
+{
+	// nothing to do
+}
+
+static void write_buffer(const std::string &json_dir, Hash hash, vector<uint8_t> &bytes)
+{
+	try
+	{
+		char filename[22]; // 16 digits + ".json" + null
+		sprintf(filename, "%016" PRIX64 ".json", hash);
+		auto path = json_dir + filename;
+		FILE *file = fopen(path.c_str(), "wb");
+		if (file)
+		{
+			if (fwrite(bytes.data(), 1, bytes.size(), file) != bytes.size())
+				LOGE("Failed to write serialized state to disk.\n");
+			fclose(file);
+		}
+		else
+		{
+			LOGE("Failed to open file for writing: \"%s\".\n", path.c_str());
+		}
+	}
+	catch (const std::exception &e)
+	{
+		LOGE("Failed to serialize: \"%s\".\n", e.what());
+	}
+}
+
+void StateRecorder::Impl::record_task(StateRecorder *recorder) {
+	for(;;)
+	{
+		std::unique_lock<std::mutex> lock(recorder->impl->record_lock);
+		if (auto size = recorder->impl->record_queue.size())
+		{
+			auto record_item = recorder->impl->record_queue.front();
+			recorder->impl->record_queue.pop();
+			lock.unlock();
+
+			switch (record_item.type)
+			{
+			case VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO:
+			{
+				auto *create_info = reinterpret_cast<VkSamplerCreateInfo *>(record_item.create_info);
+				auto hash = Hashing::compute_hash_sampler(*recorder, *create_info);
+				recorder->impl->samplers[hash] = *create_info;
+				recorder->impl->sampler_to_index[(VkSampler)record_item.handle] = hash;
+				break;
+			}
+			case VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO:
+			{
+				auto *create_info = reinterpret_cast<VkDescriptorSetLayoutCreateInfo *>(record_item.create_info);
+				auto hash = Hashing::compute_hash_descriptor_set_layout(*recorder, *create_info);
+				recorder->impl->remap_descriptor_set_layout_ci(create_info);
+				recorder->impl->descriptor_sets[hash] = *create_info;
+				recorder->impl->descriptor_set_layout_to_index[(VkDescriptorSetLayout)record_item.handle] = hash;
+				break;
+			}
+			case VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO:
+			{
+				auto *create_info = reinterpret_cast<VkPipelineLayoutCreateInfo *>(record_item.create_info);
+				auto hash = Hashing::compute_hash_pipeline_layout(*recorder, *create_info);
+				recorder->impl->remap_pipeline_layout_ci(create_info);
+				recorder->impl->pipeline_layouts[hash] = *create_info;
+				recorder->impl->pipeline_layout_to_index[(VkPipelineLayout)record_item.handle] = hash;
+				break;
+			}
+			case VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO:
+			{
+				auto *create_info = reinterpret_cast<VkRenderPassCreateInfo *>(record_item.create_info);
+				auto hash = Hashing::compute_hash_render_pass(*recorder, *create_info);
+				recorder->impl->render_passes[hash] = *create_info;
+				recorder->impl->render_pass_to_index[(VkRenderPass)record_item.handle] = hash;
+				break;
+			}
+			case VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO:
+			{
+				auto *create_info = reinterpret_cast<VkShaderModuleCreateInfo *>(record_item.create_info);
+				auto hash = Hashing::compute_hash_shader_module(*recorder, *create_info);
+				recorder->impl->shader_modules[hash] = *create_info;
+				recorder->impl->shader_module_to_index[(VkShaderModule)record_item.handle] = hash;
+				write_buffer("", hash, recorder->serialize_shader_module(hash));
+				break;
+			}
+			case VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO:
+			{
+				auto *create_info = reinterpret_cast<VkGraphicsPipelineCreateInfo *>(record_item.create_info);
+				auto hash = Hashing::compute_hash_graphics_pipeline(*recorder, *create_info);
+				recorder->impl->remap_graphics_pipeline_ci(create_info);
+				recorder->impl->graphics_pipelines[hash] = *create_info;
+				recorder->impl->graphics_pipeline_to_index[(VkPipeline)record_item.handle] = hash;
+				write_buffer("", hash, recorder->serialize_graphics_pipeline(hash));
+				break;
+			}
+			case VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO:
+			{
+				auto *create_info = reinterpret_cast<VkComputePipelineCreateInfo *>(record_item.create_info);
+				auto hash = Hashing::compute_hash_compute_pipeline(*recorder, *create_info);
+				recorder->impl->remap_compute_pipeline_ci(create_info);
+				recorder->impl->compute_pipelines[hash] = *create_info;
+				recorder->impl->compute_pipeline_to_index[(VkPipeline)record_item.handle] = hash;
+				write_buffer("", hash, recorder->serialize_compute_pipeline(hash));
+				break;
+			}
+			default:
+				break;
+			}
+		}
+		else
+		{
+			lock.unlock();
+			if (recorder->impl->record_done) return;
+			std::this_thread::sleep_for(std::chrono::milliseconds(10));
+		}
+	}
 }
 
 static char base64(uint32_t v)
@@ -2955,10 +3104,14 @@ vector<uint8_t> StateRecorder::serialize() const
 StateRecorder::StateRecorder()
 {
 	impl.reset(new Impl);
+	impl->record_done = false;
+	impl->worker_thread = std::thread(&StateRecorder::Impl::record_task, this);
 }
 
 StateRecorder::~StateRecorder()
 {
+	impl->record_done = true;
+	impl->worker_thread.join();
 }
 
 }

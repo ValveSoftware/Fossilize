@@ -173,36 +173,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(VkDevice device, V
 
 	for (uint32_t i = 0; i < createInfoCount; i++)
 	{
-		bool registerHandle = false;
-		Hash index;
-		try
-		{
-			index = layer->getRecorder().register_graphics_pipeline(
-					Hashing::compute_hash_graphics_pipeline(layer->getRecorder(), pCreateInfos[i]), pCreateInfos[i]);
-			registerHandle = true;
-		}
-		catch (const std::exception &e)
-		{
-			LOGE("Exception caught: %s\n", e.what());
-		}
-		pPipelines[i] = VK_NULL_HANDLE;
-
-		if (layer->isParanoid())
-			layer->serializeToPath(layer->getSerializationPath());
-
 		auto res = createGraphicsPipeline(layer, pipelineCache, &pCreateInfos[i], pAllocator, &pPipelines[i]);
 
-		if (res != VK_SUCCESS)
-		{
-			LOGE("Failed to create graphics pipeline, safety serialization ...\n");
-			layer->serializeToPath(layer->getSerializationPath());
+		if (res == VK_SUCCESS)
+			layer->getRecorder().register_graphics_pipeline(pPipelines[i], pCreateInfos[i]);
+		else
 			return res;
-		}
-
-		if (registerHandle) {
-			layer->getRecorder().set_compute_pipeline_handle(index, pPipelines[i]);
-			layer->serializeGraphicsPipeline(layer->getSerializationPath(), index);
-		}
 	}
 
 	return VK_SUCCESS;
@@ -220,37 +196,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelines(VkDevice device, Vk
 
 	for (uint32_t i = 0; i < createInfoCount; i++)
 	{
-		bool registerHandle = false;
-		Hash index;
-		try
-		{
-			index = layer->getRecorder().register_compute_pipeline(
-					Hashing::compute_hash_compute_pipeline(layer->getRecorder(), pCreateInfos[i]), pCreateInfos[i]);
-			registerHandle = true;
-		}
-		catch (const std::exception &e)
-		{
-			LOGE("Exception caught: %s\n", e.what());
-		}
-
-		if (layer->isParanoid())
-			layer->serializeToPath(layer->getSerializationPath());
-
-		pPipelines[i] = VK_NULL_HANDLE;
-
 		auto res = createComputePipeline(layer, pipelineCache, &pCreateInfos[i], pAllocator, &pPipelines[i]);
 
-		if (res != VK_SUCCESS)
-		{
-			LOGE("Failed to create compute pipeline, safety serialization ...\n");
-			layer->serializeToPath(layer->getSerializationPath());
+		if (res == VK_SUCCESS)
+			layer->getRecorder().register_compute_pipeline(pPipelines[i], pCreateInfos[i]);
+		else
 			return res;
-		}
-
-		if (registerHandle) {
-			layer->getRecorder().set_compute_pipeline_handle(index, pPipelines[i]);
-			layer->serializeComputePipeline(layer->getSerializationPath(), index);
-		}
 	}
 
 	return VK_SUCCESS;
@@ -265,24 +216,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(VkDevice device,
 	void *key = getDispatchKey(device);
 	auto *layer = getLayerData(key, deviceData);
 
-	bool registerHandle = false;
-	Hash index;
-	try
-	{
-		index = layer->getRecorder().register_pipeline_layout(
-				Hashing::compute_hash_pipeline_layout(layer->getRecorder(), *pCreateInfo), *pCreateInfo);
-		registerHandle = true;
-	}
-	catch (const std::exception &e)
-	{
-		LOGE("Exception caught: %s\n", e.what());
-	}
-	*pLayout = VK_NULL_HANDLE;
-
 	VkResult result = layer->getTable()->CreatePipelineLayout(device, pCreateInfo, pAllocator, pLayout);
 
-	if (registerHandle)
-		layer->getRecorder().set_pipeline_layout_handle(index, *pLayout);
+	if (result == VK_SUCCESS)
+		layer->getRecorder().register_pipeline_layout(*pLayout, *pCreateInfo);
 	return result;
 }
 
@@ -295,24 +232,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(VkDevice device,
 	void *key = getDispatchKey(device);
 	auto *layer = getLayerData(key, deviceData);
 
-	bool registerHandle = false;
-	Hash index;
-	try
-	{
-		index = layer->getRecorder().register_descriptor_set_layout(
-				Hashing::compute_hash_descriptor_set_layout(layer->getRecorder(), *pCreateInfo), *pCreateInfo);
-		registerHandle = true;
-	}
-	catch (const std::exception &e)
-	{
-		LOGE("Exception caught: %s\n", e.what());
-	}
-	*pSetLayout = VK_NULL_HANDLE;
-
 	VkResult result = layer->getTable()->CreateDescriptorSetLayout(device, pCreateInfo, pAllocator, pSetLayout);
 
-	if (registerHandle)
-		layer->getRecorder().set_descriptor_set_layout_handle(index, *pSetLayout);
+	if (result == VK_SUCCESS)
+		layer->getRecorder().register_descriptor_set_layout(*pSetLayout, *pCreateInfo);
 	return result;
 }
 
@@ -353,24 +276,11 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateSampler(VkDevice device, const VkSam
 	void *key = getDispatchKey(device);
 	auto *layer = getLayerData(key, deviceData);
 
-	bool registerHandle = false;
-	Hash index;
-	try
-	{
-		index = layer->getRecorder().register_sampler(
-				Hashing::compute_hash_sampler(layer->getRecorder(), *pCreateInfo), *pCreateInfo);
-		registerHandle = true;
-	}
-	catch (const std::exception &e)
-	{
-		LOGE("Exception caught: %s\n", e.what());
-	}
-	*pSampler = VK_NULL_HANDLE;
-
 	auto res = layer->getTable()->CreateSampler(device, pCreateInfo, pCallbacks, pSampler);
 
-	if (registerHandle)
-		layer->getRecorder().set_sampler_handle(index, *pSampler);
+	if (res == VK_SUCCESS)
+		layer->getRecorder().register_sampler(*pSampler, *pCreateInfo);
+
 	return res;
 }
 
@@ -382,26 +292,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateShaderModule(VkDevice device, const 
 	void *key = getDispatchKey(device);
 	auto *layer = getLayerData(key, deviceData);
 
-	bool registerHandle = false;
-	Hash index;
-	try
-	{
-		index = layer->getRecorder().register_shader_module(
-				Hashing::compute_hash_shader_module(layer->getRecorder(), *pCreateInfo), *pCreateInfo);
-		registerHandle = true;
-	}
-	catch (const std::exception &e)
-	{
-		LOGE("Exception caught: %s\n", e.what());
-	}
 	*pShaderModule = VK_NULL_HANDLE;
 
 	auto res = layer->getTable()->CreateShaderModule(device, pCreateInfo, pCallbacks, pShaderModule);
 
-	if (registerHandle) {
-		layer->getRecorder().set_shader_module_handle(index, *pShaderModule);
-		layer->serializeShaderModule(layer->getSerializationPath(), index);
-	}
+	if (res == VK_SUCCESS)
+		layer->getRecorder().register_shader_module(*pShaderModule, *pCreateInfo);
+
 	return res;
 }
 
@@ -412,24 +309,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass(VkDevice device, const Vk
 	void *key = getDispatchKey(device);
 	auto *layer = getLayerData(key, deviceData);
 
-	bool registerHandle = false;
-	Hash index;
-	try
-	{
-		index = layer->getRecorder().register_render_pass(
-				Hashing::compute_hash_render_pass(layer->getRecorder(), *pCreateInfo), *pCreateInfo);
-		registerHandle = true;
-	}
-	catch (const std::exception &e)
-	{
-		LOGE("Exception caught: %s\n", e.what());
-	}
-	*pRenderPass = VK_NULL_HANDLE;
-
 	auto res = layer->getTable()->CreateRenderPass(device, pCreateInfo, pCallbacks, pRenderPass);
 
-	if (registerHandle)
-		layer->getRecorder().set_render_pass_handle(index, *pRenderPass);
+	if (res == VK_SUCCESS)
+		layer->getRecorder().register_render_pass(*pRenderPass, *pCreateInfo);
 	return res;
 }
 

@@ -45,9 +45,6 @@ public:
 		return recorder;
 	}
 
-	bool serializeGraphicsPipeline(const std::string &json_dir, Hash hash);
-	bool serializeComputePipeline(const std::string &json_dir, Hash hash);
-	bool serializeShaderModule(const std::string &json_dir, Hash hash);
 	bool serializeToPath(const std::string &json_dir);
 	const std::string &getSerializationPath() const
 	{

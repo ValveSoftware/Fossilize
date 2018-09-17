@@ -155,21 +155,13 @@ public:
 	// TODO: create_device which can capture which features/exts are used to create the device.
 	// This can be relevant when using more exotic features.
 
-	Hash register_descriptor_set_layout(Hash hash, const VkDescriptorSetLayoutCreateInfo &layout_info);
-	Hash register_pipeline_layout(Hash hash, const VkPipelineLayoutCreateInfo &layout_info);
-	Hash register_shader_module(Hash hash, const VkShaderModuleCreateInfo &create_info);
-	Hash register_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo &create_info);
-	Hash register_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo &create_info);
-	Hash register_render_pass(Hash hash, const VkRenderPassCreateInfo &create_info);
-	Hash register_sampler(Hash hash, const VkSamplerCreateInfo &create_info);
-
-	void set_descriptor_set_layout_handle(Hash index, VkDescriptorSetLayout layout);
-	void set_pipeline_layout_handle(Hash index, VkPipelineLayout layout);
-	void set_shader_module_handle(Hash index, VkShaderModule module);
-	void set_graphics_pipeline_handle(Hash index, VkPipeline pipeline);
-	void set_compute_pipeline_handle(Hash index, VkPipeline pipeline);
-	void set_render_pass_handle(Hash index, VkRenderPass render_pass);
-	void set_sampler_handle(Hash index, VkSampler sampler);
+	void register_descriptor_set_layout(VkDescriptorSetLayout set_layout, const VkDescriptorSetLayoutCreateInfo &layout_info);
+	void register_pipeline_layout(VkPipelineLayout pipeline_layout, const VkPipelineLayoutCreateInfo &layout_info);
+	void register_shader_module(VkShaderModule module, const VkShaderModuleCreateInfo &create_info);
+	void register_graphics_pipeline(VkPipeline pipeline, const VkGraphicsPipelineCreateInfo &create_info);
+	void register_compute_pipeline(VkPipeline pipeline, const VkComputePipelineCreateInfo &create_info);
+	void register_render_pass(VkRenderPass render_pass, const VkRenderPassCreateInfo &create_info);
+	void register_sampler(VkSampler sampler, const VkSamplerCreateInfo &create_info);
 
 	Hash get_hash_for_descriptor_set_layout(VkDescriptorSetLayout layout) const;
 	Hash get_hash_for_pipeline_layout(VkPipelineLayout layout) const;
