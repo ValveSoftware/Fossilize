@@ -88,6 +88,7 @@ void Device::init(VkPhysicalDevice gpu, VkDevice device, VkLayerInstanceDispatch
 		serializationPath = path;
 		LOGI("Overriding serialization path: \"%s\".\n", path);
 	}
+	this->recorder.set_serialization_path(serializationPath);
 
 	const char *paranoid = getenv("FOSSILIZE_PARANOID_MODE");
 	if (paranoid && strtoul(paranoid, nullptr, 0) != 0)
@@ -115,9 +116,7 @@ static Device *segfaultDevice = nullptr;
 
 static void segfaultHandler(int, siginfo_t *, void *)
 {
-	LOGE("Caught segmentation fault! Emergency serialization of state to disk ...\n");
-	segfaultDevice->serializeToPath(segfaultDevice->getSerializationPath());
-	LOGE("Done with emergency serialization, hopefully this worked :D\n");
+	LOGE("Caught segmentation fault!");
 
 	// Now we can die properly.
 	kill(getpid(), SIGSEGV);
@@ -136,33 +135,5 @@ void Device::installSegfaultHandler()
 		LOGE("Failed to install SIGSEGV handler!\n");
 }
 #endif
-
-bool Device::serializeToPath(const std::string &json_dir)
-{
-	try
-	{
-		auto path = json_dir + "fossilize.json";
-		auto result = recorder.serialize();
-		FILE *file = fopen(path.c_str(), "wb");
-		if (file)
-		{
-			if (fwrite(result.data(), 1, result.size(), file) != result.size())
-				LOGE("Failed to write serialized state to disk.\n");
-			fclose(file);
-			LOGI("Serialized to \"%s\".\n", path.c_str());
-			return true;
-		}
-		else
-		{
-			LOGE("Failed to open file for writing: \"%s\".\n", path.c_str());
-			return false;
-		}
-	}
-	catch (const std::exception &e)
-	{
-		LOGE("Failed to serialize: \"%s\".\n", e.what());
-		return false;
-	}
-}
 
 }

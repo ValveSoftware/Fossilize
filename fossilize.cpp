@@ -248,6 +248,9 @@ struct StateRecorder::Impl
 
 	static void record_task(StateRecorder *recorder);
 
+	std::mutex serialization_lock;
+	std::string serialization_path;
+
 	template <typename T>
 	T *copy(const T *src, size_t count);
 };
@@ -2301,7 +2304,8 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder) {
 				auto hash = Hashing::compute_hash_shader_module(*recorder, *create_info);
 				recorder->impl->shader_modules[hash] = *create_info;
 				recorder->impl->shader_module_to_index[(VkShaderModule)record_item.handle] = hash;
-				write_buffer("", hash, recorder->serialize_shader_module(hash));
+				lock_guard<mutex> lock(recorder->impl->serialization_lock);
+				write_buffer(recorder->impl->serialization_path, hash, recorder->serialize_shader_module(hash));
 				break;
 			}
 			case VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO:
@@ -2311,7 +2315,8 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder) {
 				recorder->impl->remap_graphics_pipeline_ci(create_info);
 				recorder->impl->graphics_pipelines[hash] = *create_info;
 				recorder->impl->graphics_pipeline_to_index[(VkPipeline)record_item.handle] = hash;
-				write_buffer("", hash, recorder->serialize_graphics_pipeline(hash));
+				lock_guard<mutex> lock(recorder->impl->serialization_lock);
+				write_buffer(recorder->impl->serialization_path, hash, recorder->serialize_graphics_pipeline(hash));
 				break;
 			}
 			case VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO:
@@ -2321,7 +2326,8 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder) {
 				recorder->impl->remap_compute_pipeline_ci(create_info);
 				recorder->impl->compute_pipelines[hash] = *create_info;
 				recorder->impl->compute_pipeline_to_index[(VkPipeline)record_item.handle] = hash;
-				write_buffer("", hash, recorder->serialize_compute_pipeline(hash));
+				lock_guard<mutex> lock(recorder->impl->serialization_lock);
+				write_buffer(recorder->impl->serialization_path, hash, recorder->serialize_compute_pipeline(hash));
 				break;
 			}
 			default:
@@ -3101,6 +3107,12 @@ vector<uint8_t> StateRecorder::serialize() const
 	return serialize_buffer;
 }
 
+void StateRecorder::set_serialization_path(const std::string &serialization_path)
+{
+	std::lock_guard lock(impl->serialization_lock);
+	impl->serialization_path = serialization_path;
+}
+
 StateRecorder::StateRecorder()
 {
 	impl.reset(new Impl);
@@ -3113,5 +3125,6 @@ StateRecorder::~StateRecorder()
 	impl->record_done = true;
 	impl->worker_thread.join();
 }
+
 
 }

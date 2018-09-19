@@ -124,12 +124,7 @@ static VkResult createGraphicsPipeline(Device *device, VkPipelineCache pipelineC
 	__except (filterSEHException(GetExceptionCode()))
 	{
 		LOGE("Caught access violation in vkCreateGraphicsPipelines(), safety serialization before terminating ...\n");
-		bool success = device->serializeToPath(device->getSerializationPath());
 
-		if (success)
-			MessageBoxA(nullptr, "vkCreateGraphicsPipelines() triggered an access violation, the offending state has been serialized.", "CreateGraphicsPipeline Access Violation", 0);
-		else
-			MessageBoxA(nullptr, "vkCreateGraphicsPipelines() triggered an access violation, but the offending state failed to be serialized.", "CreateGraphicsPipeline Access Violation", 0);
 		std::terminate();
 	}
 #endif
@@ -150,12 +145,7 @@ static VkResult createComputePipeline(Device *device, VkPipelineCache pipelineCa
 	__except (filterSEHException(GetExceptionCode()))
 	{
 		LOGE("Caught access violation in vkCreateComputePipelines(), safety serialization before terminating ...\n");
-		bool success = device->serializeToPath(device->getSerializationPath());
 
-		if (success)
-			MessageBoxA(nullptr, "vkCreateComputePipelines() triggered an access violation, the offending state has been serialized.", "CreateComputePipeline Access Violation", 0);
-		else
-			MessageBoxA(nullptr, "vkCreateComputePipelines() triggered an access violation, but the offending state failed to be serialized.", "GraphicsComputePipeline Access Violation", 0);
 		std::terminate();
 	}
 #endif

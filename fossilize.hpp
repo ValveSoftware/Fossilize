@@ -176,6 +176,8 @@ public:
 	std::vector<uint8_t> serialize_shader_module(Hash hash) const;
 	std::vector<uint8_t> serialize() const;
 
+	void set_serialization_path(const std::string &serialization_path);
+
 private:
 	struct Impl;
 	std::unique_ptr<Impl> impl;
