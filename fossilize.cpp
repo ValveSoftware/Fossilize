@@ -2224,7 +2224,7 @@ void StateRecorder::Impl::remap_render_pass_ci(VkRenderPassCreateInfo *create_in
 	// nothing to do
 }
 
-static void write_buffer(const std::string &json_dir, Hash hash, vector<uint8_t> &bytes)
+static void write_buffer(const std::string &json_dir, Hash hash, const vector<uint8_t> &bytes)
 {
 	try
 	{
