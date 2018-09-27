@@ -127,66 +127,56 @@ struct DumbReplayer : StateCreatorInterface
 
 	bool enqueue_create_sampler(Hash index, const VkSamplerCreateInfo *create_info, VkSampler *sampler) override
 	{
-		LOGI("Creating sampler %0" PRIX64 "\n", index);
 		if (vkCreateSampler(device.get_device(), create_info, nullptr, sampler) != VK_SUCCESS)
 		{
-			LOGE(" ... Failed!\n");
+			LOGE("Creating sampler %0" PRIX64 " Failed!\n", index);
 			return false;
 		}
 		samplers[index] = *sampler;
-		LOGI(" ... Succeeded!\n");
 		return true;
 	}
 
 	bool enqueue_create_descriptor_set_layout(Hash index, const VkDescriptorSetLayoutCreateInfo *create_info, VkDescriptorSetLayout *layout) override
 	{
-		LOGI("Creating descriptor set layout %0" PRIX64 "\n", index);
 		if (vkCreateDescriptorSetLayout(device.get_device(), create_info, nullptr, layout) != VK_SUCCESS)
 		{
-			LOGE(" ... Failed!\n");
+			LOGE("Creating descriptor set layout %0" PRIX64 " Failed!\n", index);
 			return false;
 		}
 		layouts[index] = *layout;
-		LOGI(" ... Succeeded!\n");
 		return true;
 	}
 
 	bool enqueue_create_pipeline_layout(Hash index, const VkPipelineLayoutCreateInfo *create_info, VkPipelineLayout *layout) override
 	{
-		LOGI("Creating pipeline layout %0" PRIX64 "\n", index);
 		if (vkCreatePipelineLayout(device.get_device(), create_info, nullptr, layout) != VK_SUCCESS)
 		{
-			LOGE(" ... Failed!\n");
+			LOGE("Creating pipeline layout %0" PRIX64 " Failed!\n", index);
 			return false;
 		}
 		pipeline_layouts[index] = *layout;
-		LOGI(" ... Succeeded!\n");
 		return true;
 	}
 
 	bool enqueue_create_shader_module(Hash index, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module) override
 	{
-		LOGI("Creating shader module %0" PRIX64 "\n", index);
 		if (vkCreateShaderModule(device.get_device(), create_info, nullptr, module) != VK_SUCCESS)
 		{
-			LOGE(" ... Failed!\n");
+			LOGE("Creating shader module %0" PRIX64 " Failed!\n", index);
 			return false;
 		}
 		shader_modules[index] = *module;
-		LOGI(" ... Succeeded!\n");
 		return true;
 	}
 
 	bool enqueue_create_render_pass(Hash index, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass) override
 	{
-		LOGI("Creating render pass %0" PRIX64 "\n", index);
 		if (vkCreateRenderPass(device.get_device(), create_info, nullptr, render_pass) != VK_SUCCESS)
 		{
-			LOGE(" ... Failed!\n");
+			LOGE("Creating render pass %0" PRIX64 " Failed!\n", index);
 			return false;
 		}
 		render_passes[index] = *render_pass;
-		LOGI(" ... Succeeded!\n");
 		return true;
 	}
 
@@ -194,14 +184,12 @@ struct DumbReplayer : StateCreatorInterface
 	{
 		if ((filter_compute.empty() && filter_graphics.empty()) || filter_compute.count(index))
 		{
-			LOGI("Creating compute pipeline %0" PRIX64 "\n", index);
 			if (vkCreateComputePipelines(device.get_device(), pipeline_cache, 1, create_info, nullptr, pipeline) !=
 			    VK_SUCCESS)
 			{
-				LOGE(" ... Failed!\n");
+				LOGE("Creating compute pipeline %0" PRIX64 " Failed!\n", index);
 				return false;
 			}
-			LOGI(" ... Succeeded!\n");
 		}
 		else
 			*pipeline = VK_NULL_HANDLE;
@@ -214,14 +202,12 @@ struct DumbReplayer : StateCreatorInterface
 	{
 		if ((filter_graphics.empty() && filter_compute.empty()) || filter_graphics.count(index))
 		{
-			LOGI("Creating graphics pipeline %0" PRIX64 "\n", index);
 			if (vkCreateGraphicsPipelines(device.get_device(), pipeline_cache, 1, create_info, nullptr, pipeline) !=
 			    VK_SUCCESS)
 			{
-				LOGE(" ... Failed!\n");
+				LOGE("Creating graphics pipeline %0" PRIX64 " failed\n", index);
 				return false;
 			}
-			LOGI(" ... Succeeded!\n");
 		}
 		else
 			*pipeline = VK_NULL_HANDLE;
@@ -323,32 +309,32 @@ int main(int argc, char *argv[])
 		return EXIT_FAILURE;
 	}
 
-	try
+	VulkanDevice device;
+	if (!device.init_device(opts))
+		return EXIT_FAILURE;
+
+	if (!std::filesystem::is_directory(json_path))
 	{
-		VulkanDevice device;
-		if (!device.init_device(opts))
-			return EXIT_FAILURE;
+		LOGE("Invalid path to serialized state provided.\n");
+		return EXIT_FAILURE;
+	}
 
-		if (!std::filesystem::is_directory(json_path))
+	for (auto& entry : std::filesystem::directory_iterator(json_path))
+	{
+		// check that filename is 16 char hex with json extension
+		auto stem = entry.path().stem().string();
+		if (stem.size() != 16)
+			continue;
+		for (auto c : stem)
 		{
-			LOGE("Invalid path to serialized state provided.\n");
-			return EXIT_FAILURE;
+			if (!isxdigit(c))
+				continue;
 		}
+		if (entry.path().extension() != ".json")
+			continue;
 
-		for (auto& entry : std::filesystem::directory_iterator(json_path))
+		try
 		{
-			// check that filename is 16 char hex with json extension
-			auto stem = entry.path().stem().string();
-			if (stem.size() != 16)
-				continue;
-			for (auto c : stem)
-			{
-				if (!isxdigit(c))
-					continue;
-			}
-			if (entry.path().extension() != ".json")
-				continue;
-
 			DumbReplayer replayer(device, replayer_opts, filter_graphics, filter_compute);
 			DirectoryResolver resolver(json_path);
 			StateReplayer state_replayer;
@@ -356,17 +342,15 @@ int main(int argc, char *argv[])
 			auto state_json = load_buffer_from_path(entry);
 			if (state_json.empty())
 			{
-				LOGE("Failed to load state JSON from disk.\n");
-				return EXIT_FAILURE;
+				LOGE("Failed to load %s from disk.\n", entry.path().string().c_str());
 			}
 
 			state_replayer.parse(replayer, resolver, state_json.data(), state_json.size());
 		}
-	}
-	catch (const exception &e)
-	{
-		LOGE("StateReplayer threw exception: %s\n", e.what());
-		return EXIT_FAILURE;
+		catch (const exception &e)
+		{
+			LOGE("StateReplayer threw exception parsing %s: %s\n", entry.path().string().c_str(), e.what());
+		}
 	}
 
 	return EXIT_SUCCESS;
