@@ -190,7 +190,6 @@ struct StateReplayer::Impl
 
 struct WorkItem
 {
-	VkStructureType type;
 	uint64_t handle;
 	void* create_info;
 };
@@ -1800,13 +1799,13 @@ ScratchAllocator &StateRecorder::get_allocator()
 void StateRecorder::register_descriptor_set_layout(VkDescriptorSetLayout set_layout, const VkDescriptorSetLayoutCreateInfo &create_info)
 {
 	std::lock_guard<std::mutex> lock(impl->record_lock);
-	impl->record_queue.push({ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, api_object_cast<uint64_t>(set_layout), reinterpret_cast<void *>(impl->copy_descriptor_set_layout(&create_info)) });
+	impl->record_queue.push({ api_object_cast<uint64_t>(set_layout), reinterpret_cast<void *>(impl->copy_descriptor_set_layout(&create_info)) });
 }
 
 void StateRecorder::register_pipeline_layout(VkPipelineLayout pipeline_layout, const VkPipelineLayoutCreateInfo &create_info)
 {
 	std::lock_guard<std::mutex> lock(impl->record_lock);
-	impl->record_queue.push({ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, api_object_cast<uint64_t>(pipeline_layout), (void *)impl->copy_pipeline_layout(&create_info) });
+	impl->record_queue.push({ api_object_cast<uint64_t>(pipeline_layout), reinterpret_cast<void *>(impl->copy_pipeline_layout(&create_info)) });
 }
 
 void StateRecorder::register_sampler(VkSampler sampler, const VkSamplerCreateInfo &create_info)
@@ -1814,7 +1813,7 @@ void StateRecorder::register_sampler(VkSampler sampler, const VkSamplerCreateInf
 	if (create_info.pNext)
 		FOSSILIZE_THROW("pNext in VkSamplerCreateInfo not supported.");
 	std::lock_guard<std::mutex> lock(impl->record_lock);
-	impl->record_queue.push({ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO, api_object_cast<uint64_t>(sampler), (void *)impl->copy_sampler(&create_info) });
+	impl->record_queue.push({ api_object_cast<uint64_t>(sampler), reinterpret_cast<void *>(impl->copy_sampler(&create_info)) });
 }
 
 void StateRecorder::register_graphics_pipeline(VkPipeline pipeline, const VkGraphicsPipelineCreateInfo &create_info)
@@ -1822,7 +1821,7 @@ void StateRecorder::register_graphics_pipeline(VkPipeline pipeline, const VkGrap
 	if (create_info.pNext)
 		FOSSILIZE_THROW("pNext in VkGraphicsPipelineCreateInfo not supported.");
 	std::lock_guard<std::mutex> lock(impl->record_lock);
-	impl->record_queue.push({ VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, api_object_cast<uint64_t>(pipeline), (void *)impl->copy_graphics_pipeline(&create_info) });
+	impl->record_queue.push({ api_object_cast<uint64_t>(pipeline), reinterpret_cast<void *>(impl->copy_graphics_pipeline(&create_info)) });
 }
 
 void StateRecorder::register_compute_pipeline(VkPipeline pipeline, const VkComputePipelineCreateInfo &create_info)
@@ -1830,7 +1829,7 @@ void StateRecorder::register_compute_pipeline(VkPipeline pipeline, const VkCompu
 	if (create_info.pNext)
 		FOSSILIZE_THROW("pNext in VkComputePipelineCreateInfo not supported.");
 	std::lock_guard<std::mutex> lock(impl->record_lock);
-	impl->record_queue.push({ VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO, api_object_cast<uint64_t>(pipeline), (void *)impl->copy_compute_pipeline(&create_info) });
+	impl->record_queue.push({ api_object_cast<uint64_t>(pipeline), reinterpret_cast<void *>(impl->copy_compute_pipeline(&create_info)) });
 }
 
 void StateRecorder::register_render_pass(VkRenderPass render_pass, const VkRenderPassCreateInfo &create_info)
@@ -1838,7 +1837,7 @@ void StateRecorder::register_render_pass(VkRenderPass render_pass, const VkRende
 	if (create_info.pNext)
 		FOSSILIZE_THROW("pNext in VkRenderPassCreateInfo not supported.");
 	std::lock_guard<std::mutex> lock(impl->record_lock);
-	impl->record_queue.push({ VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO, (uint64_t)render_pass, (void *)impl->copy_render_pass(&create_info) });
+	impl->record_queue.push({ api_object_cast<uint64_t>(render_pass), reinterpret_cast<void *>(impl->copy_render_pass(&create_info)) });
 }
 
 void StateRecorder::register_shader_module(VkShaderModule module, const VkShaderModuleCreateInfo &create_info)
@@ -1846,7 +1845,7 @@ void StateRecorder::register_shader_module(VkShaderModule module, const VkShader
 	if (create_info.pNext)
 		FOSSILIZE_THROW("pNext in VkShaderModuleCreateInfo not supported.");
 	std::lock_guard<std::mutex> lock(impl->record_lock);
-	impl->record_queue.push({ VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, (uint64_t)module, (void *)impl->copy_shader_module(&create_info) });
+	impl->record_queue.push({ api_object_cast<uint64_t>(module), reinterpret_cast<void *>(impl->copy_shader_module(&create_info)) });
 }
 
 Hash StateRecorder::get_hash_for_compute_pipeline_handle(VkPipeline pipeline) const
@@ -2264,7 +2263,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder) {
 
 			try
 			{
-				switch (record_item.type)
+				switch (*reinterpret_cast<VkStructureType*>(record_item.create_info))
 				{
 				case VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO:
 				{
