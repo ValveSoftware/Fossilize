@@ -931,14 +931,14 @@ VkDescriptorSetLayout *StateReplayer::Impl::parse_set_layouts(const Value &layou
 
 void StateReplayer::Impl::parse_shader_modules(StateCreatorInterface &iface, const Value &modules)
 {
-	iface.set_num_shader_modules(modules.MemberCount());
-	replayed_shader_modules.reserve(modules.MemberCount());
 	auto *infos = allocator.allocate_n_cleared<VkShaderModuleCreateInfo>(modules.MemberCount());
 
 	unsigned index = 0;
 	for (auto itr = modules.MemberBegin(); itr != modules.MemberEnd(); ++itr, index++)
 	{
 		Hash hash = string_to_uint64(itr->name.GetString());
+		if (replayed_shader_modules.count(hash))
+			continue;
 		auto &obj = itr->value;
 		auto &info = infos[index];
 		info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -953,14 +953,14 @@ void StateReplayer::Impl::parse_shader_modules(StateCreatorInterface &iface, con
 
 void StateReplayer::Impl::parse_pipeline_layouts(StateCreatorInterface &iface, const Value &layouts)
 {
-	iface.set_num_pipeline_layouts(layouts.MemberCount());
-	replayed_pipeline_layouts.reserve(layouts.MemberCount());
 	auto *infos = allocator.allocate_n_cleared<VkPipelineLayoutCreateInfo>(layouts.MemberCount());
 
 	unsigned index = 0;
 	for (auto itr = layouts.MemberBegin(); itr != layouts.MemberEnd(); ++itr, index++)
 	{
 		Hash hash = string_to_uint64(itr->name.GetString());
+		if (replayed_pipeline_layouts.count(hash))
+			continue;
 		auto &obj = itr->value;
 		auto &info = infos[index];
 		info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -987,14 +987,14 @@ void StateReplayer::Impl::parse_pipeline_layouts(StateCreatorInterface &iface, c
 
 void StateReplayer::Impl::parse_descriptor_set_layouts(StateCreatorInterface &iface, const Value &layouts)
 {
-	iface.set_num_descriptor_set_layouts(layouts.MemberCount());
-	replayed_descriptor_set_layouts.reserve(layouts.MemberCount());
 	auto *infos = allocator.allocate_n_cleared<VkDescriptorSetLayoutCreateInfo>(layouts.MemberCount());
 
 	unsigned index = 0;
 	for (auto itr = layouts.MemberBegin(); itr != layouts.MemberEnd(); ++itr, index++)
 	{
 		Hash hash = string_to_uint64(itr->name.GetString());
+		if (replayed_descriptor_set_layouts.count(hash))
+			continue;
 		auto &obj = itr->value;
 		auto &info = infos[index];
 		info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -1016,14 +1016,14 @@ void StateReplayer::Impl::parse_descriptor_set_layouts(StateCreatorInterface &if
 
 void StateReplayer::Impl::parse_samplers(StateCreatorInterface &iface, const Value &samplers)
 {
-	iface.set_num_samplers(samplers.MemberCount());
-	replayed_samplers.reserve(samplers.MemberCount());
 	auto *infos = allocator.allocate_n_cleared<VkSamplerCreateInfo>(samplers.MemberCount());
 
 	unsigned index = 0;
 	for (auto itr = samplers.MemberBegin(); itr != samplers.MemberEnd(); ++itr)
 	{
 		Hash hash = string_to_uint64(itr->name.GetString());
+		if (replayed_samplers.count(hash))
+			continue;
 		auto &obj = itr->value;
 		auto &info = infos[index];
 		info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
@@ -1165,14 +1165,14 @@ VkSubpassDescription *StateReplayer::Impl::parse_render_pass_subpasses(const Val
 
 void StateReplayer::Impl::parse_render_passes(StateCreatorInterface &iface, const Value &passes)
 {
-	iface.set_num_render_passes(passes.MemberCount());
-	replayed_render_passes.reserve(passes.MemberCount());
 	auto *infos = allocator.allocate_n_cleared<VkRenderPassCreateInfo>(passes.MemberCount());
 
 	unsigned index = 0;
 	for (auto itr = passes.MemberBegin(); itr != passes.MemberEnd(); ++itr, index++)
 	{
 		Hash hash = string_to_uint64(itr->name.GetString());
+		if (replayed_samplers.count(hash))
+			continue;
 		auto &obj = itr->value;
 		auto &info = infos[index];
 		info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
@@ -1235,14 +1235,14 @@ VkSpecializationInfo *StateReplayer::Impl::parse_specialization_info(const Value
 
 void StateReplayer::Impl::parse_compute_pipelines(StateCreatorInterface &iface, ResolverInterface &resolver, const Value &pipelines)
 {
-	iface.set_num_compute_pipelines(pipelines.MemberCount());
-	replayed_compute_pipelines.reserve(pipelines.MemberCount());
 	auto *infos = allocator.allocate_n_cleared<VkComputePipelineCreateInfo>(pipelines.MemberCount());
 
 	unsigned index = 0;
 	for (auto itr = pipelines.MemberBegin(); itr != pipelines.MemberEnd(); ++itr, index++)
 	{
 		Hash hash = string_to_uint64(itr->name.GetString());
+		if (replayed_compute_pipelines.count(hash))
+			continue;
 		auto &obj = itr->value;
 		auto &info = infos[index];
 		info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
@@ -1594,14 +1594,14 @@ VkPipelineShaderStageCreateInfo *StateReplayer::Impl::parse_stages(StateCreatorI
 
 void StateReplayer::Impl::parse_graphics_pipelines(StateCreatorInterface &iface, ResolverInterface &resolver, const Value &pipelines)
 {
-	iface.set_num_graphics_pipelines(pipelines.MemberCount());
-	replayed_graphics_pipelines.reserve(pipelines.MemberCount());
 	auto *infos = allocator.allocate_n_cleared<VkGraphicsPipelineCreateInfo>(pipelines.MemberCount());
 
 	unsigned index = 0;
 	for (auto itr = pipelines.MemberBegin(); itr != pipelines.MemberEnd(); ++itr, index++)
 	{
 		Hash hash = string_to_uint64(itr->name.GetString());
+		if (replayed_graphics_pipelines.count(hash))
+			continue;
 		auto &obj = itr->value;
 		auto &info = infos[index];
 		info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;

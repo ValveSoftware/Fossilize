@@ -83,48 +83,6 @@ struct DumbReplayer : StateCreatorInterface
 				vkDestroyPipeline(device.get_device(), pipeline.second, nullptr);
 	}
 
-	bool set_num_samplers(unsigned count) override
-	{
-		samplers.reserve(count);
-		return true;
-	}
-
-	bool set_num_descriptor_set_layouts(unsigned count) override
-	{
-		layouts.reserve(count);
-		return true;
-	}
-
-	bool set_num_pipeline_layouts(unsigned count) override
-	{
-		pipeline_layouts.reserve(count);
-		return true;
-	}
-
-	bool set_num_shader_modules(unsigned count) override
-	{
-		shader_modules.reserve(count);
-		return true;
-	}
-
-	bool set_num_render_passes(unsigned count) override
-	{
-		render_passes.reserve(count);
-		return true;
-	}
-
-	bool set_num_compute_pipelines(unsigned count) override
-	{
-		compute_pipelines.reserve(count);
-		return true;
-	}
-
-	bool set_num_graphics_pipelines(unsigned count) override
-	{
-		graphics_pipelines.reserve(count);
-		return true;
-	}
-
 	bool enqueue_create_sampler(Hash index, const VkSamplerCreateInfo *create_info, VkSampler *sampler) override
 	{
 		if (vkCreateSampler(device.get_device(), create_info, nullptr, sampler) != VK_SUCCESS)
@@ -309,15 +267,21 @@ int main(int argc, char *argv[])
 		return EXIT_FAILURE;
 	}
 
-	VulkanDevice device;
-	if (!device.init_device(opts))
-		return EXIT_FAILURE;
-
 	if (!std::filesystem::is_directory(json_path))
 	{
 		LOGE("Invalid path to serialized state provided.\n");
 		return EXIT_FAILURE;
 	}
+
+	auto start_time = chrono::steady_clock::now();
+
+	VulkanDevice device;
+	if (!device.init_device(opts))
+		return EXIT_FAILURE;
+
+	DumbReplayer replayer(device, replayer_opts, filter_graphics, filter_compute);
+	DirectoryResolver resolver(json_path);
+	StateReplayer state_replayer;
 
 	for (auto& entry : std::filesystem::directory_iterator(json_path))
 	{
@@ -335,10 +299,6 @@ int main(int argc, char *argv[])
 
 		try
 		{
-			DumbReplayer replayer(device, replayer_opts, filter_graphics, filter_compute);
-			DirectoryResolver resolver(json_path);
-			StateReplayer state_replayer;
-
 			auto state_json = load_buffer_from_path(entry);
 			if (state_json.empty())
 			{
@@ -352,6 +312,26 @@ int main(int argc, char *argv[])
 			LOGE("StateReplayer threw exception parsing %s: %s\n", entry.path().string().c_str(), e.what());
 		}
 	}
+
+	unsigned long total_size =
+		replayer.samplers.size() +
+		replayer.layouts.size() +
+		replayer.pipeline_layouts.size() +
+		replayer.shader_modules.size() +
+		replayer.render_passes.size() +
+		replayer.compute_pipelines.size() +
+		replayer.graphics_pipelines.size();
+
+	unsigned long elapsed_ms = chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now() - start_time).count();
+
+	LOGI("Replayed %lu objects in %lu ms:\n", total_size, elapsed_ms);
+	LOGI("  samplers:              %7lu\n", (unsigned long)replayer.samplers.size());
+	LOGI("  descriptor set layouts:%7lu\n", (unsigned long)replayer.layouts.size());
+	LOGI("  pipeline layouts:      %7lu\n", (unsigned long)replayer.pipeline_layouts.size());
+	LOGI("  shader modules:        %7lu\n", (unsigned long)replayer.shader_modules.size());
+	LOGI("  render passes:         %7lu\n", (unsigned long)replayer.render_passes.size());
+	LOGI("  compute pipelines:     %7lu\n", (unsigned long)replayer.compute_pipelines.size());
+	LOGI("  graphics pipelines:    %7lu\n", (unsigned long)replayer.graphics_pipelines.size());
 
 	return EXIT_SUCCESS;
 }
