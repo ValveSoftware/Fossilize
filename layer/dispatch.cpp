@@ -166,7 +166,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(VkDevice device, V
 		auto res = createGraphicsPipeline(layer, pipelineCache, &pCreateInfos[i], pAllocator, &pPipelines[i]);
 
 		if (res == VK_SUCCESS)
-			layer->getRecorder().register_graphics_pipeline(pPipelines[i], pCreateInfos[i]);
+			layer->getRecorder().record_graphics_pipeline(pPipelines[i], pCreateInfos[i]);
 		else
 			return res;
 	}
@@ -189,7 +189,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelines(VkDevice device, Vk
 		auto res = createComputePipeline(layer, pipelineCache, &pCreateInfos[i], pAllocator, &pPipelines[i]);
 
 		if (res == VK_SUCCESS)
-			layer->getRecorder().register_compute_pipeline(pPipelines[i], pCreateInfos[i]);
+			layer->getRecorder().record_compute_pipeline(pPipelines[i], pCreateInfos[i]);
 		else
 			return res;
 	}
@@ -209,7 +209,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(VkDevice device,
 	VkResult result = layer->getTable()->CreatePipelineLayout(device, pCreateInfo, pAllocator, pLayout);
 
 	if (result == VK_SUCCESS)
-		layer->getRecorder().register_pipeline_layout(*pLayout, *pCreateInfo);
+		layer->getRecorder().record_pipeline_layout(*pLayout, *pCreateInfo);
 	return result;
 }
 
@@ -225,7 +225,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(VkDevice device,
 	VkResult result = layer->getTable()->CreateDescriptorSetLayout(device, pCreateInfo, pAllocator, pSetLayout);
 
 	if (result == VK_SUCCESS)
-		layer->getRecorder().register_descriptor_set_layout(*pSetLayout, *pCreateInfo);
+		layer->getRecorder().record_descriptor_set_layout(*pSetLayout, *pCreateInfo);
 	return result;
 }
 
@@ -269,7 +269,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateSampler(VkDevice device, const VkSam
 	auto res = layer->getTable()->CreateSampler(device, pCreateInfo, pCallbacks, pSampler);
 
 	if (res == VK_SUCCESS)
-		layer->getRecorder().register_sampler(*pSampler, *pCreateInfo);
+		layer->getRecorder().record_sampler(*pSampler, *pCreateInfo);
 
 	return res;
 }
@@ -287,7 +287,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateShaderModule(VkDevice device, const 
 	auto res = layer->getTable()->CreateShaderModule(device, pCreateInfo, pCallbacks, pShaderModule);
 
 	if (res == VK_SUCCESS)
-		layer->getRecorder().register_shader_module(*pShaderModule, *pCreateInfo);
+		layer->getRecorder().record_shader_module(*pShaderModule, *pCreateInfo);
 
 	return res;
 }
@@ -302,7 +302,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass(VkDevice device, const Vk
 	auto res = layer->getTable()->CreateRenderPass(device, pCreateInfo, pCallbacks, pRenderPass);
 
 	if (res == VK_SUCCESS)
-		layer->getRecorder().register_render_pass(*pRenderPass, *pCreateInfo);
+		layer->getRecorder().record_render_pass(*pRenderPass, *pCreateInfo);
 	return res;
 }
 

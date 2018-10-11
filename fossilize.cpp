@@ -21,6 +21,7 @@
  */
 #include <atomic>
 #include <mutex>
+#include <condition_variable>
 #include <thread>
 #include <stddef.h>
 #include "fossilize.hpp"
@@ -241,8 +242,8 @@ struct StateRecorder::Impl
 	void remap_render_pass_ci(VkRenderPassCreateInfo *create_info);
 
 	std::mutex record_lock;
+	std::condition_variable record_cv;
 	std::queue<WorkItem> record_queue;
-	std::atomic<bool> record_done;
 	std::thread worker_thread;
 
 	static void record_task(StateRecorder *recorder);
@@ -1796,56 +1797,71 @@ ScratchAllocator &StateRecorder::get_allocator()
 	return impl->allocator;
 }
 
-void StateRecorder::register_descriptor_set_layout(VkDescriptorSetLayout set_layout, const VkDescriptorSetLayoutCreateInfo &create_info)
+void StateRecorder::record_descriptor_set_layout(VkDescriptorSetLayout set_layout, const VkDescriptorSetLayoutCreateInfo &create_info)
 {
 	std::lock_guard<std::mutex> lock(impl->record_lock);
 	impl->record_queue.push({ api_object_cast<uint64_t>(set_layout), reinterpret_cast<void *>(impl->copy_descriptor_set_layout(&create_info)) });
+	impl->record_cv.notify_one();
 }
 
-void StateRecorder::register_pipeline_layout(VkPipelineLayout pipeline_layout, const VkPipelineLayoutCreateInfo &create_info)
+void StateRecorder::record_pipeline_layout(VkPipelineLayout pipeline_layout, const VkPipelineLayoutCreateInfo &create_info)
 {
 	std::lock_guard<std::mutex> lock(impl->record_lock);
 	impl->record_queue.push({ api_object_cast<uint64_t>(pipeline_layout), reinterpret_cast<void *>(impl->copy_pipeline_layout(&create_info)) });
+	impl->record_cv.notify_one();
 }
 
-void StateRecorder::register_sampler(VkSampler sampler, const VkSamplerCreateInfo &create_info)
+void StateRecorder::record_sampler(VkSampler sampler, const VkSamplerCreateInfo &create_info)
 {
 	if (create_info.pNext)
 		FOSSILIZE_THROW("pNext in VkSamplerCreateInfo not supported.");
 	std::lock_guard<std::mutex> lock(impl->record_lock);
 	impl->record_queue.push({ api_object_cast<uint64_t>(sampler), reinterpret_cast<void *>(impl->copy_sampler(&create_info)) });
+	impl->record_cv.notify_one();
 }
 
-void StateRecorder::register_graphics_pipeline(VkPipeline pipeline, const VkGraphicsPipelineCreateInfo &create_info)
+void StateRecorder::record_graphics_pipeline(VkPipeline pipeline, const VkGraphicsPipelineCreateInfo &create_info)
 {
 	if (create_info.pNext)
 		FOSSILIZE_THROW("pNext in VkGraphicsPipelineCreateInfo not supported.");
 	std::lock_guard<std::mutex> lock(impl->record_lock);
 	impl->record_queue.push({ api_object_cast<uint64_t>(pipeline), reinterpret_cast<void *>(impl->copy_graphics_pipeline(&create_info)) });
+	impl->record_cv.notify_one();
 }
 
-void StateRecorder::register_compute_pipeline(VkPipeline pipeline, const VkComputePipelineCreateInfo &create_info)
+void StateRecorder::record_compute_pipeline(VkPipeline pipeline, const VkComputePipelineCreateInfo &create_info)
 {
 	if (create_info.pNext)
 		FOSSILIZE_THROW("pNext in VkComputePipelineCreateInfo not supported.");
 	std::lock_guard<std::mutex> lock(impl->record_lock);
 	impl->record_queue.push({ api_object_cast<uint64_t>(pipeline), reinterpret_cast<void *>(impl->copy_compute_pipeline(&create_info)) });
+	impl->record_cv.notify_one();
 }
 
-void StateRecorder::register_render_pass(VkRenderPass render_pass, const VkRenderPassCreateInfo &create_info)
+void StateRecorder::record_render_pass(VkRenderPass render_pass, const VkRenderPassCreateInfo &create_info)
 {
 	if (create_info.pNext)
 		FOSSILIZE_THROW("pNext in VkRenderPassCreateInfo not supported.");
 	std::lock_guard<std::mutex> lock(impl->record_lock);
 	impl->record_queue.push({ api_object_cast<uint64_t>(render_pass), reinterpret_cast<void *>(impl->copy_render_pass(&create_info)) });
+	impl->record_cv.notify_one();
 }
 
-void StateRecorder::register_shader_module(VkShaderModule module, const VkShaderModuleCreateInfo &create_info)
+void StateRecorder::record_shader_module(VkShaderModule module, const VkShaderModuleCreateInfo &create_info)
 {
 	if (create_info.pNext)
 		FOSSILIZE_THROW("pNext in VkShaderModuleCreateInfo not supported.");
 	std::lock_guard<std::mutex> lock(impl->record_lock);
 	impl->record_queue.push({ api_object_cast<uint64_t>(module), reinterpret_cast<void *>(impl->copy_shader_module(&create_info)) });
+	impl->record_cv.notify_one();
+}
+
+void StateRecorder::record_end()
+{
+	// Signal end of recording with empty work item
+	std::lock_guard lock(impl->record_lock);
+	impl->record_queue.push({ 0, nullptr });
+	impl->record_cv.notify_one();
 }
 
 Hash StateRecorder::get_hash_for_compute_pipeline_handle(VkPipeline pipeline) const
@@ -2255,113 +2271,108 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder) {
 	for(;;)
 	{
 		std::unique_lock<std::mutex> lock(recorder->impl->record_lock);
-		if (auto size = recorder->impl->record_queue.size())
-		{
-			auto record_item = recorder->impl->record_queue.front();
-			recorder->impl->record_queue.pop();
-			lock.unlock();
+		recorder->impl->record_cv.wait(lock, [&] {return !recorder->impl->record_queue.empty(); });
+		auto record_item = recorder->impl->record_queue.front();
+		recorder->impl->record_queue.pop();
+		lock.unlock();
 
-			try
+		if (!record_item.create_info)
+			return;
+
+		try
+		{
+			switch (*reinterpret_cast<VkStructureType*>(record_item.create_info))
 			{
-				switch (*reinterpret_cast<VkStructureType*>(record_item.create_info))
-				{
-				case VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO:
-				{
-					auto *create_info = reinterpret_cast<VkSamplerCreateInfo *>(record_item.create_info);
-					auto hash = Hashing::compute_hash_sampler(*recorder, *create_info);
-					recorder->impl->sampler_to_index[(VkSampler)record_item.handle] = hash;
-					if (!recorder->impl->samplers.count(hash))
-						recorder->impl->samplers[hash] = *create_info;
-					break;
-				}
-				case VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO:
-				{
-					auto *create_info = reinterpret_cast<VkDescriptorSetLayoutCreateInfo *>(record_item.create_info);
-					auto hash = Hashing::compute_hash_descriptor_set_layout(*recorder, *create_info);
-					recorder->impl->descriptor_set_layout_to_index[(VkDescriptorSetLayout)record_item.handle] = hash;
-					if (!recorder->impl->descriptor_sets.count(hash))
-					{
-						recorder->impl->remap_descriptor_set_layout_ci(create_info);
-						recorder->impl->descriptor_sets[hash] = *create_info;
-					}
-					break;
-				}
-				case VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO:
-				{
-					auto *create_info = reinterpret_cast<VkPipelineLayoutCreateInfo *>(record_item.create_info);
-					auto hash = Hashing::compute_hash_pipeline_layout(*recorder, *create_info);
-					recorder->impl->pipeline_layout_to_index[(VkPipelineLayout)record_item.handle] = hash;
-					if (!recorder->impl->pipeline_layouts.count(hash))
-					{
-						recorder->impl->remap_pipeline_layout_ci(create_info);
-						recorder->impl->pipeline_layouts[hash] = *create_info;
-					}
-					break;
-				}
-				case VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO:
-				{
-					auto *create_info = reinterpret_cast<VkRenderPassCreateInfo *>(record_item.create_info);
-					auto hash = Hashing::compute_hash_render_pass(*recorder, *create_info);
-					recorder->impl->render_pass_to_index[(VkRenderPass)record_item.handle] = hash;
-					if (!recorder->impl->render_passes.count(hash))
-						recorder->impl->render_passes[hash] = *create_info;
-					break;
-				}
-				case VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO:
-				{
-					auto *create_info = reinterpret_cast<VkShaderModuleCreateInfo *>(record_item.create_info);
-					auto hash = Hashing::compute_hash_shader_module(*recorder, *create_info);
-					recorder->impl->shader_module_to_index[(VkShaderModule)record_item.handle] = hash;
-					if (!recorder->impl->shader_modules.count(hash))
-					{
-						recorder->impl->shader_modules[hash] = *create_info;
-						lock_guard<mutex> lock(recorder->impl->serialization_lock);
-						write_buffer(recorder->impl->serialization_path, hash, recorder->serialize_shader_module(hash));
-					}
-					break;
-				}
-				case VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO:
-				{
-					auto *create_info = reinterpret_cast<VkGraphicsPipelineCreateInfo *>(record_item.create_info);
-					auto hash = Hashing::compute_hash_graphics_pipeline(*recorder, *create_info);
-					recorder->impl->graphics_pipeline_to_index[(VkPipeline)record_item.handle] = hash;
-					if (!recorder->impl->graphics_pipelines.count(hash))
-					{
-						recorder->impl->remap_graphics_pipeline_ci(create_info);
-						recorder->impl->graphics_pipelines[hash] = *create_info;
-						lock_guard<mutex> lock(recorder->impl->serialization_lock);
-						write_buffer(recorder->impl->serialization_path, hash, recorder->serialize_graphics_pipeline(hash));
-					}
-					break;
-				}
-				case VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO:
-				{
-					auto *create_info = reinterpret_cast<VkComputePipelineCreateInfo *>(record_item.create_info);
-					auto hash = Hashing::compute_hash_compute_pipeline(*recorder, *create_info);
-					recorder->impl->compute_pipeline_to_index[(VkPipeline)record_item.handle] = hash;
-					if (!recorder->impl->compute_pipelines.count(hash))
-					{
-						recorder->impl->remap_compute_pipeline_ci(create_info);
-						recorder->impl->compute_pipelines[hash] = *create_info;
-						lock_guard<mutex> lock(recorder->impl->serialization_lock);
-						write_buffer(recorder->impl->serialization_path, hash, recorder->serialize_compute_pipeline(hash));
-					}
-					break;
-				}
-				default:
-					break;
-				}
+			case VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO:
+			{
+				auto *create_info = reinterpret_cast<VkSamplerCreateInfo *>(record_item.create_info);
+				auto hash = Hashing::compute_hash_sampler(*recorder, *create_info);
+				recorder->impl->sampler_to_index[(VkSampler)record_item.handle] = hash;
+				if (!recorder->impl->samplers.count(hash))
+					recorder->impl->samplers[hash] = *create_info;
+				break;
 			}
-			catch (const std::exception &e)
+			case VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO:
 			{
-				LOGE("%s\n", e.what());
+				auto *create_info = reinterpret_cast<VkDescriptorSetLayoutCreateInfo *>(record_item.create_info);
+				auto hash = Hashing::compute_hash_descriptor_set_layout(*recorder, *create_info);
+				recorder->impl->descriptor_set_layout_to_index[(VkDescriptorSetLayout)record_item.handle] = hash;
+				if (!recorder->impl->descriptor_sets.count(hash))
+				{
+					recorder->impl->remap_descriptor_set_layout_ci(create_info);
+					recorder->impl->descriptor_sets[hash] = *create_info;
+				}
+				break;
+			}
+			case VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO:
+			{
+				auto *create_info = reinterpret_cast<VkPipelineLayoutCreateInfo *>(record_item.create_info);
+				auto hash = Hashing::compute_hash_pipeline_layout(*recorder, *create_info);
+				recorder->impl->pipeline_layout_to_index[(VkPipelineLayout)record_item.handle] = hash;
+				if (!recorder->impl->pipeline_layouts.count(hash))
+				{
+					recorder->impl->remap_pipeline_layout_ci(create_info);
+					recorder->impl->pipeline_layouts[hash] = *create_info;
+				}
+				break;
+			}
+			case VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO:
+			{
+				auto *create_info = reinterpret_cast<VkRenderPassCreateInfo *>(record_item.create_info);
+				auto hash = Hashing::compute_hash_render_pass(*recorder, *create_info);
+				recorder->impl->render_pass_to_index[(VkRenderPass)record_item.handle] = hash;
+				if (!recorder->impl->render_passes.count(hash))
+					recorder->impl->render_passes[hash] = *create_info;
+				break;
+			}
+			case VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO:
+			{
+				auto *create_info = reinterpret_cast<VkShaderModuleCreateInfo *>(record_item.create_info);
+				auto hash = Hashing::compute_hash_shader_module(*recorder, *create_info);
+				recorder->impl->shader_module_to_index[(VkShaderModule)record_item.handle] = hash;
+				if (!recorder->impl->shader_modules.count(hash))
+				{
+					recorder->impl->shader_modules[hash] = *create_info;
+					lock_guard<mutex> lock(recorder->impl->serialization_lock);
+					write_buffer(recorder->impl->serialization_path, hash, recorder->serialize_shader_module(hash));
+				}
+				break;
+			}
+			case VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO:
+			{
+				auto *create_info = reinterpret_cast<VkGraphicsPipelineCreateInfo *>(record_item.create_info);
+				auto hash = Hashing::compute_hash_graphics_pipeline(*recorder, *create_info);
+				recorder->impl->graphics_pipeline_to_index[(VkPipeline)record_item.handle] = hash;
+				if (!recorder->impl->graphics_pipelines.count(hash))
+				{
+					recorder->impl->remap_graphics_pipeline_ci(create_info);
+					recorder->impl->graphics_pipelines[hash] = *create_info;
+					lock_guard<mutex> lock(recorder->impl->serialization_lock);
+					write_buffer(recorder->impl->serialization_path, hash, recorder->serialize_graphics_pipeline(hash));
+				}
+				break;
+			}
+			case VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO:
+			{
+				auto *create_info = reinterpret_cast<VkComputePipelineCreateInfo *>(record_item.create_info);
+				auto hash = Hashing::compute_hash_compute_pipeline(*recorder, *create_info);
+				recorder->impl->compute_pipeline_to_index[(VkPipeline)record_item.handle] = hash;
+				if (!recorder->impl->compute_pipelines.count(hash))
+				{
+					recorder->impl->remap_compute_pipeline_ci(create_info);
+					recorder->impl->compute_pipelines[hash] = *create_info;
+					lock_guard<mutex> lock(recorder->impl->serialization_lock);
+					write_buffer(recorder->impl->serialization_path, hash, recorder->serialize_compute_pipeline(hash));
+				}
+				break;
+			}
+			default:
+				break;
 			}
 		}
-		else
+		catch (const std::exception &e)
 		{
-			lock.unlock();
-			if (recorder->impl->record_done) return;
-			std::this_thread::sleep_for(std::chrono::milliseconds(10));
+			LOGE("%s\n", e.what());
 		}
 	}
 }
@@ -3139,13 +3150,12 @@ void StateRecorder::set_serialization_path(const std::string &serialization_path
 StateRecorder::StateRecorder()
 {
 	impl.reset(new Impl);
-	impl->record_done = false;
 	impl->worker_thread = std::thread(&StateRecorder::Impl::record_task, this);
 }
 
 StateRecorder::~StateRecorder()
 {
-	impl->record_done = true;
+	record_end();
 	impl->worker_thread.join();
 }
 
