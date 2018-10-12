@@ -89,6 +89,8 @@ public:
 	void *allocate_raw(size_t size, size_t alignment);
 	void *allocate_raw_cleared(size_t size, size_t alignment);
 
+	void reset();
+
 private:
 	struct Block
 	{
@@ -177,7 +179,7 @@ public:
 	std::vector<uint8_t> serialize_shader_module(Hash hash) const;
 	std::vector<uint8_t> serialize() const;
 
-	void set_serialization_path(const std::string &serialization_path);
+	void init(const std::string &serialization_path);
 
 private:
 	struct Impl;

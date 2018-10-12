@@ -198,14 +198,15 @@ struct WorkItem
 struct StateRecorder::Impl
 {
 	ScratchAllocator allocator;
+	ScratchAllocator temp_allocator;
 
-	std::unordered_map<Hash, VkDescriptorSetLayoutCreateInfo> descriptor_sets;
-	std::unordered_map<Hash, VkPipelineLayoutCreateInfo> pipeline_layouts;
-	std::unordered_map<Hash, VkShaderModuleCreateInfo> shader_modules;
-	std::unordered_map<Hash, VkGraphicsPipelineCreateInfo> graphics_pipelines;
-	std::unordered_map<Hash, VkComputePipelineCreateInfo> compute_pipelines;
-	std::unordered_map<Hash, VkRenderPassCreateInfo> render_passes;
-	std::unordered_map<Hash, VkSamplerCreateInfo> samplers;
+	std::unordered_map<Hash, VkDescriptorSetLayoutCreateInfo *> descriptor_sets;
+	std::unordered_map<Hash, VkPipelineLayoutCreateInfo *> pipeline_layouts;
+	std::unordered_map<Hash, VkShaderModuleCreateInfo *> shader_modules;
+	std::unordered_map<Hash, VkGraphicsPipelineCreateInfo *> graphics_pipelines;
+	std::unordered_map<Hash, VkComputePipelineCreateInfo *> compute_pipelines;
+	std::unordered_map<Hash, VkRenderPassCreateInfo *> render_passes;
+	std::unordered_map<Hash, VkSamplerCreateInfo *> samplers;
 
 	std::unordered_map<VkDescriptorSetLayout, Hash> descriptor_set_layout_to_index;
 	std::unordered_map<VkPipelineLayout, Hash> pipeline_layout_to_index;
@@ -215,15 +216,15 @@ struct StateRecorder::Impl
 	std::unordered_map<VkRenderPass, Hash> render_pass_to_index;
 	std::unordered_map<VkSampler, Hash> sampler_to_index;
 
-	VkDescriptorSetLayoutCreateInfo *copy_descriptor_set_layout(const VkDescriptorSetLayoutCreateInfo *create_info);
-	VkPipelineLayoutCreateInfo *copy_pipeline_layout(const VkPipelineLayoutCreateInfo *create_info);
-	VkShaderModuleCreateInfo *copy_shader_module(const VkShaderModuleCreateInfo *create_info);
-	VkGraphicsPipelineCreateInfo *copy_graphics_pipeline(const VkGraphicsPipelineCreateInfo *create_info);
-	VkComputePipelineCreateInfo *copy_compute_pipeline(const VkComputePipelineCreateInfo *create_info);
-	VkSamplerCreateInfo *copy_sampler(const VkSamplerCreateInfo *create_info);
-	VkRenderPassCreateInfo *copy_render_pass(const VkRenderPassCreateInfo *create_info);
+	VkDescriptorSetLayoutCreateInfo *copy_descriptor_set_layout(const VkDescriptorSetLayoutCreateInfo *create_info, ScratchAllocator &alloc);
+	VkPipelineLayoutCreateInfo *copy_pipeline_layout(const VkPipelineLayoutCreateInfo *create_info, ScratchAllocator &alloc);
+	VkShaderModuleCreateInfo *copy_shader_module(const VkShaderModuleCreateInfo *create_info, ScratchAllocator &alloc);
+	VkGraphicsPipelineCreateInfo *copy_graphics_pipeline(const VkGraphicsPipelineCreateInfo *create_info, ScratchAllocator &alloc);
+	VkComputePipelineCreateInfo *copy_compute_pipeline(const VkComputePipelineCreateInfo *create_info, ScratchAllocator &alloc);
+	VkSamplerCreateInfo *copy_sampler(const VkSamplerCreateInfo *create_info, ScratchAllocator &alloc);
+	VkRenderPassCreateInfo *copy_render_pass(const VkRenderPassCreateInfo *create_info, ScratchAllocator &alloc);
 
-	VkSpecializationInfo *copy_specialization_info(const VkSpecializationInfo *info);
+	VkSpecializationInfo *copy_specialization_info(const VkSpecializationInfo *info, ScratchAllocator &alloc);
 
 	VkSampler remap_sampler_handle(VkSampler sampler) const;
 	VkDescriptorSetLayout remap_descriptor_set_layout_handle(VkDescriptorSetLayout layout) const;
@@ -248,11 +249,10 @@ struct StateRecorder::Impl
 
 	static void record_task(StateRecorder *recorder);
 
-	std::mutex serialization_lock;
 	std::string serialization_path;
 
 	template <typename T>
-	T *copy(const T *src, size_t count);
+	T *copy(const T *src, size_t count, ScratchAllocator &alloc);
 };
 
 // reinterpret_cast does not work reliably on MSVC 2013 for Vulkan objects.
@@ -1744,9 +1744,9 @@ T *StateReplayer::Impl::copy(const T *src, size_t count)
 }
 
 template <typename T>
-T *StateRecorder::Impl::copy(const T *src, size_t count)
+T *StateRecorder::Impl::copy(const T *src, size_t count, ScratchAllocator &alloc)
 {
-	auto *new_data = allocator.allocate_n<T>(count);
+	auto *new_data = alloc.allocate_n<T>(count);
 	if (new_data)
 		std::copy(src, src + count, new_data);
 	return new_data;
@@ -1792,6 +1792,18 @@ void *ScratchAllocator::allocate_raw(size_t size, size_t alignment)
 	return allocate_raw(size, alignment);
 }
 
+void ScratchAllocator::reset()
+{
+	if (blocks.size() > 0)
+	{
+		// free all but first block
+		if (blocks.size() > 1)
+			blocks.erase(++blocks.begin(), blocks.end());
+		// reset offset on first block
+		blocks[0].offset = 0;
+	}
+}
+
 ScratchAllocator &StateRecorder::get_allocator()
 {
 	return impl->allocator;
@@ -1800,14 +1812,14 @@ ScratchAllocator &StateRecorder::get_allocator()
 void StateRecorder::record_descriptor_set_layout(VkDescriptorSetLayout set_layout, const VkDescriptorSetLayoutCreateInfo &create_info)
 {
 	std::lock_guard<std::mutex> lock(impl->record_lock);
-	impl->record_queue.push({ api_object_cast<uint64_t>(set_layout), reinterpret_cast<void *>(impl->copy_descriptor_set_layout(&create_info)) });
+	impl->record_queue.push({ api_object_cast<uint64_t>(set_layout), reinterpret_cast<void *>(impl->copy_descriptor_set_layout(&create_info, impl->temp_allocator)) });
 	impl->record_cv.notify_one();
 }
 
 void StateRecorder::record_pipeline_layout(VkPipelineLayout pipeline_layout, const VkPipelineLayoutCreateInfo &create_info)
 {
 	std::lock_guard<std::mutex> lock(impl->record_lock);
-	impl->record_queue.push({ api_object_cast<uint64_t>(pipeline_layout), reinterpret_cast<void *>(impl->copy_pipeline_layout(&create_info)) });
+	impl->record_queue.push({ api_object_cast<uint64_t>(pipeline_layout), reinterpret_cast<void *>(impl->copy_pipeline_layout(&create_info, impl->temp_allocator)) });
 	impl->record_cv.notify_one();
 }
 
@@ -1816,7 +1828,7 @@ void StateRecorder::record_sampler(VkSampler sampler, const VkSamplerCreateInfo 
 	if (create_info.pNext)
 		FOSSILIZE_THROW("pNext in VkSamplerCreateInfo not supported.");
 	std::lock_guard<std::mutex> lock(impl->record_lock);
-	impl->record_queue.push({ api_object_cast<uint64_t>(sampler), reinterpret_cast<void *>(impl->copy_sampler(&create_info)) });
+	impl->record_queue.push({ api_object_cast<uint64_t>(sampler), reinterpret_cast<void *>(impl->copy_sampler(&create_info, impl->temp_allocator)) });
 	impl->record_cv.notify_one();
 }
 
@@ -1825,7 +1837,7 @@ void StateRecorder::record_graphics_pipeline(VkPipeline pipeline, const VkGraphi
 	if (create_info.pNext)
 		FOSSILIZE_THROW("pNext in VkGraphicsPipelineCreateInfo not supported.");
 	std::lock_guard<std::mutex> lock(impl->record_lock);
-	impl->record_queue.push({ api_object_cast<uint64_t>(pipeline), reinterpret_cast<void *>(impl->copy_graphics_pipeline(&create_info)) });
+	impl->record_queue.push({ api_object_cast<uint64_t>(pipeline), reinterpret_cast<void *>(impl->copy_graphics_pipeline(&create_info, impl->temp_allocator)) });
 	impl->record_cv.notify_one();
 }
 
@@ -1834,7 +1846,7 @@ void StateRecorder::record_compute_pipeline(VkPipeline pipeline, const VkCompute
 	if (create_info.pNext)
 		FOSSILIZE_THROW("pNext in VkComputePipelineCreateInfo not supported.");
 	std::lock_guard<std::mutex> lock(impl->record_lock);
-	impl->record_queue.push({ api_object_cast<uint64_t>(pipeline), reinterpret_cast<void *>(impl->copy_compute_pipeline(&create_info)) });
+	impl->record_queue.push({ api_object_cast<uint64_t>(pipeline), reinterpret_cast<void *>(impl->copy_compute_pipeline(&create_info, impl->temp_allocator)) });
 	impl->record_cv.notify_one();
 }
 
@@ -1843,7 +1855,7 @@ void StateRecorder::record_render_pass(VkRenderPass render_pass, const VkRenderP
 	if (create_info.pNext)
 		FOSSILIZE_THROW("pNext in VkRenderPassCreateInfo not supported.");
 	std::lock_guard<std::mutex> lock(impl->record_lock);
-	impl->record_queue.push({ api_object_cast<uint64_t>(render_pass), reinterpret_cast<void *>(impl->copy_render_pass(&create_info)) });
+	impl->record_queue.push({ api_object_cast<uint64_t>(render_pass), reinterpret_cast<void *>(impl->copy_render_pass(&create_info, impl->temp_allocator)) });
 	impl->record_cv.notify_one();
 }
 
@@ -1852,7 +1864,7 @@ void StateRecorder::record_shader_module(VkShaderModule module, const VkShaderMo
 	if (create_info.pNext)
 		FOSSILIZE_THROW("pNext in VkShaderModuleCreateInfo not supported.");
 	std::lock_guard<std::mutex> lock(impl->record_lock);
-	impl->record_queue.push({ api_object_cast<uint64_t>(module), reinterpret_cast<void *>(impl->copy_shader_module(&create_info)) });
+	impl->record_queue.push({ api_object_cast<uint64_t>(module), reinterpret_cast<void *>(impl->copy_shader_module(&create_info, impl->temp_allocator)) });
 	impl->record_cv.notify_one();
 }
 
@@ -1927,23 +1939,23 @@ Hash StateRecorder::get_hash_for_render_pass(VkRenderPass render_pass) const
 		return itr->second;
 }
 
-VkShaderModuleCreateInfo *StateRecorder::Impl::copy_shader_module(const VkShaderModuleCreateInfo *create_info)
+VkShaderModuleCreateInfo *StateRecorder::Impl::copy_shader_module(const VkShaderModuleCreateInfo *create_info, ScratchAllocator &alloc)
 {
-	auto *info = copy(create_info, 1);
-	info->pCode = copy(info->pCode, info->codeSize / sizeof(uint32_t));
+	auto *info = copy(create_info, 1, alloc);
+	info->pCode = copy(info->pCode, info->codeSize / sizeof(uint32_t), alloc);
 	return info;
 }
 
-VkSamplerCreateInfo *StateRecorder::Impl::copy_sampler(const VkSamplerCreateInfo *create_info)
+VkSamplerCreateInfo *StateRecorder::Impl::copy_sampler(const VkSamplerCreateInfo *create_info, ScratchAllocator &alloc)
 {
-	return copy(create_info, 1);
+	return copy(create_info, 1, alloc);
 }
 
 VkDescriptorSetLayoutCreateInfo *StateRecorder::Impl::copy_descriptor_set_layout(
-	const VkDescriptorSetLayoutCreateInfo *create_info)
+	const VkDescriptorSetLayoutCreateInfo *create_info, ScratchAllocator &alloc)
 {
-	auto *info = copy(create_info, 1);
-	info->pBindings = copy(info->pBindings, info->bindingCount);
+	auto *info = copy(create_info, 1, alloc);
+	info->pBindings = copy(info->pBindings, info->bindingCount, alloc);
 
 	for (uint32_t i = 0; i < info->bindingCount; i++)
 	{
@@ -1952,113 +1964,113 @@ VkDescriptorSetLayoutCreateInfo *StateRecorder::Impl::copy_descriptor_set_layout
 		    (b.descriptorType == VK_DESCRIPTOR_TYPE_SAMPLER ||
 		     b.descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER))
 		{
-			b.pImmutableSamplers = copy(b.pImmutableSamplers, b.descriptorCount);
+			b.pImmutableSamplers = copy(b.pImmutableSamplers, b.descriptorCount, alloc);
 		}
 	}
 
 	return info;
 }
 
-VkPipelineLayoutCreateInfo *StateRecorder::Impl::copy_pipeline_layout(const VkPipelineLayoutCreateInfo *create_info)
+VkPipelineLayoutCreateInfo *StateRecorder::Impl::copy_pipeline_layout(const VkPipelineLayoutCreateInfo *create_info, ScratchAllocator &alloc)
 {
-	auto *info = copy(create_info, 1);
-	info->pPushConstantRanges = copy(info->pPushConstantRanges, info->pushConstantRangeCount);
-	info->pSetLayouts = copy(info->pSetLayouts, info->setLayoutCount);
+	auto *info = copy(create_info, 1, alloc);
+	info->pPushConstantRanges = copy(info->pPushConstantRanges, info->pushConstantRangeCount, alloc);
+	info->pSetLayouts = copy(info->pSetLayouts, info->setLayoutCount, alloc);
 	return info;
 }
 
-VkSpecializationInfo *StateRecorder::Impl::copy_specialization_info(const VkSpecializationInfo *info)
+VkSpecializationInfo *StateRecorder::Impl::copy_specialization_info(const VkSpecializationInfo *info, ScratchAllocator &alloc)
 {
-	auto *ret = copy(info, 1);
-	ret->pMapEntries = copy(ret->pMapEntries, ret->mapEntryCount);
-	ret->pData = copy(static_cast<const uint8_t *>(ret->pData), ret->dataSize);
+	auto *ret = copy(info, 1, alloc);
+	ret->pMapEntries = copy(ret->pMapEntries, ret->mapEntryCount, alloc);
+	ret->pData = copy(static_cast<const uint8_t *>(ret->pData), ret->dataSize, alloc);
 	return ret;
 }
 
-VkComputePipelineCreateInfo *StateRecorder::Impl::copy_compute_pipeline(const VkComputePipelineCreateInfo *create_info)
+VkComputePipelineCreateInfo *StateRecorder::Impl::copy_compute_pipeline(const VkComputePipelineCreateInfo *create_info, ScratchAllocator &alloc)
 {
-	auto *info = copy(create_info, 1);
+	auto *info = copy(create_info, 1, alloc);
 	if (info->stage.pSpecializationInfo)
-		info->stage.pSpecializationInfo = copy_specialization_info(info->stage.pSpecializationInfo);
+		info->stage.pSpecializationInfo = copy_specialization_info(info->stage.pSpecializationInfo, alloc);
 	if (info->stage.pNext)
 		FOSSILIZE_THROW("pNext in VkPipelineShaderStageCreateInfo not supported.");
-	info->stage.pName = copy(info->stage.pName, strlen(info->stage.pName) + 1);
+	info->stage.pName = copy(info->stage.pName, strlen(info->stage.pName) + 1, alloc);
 	return info;
 }
 
-VkGraphicsPipelineCreateInfo *StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateInfo *create_info)
+VkGraphicsPipelineCreateInfo *StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateInfo *create_info, ScratchAllocator &alloc)
 {
-	auto *info = copy(create_info, 1);
+	auto *info = copy(create_info, 1, alloc);
 
-	info->pStages = copy(info->pStages, info->stageCount);
+	info->pStages = copy(info->pStages, info->stageCount, alloc);
 	if (info->pTessellationState)
 	{
 		if (info->pTessellationState->pNext)
 			FOSSILIZE_THROW("pNext in VkPipelineTessellationStateCreateInfo not supported.");
-		info->pTessellationState = copy(info->pTessellationState, 1);
+		info->pTessellationState = copy(info->pTessellationState, 1, alloc);
 	}
 
 	if (info->pColorBlendState)
 	{
 		if (info->pColorBlendState->pNext)
 			FOSSILIZE_THROW("pNext in VkPipelineColorBlendStateCreateInfo not supported.");
-		info->pColorBlendState = copy(info->pColorBlendState, 1);
+		info->pColorBlendState = copy(info->pColorBlendState, 1, alloc);
 	}
 
 	if (info->pVertexInputState)
 	{
 		if (info->pColorBlendState->pNext)
 			FOSSILIZE_THROW("pNext in VkPipelineTessellationStateCreateInfo not supported.");
-		info->pVertexInputState = copy(info->pVertexInputState, 1);
+		info->pVertexInputState = copy(info->pVertexInputState, 1, alloc);
 	}
 
 	if (info->pMultisampleState)
 	{
 		if (info->pMultisampleState->pNext)
 			FOSSILIZE_THROW("pNext in VkPipelineMultisampleStateCreateInfo not supported.");
-		info->pMultisampleState = copy(info->pMultisampleState, 1);
+		info->pMultisampleState = copy(info->pMultisampleState, 1, alloc);
 	}
 
 	if (info->pVertexInputState)
 	{
 		if (info->pVertexInputState->pNext)
 			FOSSILIZE_THROW("pNext in VkPipelineVertexInputStateCreateInfo not supported.");
-		info->pVertexInputState = copy(info->pVertexInputState, 1);
+		info->pVertexInputState = copy(info->pVertexInputState, 1, alloc);
 	}
 
 	if (info->pViewportState)
 	{
 		if (info->pViewportState->pNext)
 			FOSSILIZE_THROW("pNext in VkPipelineViewportStateCreateInfo not supported.");
-		info->pViewportState = copy(info->pViewportState, 1);
+		info->pViewportState = copy(info->pViewportState, 1, alloc);
 	}
 
 	if (info->pInputAssemblyState)
 	{
 		if (info->pInputAssemblyState->pNext)
 			FOSSILIZE_THROW("pNext in VkPipelineInputAssemblyStateCreateInfo not supported.");
-		info->pInputAssemblyState = copy(info->pInputAssemblyState, 1);
+		info->pInputAssemblyState = copy(info->pInputAssemblyState, 1, alloc);
 	}
 
 	if (info->pDepthStencilState)
 	{
 		if (info->pDepthStencilState->pNext)
 			FOSSILIZE_THROW("pNext in VkPipelineDepthStencilStateCreateInfo not supported.");
-		info->pDepthStencilState = copy(info->pDepthStencilState, 1);
+		info->pDepthStencilState = copy(info->pDepthStencilState, 1, alloc);
 	}
 
 	if (info->pRasterizationState)
 	{
 		if (info->pRasterizationState->pNext)
 			FOSSILIZE_THROW("pNext in VkPipelineRasterizationCreateInfo not supported.");
-		info->pRasterizationState = copy(info->pRasterizationState, 1);
+		info->pRasterizationState = copy(info->pRasterizationState, 1, alloc);
 	}
 
 	if (info->pDynamicState)
 	{
 		if (info->pDynamicState->pNext)
 			FOSSILIZE_THROW("pNext in VkPipelineDynamicStateCreateInfo not supported.");
-		info->pDynamicState = copy(info->pDynamicState, 1);
+		info->pDynamicState = copy(info->pDynamicState, 1, alloc);
 	}
 
 	for (uint32_t i = 0; i < info->stageCount; i++)
@@ -2066,60 +2078,60 @@ VkGraphicsPipelineCreateInfo *StateRecorder::Impl::copy_graphics_pipeline(const 
 		auto &stage = const_cast<VkPipelineShaderStageCreateInfo &>(info->pStages[i]);
 		if (stage.pNext)
 			FOSSILIZE_THROW("pNext in VkPipelineShaderStageCreateInfo not supported.");
-		stage.pName = copy(stage.pName, strlen(stage.pName) + 1);
+		stage.pName = copy(stage.pName, strlen(stage.pName) + 1, alloc);
 		if (stage.pSpecializationInfo)
-			stage.pSpecializationInfo = copy_specialization_info(stage.pSpecializationInfo);
+			stage.pSpecializationInfo = copy_specialization_info(stage.pSpecializationInfo, alloc);
 	}
 
 	if (info->pColorBlendState)
 	{
 		auto &blend = const_cast<VkPipelineColorBlendStateCreateInfo &>(*info->pColorBlendState);
-		blend.pAttachments = copy(blend.pAttachments, blend.attachmentCount);
+		blend.pAttachments = copy(blend.pAttachments, blend.attachmentCount, alloc);
 	}
 
 	if (info->pVertexInputState)
 	{
 		auto &vs = const_cast<VkPipelineVertexInputStateCreateInfo &>(*info->pVertexInputState);
-		vs.pVertexAttributeDescriptions = copy(vs.pVertexAttributeDescriptions, vs.vertexAttributeDescriptionCount);
-		vs.pVertexBindingDescriptions = copy(vs.pVertexBindingDescriptions, vs.vertexBindingDescriptionCount);
+		vs.pVertexAttributeDescriptions = copy(vs.pVertexAttributeDescriptions, vs.vertexAttributeDescriptionCount, alloc);
+		vs.pVertexBindingDescriptions = copy(vs.pVertexBindingDescriptions, vs.vertexBindingDescriptionCount, alloc);
 	}
 
 	if (info->pMultisampleState)
 	{
 		auto &ms = const_cast<VkPipelineMultisampleStateCreateInfo &>(*info->pMultisampleState);
 		if (ms.pSampleMask)
-			ms.pSampleMask = copy(ms.pSampleMask, (ms.rasterizationSamples + 31) / 32);
+			ms.pSampleMask = copy(ms.pSampleMask, (ms.rasterizationSamples + 31) / 32, alloc);
 	}
 
 	if (info->pDynamicState)
 	{
 		const_cast<VkPipelineDynamicStateCreateInfo *>(info->pDynamicState)->pDynamicStates =
-				copy(info->pDynamicState->pDynamicStates, info->pDynamicState->dynamicStateCount);
+				copy(info->pDynamicState->pDynamicStates, info->pDynamicState->dynamicStateCount, alloc);
 	}
 
 	return info;
 }
 
-VkRenderPassCreateInfo *StateRecorder::Impl::copy_render_pass(const VkRenderPassCreateInfo *create_info)
+VkRenderPassCreateInfo *StateRecorder::Impl::copy_render_pass(const VkRenderPassCreateInfo *create_info, ScratchAllocator &alloc)
 {
-	auto *info = copy(create_info, 1);
-	info->pAttachments = copy(info->pAttachments, info->attachmentCount);
-	info->pSubpasses = copy(info->pSubpasses, info->subpassCount);
-	info->pDependencies = copy(info->pDependencies, info->dependencyCount);
+	auto *info = copy(create_info, 1, alloc);
+	info->pAttachments = copy(info->pAttachments, info->attachmentCount, alloc);
+	info->pSubpasses = copy(info->pSubpasses, info->subpassCount, alloc);
+	info->pDependencies = copy(info->pDependencies, info->dependencyCount, alloc);
 
 	for (uint32_t i = 0; i < info->subpassCount; i++)
 	{
 		auto &sub = const_cast<VkSubpassDescription &>(info->pSubpasses[i]);
 		if (sub.pDepthStencilAttachment)
-			sub.pDepthStencilAttachment = copy(sub.pDepthStencilAttachment, 1);
+			sub.pDepthStencilAttachment = copy(sub.pDepthStencilAttachment, 1, alloc);
 		if (sub.pColorAttachments)
-			sub.pColorAttachments = copy(sub.pColorAttachments, sub.colorAttachmentCount);
+			sub.pColorAttachments = copy(sub.pColorAttachments, sub.colorAttachmentCount, alloc);
 		if (sub.pResolveAttachments)
-			sub.pResolveAttachments = copy(sub.pResolveAttachments, sub.colorAttachmentCount);
+			sub.pResolveAttachments = copy(sub.pResolveAttachments, sub.colorAttachmentCount, alloc);
 		if (sub.pInputAttachments)
-			sub.pInputAttachments = copy(sub.pInputAttachments, sub.inputAttachmentCount);
+			sub.pInputAttachments = copy(sub.pInputAttachments, sub.inputAttachmentCount, alloc);
 		if (sub.pPreserveAttachments)
-			sub.pPreserveAttachments = copy(sub.pPreserveAttachments, sub.preserveAttachmentCount);
+			sub.pPreserveAttachments = copy(sub.pPreserveAttachments, sub.preserveAttachmentCount, alloc);
 	}
 
 	return info;
@@ -2271,6 +2283,8 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder) {
 	for(;;)
 	{
 		std::unique_lock<std::mutex> lock(recorder->impl->record_lock);
+		if (recorder->impl->record_queue.empty())
+			recorder->impl->temp_allocator.reset();
 		recorder->impl->record_cv.wait(lock, [&] {return !recorder->impl->record_queue.empty(); });
 		auto record_item = recorder->impl->record_queue.front();
 		recorder->impl->record_queue.pop();
@@ -2289,7 +2303,10 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder) {
 				auto hash = Hashing::compute_hash_sampler(*recorder, *create_info);
 				recorder->impl->sampler_to_index[(VkSampler)record_item.handle] = hash;
 				if (!recorder->impl->samplers.count(hash))
-					recorder->impl->samplers[hash] = *create_info;
+				{
+					auto create_info_copy = recorder->impl->copy_sampler(create_info, recorder->impl->allocator);
+					recorder->impl->samplers[hash] = create_info_copy;
+				}
 				break;
 			}
 			case VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO:
@@ -2299,8 +2316,9 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder) {
 				recorder->impl->descriptor_set_layout_to_index[(VkDescriptorSetLayout)record_item.handle] = hash;
 				if (!recorder->impl->descriptor_sets.count(hash))
 				{
-					recorder->impl->remap_descriptor_set_layout_ci(create_info);
-					recorder->impl->descriptor_sets[hash] = *create_info;
+					auto create_info_copy = recorder->impl->copy_descriptor_set_layout(create_info, recorder->impl->allocator);
+					recorder->impl->remap_descriptor_set_layout_ci(create_info_copy);
+					recorder->impl->descriptor_sets[hash] = create_info_copy;
 				}
 				break;
 			}
@@ -2311,8 +2329,9 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder) {
 				recorder->impl->pipeline_layout_to_index[(VkPipelineLayout)record_item.handle] = hash;
 				if (!recorder->impl->pipeline_layouts.count(hash))
 				{
-					recorder->impl->remap_pipeline_layout_ci(create_info);
-					recorder->impl->pipeline_layouts[hash] = *create_info;
+					auto create_info_copy = recorder->impl->copy_pipeline_layout(create_info, recorder->impl->allocator);
+					recorder->impl->remap_pipeline_layout_ci(create_info_copy);
+					recorder->impl->pipeline_layouts[hash] = create_info_copy;
 				}
 				break;
 			}
@@ -2322,7 +2341,10 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder) {
 				auto hash = Hashing::compute_hash_render_pass(*recorder, *create_info);
 				recorder->impl->render_pass_to_index[(VkRenderPass)record_item.handle] = hash;
 				if (!recorder->impl->render_passes.count(hash))
-					recorder->impl->render_passes[hash] = *create_info;
+				{
+					auto create_info_copy = recorder->impl->copy_render_pass(create_info, recorder->impl->allocator);
+					recorder->impl->render_passes[hash] = create_info_copy;
+				}
 				break;
 			}
 			case VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO:
@@ -2332,8 +2354,8 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder) {
 				recorder->impl->shader_module_to_index[(VkShaderModule)record_item.handle] = hash;
 				if (!recorder->impl->shader_modules.count(hash))
 				{
-					recorder->impl->shader_modules[hash] = *create_info;
-					lock_guard<mutex> lock(recorder->impl->serialization_lock);
+					auto create_info_copy = recorder->impl->copy_shader_module(create_info, recorder->impl->allocator);
+					recorder->impl->shader_modules[hash] = create_info_copy;
 					write_buffer(recorder->impl->serialization_path, hash, recorder->serialize_shader_module(hash));
 				}
 				break;
@@ -2345,9 +2367,9 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder) {
 				recorder->impl->graphics_pipeline_to_index[(VkPipeline)record_item.handle] = hash;
 				if (!recorder->impl->graphics_pipelines.count(hash))
 				{
-					recorder->impl->remap_graphics_pipeline_ci(create_info);
-					recorder->impl->graphics_pipelines[hash] = *create_info;
-					lock_guard<mutex> lock(recorder->impl->serialization_lock);
+					auto create_info_copy = recorder->impl->copy_graphics_pipeline(create_info, recorder->impl->allocator);
+					recorder->impl->remap_graphics_pipeline_ci(create_info_copy);
+					recorder->impl->graphics_pipelines[hash] = create_info_copy;
 					write_buffer(recorder->impl->serialization_path, hash, recorder->serialize_graphics_pipeline(hash));
 				}
 				break;
@@ -2359,9 +2381,9 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder) {
 				recorder->impl->compute_pipeline_to_index[(VkPipeline)record_item.handle] = hash;
 				if (!recorder->impl->compute_pipelines.count(hash))
 				{
-					recorder->impl->remap_compute_pipeline_ci(create_info);
-					recorder->impl->compute_pipelines[hash] = *create_info;
-					lock_guard<mutex> lock(recorder->impl->serialization_lock);
+					auto create_info_copy = recorder->impl->copy_compute_pipeline(create_info, recorder->impl->allocator);
+					recorder->impl->remap_compute_pipeline_ci(create_info_copy);
+					recorder->impl->compute_pipelines[hash] = create_info_copy;
 					write_buffer(recorder->impl->serialization_path, hash, recorder->serialize_compute_pipeline(hash));
 				}
 				break;
@@ -2926,15 +2948,15 @@ static Value json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& all
 }
 
 template <typename ObjType, typename CreateType, typename AllocType>
-static inline const CreateType* serialize_obj(ObjType obj, std::unordered_map<Hash, CreateType>& ci_map, Value& json_map, AllocType& alloc)
+static inline const CreateType serialize_obj(ObjType obj, std::unordered_map<Hash, CreateType>& ci_map, Value& json_map, AllocType& alloc)
 {
 	auto iter = ci_map.find(api_object_cast<Hash>(obj));
 	if (iter != ci_map.end()) {
 		auto hash = uint64_string(api_object_cast<uint64_t>(obj), alloc);
 		if (!json_map.HasMember(hash)) {
-			json_map.AddMember(hash, json_value(iter->second, alloc), alloc);
+			json_map.AddMember(hash, json_value(*iter->second, alloc), alloc);
 		}
-		return &iter->second;
+		return iter->second;
 	}
 	return nullptr;
 }
@@ -3079,15 +3101,15 @@ vector<uint8_t> StateRecorder::serialize() const
 	Value samplers(kObjectType);
 	for (auto &sampler : impl->samplers)
 	{
-		auto s = json_value(sampler.second, alloc);
-		samplers.AddMember(uint64_string(sampler.first, alloc), json_value(sampler.second, alloc), alloc);
+		auto s = json_value(*sampler.second, alloc);
+		samplers.AddMember(uint64_string(sampler.first, alloc), s, alloc);
 	}
 	doc.AddMember("samplers", samplers, alloc);
 
 	Value set_layouts(kObjectType);
 	for (auto &layout : impl->descriptor_sets)
 	{
-		auto l = json_value(layout.second, alloc);
+		auto l = json_value(*layout.second, alloc);
 		set_layouts.AddMember(uint64_string(layout.first, alloc), l, alloc);
 	}
 	doc.AddMember("setLayouts", set_layouts, alloc);
@@ -3095,7 +3117,7 @@ vector<uint8_t> StateRecorder::serialize() const
 	Value pipeline_layouts(kObjectType);
 	for (auto &layout : impl->pipeline_layouts)
 	{
-		auto p = json_value(layout.second, alloc);
+		auto p = json_value(*layout.second, alloc);
 		pipeline_layouts.AddMember(uint64_string(layout.first, alloc), p, alloc);
 	}
 	doc.AddMember("pipelineLayouts", pipeline_layouts, alloc);
@@ -3103,7 +3125,7 @@ vector<uint8_t> StateRecorder::serialize() const
 	Value shader_modules(kObjectType);
 	for (auto &module : impl->shader_modules)
 	{
-		auto m = json_value(module.second, alloc);
+		auto m = json_value(*module.second, alloc);
 		shader_modules.AddMember(uint64_string(module.first, alloc), m, alloc);
 	}
 	doc.AddMember("shaderModules", shader_modules, alloc);
@@ -3111,7 +3133,7 @@ vector<uint8_t> StateRecorder::serialize() const
 	Value render_passes(kObjectType);
 	for (auto &pass : impl->render_passes)
 	{
-		auto p = json_value(pass.second, alloc);
+		auto p = json_value(*pass.second, alloc);
 		render_passes.AddMember(uint64_string(pass.first, alloc), p, alloc);
 	}
 	doc.AddMember("renderPasses", render_passes, alloc);
@@ -3119,7 +3141,7 @@ vector<uint8_t> StateRecorder::serialize() const
 	Value compute_pipelines(kObjectType);
 	for (auto &pipe : impl->compute_pipelines)
 	{
-		auto p = json_value(pipe.second, alloc);
+		auto p = json_value(*pipe.second, alloc);
 		compute_pipelines.AddMember(uint64_string(pipe.first, alloc), p, alloc);
 	}
 	doc.AddMember("computePipelines", compute_pipelines, alloc);
@@ -3127,7 +3149,7 @@ vector<uint8_t> StateRecorder::serialize() const
 	Value graphics_pipelines(kObjectType);
 	for (auto &pipe : impl->graphics_pipelines)
 	{
-		auto p = json_value(pipe.second, alloc);
+		auto p = json_value(*pipe.second, alloc);
 		graphics_pipelines.AddMember(uint64_string(pipe.first, alloc), p, alloc);
 	}
 	doc.AddMember("graphicsPipelines", graphics_pipelines, alloc);
@@ -3141,16 +3163,15 @@ vector<uint8_t> StateRecorder::serialize() const
 	return serialize_buffer;
 }
 
-void StateRecorder::set_serialization_path(const std::string &serialization_path)
+void StateRecorder::init(const std::string &serialization_path)
 {
-	std::lock_guard lock(impl->serialization_lock);
+	impl.reset(new Impl);
 	impl->serialization_path = serialization_path;
+	impl->worker_thread = std::thread(&StateRecorder::Impl::record_task, this);
 }
 
 StateRecorder::StateRecorder()
 {
-	impl.reset(new Impl);
-	impl->worker_thread = std::thread(&StateRecorder::Impl::record_task, this);
 }
 
 StateRecorder::~StateRecorder()

@@ -88,7 +88,6 @@ void Device::init(VkPhysicalDevice gpu, VkDevice device, VkLayerInstanceDispatch
 		serializationPath = path;
 		LOGI("Overriding serialization path: \"%s\".\n", path);
 	}
-	this->recorder.set_serialization_path(serializationPath);
 
 	const char *paranoid = getenv("FOSSILIZE_PARANOID_MODE");
 	if (paranoid && strtoul(paranoid, nullptr, 0) != 0)
@@ -109,6 +108,8 @@ void Device::init(VkPhysicalDevice gpu, VkDevice device, VkLayerInstanceDispatch
 		installSegfaultHandler();
 #endif
 #endif
+
+	recorder.init(serializationPath);
 }
 
 #ifndef _WIN32
