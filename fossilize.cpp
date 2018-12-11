@@ -1871,7 +1871,7 @@ void StateRecorder::record_shader_module(VkShaderModule module, const VkShaderMo
 void StateRecorder::record_end()
 {
 	// Signal end of recording with empty work item
-	std::lock_guard lock(impl->record_lock);
+	std::lock_guard<std::mutex> lock(impl->record_lock);
 	impl->record_queue.push({ 0, nullptr });
 	impl->record_cv.notify_one();
 }
