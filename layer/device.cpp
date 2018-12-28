@@ -82,14 +82,14 @@ void Device::init(VkPhysicalDevice gpu, VkDevice device, VkLayerInstanceDispatch
 		LOGI("Enabling paranoid serialization mode.\n");
 	}
 #else
-	const char *path = getenv("FOSSILIZE_DUMP_PATH");
+	const char *path = getenv("STEAM_FOSSILIZE_DUMP_PATH");
 	if (path)
 	{
 		serializationPath = path;
 		LOGI("Overriding serialization path: \"%s\".\n", path);
 	}
 
-	const char *paranoid = getenv("FOSSILIZE_PARANOID_MODE");
+	const char *paranoid = getenv("STEAM_FOSSILIZE_PARANOID_MODE");
 	if (paranoid && strtoul(paranoid, nullptr, 0) != 0)
 	{
 		paranoidMode = true;
@@ -103,7 +103,7 @@ void Device::init(VkPhysicalDevice gpu, VkDevice device, VkLayerInstanceDispatch
 	if (!sigsegv.empty() && strtoul(sigsegv.c_str(), nullptr, 0) != 0)
 		installSegfaultHandler();
 #else
-	const char *sigsegv = getenv("FOSSILIZE_DUMP_SIGSEGV");
+	const char *sigsegv = getenv("STEAM_FOSSILIZE_DUMP_SIGSEGV");
 	if (sigsegv && strtoul(sigsegv, nullptr, 0) != 0)
 		installSegfaultHandler();
 #endif

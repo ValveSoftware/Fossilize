@@ -1,0 +1,91 @@
+//-----------------------------------------------------------------------------
+//	fossilize_layer.vpc
+//
+//	Project Script
+//-----------------------------------------------------------------------------
+
+$macro SRCDIR     "..\.."
+$macro OUTBINDIR  "$SRDIR\..\client"
+$macro TARGETNAME "fossilize-replay"   [$WIN32]
+$macro TARGETNAME "fossilize-replay64" [$WIN64]
+$macro OUTBINNAME "fossilize-replay"   [$WIN32]
+$macro OUTBINNAME "fossilize-replay64" [$WIN64]
+
+$include "$SRCDIR\vpc_scripts\steam_exe_con_win32_base.vpc"	[$WINDOWS]
+$include "$SRCDIR\vpc_scripts\steam_exe_posix_base.vpc"		[$POSIX]
+$include "$SRCDIR\vstdlib\vstdlib_s_exclude.vpc"
+$include "$SRCDIR\tier0\tier0_s_exclude.vpc"
+
+
+$Configuration
+{
+	$General
+	{
+		$OutputDirectory					".\$(TARGETNAME)$(Configuration)" [$WINDOWS]
+		$IntermediateDirectory				".\$(TARGETNAME)$(Configuration)" [$WINDOWS]
+		$OutputDirectory					"$CLIENTBINDIR" [$POSIX]
+
+	}
+}
+
+$Configuration
+{
+	$Compiler
+	{
+		$PreprocessorDefinitions			"$BASE;NOMINMAX=1" [$WINDOWS]
+		$PreprocessorDefinitions			"$BASE;DONT_WRAP_FILEIO" [$POSIX]
+		$AdditionalIncludeDirectories		"$BASE;.\rapidjson\include"
+		$AdditionalIncludeDirectories		"$BASE;.\khronos;.\khronos\vulkan"
+		$AdditionalIncludeDirectories		"$BASE;.\cli\volk"
+		$AdditionalIncludeDirectories		"$BASE;.\cli\dirent\include" [$WINDOWS]
+		$AdditionalIncludeDirectories		"$BASE;..;."
+
+		$TreatWarningsAsErrors				"false"
+		$AdditionalOptions					"/std:c++17" // filesystem on Windows requires C++17
+		$WarningLevel						"Level 2 (/W2)"
+		$GCC_ExtraCompilerFlags				"$BASE -Wno-shadow" [$LINUXALL]
+		$GCC_ExtraCompilerFlags				"$BASE -Wno-unused-variable" [$LINUXALL]
+		$GCC_ExtraCompilerFlags				"$BASE -Wno-format" [$LINUXALL]
+	}
+	$Linker
+	{
+		$OutputFile							"$CLIENTBINDIR\fossilize_replay" [$POSIX]
+	}
+}
+
+$Project "fossilize_replay"
+{
+	$Folder "Source Files"
+	{
+			$File ".\cli\fossilize_replay.cpp"
+			
+	}
+
+	$Folder "Header Files"
+	{
+	}
+	
+	$Folder "cli-utils"
+	{
+		$File ".\cli\cli_parser.cpp"
+		$File ".\cli\cli_parser.hpp"
+		$File ".\cli\device.cpp"
+		$File ".\cli\device.hpp"
+		$File ".\cli\file.cpp"
+		$File ".\cli\file.hpp"
+	}
+
+	$Folder "volk"
+	{
+		$File ".\cli\volk\volk.c"
+		$File ".\cli\volk\volk.h"
+	}
+	
+	$Folder "fossilize"
+	{
+		$File ".\fossilize.cpp"
+		$File ".\varint.cpp"
+		$File ".\fossilize.hpp"
+		$File ".\varint.hpp"
+	}
+}

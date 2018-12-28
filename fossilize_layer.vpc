@@ -1,0 +1,79 @@
+//-----------------------------------------------------------------------------
+//	fossilize_layer.vpc
+//
+//	Project Script
+//-----------------------------------------------------------------------------
+
+$macro SRCDIR     "..\.."
+$macro TARGETNAME "VkLayer_steam_fossilize"
+$macro TARGETNAME "VkLayer_steam_fossilize64" [$WIN64]
+$macro OUTBINNAME "VkLayer_steam_fossilize"
+$macro OUTBINNAME "VkLayer_steam_fossilize64" [$WIN64]
+
+$macro TARGETCOPYNAME $_IMPLIB_DLL_PREFIX$OUTBINNAME
+
+$include "$SRCDIR\vpc_scripts\steam_dll_base.vpc"
+$include "$SRCDIR\vpc_scripts\steam_copy_target_client_dll.vpc"
+$include "$SRCDIR\vstdlib\vstdlib_s_exclude.vpc"
+$include "$SRCDIR\tier0\tier0_s_exclude.vpc"
+
+$macro OUTBINDIR "$SRCDIR\..\bin\$(ConfigurationName)"
+
+$Configuration
+{
+	$General
+	{
+		$OutputDirectory					".\$(TARGETNAME)$(Configuration)"
+		$IntermediateDirectory				".\$(TARGETNAME)$(Configuration)"
+		$GameOutputFile						"$OUTBINDIR/$TARGETCOPYNAME$_DLL_EXT"
+	}
+}
+
+$Configuration
+{
+	$Compiler
+	{
+		$PreprocessorDefinitions			"$BASE;NOMINMAX=1" [$WINDOWS]
+		$PreprocessorDefinitions			"$BASE;DONT_WRAP_FILEIO" [$POSIX]
+		$AdditionalIncludeDirectories		"$BASE;.\rapidjson\include"
+		$AdditionalIncludeDirectories		"$BASE;.\khronos\vulkan"
+		$AdditionalIncludeDirectories		"$BASE;..;."
+		$TreatWarningsAsErrors				"false"
+		$WarningLevel						"Level 2 (/W2)"
+		$GCC_ExtraCompilerFlags				"$BASE -Wno-shadow" [$LINUXALL]
+		$GCC_ExtraCompilerFlags				"$BASE -Wno-unused-variable" [$LINUXALL]
+		$GCC_ExtraCompilerFlags				"$BASE -Wno-format" [$LINUXALL]
+	}
+
+	$Linker
+	{
+		$ModuleDefinitionFile				".\layer\exports.def" [$WINDOWS]
+	}
+}
+
+$Project "fossilize_layer"
+{
+	$Folder "Source Files"
+	{
+		$File ".\layer\device.cpp"
+		$File ".\layer\dispatch.cpp"
+		$File ".\layer\dispatch_helper.cpp"
+		$File ".\layer\instance.cpp"
+			
+	}
+
+	$Folder "Header Files"
+	{
+		$File ".\layer\device.hpp"
+		$File ".\layer\dispatch_helper.hpp"
+		$File ".\layer\instance.hpp"
+	}
+	
+	$Folder "fossilize"
+	{
+		$File ".\fossilize.cpp"
+		$File ".\varint.cpp"
+		$File ".\fossilize.hpp"
+		$File ".\varint.hpp"
+	}
+}

@@ -362,7 +362,7 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instan
 }
 
 static const VkLayerProperties layerProps[] = {
-	{ VK_LAYER_fossilize, VK_MAKE_VERSION(1, 0, 70), 1, "Fossilize capture layer" },
+	{ VK_LAYER_steam_fossilize, VK_MAKE_VERSION(1, 0, 70), 1, "Fossilize capture layer" },
 };
 
 VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceExtensionProperties(const char *pLayerName, uint32_t *pPropertyCount,

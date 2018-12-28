@@ -31,7 +31,8 @@
 #include <string>
 #include <unordered_set>
 #include <stdlib.h>
-#include <filesystem>
+#include <dirent.h>	// VALVE
+#include <chrono>	// VALVE
 #include <fstream>
 
 using namespace Fossilize;
@@ -188,22 +189,19 @@ struct DumbReplayer : StateCreatorInterface
 	VkPipelineCache pipeline_cache = VK_NULL_HANDLE;
 };
 
-static std::vector<uint8_t> load_buffer_from_path(std::filesystem::path path)
+// VALVE: Modified to not use std::filesystem
+static std::vector<uint8_t> load_buffer_from_path(const std::string &path)
 {
-	if (std::filesystem::is_regular_file(path))
-	{
-		std::ifstream file(path, std::ios::binary);
+	std::ifstream file(path, std::ios::binary);
 
-		file.seekg(0, std::ios::end);
-		auto file_size = file.tellg();
-		file.seekg(0, std::ios::beg);
+	file.seekg(0, std::ios::end);
+	auto file_size = file.tellg();
+	file.seekg(0, std::ios::beg);
 
-		std::vector<uint8_t> file_data(file_size);
-		file.read(reinterpret_cast<char *>(file_data.data()), file_size);
+	std::vector<uint8_t> file_data(file_size);
+	file.read(reinterpret_cast<char *>(file_data.data()), file_size);
 
-		return file_data;
-	}
-	return {};
+	return file_data;
 }
 
 struct DirectoryResolver : ResolverInterface
@@ -214,12 +212,18 @@ struct DirectoryResolver : ResolverInterface
 	{
 		char filename[22];
 		sprintf(filename, "%016" PRIX64 ".json", hash);
-		auto path = directory / filename;
+		// VALVE: modified to not use std::filesystem
+#if defined( WIN32 )
+		std::string separator = "\\";
+#else
+		std::string separator = "/";
+#endif
+		std::string path = directory + separator + filename;
 
 		return load_buffer_from_path(path);
 	}
 
-	std::filesystem::path directory;
+	std::string directory;
 };
 
 static void print_help()
@@ -267,7 +271,11 @@ int main(int argc, char *argv[])
 		return EXIT_FAILURE;
 	}
 
-	if (!std::filesystem::is_directory(json_path))
+	// VALVE: modified to not use std::filesystem
+	struct dirent *pEntry;
+	DIR *dp;
+	dp = opendir( json_path.c_str() );
+	if ( dp == NULL )
 	{
 		LOGE("Invalid path to serialized state provided.\n");
 		return EXIT_FAILURE;
@@ -283,35 +291,44 @@ int main(int argc, char *argv[])
 	DirectoryResolver resolver(json_path);
 	StateReplayer state_replayer;
 
-	for (auto& entry : std::filesystem::directory_iterator(json_path))
+	// VALVE: modified to not use std::filesystem
+	while ( ( pEntry = readdir( dp ) ) )
 	{
+		if ( pEntry->d_type != DT_REG)
+			continue;
+
+		// VALVE: modified to not use std::filesystem
+		std::string path( pEntry->d_name );;
+		std::string stem = path.substr( 0, path.find( "." ) );
+		std::string ext = path.substr( path.find( "." ) );
 		// check that filename is 16 char hex with json extension
-		auto stem = entry.path().stem().string();
-		if (stem.size() != 16)
+		if (stem.length() != 16)
 			continue;
 		for (auto c : stem)
 		{
 			if (!isxdigit(c))
 				continue;
 		}
-		if (entry.path().extension() != ".json")
+		if (ext != ".json")
 			continue;
 
 		try
 		{
-			auto state_json = load_buffer_from_path(entry);
+			auto state_json = load_buffer_from_path(path);
 			if (state_json.empty())
 			{
-				LOGE("Failed to load %s from disk.\n", entry.path().string().c_str());
+				LOGE("Failed to load %s from disk.\n", pEntry->d_name);
 			}
 
 			state_replayer.parse(replayer, resolver, state_json.data(), state_json.size());
 		}
 		catch (const exception &e)
 		{
-			LOGE("StateReplayer threw exception parsing %s: %s\n", entry.path().string().c_str(), e.what());
+			LOGE("StateReplayer threw exception parsing %s: %s\n", pEntry->d_name, e.what());
 		}
 	}
+	// VALVE: modified to not use std::filesystem
+	closedir( dp );
 
 	unsigned long total_size =
 		replayer.samplers.size() +
