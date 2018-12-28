@@ -1,5 +1,5 @@
 add_library(volk STATIC volk/volk.c volk/volk.h)
-target_include_directories(volk PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/volk ${CMAKE_CURRENT_SOURCE_DIR}/../khronos)
+target_include_directories(volk PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/volk ${CMAKE_CURRENT_SOURCE_DIR}/../khronos ${CMAKE_CURRENT_SOURCE_DIR}/dirent/include)
 target_compile_options(volk PRIVATE ${FOSSILIZE_CXX_FLAGS})
 if (NOT WIN32)
 	target_link_libraries(volk dl)
