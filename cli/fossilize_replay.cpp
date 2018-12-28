@@ -305,6 +305,17 @@ public:
 	int32_t numWorkerThreads;
 	std::mutex pipelineWorkQueueMutex;
 	std::queue< PipelineWorkItem_t > pipelineWorkQueue;
+
+	// For --loop, allow refill of the work queue
+	void getWorkQueue( std::queue< PipelineWorkItem_t > &workQueue )
+	{
+		workQueue = pipelineWorkQueue;
+	}
+
+	void fillWorkQueue( const std::queue< PipelineWorkItem_t > &workQueue )
+	{
+		pipelineWorkQueue = workQueue;
+	}
 };
 
 // VALVE: Modified to not use std::filesystem
@@ -355,6 +366,7 @@ static void print_help()
 	     "\t[--filter-graphics <index>]\n"
 	     "\t[--pipeline-cache]\n"
 	     "\t[--num-threads <count>]\n"
+	     "\t[--loop <count>]\n"
 	     "\tstate.json\n");
 }
 
@@ -366,6 +378,7 @@ int main(int argc, char *argv[])
 
 	unordered_set<unsigned> filter_graphics;
 	unordered_set<unsigned> filter_compute;
+	uint32_t nLoopCount = 0;
 
 	CLICallbacks cbs;
 	cbs.default_handler = [&](const char *arg) { json_path = arg; };
@@ -376,6 +389,7 @@ int main(int argc, char *argv[])
 	cbs.add("--filter-compute", [&](CLIParser &parser) { filter_compute.insert(parser.next_uint()); });
 	cbs.add("--filter-graphics", [&](CLIParser &parser) { filter_graphics.insert(parser.next_uint()); });
 	cbs.add("--num-threads", [&](CLIParser &parser) { replayer_opts.num_threads = parser.next_uint(); });
+	cbs.add("--loop", [&](CLIParser &parser) { nLoopCount = parser.next_uint(); });
 	cbs.error_handler = [] { print_help(); };
 
 	CLIParser parser(move(cbs), argc - 1, argv + 1);
@@ -448,8 +462,22 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	std::queue< DumbReplayer::PipelineWorkItem_t > workQueueCopy;
+	if ( nLoopCount > 0 )
+	{
+		replayer.getWorkQueue( workQueueCopy );
+	}
+
 	// VALVE: drain all outstanding pipeline compiles
 	replayer.drainWorkQueue();
+	
+	// VALVE: Testing mode for performance
+	while ( nLoopCount > 0 )
+	{
+		replayer.fillWorkQueue( workQueueCopy );
+		replayer.drainWorkQueue();
+		nLoopCount--;
+	}
 
 	// VALVE: modified to not use std::filesystem
 	closedir( dp );
