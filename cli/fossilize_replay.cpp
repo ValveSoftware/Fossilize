@@ -33,6 +33,9 @@
 #include <stdlib.h>
 #include <dirent.h>	// VALVE
 #include <chrono>	// VALVE
+#include <queue>	// VALVE
+#include <thread>	// VALVE
+#include <mutex>	// VALVE
 #include <fstream>
 
 using namespace Fossilize;
@@ -43,12 +46,112 @@ struct DumbReplayer : StateCreatorInterface
 	struct Options
 	{
 		bool pipeline_cache = false;
+
+		// VALVE: Add multi-threaded pipeline creation
+		uint32_t num_threads = thread::hardware_concurrency();
 	};
+
+public:
+	
+	// VALVE: Kick off threads to perform pipeline compiles
+	void drainWorkQueue()
+	{
+		if ( !pipelineWorkQueue.empty() )
+		{
+			int32_t nPipelineCount = ( int32_t ) pipelineWorkQueue.size();
+
+			// Create a thread pool with the # of specified worker threads (defaults to thread::hardware_concurrency()).
+			std::vector< std::thread > threadPool;
+			for ( int32_t i = 0; i < numWorkerThreads; i++ )
+			{
+				threadPool.push_back( std::thread( &DumbReplayer::workerThreadRun, this ) );
+			}
+
+			auto start_time = chrono::steady_clock::now();
+			for ( int32_t i = 0; i < numWorkerThreads; i++ )
+			{
+				threadPool[ i ].join();
+			}
+			unsigned long elapsed_ms = chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now() - start_time).count();
+			
+			LOGI( "Compiling %d pipelines took %d ms (avg: %0.2f ms / pipeline)\n", nPipelineCount, elapsed_ms, ( float ) elapsed_ms / ( float ) nPipelineCount );
+		}
+	}
+
+	// VALVE: Worker thread function - grab work item off of the queue and perform the compile
+	void workerThreadRun()
+	{
+		// If user asked for a pipeline cache, create a pipeline cache on each thread
+		VkPipelineCache perThreadPipelineCache = VK_NULL_HANDLE;
+		if ( pipeline_cache != VK_NULL_HANDLE )
+		{
+			VkPipelineCacheCreateInfo info = { VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO };
+			vkCreatePipelineCache( device.get_device(), &info, nullptr, &perThreadPipelineCache );
+		}
+		while ( true )
+		{
+			pipelineWorkQueueMutex.lock();
+			if ( pipelineWorkQueue.empty() )
+			{
+				// Work queue is empty, exit thread.
+				pipelineWorkQueueMutex.unlock();
+				break;
+			}
+			else
+			{
+				// Grab a new work item
+				PipelineWorkItem_t workItem = pipelineWorkQueue.front();
+				pipelineWorkQueue.pop();
+
+				// Unlock so lock is only held for dequeuing a work item
+				pipelineWorkQueueMutex.unlock();
+
+				// Create graphics or compute pipeline
+				if ( workItem.pGraphicsPipelineCreateInfo )
+				{
+					if ( vkCreateGraphicsPipelines( device.get_device(), perThreadPipelineCache, 1, workItem.pGraphicsPipelineCreateInfo, nullptr, workItem.ppPipeline ) != VK_SUCCESS)
+					{
+						LOGE("Creating graphics pipeline %0" PRIX64 " failed\n", workItem.index);
+					}
+					else
+					{
+						// Insert back into the map - needs a lock to be thread safe
+						std::lock_guard< std::mutex > lock( pipelineWorkQueueMutex );
+						graphics_pipelines[ workItem.index ] = *workItem.ppPipeline;
+					}
+				}
+				else if ( workItem.pComputePipelineCreateInfo )
+				{
+					if ( vkCreateComputePipelines( device.get_device(), perThreadPipelineCache, 1, workItem.pComputePipelineCreateInfo, nullptr, workItem.ppPipeline ) != VK_SUCCESS)
+					{
+						LOGE("Creating compute pipeline %0" PRIX64 " failed\n", workItem.index);
+					}
+					else
+					{
+						// Insert back into the map - needs a lock to be thread safe
+						std::lock_guard< std::mutex > lock( pipelineWorkQueueMutex );
+						compute_pipelines[ workItem.index ] = *workItem.ppPipeline;
+					}
+				}
+				
+			}
+		}
+
+		// Merge worker thread pipeline cache to the main cache
+		if ( perThreadPipelineCache != VK_NULL_HANDLE )
+		{
+			{
+				std::lock_guard< std::mutex > lock( pipelineWorkQueueMutex );
+				vkMergePipelineCaches( device.get_device(), pipeline_cache, 1, &perThreadPipelineCache );
+			}
+			vkDestroyPipelineCache( device.get_device(), perThreadPipelineCache, nullptr );
+		}
+	}
 
 	DumbReplayer(const VulkanDevice &device, const Options &opts,
 	             const unordered_set<unsigned> &graphics,
 	             const unordered_set<unsigned> &compute)
-		: device(device), filter_graphics(graphics), filter_compute(compute)
+		: device(device), filter_graphics(graphics), filter_compute(compute), numWorkerThreads( opts.num_threads )
 	{
 		if (opts.pipeline_cache)
 		{
@@ -143,17 +246,14 @@ struct DumbReplayer : StateCreatorInterface
 	{
 		if ((filter_compute.empty() && filter_graphics.empty()) || filter_compute.count(index))
 		{
-			if (vkCreateComputePipelines(device.get_device(), pipeline_cache, 1, create_info, nullptr, pipeline) !=
-			    VK_SUCCESS)
-			{
-				LOGE("Creating compute pipeline %0" PRIX64 " Failed!\n", index);
-				return false;
-			}
+			PipelineWorkItem_t workItem( index );
+			workItem.pComputePipelineCreateInfo = create_info;
+			workItem.ppPipeline = pipeline;
+			pipelineWorkQueue.push( workItem );
 		}
 		else
 			*pipeline = VK_NULL_HANDLE;
 
-		compute_pipelines[index] = *pipeline;
 		return true;
 	}
 
@@ -161,17 +261,15 @@ struct DumbReplayer : StateCreatorInterface
 	{
 		if ((filter_graphics.empty() && filter_compute.empty()) || filter_graphics.count(index))
 		{
-			if (vkCreateGraphicsPipelines(device.get_device(), pipeline_cache, 1, create_info, nullptr, pipeline) !=
-			    VK_SUCCESS)
-			{
-				LOGE("Creating graphics pipeline %0" PRIX64 " failed\n", index);
-				return false;
-			}
+			PipelineWorkItem_t workItem( index );
+			workItem.pGraphicsPipelineCreateInfo = create_info;
+			workItem.ppPipeline = pipeline;
+			pipelineWorkQueue.push( workItem );
+			
 		}
 		else
 			*pipeline = VK_NULL_HANDLE;
 
-		graphics_pipelines[index] = *pipeline;
 		return true;
 	}
 
@@ -187,6 +285,26 @@ struct DumbReplayer : StateCreatorInterface
 	std::unordered_map<Hash, VkPipeline> compute_pipelines;
 	std::unordered_map<Hash, VkPipeline> graphics_pipelines;
 	VkPipelineCache pipeline_cache = VK_NULL_HANDLE;
+
+	// VALVE: multi-threaded work queue for replayer
+	struct PipelineWorkItem_t
+	{
+		PipelineWorkItem_t( Hash idx ) : 
+			index( idx ),
+			pGraphicsPipelineCreateInfo( nullptr ),
+			pComputePipelineCreateInfo( nullptr ),
+			ppPipeline( nullptr )
+		{
+		}
+
+		Hash index;
+		const VkGraphicsPipelineCreateInfo *pGraphicsPipelineCreateInfo;
+		const VkComputePipelineCreateInfo *pComputePipelineCreateInfo;
+		VkPipeline *ppPipeline;
+	};
+	int32_t numWorkerThreads;
+	std::mutex pipelineWorkQueueMutex;
+	std::queue< PipelineWorkItem_t > pipelineWorkQueue;
 };
 
 // VALVE: Modified to not use std::filesystem
@@ -236,6 +354,7 @@ static void print_help()
 	     "\t[--filter-compute <index>]\n"
 	     "\t[--filter-graphics <index>]\n"
 	     "\t[--pipeline-cache]\n"
+	     "\t[--num-threads <count>]\n"
 	     "\tstate.json\n");
 }
 
@@ -256,6 +375,7 @@ int main(int argc, char *argv[])
 	cbs.add("--pipeline-cache", [&](CLIParser &) { replayer_opts.pipeline_cache = true; });
 	cbs.add("--filter-compute", [&](CLIParser &parser) { filter_compute.insert(parser.next_uint()); });
 	cbs.add("--filter-graphics", [&](CLIParser &parser) { filter_graphics.insert(parser.next_uint()); });
+	cbs.add("--num-threads", [&](CLIParser &parser) { replayer_opts.num_threads = parser.next_uint(); });
 	cbs.error_handler = [] { print_help(); };
 
 	CLIParser parser(move(cbs), argc - 1, argv + 1);
@@ -327,6 +447,10 @@ int main(int argc, char *argv[])
 			LOGE("StateReplayer threw exception parsing %s: %s\n", pEntry->d_name, e.what());
 		}
 	}
+
+	// VALVE: drain all outstanding pipeline compiles
+	replayer.drainWorkQueue();
+
 	// VALVE: modified to not use std::filesystem
 	closedir( dp );
 
