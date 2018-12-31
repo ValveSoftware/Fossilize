@@ -49,6 +49,9 @@ struct DumbReplayer : StateCreatorInterface
 
 		// VALVE: Add multi-threaded pipeline creation
 		uint32_t num_threads = thread::hardware_concurrency();
+
+		// VALVE: --loop option for testing performance
+		int32_t loop_count = 0;
 	};
 
 public:
@@ -56,25 +59,76 @@ public:
 	// VALVE: Kick off threads to perform pipeline compiles
 	void drainWorkQueue()
 	{
-		if ( !pipelineWorkQueue.empty() )
+		int32_t nPipelineCount = ( int32_t ) pipelineWorkQueue.size();
+		std::queue< PipelineWorkItem_t > pipelineWorkQueueCopy;
+		if ( nLoopCount > 0 )
 		{
-			int32_t nPipelineCount = ( int32_t ) pipelineWorkQueue.size();
+			pipelineWorkQueueCopy = pipelineWorkQueue;
+		}
 
-			// Create a thread pool with the # of specified worker threads (defaults to thread::hardware_concurrency()).
-			std::vector< std::thread > threadPool;
-			for ( int32_t i = 0; i < numWorkerThreads; i++ )
-			{
-				threadPool.push_back( std::thread( &DumbReplayer::workerThreadRun, this ) );
-			}
+		// Create a thread pool with the # of specified worker threads (defaults to thread::hardware_concurrency()).
+		std::vector< std::thread > threadPool;
+		for ( int32_t i = 0; i < numWorkerThreads; i++ )
+		{
+			threadPool.push_back( std::thread( &DumbReplayer::workerThreadRun, this ) );
+		}
 
-			auto start_time = chrono::steady_clock::now();
-			for ( int32_t i = 0; i < numWorkerThreads; i++ )
+		auto start_time = chrono::steady_clock::now();
+		do 
+		{
+			pipelineWorkQueueMutex.lock();
+			while ( !pipelineWorkQueue.empty() )
 			{
-				threadPool[ i ].join();
+				pipelineWorkQueueMutex.unlock();
+				workAvailableCondition.notify_all();
+				pipelineWorkQueueMutex.lock();
 			}
-			unsigned long elapsed_ms = chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now() - start_time).count();
+			pipelineWorkQueueMutex.unlock();
 			
+			unsigned long elapsed_ms = chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now() - start_time).count();
 			LOGI( "Compiling %d pipelines took %d ms (avg: %0.2f ms / pipeline)\n", nPipelineCount, elapsed_ms, ( float ) elapsed_ms / ( float ) nPipelineCount );
+
+			// For perf testing in --loop mode
+			if ( nLoopCount > 0 )
+			{
+				std::lock_guard< std::mutex> lock( pipelineWorkQueueMutex );
+				// Copy all the work back on to the queue
+				pipelineWorkQueue = pipelineWorkQueueCopy;
+				nLoopCount--;
+
+				// Free all pipelines so we don't keep growing
+				for ( auto it = graphics_pipelines.begin(); it != graphics_pipelines.end(); it++ )
+				{
+					if ( it->second != VK_NULL_HANDLE )
+					{
+						vkDestroyPipeline( device.get_device(), it->second, nullptr );
+						it->second = VK_NULL_HANDLE;
+					}
+				}
+				graphics_pipelines.clear();
+
+				// Free all pipelines so we don't keep growing
+				for ( auto it = compute_pipelines.begin(); it != compute_pipelines.end(); it++ )
+				{
+					if ( it->second != VK_NULL_HANDLE )
+					{
+						vkDestroyPipeline( device.get_device(), it->second, nullptr );
+						it->second = VK_NULL_HANDLE;
+					}
+				}
+				compute_pipelines.clear();
+
+
+			}
+			start_time = chrono::steady_clock::now();
+
+		} while ( nLoopCount > 0 );
+
+		bShuttingDown = true;
+		workAvailableCondition.notify_all();
+		for ( int32_t i = 0; i < numWorkerThreads; i++ )
+		{
+			threadPool[ i ].join();
 		}
 	}
 
@@ -88,52 +142,57 @@ public:
 			VkPipelineCacheCreateInfo info = { VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO };
 			vkCreatePipelineCache( device.get_device(), &info, nullptr, &perThreadPipelineCache );
 		}
-		while ( true )
+
+		while ( !bShuttingDown )
 		{
-			pipelineWorkQueueMutex.lock();
-			if ( pipelineWorkQueue.empty() )
+			PipelineWorkItem_t workItem;
 			{
-				// Work queue is empty, exit thread.
-				pipelineWorkQueueMutex.unlock();
-				break;
+				std::unique_lock< std::mutex > lock( pipelineWorkQueueMutex );
+				workAvailableCondition.wait( lock, [&] 
+					{
+						if ( bShuttingDown )
+						{
+							return true;
+						}
+						if ( !pipelineWorkQueue.empty() )
+						{
+							workItem = pipelineWorkQueue.front();
+							pipelineWorkQueue.pop();
+							return true;
+						}
+						return false;
+					} );
 			}
-			else
+
+			if ( bShuttingDown )
+				continue;
+			
+			// Create graphics or compute pipeline
+			if ( workItem.pGraphicsPipelineCreateInfo )
 			{
-				// Grab a new work item
-				PipelineWorkItem_t workItem = pipelineWorkQueue.front();
-				pipelineWorkQueue.pop();
-
-				// Unlock so lock is only held for dequeuing a work item
-				pipelineWorkQueueMutex.unlock();
-
-				// Create graphics or compute pipeline
-				if ( workItem.pGraphicsPipelineCreateInfo )
+				if ( vkCreateGraphicsPipelines( device.get_device(), perThreadPipelineCache, 1, workItem.pGraphicsPipelineCreateInfo, nullptr, workItem.ppPipeline ) != VK_SUCCESS)
 				{
-					if ( vkCreateGraphicsPipelines( device.get_device(), perThreadPipelineCache, 1, workItem.pGraphicsPipelineCreateInfo, nullptr, workItem.ppPipeline ) != VK_SUCCESS)
-					{
-						LOGE("Creating graphics pipeline %0" PRIX64 " failed\n", workItem.index);
-					}
-					else
-					{
-						// Insert back into the map - needs a lock to be thread safe
-						std::lock_guard< std::mutex > lock( pipelineWorkQueueMutex );
-						graphics_pipelines[ workItem.index ] = *workItem.ppPipeline;
-					}
+					LOGE("Creating graphics pipeline %0" PRIX64 " failed\n", workItem.index);
 				}
-				else if ( workItem.pComputePipelineCreateInfo )
+				else
 				{
-					if ( vkCreateComputePipelines( device.get_device(), perThreadPipelineCache, 1, workItem.pComputePipelineCreateInfo, nullptr, workItem.ppPipeline ) != VK_SUCCESS)
-					{
-						LOGE("Creating compute pipeline %0" PRIX64 " failed\n", workItem.index);
-					}
-					else
-					{
-						// Insert back into the map - needs a lock to be thread safe
-						std::lock_guard< std::mutex > lock( pipelineWorkQueueMutex );
-						compute_pipelines[ workItem.index ] = *workItem.ppPipeline;
-					}
+					// Insert back into the map - needs a lock to be thread safe
+					std::lock_guard< std::mutex > lock( pipelineWorkQueueMutex );
+					graphics_pipelines[ workItem.index ] = *workItem.ppPipeline;
 				}
-				
+			}
+			else if ( workItem.pComputePipelineCreateInfo )
+			{
+				if ( vkCreateComputePipelines( device.get_device(), perThreadPipelineCache, 1, workItem.pComputePipelineCreateInfo, nullptr, workItem.ppPipeline ) != VK_SUCCESS)
+				{
+					LOGE("Creating compute pipeline %0" PRIX64 " failed\n", workItem.index);
+				}
+				else
+				{
+					// Insert back into the map - needs a lock to be thread safe
+					std::lock_guard< std::mutex > lock( pipelineWorkQueueMutex );
+					compute_pipelines[ workItem.index ] = *workItem.ppPipeline;
+				}
 			}
 		}
 
@@ -151,7 +210,7 @@ public:
 	DumbReplayer(const VulkanDevice &device, const Options &opts,
 	             const unordered_set<unsigned> &graphics,
 	             const unordered_set<unsigned> &compute)
-		: device(device), filter_graphics(graphics), filter_compute(compute), numWorkerThreads( opts.num_threads )
+		: device(device), filter_graphics(graphics), filter_compute(compute), numWorkerThreads( opts.num_threads ), nLoopCount( opts.loop_count ),bShuttingDown( false )
 	{
 		if (opts.pipeline_cache)
 		{
@@ -289,6 +348,10 @@ public:
 	// VALVE: multi-threaded work queue for replayer
 	struct PipelineWorkItem_t
 	{
+		PipelineWorkItem_t() :
+			PipelineWorkItem_t( Hash() )
+		{
+		}
 		PipelineWorkItem_t( Hash idx ) : 
 			index( idx ),
 			pGraphicsPipelineCreateInfo( nullptr ),
@@ -303,19 +366,11 @@ public:
 		VkPipeline *ppPipeline;
 	};
 	int32_t numWorkerThreads;
+	int32_t nLoopCount;
 	std::mutex pipelineWorkQueueMutex;
 	std::queue< PipelineWorkItem_t > pipelineWorkQueue;
-
-	// For --loop, allow refill of the work queue
-	void getWorkQueue( std::queue< PipelineWorkItem_t > &workQueue )
-	{
-		workQueue = pipelineWorkQueue;
-	}
-
-	void fillWorkQueue( const std::queue< PipelineWorkItem_t > &workQueue )
-	{
-		pipelineWorkQueue = workQueue;
-	}
+	std::condition_variable workAvailableCondition;
+	volatile bool bShuttingDown;
 };
 
 // VALVE: Modified to not use std::filesystem
@@ -378,7 +433,6 @@ int main(int argc, char *argv[])
 
 	unordered_set<unsigned> filter_graphics;
 	unordered_set<unsigned> filter_compute;
-	uint32_t nLoopCount = 0;
 
 	CLICallbacks cbs;
 	cbs.default_handler = [&](const char *arg) { json_path = arg; };
@@ -389,7 +443,7 @@ int main(int argc, char *argv[])
 	cbs.add("--filter-compute", [&](CLIParser &parser) { filter_compute.insert(parser.next_uint()); });
 	cbs.add("--filter-graphics", [&](CLIParser &parser) { filter_graphics.insert(parser.next_uint()); });
 	cbs.add("--num-threads", [&](CLIParser &parser) { replayer_opts.num_threads = parser.next_uint(); });
-	cbs.add("--loop", [&](CLIParser &parser) { nLoopCount = parser.next_uint(); });
+	cbs.add("--loop", [&](CLIParser &parser) { replayer_opts.loop_count = parser.next_uint(); });
 	cbs.error_handler = [] { print_help(); };
 
 	CLIParser parser(move(cbs), argc - 1, argv + 1);
@@ -462,23 +516,9 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	std::queue< DumbReplayer::PipelineWorkItem_t > workQueueCopy;
-	if ( nLoopCount > 0 )
-	{
-		replayer.getWorkQueue( workQueueCopy );
-	}
-
 	// VALVE: drain all outstanding pipeline compiles
 	replayer.drainWorkQueue();
 	
-	// VALVE: Testing mode for performance
-	while ( nLoopCount > 0 )
-	{
-		replayer.fillWorkQueue( workQueueCopy );
-		replayer.drainWorkQueue();
-		nLoopCount--;
-	}
-
 	// VALVE: modified to not use std::filesystem
 	closedir( dp );
 
