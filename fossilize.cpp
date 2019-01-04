@@ -2261,7 +2261,13 @@ static void write_buffer(const std::string &json_dir, Hash hash, const vector<ui
 	{
 		char filename[22]; // 16 digits + ".json" + null
 		sprintf(filename, "%016" PRIX64 ".json", hash);
-		auto path = json_dir + filename;
+		// VALVE: fix bug with separator missing from path
+#if defined( WIN32 )
+		std::string separator = "\\";
+#else
+		std::string separator = "/";
+#endif
+		auto path = json_dir + separator + filename;
 		FILE *file = fopen(path.c_str(), "wb");
 		if (file)
 		{

@@ -44,11 +44,6 @@ $Configuration
 		$GCC_ExtraCompilerFlags				"$BASE -Wno-unused-variable" [$LINUXALL]
 		$GCC_ExtraCompilerFlags				"$BASE -Wno-format" [$LINUXALL]
 	}
-
-	$Linker
-	{
-		$ModuleDefinitionFile				".\layer\exports.def" [$WINDOWS]
-	}
 }
 
 $Project "fossilize_layer"

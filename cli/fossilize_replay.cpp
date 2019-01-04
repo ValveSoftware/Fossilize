@@ -36,6 +36,7 @@
 #include <queue>	// VALVE
 #include <thread>	// VALVE
 #include <mutex>	// VALVE
+#include <condition_variable> // VALVE
 #include <fstream>
 
 using namespace Fossilize;
