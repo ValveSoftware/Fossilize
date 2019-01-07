@@ -43,6 +43,7 @@ $Configuration
 		$GCC_ExtraCompilerFlags				"$BASE -Wno-shadow" [$LINUXALL]
 		$GCC_ExtraCompilerFlags				"$BASE -Wno-unused-variable" [$LINUXALL]
 		$GCC_ExtraCompilerFlags				"$BASE -Wno-format" [$LINUXALL]
+		$DisableSpecificWarnings			"$BASE;6313" [$ANALYZE] // Disable C6313: Incorrect operator: zero-valued flag cannot be tested with bitwise-and for rapidjson code
 	}
 }
 
