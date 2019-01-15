@@ -214,6 +214,8 @@ struct StateRecorder::Impl
 	std::unordered_map<VkRenderPass, Hash> render_pass_to_hash;
 	std::unordered_map<VkSampler, Hash> sampler_to_hash;
 
+	VkApplicationInfo *application_info = nullptr;
+
 	VkDescriptorSetLayoutCreateInfo *copy_descriptor_set_layout(const VkDescriptorSetLayoutCreateInfo *create_info, ScratchAllocator &alloc);
 	VkPipelineLayoutCreateInfo *copy_pipeline_layout(const VkPipelineLayoutCreateInfo *create_info, ScratchAllocator &alloc);
 	VkShaderModuleCreateInfo *copy_shader_module(const VkShaderModuleCreateInfo *create_info, ScratchAllocator &alloc);
@@ -221,6 +223,7 @@ struct StateRecorder::Impl
 	VkComputePipelineCreateInfo *copy_compute_pipeline(const VkComputePipelineCreateInfo *create_info, ScratchAllocator &alloc);
 	VkSamplerCreateInfo *copy_sampler(const VkSamplerCreateInfo *create_info, ScratchAllocator &alloc);
 	VkRenderPassCreateInfo *copy_render_pass(const VkRenderPassCreateInfo *create_info, ScratchAllocator &alloc);
+	VkApplicationInfo *copy_application_info(const VkApplicationInfo *app_info, ScratchAllocator &alloc);
 
 	VkSpecializationInfo *copy_specialization_info(const VkSpecializationInfo *info, ScratchAllocator &alloc);
 
@@ -1823,6 +1826,14 @@ void StateRecorder::record_pipeline_layout(VkPipelineLayout pipeline_layout, con
 	impl->record_cv.notify_one();
 }
 
+void StateRecorder::record_application_info(const VkApplicationInfo &info)
+{
+	if (info.pNext)
+		FOSSILIZE_THROW("pNext in VkApplicationInfo not supported.");
+	std::lock_guard<std::mutex> lock(impl->record_lock);
+	impl->application_info = impl->copy_application_info(&info, impl->allocator);
+}
+
 void StateRecorder::record_sampler(VkSampler sampler, const VkSamplerCreateInfo &create_info)
 {
 	if (create_info.pNext)
@@ -1949,6 +1960,17 @@ VkShaderModuleCreateInfo *StateRecorder::Impl::copy_shader_module(const VkShader
 VkSamplerCreateInfo *StateRecorder::Impl::copy_sampler(const VkSamplerCreateInfo *create_info, ScratchAllocator &alloc)
 {
 	return copy(create_info, 1, alloc);
+}
+
+VkApplicationInfo *StateRecorder::Impl::copy_application_info(const VkApplicationInfo *app_info, ScratchAllocator &alloc)
+{
+	auto *app = copy(app_info, 1, alloc);
+	if (app->pEngineName)
+		app->pEngineName = copy(app->pEngineName, strlen(app->pEngineName) + 1, alloc);
+	if (app->pApplicationName)
+		app->pApplicationName = copy(app->pApplicationName, strlen(app->pApplicationName) + 1, alloc);
+
+	return app;
 }
 
 VkDescriptorSetLayoutCreateInfo *StateRecorder::Impl::copy_descriptor_set_layout(
@@ -3011,18 +3033,34 @@ static inline const CreateType serialize_obj(ObjType obj, const std::unordered_m
 	return nullptr;
 }
 
+template <typename AllocType>
+static void serialize_application_info(Value &value, const VkApplicationInfo &info, AllocType &alloc)
+{
+	if (info.pApplicationName)
+		value.AddMember("applicationName", StringRef(info.pApplicationName), alloc);
+	if (info.pEngineName)
+		value.AddMember("engineName", StringRef(info.pEngineName), alloc);
+	value.AddMember("applicationVersion", info.applicationVersion, alloc);
+	value.AddMember("engineVersion", info.engineVersion, alloc);
+	value.AddMember("apiVersion", info.apiVersion, alloc);
+}
+
 vector<uint8_t> StateRecorder::serialize_graphics_pipeline(Hash hash) const
 {
 	Document doc;
 	doc.SetObject();
 	auto &alloc = doc.GetAllocator();
 
+	Value app_info(kObjectType);
 	Value samplers(kObjectType);
 	Value set_layouts(kObjectType);
 	Value pipeline_layouts(kObjectType);
 	Value shader_modules(kObjectType);
 	Value render_passes(kObjectType);
 	Value graphics_pipelines(kObjectType);
+
+	if (impl->application_info)
+		serialize_application_info(app_info, *impl->application_info, alloc);
 
 	if (auto pipe = serialize_obj(hash, impl->graphics_pipelines, graphics_pipelines, alloc))
 	{
@@ -3051,6 +3089,7 @@ vector<uint8_t> StateRecorder::serialize_graphics_pipeline(Hash hash) const
 	}
 
 	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
+	doc.AddMember("applicationInfo", app_info, alloc);
 	doc.AddMember("samplers", samplers, alloc);
 	doc.AddMember("setLayouts", set_layouts, alloc);
 	doc.AddMember("pipelineLayouts", pipeline_layouts, alloc);
@@ -3072,12 +3111,16 @@ vector<uint8_t> StateRecorder::serialize_compute_pipeline(Hash hash) const
 	doc.SetObject();
 	auto &alloc = doc.GetAllocator();
 
+	Value app_info(kObjectType);
 	Value samplers(kObjectType);
 	Value set_layouts(kObjectType);
 	Value pipeline_layouts(kObjectType);
 	Value shader_modules(kObjectType);
 	Value compute_pipelines(kObjectType);
-	
+
+	if (impl->application_info)
+		serialize_application_info(app_info, *impl->application_info, alloc);
+
 	if (auto pipe = serialize_obj(hash, impl->compute_pipelines, compute_pipelines, alloc))
 	{
 		if (auto pipeline_layout = serialize_obj(pipe->layout, impl->pipeline_layouts, pipeline_layouts, alloc))
@@ -3103,6 +3146,7 @@ vector<uint8_t> StateRecorder::serialize_compute_pipeline(Hash hash) const
 	}
 
 	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
+	doc.AddMember("applicationInfo", app_info, alloc);
 	doc.AddMember("samplers", samplers, alloc);
 	doc.AddMember("setLayouts", set_layouts, alloc);
 	doc.AddMember("pipelineLayouts", pipeline_layouts, alloc);
@@ -3123,10 +3167,15 @@ vector<uint8_t> StateRecorder::serialize_shader_module(Hash hash) const
 	doc.SetObject();
 	auto &alloc = doc.GetAllocator();
 
+	Value app_info(kObjectType);
 	Value shader_modules(kObjectType);
+
+	if (impl->application_info)
+		serialize_application_info(app_info, *impl->application_info, alloc);
 	serialize_obj(hash, impl->shader_modules, shader_modules, alloc);
 
 	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
+	doc.AddMember("applicationInfo", app_info, alloc);
 	doc.AddMember("shaderModules", shader_modules, alloc);
 
 	StringBuffer buffer;
@@ -3145,6 +3194,11 @@ vector<uint8_t> StateRecorder::serialize() const
 	auto &alloc = doc.GetAllocator();
 
 	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
+
+	Value app_info(kObjectType);
+	if (impl->application_info)
+		serialize_application_info(app_info, *impl->application_info, alloc);
+	doc.AddMember("applicationInfo", app_info, alloc);
 
 	Value samplers(kObjectType);
 	for (auto &sampler : impl->samplers)

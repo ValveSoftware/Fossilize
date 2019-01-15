@@ -24,11 +24,34 @@
 
 namespace Fossilize
 {
-void Instance::init(VkInstance instance, VkLayerInstanceDispatchTable *pTable, PFN_vkGetInstanceProcAddr gpa)
+void Instance::init(VkInstance instance, const VkApplicationInfo *pApp, VkLayerInstanceDispatchTable *pTable, PFN_vkGetInstanceProcAddr gpa)
 {
 	this->instance = instance;
 	this->pTable = pTable;
 	this->gpa = gpa;
+
+	// pNext in appInfo is not supported.
+	if (pApp && !pApp->pNext)
+	{
+		pAppInfo = alloc.allocate<VkApplicationInfo>();
+		*pAppInfo = *pApp;
+
+		if (pApp->pApplicationName)
+		{
+			size_t len = strlen(pApp->pApplicationName) + 1;
+			char *pAppName = alloc.allocate_n<char>(len);
+			memcpy(pAppName, pApp->pApplicationName, len);
+			pAppInfo->pApplicationName = pAppName;
+		}
+
+		if (pApp->pEngineName)
+		{
+			size_t len = strlen(pApp->pEngineName) + 1;
+			char *pEngineName = alloc.allocate_n<char>(len);
+			memcpy(pEngineName, pApp->pEngineName, len);
+			pAppInfo->pEngineName = pEngineName;
+		}
+	}
 }
 
 }

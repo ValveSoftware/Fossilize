@@ -21,6 +21,7 @@
  */
 
 #include "device.hpp"
+#include "instance.hpp"
 #include "utils.hpp"
 #include <cinttypes>
 #include <stdlib.h>
@@ -59,12 +60,12 @@ static std::string getSystemProperty(const char *key)
 }
 #endif
 
-void Device::init(VkPhysicalDevice gpu, VkDevice device, VkLayerInstanceDispatchTable *pInstanceTable,
+void Device::init(VkPhysicalDevice gpu, VkDevice device, Instance *pInstance,
                   VkLayerDispatchTable *pTable)
 {
 	this->gpu = gpu;
 	this->device = device;
-	this->pInstanceTable = pInstanceTable;
+	this->pInstanceTable = pInstance->getTable();
 	this->pTable = pTable;
 
 #ifdef ANDROID
@@ -99,5 +100,8 @@ void Device::init(VkPhysicalDevice gpu, VkDevice device, VkLayerInstanceDispatch
 
 	iface.set_base_directory(serializationPath);
 	recorder.init(&iface);
+
+	if (pInstance->getApplicationInfo())
+		recorder.record_application_info(*pInstance->getApplicationInfo());
 }
 }

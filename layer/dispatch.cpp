@@ -89,7 +89,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(VkPhysicalDevice gpu, const V
 	{
 		lock_guard<mutex> holder{globalLock};
 		auto *device = createLayerData(getDispatchKey(*pDevice), deviceData);
-		device->init(gpu, *pDevice, layer->getTable(), initDeviceTable(*pDevice, fpGetDeviceProcAddr, deviceDispatch));
+		device->init(gpu, *pDevice, layer, initDeviceTable(*pDevice, fpGetDeviceProcAddr, deviceDispatch));
 	}
 
 	return VK_SUCCESS;
@@ -113,8 +113,8 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(const VkInstanceCreateInfo 
 	{
 		lock_guard<mutex> holder{globalLock};
 		auto *layer = createLayerData(getDispatchKey(*pInstance), instanceData);
-		layer->init(*pInstance, initInstanceTable(*pInstance, fpGetInstanceProcAddr, instanceDispatch),
-		            fpGetInstanceProcAddr);
+		layer->init(*pInstance, pCreateInfo->pApplicationInfo,
+		            initInstanceTable(*pInstance, fpGetInstanceProcAddr, instanceDispatch), fpGetInstanceProcAddr);
 	}
 
 	return VK_SUCCESS;

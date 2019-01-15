@@ -24,6 +24,7 @@
 
 #include "vulkan.h"
 #include "dispatch_helper.hpp"
+#include "fossilize.hpp"
 
 namespace Fossilize
 {
@@ -40,13 +41,20 @@ public:
 		return pTable;
 	}
 
-	void init(VkInstance instance, VkLayerInstanceDispatchTable *pTable, PFN_vkGetInstanceProcAddr gpa);
+	void init(VkInstance instance, const VkApplicationInfo *pApp, VkLayerInstanceDispatchTable *pTable, PFN_vkGetInstanceProcAddr gpa);
 	PFN_vkVoidFunction getProcAddr(const char *pName)
 	{
 		return gpa(instance, pName);
 	}
 
+	const VkApplicationInfo *getApplicationInfo() const
+	{
+		return pAppInfo;
+	}
+
 private:
+	ScratchAllocator alloc;
+	VkApplicationInfo *pAppInfo = nullptr;
 	VkInstance instance = VK_NULL_HANDLE;
 	VkLayerInstanceDispatchTable *pTable = nullptr;
 	PFN_vkGetInstanceProcAddr gpa = nullptr;

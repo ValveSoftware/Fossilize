@@ -31,6 +31,7 @@
 #include <unordered_map>
 #include <algorithm>
 #include "vk_layer.h"
+#include "vk_layer_dispatch_table.h"
 #include "vulkan.h"
 
 namespace Fossilize

@@ -159,6 +159,8 @@ public:
 	~StateRecorder();
 	ScratchAllocator &get_allocator();
 
+	void record_application_info(const VkApplicationInfo &info);
+
 	// TODO: create_device which can capture which features/exts are used to create the device.
 	// This can be relevant when using more exotic features.
 

@@ -28,11 +28,12 @@
 
 namespace Fossilize
 {
+class Instance;
 class Device
 {
 public:
 	void init(VkPhysicalDevice gpu, VkDevice device,
-	          VkLayerInstanceDispatchTable *pInstanceTable,
+	          Instance *pInstance,
 	          VkLayerDispatchTable *pTable);
 
 	VkLayerDispatchTable *getTable()
