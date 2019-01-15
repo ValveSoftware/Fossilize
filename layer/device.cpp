@@ -97,44 +97,6 @@ void Device::init(VkPhysicalDevice gpu, VkDevice device, VkLayerInstanceDispatch
 	}
 #endif
 
-#ifndef _WIN32
-#if ANDROID
-	auto sigsegv = getSystemProperty("debug.fossilize.dump_sigsegv");
-	if (!sigsegv.empty() && strtoul(sigsegv.c_str(), nullptr, 0) != 0)
-		installSegfaultHandler();
-#else
-	const char *sigsegv = getenv("STEAM_FOSSILIZE_DUMP_SIGSEGV");
-	if (sigsegv && strtoul(sigsegv, nullptr, 0) != 0)
-		installSegfaultHandler();
-#endif
-#endif
-
 	recorder.init(serializationPath);
 }
-
-#ifndef _WIN32
-static Device *segfaultDevice = nullptr;
-
-static void segfaultHandler(int, siginfo_t *, void *)
-{
-	LOGE("Caught segmentation fault!");
-
-	// Now we can die properly.
-	kill(getpid(), SIGSEGV);
-}
-
-void Device::installSegfaultHandler()
-{
-	segfaultDevice = this;
-
-	struct sigaction sa;
-	sa.sa_flags = SA_SIGINFO | SA_RESETHAND;
-	sigemptyset(&sa.sa_mask);
-	sa.sa_sigaction = segfaultHandler;
-
-	if (sigaction(SIGSEGV, &sa, nullptr) < 0)
-		LOGE("Failed to install SIGSEGV handler!\n");
-}
-#endif
-
 }

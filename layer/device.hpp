@@ -76,9 +76,5 @@ private:
 #endif
 
 	bool paranoidMode = false;
-
-#ifndef _WIN32
-	void installSegfaultHandler();
-#endif
 };
 }

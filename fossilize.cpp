@@ -3180,7 +3180,8 @@ StateRecorder::StateRecorder()
 StateRecorder::~StateRecorder()
 {
 	record_end();
-	impl->worker_thread.join();
+	if (impl->worker_thread.joinable())
+		impl->worker_thread.join();
 }
 
 
