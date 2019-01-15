@@ -37,6 +37,11 @@ struct ReplayInterface : StateCreatorInterface
 {
 	StateRecorder recorder;
 
+	ReplayInterface()
+	{
+		recorder.init("/tmp");
+	}
+
 	bool enqueue_create_sampler(Hash hash, const VkSamplerCreateInfo *create_info, VkSampler *sampler) override
 	{
 		Hash recorded_hash = Hashing::compute_hash_sampler(recorder, *create_info);
@@ -220,7 +225,7 @@ static void record_shader_modules(StateRecorder &recorder)
 
 static void record_render_passes(StateRecorder &recorder)
 {
-	VkRenderPassCreateInfo pass = { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
+	VkRenderPassCreateInfo pass = { VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
 	VkSubpassDependency deps[2] = {};
 	VkSubpassDescription subpasses[2] = {};
 	VkAttachmentDescription att[2] = {};
@@ -474,20 +479,27 @@ int main()
 {
 	try
 	{
-		StateRecorder recorder;
+		std::vector<uint8_t> res;
+		{
+			StateRecorder recorder;
+
+			recorder.init("/tmp/");
+
+			record_samplers(recorder);
+			record_set_layouts(recorder);
+			record_pipeline_layouts(recorder);
+			record_shader_modules(recorder);
+			record_render_passes(recorder);
+			record_compute_pipelines(recorder);
+			record_graphics_pipelines(recorder);
+
+			res = recorder.serialize();
+		}
+
 		StateReplayer replayer;
 		ReplayInterface iface;
 		ResolverInterface resolver;
 
-		record_samplers(recorder);
-		record_set_layouts(recorder);
-		record_pipeline_layouts(recorder);
-		record_shader_modules(recorder);
-		record_render_passes(recorder);
-		record_compute_pipelines(recorder);
-		record_graphics_pipelines(recorder);
-
-		auto res = recorder.serialize();
 		replayer.parse(iface, resolver, res.data(), res.size());
 		return EXIT_SUCCESS;
 	}
