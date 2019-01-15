@@ -1,4 +1,4 @@
-/* Copyright (c) 2018 Hans-Kristian Arntzen
+/* Copyright (c) 2017-2019 Hans-Kristian Arntzen
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -21,61 +21,26 @@
  */
 
 #pragma once
-
-#include "dispatch_helper.hpp"
-#include "fossilize.hpp"
 #include <string>
+#include <utility>
+#include <vector>
 
-namespace Fossilize
+namespace Path
 {
-class Device
-{
-public:
-	void init(VkPhysicalDevice gpu, VkDevice device,
-	          VkLayerInstanceDispatchTable *pInstanceTable,
-	          VkLayerDispatchTable *pTable);
+std::string join(const std::string &base, const std::string &path);
+std::string basedir(const std::string &path);
+std::string basename(const std::string &path);
+std::pair<std::string, std::string> split(const std::string &path);
+std::string relpath(const std::string &base, const std::string &path);
+std::string ext(const std::string &path);
+std::pair<std::string, std::string> protocol_split(const std::string &path);
+bool is_abspath(const std::string &path);
+bool is_root_path(const std::string &path);
+std::string canonicalize_path(const std::string &path);
+std::string enforce_protocol(const std::string &path);
+std::string get_executable_path();
 
-	VkLayerDispatchTable *getTable()
-	{
-		return pTable;
-	}
-
-	StateRecorder &getRecorder()
-	{
-		return recorder;
-	}
-
-	bool serializeToPath(const std::string &json_dir);
-	const std::string &getSerializationPath() const
-	{
-		return serializationPath;
-	}
-
-	bool isParanoid() const
-	{
-		return paranoidMode;
-	}
-
-	VkDevice getDevice() const
-	{
-		return device;
-	}
-
-private:
-	VkPhysicalDevice gpu = VK_NULL_HANDLE;
-	VkDevice device = VK_NULL_HANDLE;
-	VkLayerInstanceDispatchTable *pInstanceTable = nullptr;
-	VkLayerDispatchTable *pTable = nullptr;
-
-	DatabaseInterface iface;
-	StateRecorder recorder;
-
-#ifdef ANDROID
-	std::string serializationPath = "/sdcard/";
-#else
-	std::string serializationPath = "";
-#endif
-
-	bool paranoidMode = false;
-};
+std::vector<std::string> split(const std::string &str, const char *delim);
+std::vector<std::string> split_no_empty(const std::string &str, const char *delim);
+std::string strip_whitespace(const std::string &str);
 }

@@ -97,6 +97,7 @@ void Device::init(VkPhysicalDevice gpu, VkDevice device, VkLayerInstanceDispatch
 	}
 #endif
 
-	recorder.init(serializationPath);
+	iface.set_base_directory(serializationPath);
+	recorder.init(&iface);
 }
 }

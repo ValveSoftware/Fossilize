@@ -39,7 +39,7 @@ struct ReplayInterface : StateCreatorInterface
 
 	ReplayInterface()
 	{
-		recorder.init("/tmp");
+		recorder.init(nullptr);
 	}
 
 	bool enqueue_create_sampler(Hash hash, const VkSamplerCreateInfo *create_info, VkSampler *sampler) override
@@ -481,9 +481,10 @@ int main()
 	{
 		std::vector<uint8_t> res;
 		{
+			DatabaseInterface iface;
 			StateRecorder recorder;
 
-			recorder.init("/tmp/");
+			recorder.init(&iface);
 
 			record_samplers(recorder);
 			record_set_layouts(recorder);
@@ -498,7 +499,7 @@ int main()
 
 		StateReplayer replayer;
 		ReplayInterface iface;
-		ResolverInterface resolver;
+		DatabaseInterface resolver;
 
 		replayer.parse(iface, resolver, res.data(), res.size());
 		return EXIT_SUCCESS;

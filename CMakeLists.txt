@@ -24,7 +24,10 @@ if (FOSSILIZE_SANITIZE_THREADS)
 	set(FOSSILIZE_LINK_FLAGS ${FOSSILIZE_LINK_FLAGS} -fsanitize=thread)
 endif()
 
-add_library(fossilize STATIC fossilize.hpp fossilize.cpp varint.cpp varint.hpp)
+add_library(fossilize STATIC
+        fossilize.hpp fossilize.cpp
+        varint.cpp varint.hpp
+        path.hpp path.cpp)
 target_include_directories(fossilize PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_options(fossilize PUBLIC ${FOSSILIZE_CXX_FLAGS})
 if (NOT MSVC)

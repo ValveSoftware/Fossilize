@@ -125,13 +125,18 @@ public:
 	virtual void wait_enqueue() {}
 };
 
-class ResolverInterface
+// This is an interface to interact with an external database for blob modules.
+// It is is a simple database with key + blob.
+class DatabaseInterface
 {
 public:
-	virtual ~ResolverInterface() = default;
-	virtual std::vector<uint8_t> resolve(Hash /*hash*/) {
-		return {};
-	}
+	virtual ~DatabaseInterface() = default;
+	void set_base_directory(const std::string &base);
+	virtual std::vector<uint8_t> read_entry(Hash hash);
+	virtual bool write_entry(Hash hash, const std::vector<uint8_t> &blob);
+
+protected:
+	std::string base_directory;
 };
 
 class StateReplayer
@@ -139,7 +144,7 @@ class StateReplayer
 public:
 	StateReplayer();
 	~StateReplayer();
-	void parse(StateCreatorInterface &iface, ResolverInterface &resolver, const void *buffer, size_t size);
+	void parse(StateCreatorInterface &iface, DatabaseInterface &database, const void *buffer, size_t size);
 	ScratchAllocator &get_allocator();
 
 private:
@@ -179,7 +184,7 @@ public:
 	std::vector<uint8_t> serialize_shader_module(Hash hash) const;
 	std::vector<uint8_t> serialize() const;
 
-	void init(const std::string &serialization_path);
+	void init(DatabaseInterface *iface);
 
 private:
 	struct Impl;

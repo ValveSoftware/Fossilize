@@ -26,6 +26,7 @@
 #include "cli_parser.hpp"
 #include "logging.hpp"
 #include "file.hpp"
+#include "path.hpp"
 
 #include <cinttypes>
 #include <string>
@@ -87,7 +88,7 @@ public:
 			pipelineWorkQueueMutex.unlock();
 			
 			unsigned long elapsed_ms = chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now() - start_time).count();
-			LOGI( "Compiling %d pipelines took %d ms (avg: %0.2f ms / pipeline)\n", nPipelineCount, elapsed_ms, ( float ) elapsed_ms / ( float ) nPipelineCount );
+			LOGI( "Compiling %d pipelines took %lu ms (avg: %0.2f ms / pipeline)\n", nPipelineCount, elapsed_ms, ( float ) elapsed_ms / ( float ) nPipelineCount );
 
 			// For perf testing in --loop mode
 			if ( nLoopCount > 0 )
@@ -374,43 +375,6 @@ public:
 	volatile bool bShuttingDown;
 };
 
-// VALVE: Modified to not use std::filesystem
-static std::vector<uint8_t> load_buffer_from_path(const std::string &path)
-{
-	std::ifstream file(path, std::ios::binary);
-
-	file.seekg(0, std::ios::end);
-	auto file_size = file.tellg();
-	file.seekg(0, std::ios::beg);
-
-	std::vector<uint8_t> file_data(file_size);
-	file.read(reinterpret_cast<char *>(file_data.data()), file_size);
-
-	return file_data;
-}
-
-struct DirectoryResolver : ResolverInterface
-{
-	DirectoryResolver(const std::string &_directory) : directory(_directory) {};
-
-	vector<uint8_t> resolve(Hash hash)
-	{
-		char filename[22];
-		sprintf(filename, "%016" PRIX64 ".json", hash);
-		// VALVE: modified to not use std::filesystem
-#if defined( WIN32 )
-		std::string separator = "\\";
-#else
-		std::string separator = "/";
-#endif
-		std::string path = directory + separator + filename;
-
-		return load_buffer_from_path(path);
-	}
-
-	std::string directory;
-};
-
 static void print_help()
 {
 	LOGI("fossilize-replay\n"
@@ -420,10 +384,41 @@ static void print_help()
 	     "\t[--pipeline-cache]\n"
 	     "\t[--filter-compute <index>]\n"
 	     "\t[--filter-graphics <index>]\n"
-	     "\t[--pipeline-cache]\n"
 	     "\t[--num-threads <count>]\n"
 	     "\t[--loop <count>]\n"
-	     "\tstate.json\n");
+	     "\t<JSON directory>\n");
+}
+
+// VALVE: Modified to not use std::filesystem
+static std::vector<uint8_t> load_buffer_from_path(const std::string &path)
+{
+	FILE *file = fopen(path.c_str(), "rb");
+	if (!file)
+	{
+		LOGE("Failed to open file: %s\n", path.c_str());
+		return {};
+	}
+
+	if (fseek(file, 0, SEEK_END) < 0)
+	{
+		fclose(file);
+		LOGE("Failed to seek in file: %s\n", path.c_str());
+		return {};
+	}
+
+	size_t file_size = size_t(ftell(file));
+	rewind(file);
+
+	std::vector<uint8_t> file_data(file_size);
+	if (fread(file_data.data(), 1, file_size, file) != file_size)
+	{
+		LOGE("Failed to read from file: %s\n", path.c_str());
+		fclose(file);
+		return {};
+	}
+
+	fclose(file);
+	return file_data;
 }
 
 int main(int argc, char *argv[])
@@ -477,7 +472,8 @@ int main(int argc, char *argv[])
 		return EXIT_FAILURE;
 
 	DumbReplayer replayer(device, replayer_opts, filter_graphics, filter_compute);
-	DirectoryResolver resolver(json_path);
+	DatabaseInterface resolver;
+	resolver.set_base_directory(json_path);
 	StateReplayer state_replayer;
 
 	// VALVE: modified to not use std::filesystem
@@ -487,9 +483,13 @@ int main(int argc, char *argv[])
 			continue;
 
 		// VALVE: modified to not use std::filesystem
-		std::string path( pEntry->d_name );;
-		std::string stem = path.substr( 0, path.find( "." ) );
-		std::string ext = path.substr( path.find( "." ) );
+		std::string path( pEntry->d_name );
+		auto dotpos = path.find(".");
+		if (dotpos == std::string::npos)
+			continue;
+
+		std::string stem = path.substr( 0, dotpos );
+		std::string ext = path.substr( dotpos );
 		// check that filename is 16 char hex with json extension
 		if (stem.length() != 16)
 			continue;
@@ -503,7 +503,7 @@ int main(int argc, char *argv[])
 
 		try
 		{
-			auto state_json = load_buffer_from_path(path);
+			auto state_json = load_buffer_from_path(Path::join(json_path, path));
 			if (state_json.empty())
 			{
 				LOGE("Failed to load %s from disk.\n", pEntry->d_name);

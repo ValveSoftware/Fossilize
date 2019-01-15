@@ -529,7 +529,7 @@ int main(int argc, char *argv[])
 	}
 
 	DisasmReplayer replayer(device.get_device() ? &device : nullptr);
-	ResolverInterface resolver;
+	DatabaseInterface resolver;
 	StateReplayer state_replayer;
 
 	try

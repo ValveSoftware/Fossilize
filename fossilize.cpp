@@ -32,6 +32,7 @@
 #include <queue>
 #include <string.h>
 #include "varint.hpp"
+#include "path.hpp"
 #include "layer/utils.hpp"
 
 #define RAPIDJSON_HAS_STDSTRING 1
@@ -134,7 +135,7 @@ struct HashedInfo
 
 struct StateReplayer::Impl
 {
-	void parse(StateCreatorInterface &iface, ResolverInterface &resolver, const void *buffer, size_t size);
+	void parse(StateCreatorInterface &iface, DatabaseInterface &resolver, const void *buffer, size_t size);
 	ScratchAllocator allocator;
 
 	std::unordered_map<Hash, VkSampler> replayed_samplers;
@@ -150,8 +151,8 @@ struct StateReplayer::Impl
 	void parse_pipeline_layouts(StateCreatorInterface &iface, const Value &layouts);
 	void parse_shader_modules(StateCreatorInterface &iface, const Value &modules);
 	void parse_render_passes(StateCreatorInterface &iface, const Value &passes);
-	void parse_compute_pipelines(StateCreatorInterface &iface, ResolverInterface &resolver, const Value &pipelines);
-	void parse_graphics_pipelines(StateCreatorInterface &iface, ResolverInterface &resolver, const Value &pipelines);
+	void parse_compute_pipelines(StateCreatorInterface &iface, DatabaseInterface &resolver, const Value &pipelines);
+	void parse_graphics_pipelines(StateCreatorInterface &iface, DatabaseInterface &resolver, const Value &pipelines);
 	VkPushConstantRange *parse_push_constant_ranges(const Value &ranges);
 	VkDescriptorSetLayout *parse_set_layouts(const Value &layouts);
 	VkDescriptorSetLayoutBinding *parse_descriptor_set_bindings(const Value &bindings);
@@ -174,7 +175,7 @@ struct StateReplayer::Impl
 	VkPipelineViewportStateCreateInfo *parse_viewport_state(const Value &state);
 	VkPipelineDynamicStateCreateInfo *parse_dynamic_state(const Value &state);
 	VkPipelineTessellationStateCreateInfo *parse_tessellation_state(const Value &state);
-	VkPipelineShaderStageCreateInfo *parse_stages(StateCreatorInterface &iface, ResolverInterface &resolver, const Value &stages);
+	VkPipelineShaderStageCreateInfo *parse_stages(StateCreatorInterface &iface, DatabaseInterface &resolver, const Value &stages);
 	VkVertexInputAttributeDescription *parse_vertex_attributes(const Value &attributes);
 	VkVertexInputBindingDescription *parse_vertex_bindings(const Value &bindings);
 	VkPipelineColorBlendAttachmentState *parse_blend_attachments(const Value &attachments);
@@ -195,6 +196,7 @@ struct StateRecorder::Impl
 {
 	ScratchAllocator allocator;
 	ScratchAllocator temp_allocator;
+	DatabaseInterface *database_iface = nullptr;
 
 	std::unordered_map<Hash, VkDescriptorSetLayoutCreateInfo *> descriptor_sets;
 	std::unordered_map<Hash, VkPipelineLayoutCreateInfo *> pipeline_layouts;
@@ -244,8 +246,6 @@ struct StateRecorder::Impl
 	std::thread worker_thread;
 
 	void record_task(StateRecorder *recorder);
-
-	std::string serialization_path;
 
 	template <typename T>
 	T *copy(const T *src, size_t count, ScratchAllocator &alloc);
@@ -1229,7 +1229,7 @@ VkSpecializationInfo *StateReplayer::Impl::parse_specialization_info(const Value
 	return spec;
 }
 
-void StateReplayer::Impl::parse_compute_pipelines(StateCreatorInterface &iface, ResolverInterface &resolver, const Value &pipelines)
+void StateReplayer::Impl::parse_compute_pipelines(StateCreatorInterface &iface, DatabaseInterface &resolver, const Value &pipelines)
 {
 	auto *infos = allocator.allocate_n_cleared<VkComputePipelineCreateInfo>(pipelines.MemberCount());
 
@@ -1252,7 +1252,7 @@ void StateReplayer::Impl::parse_compute_pipelines(StateCreatorInterface &iface, 
 			auto pipeline_iter = replayed_compute_pipelines.find(pipeline);
 			if (pipeline_iter == replayed_compute_pipelines.end())
 			{
-				auto external_state = resolver.resolve(pipeline);
+				auto external_state = resolver.read_entry(pipeline);
 				if (external_state.empty())
 					FOSSILIZE_THROW("Failed to find referenced compute pipeline");
 				this->parse(iface, resolver, external_state.data(), external_state.size());
@@ -1277,7 +1277,7 @@ void StateReplayer::Impl::parse_compute_pipelines(StateCreatorInterface &iface, 
 			auto module_iter = replayed_shader_modules.find(module);
 			if (module_iter == replayed_shader_modules.end())
 			{
-				auto external_state = resolver.resolve(module);
+				auto external_state = resolver.read_entry(module);
 				if (external_state.empty())
 					FOSSILIZE_THROW("Failed to find referenced shader");
 				this->parse(iface, resolver, external_state.data(), external_state.size());
@@ -1552,7 +1552,7 @@ VkPipelineViewportStateCreateInfo *StateReplayer::Impl::parse_viewport_state(con
 	return state;
 }
 
-VkPipelineShaderStageCreateInfo *StateReplayer::Impl::parse_stages(StateCreatorInterface &iface, ResolverInterface &resolver, const rapidjson::Value &stages)
+VkPipelineShaderStageCreateInfo *StateReplayer::Impl::parse_stages(StateCreatorInterface &iface, DatabaseInterface &resolver, const rapidjson::Value &stages)
 {
 	auto *state = allocator.allocate_n_cleared<VkPipelineShaderStageCreateInfo>(stages.Size());
 	auto *ret = state;
@@ -1573,7 +1573,7 @@ VkPipelineShaderStageCreateInfo *StateReplayer::Impl::parse_stages(StateCreatorI
 			auto module_iter = replayed_shader_modules.find(module);
 			if (module_iter == replayed_shader_modules.end())
 			{
-				auto external_state = resolver.resolve(module);
+				auto external_state = resolver.read_entry(module);
 				if (external_state.empty())
 					FOSSILIZE_THROW("Failed to find referenced shader");
 				this->parse(iface, resolver, external_state.data(), external_state.size());
@@ -1588,7 +1588,7 @@ VkPipelineShaderStageCreateInfo *StateReplayer::Impl::parse_stages(StateCreatorI
 	return ret;
 }
 
-void StateReplayer::Impl::parse_graphics_pipelines(StateCreatorInterface &iface, ResolverInterface &resolver, const Value &pipelines)
+void StateReplayer::Impl::parse_graphics_pipelines(StateCreatorInterface &iface, DatabaseInterface &resolver, const Value &pipelines)
 {
 	auto *infos = allocator.allocate_n_cleared<VkGraphicsPipelineCreateInfo>(pipelines.MemberCount());
 
@@ -1611,7 +1611,7 @@ void StateReplayer::Impl::parse_graphics_pipelines(StateCreatorInterface &iface,
 			auto pipeline_iter = replayed_graphics_pipelines.find(pipeline);
 			if (pipeline_iter == replayed_graphics_pipelines.end())
 			{
-				auto external_state = resolver.resolve(pipeline);
+				auto external_state = resolver.read_entry(pipeline);
 				if (external_state.empty())
 					FOSSILIZE_THROW("Failed to find referenced graphics pipeline");
 				this->parse(iface, resolver, external_state.data(), external_state.size());
@@ -1678,18 +1678,22 @@ ScratchAllocator &StateReplayer::get_allocator()
 	return impl->allocator;
 }
 
-void StateReplayer::parse(StateCreatorInterface &iface, ResolverInterface &resolver, const void *buffer, size_t size)
+void StateReplayer::parse(StateCreatorInterface &iface, DatabaseInterface &resolver, const void *buffer, size_t size)
 {
 	impl->parse(iface, resolver, buffer, size);
 }
 
-void StateReplayer::Impl::parse(StateCreatorInterface &iface, ResolverInterface &resolver, const void *buffer_, size_t size)
+void StateReplayer::Impl::parse(StateCreatorInterface &iface, DatabaseInterface &resolver, const void *buffer_, size_t size)
 {
 	Document doc;
 	doc.Parse(reinterpret_cast<const char *>(buffer_), size);
 
 	if (doc.HasParseError())
+	{
+		auto error = doc.GetParseError();
+		LOGE("Got parse error: %d\n", int(error));
 		FOSSILIZE_THROW("JSON parse error.");
+	}
 
 	if (doc["version"].GetInt() != FOSSILIZE_FORMAT_VERSION)
 		FOSSILIZE_THROW("JSON version mismatches.");
@@ -2250,35 +2254,73 @@ void StateRecorder::Impl::remap_render_pass_ci(VkRenderPassCreateInfo *)
 	// nothing to do
 }
 
-static void write_buffer(const std::string &json_dir, Hash hash, const vector<uint8_t> &bytes)
+// VALVE: Modified to not use std::filesystem
+static std::vector<uint8_t> load_buffer_from_path(const std::string &path)
 {
-	try
+	FILE *file = fopen(path.c_str(), "rb");
+	if (!file)
 	{
-		char filename[22]; // 16 digits + ".json" + null
-		sprintf(filename, "%016" PRIX64 ".json", hash);
-		// VALVE: fix bug with separator missing from path
-#if defined( WIN32 )
-		std::string separator = "\\";
-#else
-		std::string separator = "/";
-#endif
-		auto path = json_dir + separator + filename;
-		FILE *file = fopen(path.c_str(), "wb");
-		if (file)
-		{
-			if (fwrite(bytes.data(), 1, bytes.size(), file) != bytes.size())
-				LOGE("Failed to write serialized state to disk.\n");
-			fclose(file);
-		}
-		else
-		{
-			LOGE("Failed to open file for writing: \"%s\".\n", path.c_str());
-		}
+		LOGE("Failed to open file: %s\n", path.c_str());
+		return {};
 	}
-	catch (const std::exception &e)
+
+	if (fseek(file, 0, SEEK_END) < 0)
 	{
-		LOGE("Failed to serialize: \"%s\".\n", e.what());
+		fclose(file);
+		LOGE("Failed to seek in file: %s\n", path.c_str());
+		return {};
 	}
+
+	size_t file_size = size_t(ftell(file));
+	rewind(file);
+
+	std::vector<uint8_t> file_data(file_size);
+	if (fread(file_data.data(), 1, file_size, file) != file_size)
+	{
+		LOGE("Failed to read from file: %s\n", path.c_str());
+		fclose(file);
+		return {};
+	}
+
+	fclose(file);
+	return file_data;
+}
+
+void DatabaseInterface::set_base_directory(const std::string &base)
+{
+	base_directory = base;
+}
+
+std::vector<uint8_t> DatabaseInterface::read_entry(Hash hash)
+{
+	char filename[22];
+	sprintf(filename, "%016" PRIX64 ".json", hash);
+	auto path = Path::join(base_directory, filename);
+	return load_buffer_from_path(path);
+}
+
+bool DatabaseInterface::write_entry(Hash hash, const std::vector<uint8_t> &bytes)
+{
+	char filename[22]; // 16 digits + ".json" + null
+	sprintf(filename, "%016" PRIX64 ".json", hash);
+	auto path = Path::join(base_directory, filename);
+
+	FILE *file = fopen(path.c_str(), "wb");
+	if (!file)
+	{
+		LOGE("Failed to write serialized state to disk (%s).\n", path.c_str());
+		return false;
+	}
+
+	if (fwrite(bytes.data(), 1, bytes.size(), file) != bytes.size())
+	{
+		LOGE("Failed to write serialized state to disk.\n");
+		fclose(file);
+		return false;
+	}
+
+	fclose(file);
+	return true;
 }
 
 void StateRecorder::Impl::record_task(StateRecorder *recorder)
@@ -2361,7 +2403,8 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder)
 				{
 					auto create_info_copy = copy_shader_module(create_info, allocator);
 					shader_modules[hash] = create_info_copy;
-					write_buffer(serialization_path, hash, recorder->serialize_shader_module(hash));
+					if (database_iface)
+						database_iface->write_entry(hash, recorder->serialize_shader_module(hash));
 				}
 				break;
 			}
@@ -2375,7 +2418,8 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder)
 					auto create_info_copy = copy_graphics_pipeline(create_info, allocator);
 					remap_graphics_pipeline_ci(create_info_copy);
 					graphics_pipelines[hash] = create_info_copy;
-					write_buffer(serialization_path, hash, recorder->serialize_graphics_pipeline(hash));
+					if (database_iface)
+						database_iface->write_entry(hash, recorder->serialize_graphics_pipeline(hash));
 				}
 				break;
 			}
@@ -2389,7 +2433,8 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder)
 					auto create_info_copy = copy_compute_pipeline(create_info, allocator);
 					remap_compute_pipeline_ci(create_info_copy);
 					compute_pipelines[hash] = create_info_copy;
-					write_buffer(serialization_path, hash, recorder->serialize_compute_pipeline(hash));
+					if (database_iface)
+						database_iface->write_entry(hash, recorder->serialize_compute_pipeline(hash));
 				}
 				break;
 			}
@@ -3166,10 +3211,10 @@ vector<uint8_t> StateRecorder::serialize() const
 	return serialize_buffer;
 }
 
-void StateRecorder::init(const std::string &serialization_path)
+void StateRecorder::init(DatabaseInterface *iface)
 {
 	impl.reset(new Impl);
-	impl->serialization_path = serialization_path;
+	impl->database_iface = iface;
 	impl->worker_thread = std::thread(&StateRecorder::Impl::record_task, impl.get(), this);
 }
 
