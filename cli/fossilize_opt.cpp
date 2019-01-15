@@ -41,32 +41,29 @@ struct OptimizeReplayer : StateCreatorInterface
 
 	bool enqueue_create_sampler(Hash hash, const VkSamplerCreateInfo *create_info, VkSampler *sampler) override
 	{
-		Hash record_index = recorder.register_sampler(hash, *create_info);
 		*sampler = fake_handle<VkSampler>(hash);
-		recorder.set_sampler_handle(record_index, *sampler);
+		recorder.record_sampler(*sampler, *create_info);
 		return true;
 	}
 
 	bool enqueue_create_descriptor_set_layout(Hash hash, const VkDescriptorSetLayoutCreateInfo *create_info, VkDescriptorSetLayout *layout) override
 	{
-		Hash record_index = recorder.register_descriptor_set_layout(hash, *create_info);
 		*layout = fake_handle<VkDescriptorSetLayout>(hash);
-		recorder.set_descriptor_set_layout_handle(record_index, *layout);
+		recorder.record_descriptor_set_layout(*layout, *create_info);
 		return true;
 	}
 
 	bool enqueue_create_pipeline_layout(Hash hash, const VkPipelineLayoutCreateInfo *create_info, VkPipelineLayout *layout) override
 	{
-		Hash record_index = recorder.register_pipeline_layout(hash, *create_info);
 		*layout = fake_handle<VkPipelineLayout>(hash);
-		recorder.set_pipeline_layout_handle(record_index, *layout);
+		recorder.record_pipeline_layout(*layout, *create_info);
 		return true;
 	}
 
 	bool enqueue_create_shader_module(Hash hash, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module) override
 	{
 		vector<uint32_t> compiled_spirv;
-		spvtools::Optimizer optimizer(SPV_ENV_VULKAN_1_0);
+		spvtools::Optimizer optimizer(SPV_ENV_VULKAN_1_1);
 		optimizer.RegisterPerformancePasses();
 		if (!optimizer.Run(create_info->pCode, create_info->codeSize / sizeof(uint32_t), &compiled_spirv))
 			return false;
@@ -74,33 +71,29 @@ struct OptimizeReplayer : StateCreatorInterface
 		info.pCode = compiled_spirv.data();
 		info.codeSize = compiled_spirv.size() * sizeof(uint32_t);
 
-		Hash record_index = recorder.register_shader_module(hash, info);
 		*module = fake_handle<VkShaderModule>(hash);
-		recorder.set_shader_module_handle(record_index, *module);
+		recorder.record_shader_module(*module, info);
 		return true;
 	}
 
 	bool enqueue_create_render_pass(Hash hash, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass) override
 	{
-		Hash record_index = recorder.register_render_pass(hash, *create_info);
 		*render_pass = fake_handle<VkRenderPass>(hash);
-		recorder.set_render_pass_handle(record_index, *render_pass);
+		recorder.record_render_pass(*render_pass, *create_info);
 		return true;
 	}
 
 	bool enqueue_create_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
-		Hash record_index = recorder.register_compute_pipeline(hash, *create_info);
 		*pipeline = fake_handle<VkPipeline>(hash);
-		recorder.set_compute_pipeline_handle(record_index, *pipeline);
+		recorder.record_compute_pipeline(*pipeline, *create_info);
 		return true;
 	}
 
 	bool enqueue_create_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
-		Hash record_index = recorder.register_graphics_pipeline(hash, *create_info);
 		*pipeline = fake_handle<VkPipeline>(hash);
-		recorder.set_graphics_pipeline_handle(record_index, *pipeline);
+		recorder.record_graphics_pipeline(*pipeline, *create_info);
 		return true;
 	}
 };
