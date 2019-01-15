@@ -29,10 +29,14 @@
 // VALVE: do exports without .def file, see vk_layer.h for definition on non-Windows platforms
 #ifdef _MSC_VER
 #undef VK_LAYER_EXPORT
-#define VK_LAYER_EXPORT extern "C" __declspec( dllexport )
+#define VK_LAYER_EXPORT extern "C" __declspec(dllexport)
 #endif
+
+extern "C"
+{
 VK_LAYER_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instance, const char *pName);
 VK_LAYER_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkDevice device, const char *pName);
+}
 
 using namespace std;
 
@@ -293,6 +297,9 @@ static PFN_vkVoidFunction interceptCoreDeviceCommand(const char *pName)
 }
 
 using namespace Fossilize;
+
+extern "C"
+{
 VK_LAYER_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkDevice device, const char *pName)
 {
 	auto proc = interceptCoreDeviceCommand(pName);
@@ -301,7 +308,7 @@ VK_LAYER_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkD
 
 	Device *layer = nullptr;
 	{
-		lock_guard<mutex> holder{ globalLock };
+		lock_guard<mutex> holder{globalLock};
 		layer = getLayerData(getDispatchKey(device), deviceData);
 	}
 
@@ -320,7 +327,7 @@ VK_LAYER_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(V
 
 	Instance *layer = nullptr;
 	{
-		lock_guard<mutex> holder{ globalLock };
+		lock_guard<mutex> holder{globalLock};
 		layer = getLayerData(getDispatchKey(instance), instanceData);
 	}
 
@@ -328,11 +335,12 @@ VK_LAYER_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(V
 }
 
 static const VkLayerProperties layerProps[] = {
-	{ VK_LAYER_steam_fossilize, VK_MAKE_VERSION(1, 0, 70), 1, "Fossilize capture layer" },
+		{VK_LAYER_steam_fossilize, VK_VERSION_1_1, 1, "Fossilize capture layer"},
 };
 
-VK_LAYER_EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceExtensionProperties(const char *pLayerName, uint32_t *pPropertyCount,
-                                                                                      VkExtensionProperties *pProperties)
+VK_LAYER_EXPORT VKAPI_ATTR VkResult VKAPI_CALL
+vkEnumerateInstanceExtensionProperties(const char *pLayerName, uint32_t *pPropertyCount,
+                                       VkExtensionProperties *pProperties)
 {
 	if (!pLayerName || strcmp(pLayerName, layerProps[0].layerName))
 		return VK_ERROR_LAYER_NOT_PRESENT;
@@ -347,9 +355,10 @@ VK_LAYER_EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceExtensionPrope
 	return VK_SUCCESS;
 }
 
-VK_LAYER_EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(VkPhysicalDevice, const char *pLayerName,
-                                                                                    uint32_t *pPropertyCount,
-                                                                                    VkExtensionProperties *pProperties)
+VK_LAYER_EXPORT VKAPI_ATTR VkResult VKAPI_CALL
+vkEnumerateDeviceExtensionProperties(VkPhysicalDevice, const char *pLayerName,
+                                     uint32_t *pPropertyCount,
+                                     VkExtensionProperties *pProperties)
 {
 	if (pLayerName && !strcmp(pLayerName, layerProps[0].layerName))
 	{
@@ -380,8 +389,9 @@ VK_LAYER_EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceLayerPropertie
 	}
 }
 
-VK_LAYER_EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceLayerProperties(VkPhysicalDevice, uint32_t *pPropertyCount,
-                                                                                VkLayerProperties *pProperties)
+VK_LAYER_EXPORT VKAPI_ATTR VkResult VKAPI_CALL
+vkEnumerateDeviceLayerProperties(VkPhysicalDevice, uint32_t *pPropertyCount,
+                                 VkLayerProperties *pProperties)
 {
 	if (pProperties)
 	{
@@ -396,4 +406,6 @@ VK_LAYER_EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceLayerProperties(
 		*pPropertyCount = sizeof(layerProps) / sizeof(VkLayerProperties);
 		return VK_SUCCESS;
 	}
+}
+
 }
