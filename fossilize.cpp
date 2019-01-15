@@ -2953,7 +2953,7 @@ static Value json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& all
 }
 
 template <typename ObjType, typename CreateType, typename AllocType>
-static inline const CreateType serialize_obj(ObjType obj, std::unordered_map<Hash, CreateType>& ci_map, Value& json_map, AllocType& alloc)
+static inline const CreateType serialize_obj(ObjType obj, const std::unordered_map<Hash, CreateType>& ci_map, Value& json_map, AllocType& alloc)
 {
 	auto iter = ci_map.find(api_object_cast<Hash>(obj));
 	if (iter != ci_map.end()) {
