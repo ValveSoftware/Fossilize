@@ -209,16 +209,11 @@ public:
 		}
 	}
 
-	DumbReplayer(const VulkanDevice &device, const Options &opts,
+	DumbReplayer(const VulkanDevice::Options &device_opts, const Options &opts,
 	             const unordered_set<unsigned> &graphics,
 	             const unordered_set<unsigned> &compute)
-		: device(device), filter_graphics(graphics), filter_compute(compute), numWorkerThreads( opts.num_threads ), nLoopCount( opts.loop_count ),bShuttingDown( false )
+		: opts(opts), filter_graphics(graphics), filter_compute(compute), numWorkerThreads( opts.num_threads ), nLoopCount( opts.loop_count ),bShuttingDown( false ), device_opts(device_opts)
 	{
-		if (opts.pipeline_cache)
-		{
-			VkPipelineCacheCreateInfo info = { VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO };
-			vkCreatePipelineCache(device.get_device(), &info, nullptr, &pipeline_cache);
-		}
 	}
 
 	~DumbReplayer()
@@ -246,6 +241,44 @@ public:
 		for (auto &pipeline : graphics_pipelines)
 			if (pipeline.second)
 				vkDestroyPipeline(device.get_device(), pipeline.second, nullptr);
+	}
+
+	void set_application_info(const VkApplicationInfo *app) override
+	{
+		// TODO: Could use this to create multiple VkDevices for replay as necessary if app changes.
+
+		if (!device_was_init)
+		{
+			// Now we can init the device with correct app info.
+			device_was_init = true;
+			device_opts.application_info = app;
+			if (!device.init_device(device_opts))
+			{
+				LOGE("Failed to create Vulkan device, bailing ...\n");
+				exit(EXIT_FAILURE);
+			}
+
+			if (opts.pipeline_cache)
+			{
+				VkPipelineCacheCreateInfo info = { VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO };
+				vkCreatePipelineCache(device.get_device(), &info, nullptr, &pipeline_cache);
+			}
+
+			if (app)
+			{
+				LOGI("Replaying for application:\n");
+				LOGI("  apiVersion: %u.%u.%u\n",
+				     VK_VERSION_MAJOR(app->apiVersion),
+				     VK_VERSION_MINOR(app->apiVersion),
+				     VK_VERSION_PATCH(app->apiVersion));
+				LOGI("  engineVersion: %u\n", app->engineVersion);
+				LOGI("  applicationVersion: %u\n", app->applicationVersion);
+				if (app->pEngineName)
+					LOGI("  engineName: %s\n", app->pEngineName);
+				if (app->pApplicationName)
+					LOGI("  applicationName: %s\n", app->pApplicationName);
+			}
+		}
 	}
 
 	bool enqueue_create_sampler(Hash index, const VkSamplerCreateInfo *create_info, VkSampler *sampler) override
@@ -334,7 +367,7 @@ public:
 		return true;
 	}
 
-	const VulkanDevice &device;
+	Options opts;
 	const unordered_set<unsigned> &filter_graphics;
 	const unordered_set<unsigned> &filter_compute;
 
@@ -373,6 +406,10 @@ public:
 	std::queue< PipelineWorkItem_t > pipelineWorkQueue;
 	std::condition_variable workAvailableCondition;
 	volatile bool bShuttingDown;
+
+	VulkanDevice device;
+	bool device_was_init = false;
+	VulkanDevice::Options device_opts;
 };
 
 static void print_help()
@@ -467,11 +504,7 @@ int main(int argc, char *argv[])
 
 	auto start_time = chrono::steady_clock::now();
 
-	VulkanDevice device;
-	if (!device.init_device(opts))
-		return EXIT_FAILURE;
-
-	DumbReplayer replayer(device, replayer_opts, filter_graphics, filter_compute);
+	DumbReplayer replayer(opts, replayer_opts, filter_graphics, filter_compute);
 	DatabaseInterface resolver;
 	resolver.set_base_directory(json_path);
 	StateReplayer state_replayer;

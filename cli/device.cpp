@@ -133,7 +133,7 @@ bool VulkanDevice::init_device(const Options &opts)
 	instance_info.ppEnabledExtensionNames = active_exts.empty() ? nullptr : active_exts.data();
 	instance_info.enabledLayerCount = uint32_t(active_layers.size());
 	instance_info.ppEnabledLayerNames = active_layers.empty() ? nullptr : active_layers.data();
-	instance_info.pApplicationInfo = &app;
+	instance_info.pApplicationInfo = opts.application_info ? opts.application_info : &app;
 
 	for (uint32_t i = 0; i < instance_info.enabledLayerCount; i++)
 		LOGI("Enabling instance layer: %s\n", instance_info.ppEnabledLayerNames[i]);

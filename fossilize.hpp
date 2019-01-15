@@ -115,6 +115,11 @@ public:
 	virtual bool set_num_compute_pipelines(unsigned /*count*/) { return true; }
 	virtual bool set_num_graphics_pipelines(unsigned /*count*/) { return true; }
 
+	// All future calls to enqueue_create_* were created using this application info.
+	// app can be nullptr, in which case no pApplicationInfo was used (allowed in Vulkan 1.0).
+	// The pointer provided in app is persistent as long as StateReplayer lives.
+	virtual void set_application_info(const VkApplicationInfo * /*app*/) {}
+
 	virtual bool enqueue_create_sampler(Hash index, const VkSamplerCreateInfo *create_info, VkSampler *sampler) = 0;
 	virtual bool enqueue_create_descriptor_set_layout(Hash index, const VkDescriptorSetLayoutCreateInfo *create_info, VkDescriptorSetLayout *layout) = 0;
 	virtual bool enqueue_create_pipeline_layout(Hash index, const VkPipelineLayoutCreateInfo *create_info, VkPipelineLayout *layout) = 0;

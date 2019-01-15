@@ -153,6 +153,7 @@ struct StateReplayer::Impl
 	void parse_render_passes(StateCreatorInterface &iface, const Value &passes);
 	void parse_compute_pipelines(StateCreatorInterface &iface, DatabaseInterface &resolver, const Value &pipelines);
 	void parse_graphics_pipelines(StateCreatorInterface &iface, DatabaseInterface &resolver, const Value &pipelines);
+	void parse_application_info(StateCreatorInterface &iface, const Value &app_info);
 	VkPushConstantRange *parse_push_constant_ranges(const Value &ranges);
 	VkDescriptorSetLayout *parse_set_layouts(const Value &layouts);
 	VkDescriptorSetLayoutBinding *parse_descriptor_set_bindings(const Value &bindings);
@@ -1013,6 +1014,32 @@ void StateReplayer::Impl::parse_descriptor_set_layouts(StateCreatorInterface &if
 	iface.wait_enqueue();
 }
 
+void StateReplayer::Impl::parse_application_info(StateCreatorInterface &iface, const Value &app_info)
+{
+	auto *app = allocator.allocate_cleared<VkApplicationInfo>();
+	app->apiVersion = app_info["apiVersion"].GetUint();
+	app->applicationVersion = app_info["applicationVersion"].GetUint();
+	app->engineVersion = app_info["engineVersion"].GetUint();
+
+	if (app_info.HasMember("applicationName"))
+	{
+		auto len = app_info["applicationName"].GetStringLength();
+		char *name = allocator.allocate_n_cleared<char>(len + 1);
+		memcpy(name, app_info["applicationName"].GetString(), len);
+		app->pApplicationName = name;
+	}
+
+	if (app_info.HasMember("engineName"))
+	{
+		auto len = app_info["engineName"].GetStringLength();
+		char *name = allocator.allocate_n_cleared<char>(len + 1);
+		memcpy(name, app_info["engineName"].GetString(), len);
+		app->pEngineName = name;
+	}
+
+	iface.set_application_info(app);
+}
+
 void StateReplayer::Impl::parse_samplers(StateCreatorInterface &iface, const Value &samplers)
 {
 	auto *infos = allocator.allocate_n_cleared<VkSamplerCreateInfo>(samplers.MemberCount());
@@ -1700,6 +1727,11 @@ void StateReplayer::Impl::parse(StateCreatorInterface &iface, DatabaseInterface 
 
 	if (doc["version"].GetInt() != FOSSILIZE_FORMAT_VERSION)
 		FOSSILIZE_THROW("JSON version mismatches.");
+
+	if (doc.HasMember("applicationInfo"))
+		parse_application_info(iface, doc["applicationInfo"]);
+	else
+		iface.set_application_info(nullptr);
 
 	if (doc.HasMember("shaderModules"))
 		parse_shader_modules(iface, doc["shaderModules"]);
