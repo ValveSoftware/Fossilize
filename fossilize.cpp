@@ -45,11 +45,6 @@ namespace Fossilize
 {
 #define FOSSILIZE_THROW(x) throw ::Fossilize::Exception(x)
 
-#define FOSSILIZE_MAGIC "FOSSILIZE0000001"
-#define FOSSILIZE_JSON_MAGIC "JSON    "
-#define FOSSILIZE_SPIRV_MAGIC "SPIR-V  "
-#define FOSSILIZE_MAGIC_LEN 16
-
 enum
 {
 	FOSSILIZE_FORMAT_VERSION = 1
@@ -209,13 +204,13 @@ struct StateRecorder::Impl
 	std::unordered_map<Hash, VkRenderPassCreateInfo *> render_passes;
 	std::unordered_map<Hash, VkSamplerCreateInfo *> samplers;
 
-	std::unordered_map<VkDescriptorSetLayout, Hash> descriptor_set_layout_to_index;
-	std::unordered_map<VkPipelineLayout, Hash> pipeline_layout_to_index;
-	std::unordered_map<VkShaderModule, Hash> shader_module_to_index;
-	std::unordered_map<VkPipeline, Hash> graphics_pipeline_to_index;
-	std::unordered_map<VkPipeline, Hash> compute_pipeline_to_index;
-	std::unordered_map<VkRenderPass, Hash> render_pass_to_index;
-	std::unordered_map<VkSampler, Hash> sampler_to_index;
+	std::unordered_map<VkDescriptorSetLayout, Hash> descriptor_set_layout_to_hash;
+	std::unordered_map<VkPipelineLayout, Hash> pipeline_layout_to_hash;
+	std::unordered_map<VkShaderModule, Hash> shader_module_to_hash;
+	std::unordered_map<VkPipeline, Hash> graphics_pipeline_to_hash;
+	std::unordered_map<VkPipeline, Hash> compute_pipeline_to_hash;
+	std::unordered_map<VkRenderPass, Hash> render_pass_to_hash;
+	std::unordered_map<VkSampler, Hash> sampler_to_hash;
 
 	VkDescriptorSetLayoutCreateInfo *copy_descriptor_set_layout(const VkDescriptorSetLayoutCreateInfo *create_info, ScratchAllocator &alloc);
 	VkPipelineLayoutCreateInfo *copy_pipeline_layout(const VkPipelineLayoutCreateInfo *create_info, ScratchAllocator &alloc);
@@ -248,7 +243,7 @@ struct StateRecorder::Impl
 	std::queue<WorkItem> record_queue;
 	std::thread worker_thread;
 
-	static void record_task(StateRecorder *recorder);
+	void record_task(StateRecorder *recorder);
 
 	std::string serialization_path;
 
@@ -1879,8 +1874,8 @@ void StateRecorder::record_end()
 
 Hash StateRecorder::get_hash_for_compute_pipeline_handle(VkPipeline pipeline) const
 {
-	auto itr = impl->compute_pipeline_to_index.find(pipeline);
-	if (itr == end(impl->compute_pipeline_to_index))
+	auto itr = impl->compute_pipeline_to_hash.find(pipeline);
+	if (itr == end(impl->compute_pipeline_to_hash))
 		FOSSILIZE_THROW("Handle is not registered.");
 	else
 		return itr->second;
@@ -1888,8 +1883,8 @@ Hash StateRecorder::get_hash_for_compute_pipeline_handle(VkPipeline pipeline) co
 
 Hash StateRecorder::get_hash_for_graphics_pipeline_handle(VkPipeline pipeline) const
 {
-	auto itr = impl->graphics_pipeline_to_index.find(pipeline);
-	if (itr == end(impl->graphics_pipeline_to_index))
+	auto itr = impl->graphics_pipeline_to_hash.find(pipeline);
+	if (itr == end(impl->graphics_pipeline_to_hash))
 		FOSSILIZE_THROW("Handle is not registered.");
 	else
 		return itr->second;
@@ -1897,8 +1892,8 @@ Hash StateRecorder::get_hash_for_graphics_pipeline_handle(VkPipeline pipeline) c
 
 Hash StateRecorder::get_hash_for_sampler(VkSampler sampler) const
 {
-	auto itr = impl->sampler_to_index.find(sampler);
-	if (itr == end(impl->sampler_to_index))
+	auto itr = impl->sampler_to_hash.find(sampler);
+	if (itr == end(impl->sampler_to_hash))
 		FOSSILIZE_THROW("Handle is not registered.");
 	else
 		return itr->second;
@@ -1906,8 +1901,8 @@ Hash StateRecorder::get_hash_for_sampler(VkSampler sampler) const
 
 Hash StateRecorder::get_hash_for_shader_module(VkShaderModule module) const
 {
-	auto itr = impl->shader_module_to_index.find(module);
-	if (itr == end(impl->shader_module_to_index))
+	auto itr = impl->shader_module_to_hash.find(module);
+	if (itr == end(impl->shader_module_to_hash))
 		FOSSILIZE_THROW("Handle is not registered.");
 	else
 		return itr->second;
@@ -1915,8 +1910,8 @@ Hash StateRecorder::get_hash_for_shader_module(VkShaderModule module) const
 
 Hash StateRecorder::get_hash_for_pipeline_layout(VkPipelineLayout layout) const
 {
-	auto itr = impl->pipeline_layout_to_index.find(layout);
-	if (itr == end(impl->pipeline_layout_to_index))
+	auto itr = impl->pipeline_layout_to_hash.find(layout);
+	if (itr == end(impl->pipeline_layout_to_hash))
 		FOSSILIZE_THROW("Handle is not registered.");
 	else
 		return itr->second;
@@ -1924,8 +1919,8 @@ Hash StateRecorder::get_hash_for_pipeline_layout(VkPipelineLayout layout) const
 
 Hash StateRecorder::get_hash_for_descriptor_set_layout(VkDescriptorSetLayout layout) const
 {
-	auto itr = impl->descriptor_set_layout_to_index.find(layout);
-	if (itr == end(impl->descriptor_set_layout_to_index))
+	auto itr = impl->descriptor_set_layout_to_hash.find(layout);
+	if (itr == end(impl->descriptor_set_layout_to_hash))
 		FOSSILIZE_THROW("Handle is not registered.");
 	else
 		return itr->second;
@@ -1933,8 +1928,8 @@ Hash StateRecorder::get_hash_for_descriptor_set_layout(VkDescriptorSetLayout lay
 
 Hash StateRecorder::get_hash_for_render_pass(VkRenderPass render_pass) const
 {
-	auto itr = impl->render_pass_to_index.find(render_pass);
-	if (itr == end(impl->render_pass_to_index))
+	auto itr = impl->render_pass_to_hash.find(render_pass);
+	if (itr == end(impl->render_pass_to_hash))
 		FOSSILIZE_THROW("Handle is not registered.");
 	else
 		return itr->second;
@@ -2140,56 +2135,56 @@ VkRenderPassCreateInfo *StateRecorder::Impl::copy_render_pass(const VkRenderPass
 
 VkSampler StateRecorder::Impl::remap_sampler_handle(VkSampler sampler) const
 {
-	auto itr = sampler_to_index.find(sampler);
-	if (itr == end(sampler_to_index))
+	auto itr = sampler_to_hash.find(sampler);
+	if (itr == end(sampler_to_hash))
 		FOSSILIZE_THROW("Cannot find sampler in hashmap.");
 	return api_object_cast<VkSampler>(uint64_t(itr->second));
 }
 
 VkDescriptorSetLayout StateRecorder::Impl::remap_descriptor_set_layout_handle(VkDescriptorSetLayout layout) const
 {
-	auto itr = descriptor_set_layout_to_index.find(layout);
-	if (itr == end(descriptor_set_layout_to_index))
+	auto itr = descriptor_set_layout_to_hash.find(layout);
+	if (itr == end(descriptor_set_layout_to_hash))
 		FOSSILIZE_THROW("Cannot find descriptor set layout in hashmap.");
 	return api_object_cast<VkDescriptorSetLayout>(uint64_t(itr->second));
 }
 
 VkPipelineLayout StateRecorder::Impl::remap_pipeline_layout_handle(VkPipelineLayout layout) const
 {
-	auto itr = pipeline_layout_to_index.find(layout);
-	if (itr == end(pipeline_layout_to_index))
+	auto itr = pipeline_layout_to_hash.find(layout);
+	if (itr == end(pipeline_layout_to_hash))
 		FOSSILIZE_THROW("Cannot find pipeline layout in hashmap.");
 	return api_object_cast<VkPipelineLayout>(uint64_t(itr->second));
 }
 
 VkShaderModule StateRecorder::Impl::remap_shader_module_handle(VkShaderModule module) const
 {
-	auto itr = shader_module_to_index.find(module);
-	if (itr == end(shader_module_to_index))
+	auto itr = shader_module_to_hash.find(module);
+	if (itr == end(shader_module_to_hash))
 		FOSSILIZE_THROW("Cannot find shader module in hashmap.");
 	return api_object_cast<VkShaderModule>(uint64_t(itr->second));
 }
 
 VkRenderPass StateRecorder::Impl::remap_render_pass_handle(VkRenderPass render_pass) const
 {
-	auto itr = render_pass_to_index.find(render_pass);
-	if (itr == end(render_pass_to_index))
+	auto itr = render_pass_to_hash.find(render_pass);
+	if (itr == end(render_pass_to_hash))
 		FOSSILIZE_THROW("Cannot find render pass in hashmap.");
 	return api_object_cast<VkRenderPass>(uint64_t(itr->second));
 }
 
 VkPipeline StateRecorder::Impl::remap_graphics_pipeline_handle(VkPipeline pipeline) const
 {
-	auto itr = graphics_pipeline_to_index.find(pipeline);
-	if (itr == end(graphics_pipeline_to_index))
+	auto itr = graphics_pipeline_to_hash.find(pipeline);
+	if (itr == end(graphics_pipeline_to_hash))
 		FOSSILIZE_THROW("Cannot find graphics pipeline in hashmap.");
 	return api_object_cast<VkPipeline>(uint64_t(itr->second));
 }
 
 VkPipeline StateRecorder::Impl::remap_compute_pipeline_handle(VkPipeline pipeline) const
 {
-	auto itr = compute_pipeline_to_index.find(pipeline);
-	if (itr == end(compute_pipeline_to_index))
+	auto itr = compute_pipeline_to_hash.find(pipeline);
+	if (itr == end(compute_pipeline_to_hash))
 		FOSSILIZE_THROW("Cannot find compute pipeline in hashmap.");
 	return api_object_cast<VkPipeline>(uint64_t(itr->second));
 }
@@ -2216,7 +2211,7 @@ void StateRecorder::Impl::remap_pipeline_layout_ci(VkPipelineLayoutCreateInfo *i
 		const_cast<VkDescriptorSetLayout *>(info->pSetLayouts)[i] = remap_descriptor_set_layout_handle(info->pSetLayouts[i]);
 }
 
-void StateRecorder::Impl::remap_shader_module_ci(VkShaderModuleCreateInfo *info)
+void StateRecorder::Impl::remap_shader_module_ci(VkShaderModuleCreateInfo *)
 {
 	// nothing to do
 }
@@ -2245,12 +2240,12 @@ void StateRecorder::Impl::remap_compute_pipeline_ci(VkComputePipelineCreateInfo 
 	info->layout = remap_pipeline_layout_handle(info->layout);
 }
 
-void StateRecorder::Impl::remap_sampler_ci(VkSamplerCreateInfo *info)
+void StateRecorder::Impl::remap_sampler_ci(VkSamplerCreateInfo *)
 {
 	// nothing to do
 }
 
-void StateRecorder::Impl::remap_render_pass_ci(VkRenderPassCreateInfo *create_info)
+void StateRecorder::Impl::remap_render_pass_ci(VkRenderPassCreateInfo *)
 {
 	// nothing to do
 }
@@ -2286,16 +2281,19 @@ static void write_buffer(const std::string &json_dir, Hash hash, const vector<ui
 	}
 }
 
-void StateRecorder::Impl::record_task(StateRecorder *recorder) {
-	for(;;)
+void StateRecorder::Impl::record_task(StateRecorder *recorder)
+{
+	for (;;)
 	{
-		std::unique_lock<std::mutex> lock(recorder->impl->record_lock);
-		if (recorder->impl->record_queue.empty())
-			recorder->impl->temp_allocator.reset();
-		recorder->impl->record_cv.wait(lock, [&] {return !recorder->impl->record_queue.empty(); });
-		auto record_item = recorder->impl->record_queue.front();
-		recorder->impl->record_queue.pop();
-		lock.unlock();
+		WorkItem record_item;
+		{
+			std::unique_lock<std::mutex> lock(record_lock);
+			if (record_queue.empty())
+				temp_allocator.reset();
+			record_cv.wait(lock, [&] { return !record_queue.empty(); });
+			record_item = record_queue.front();
+			record_queue.pop();
+		}
 
 		if (!record_item.create_info)
 			return;
@@ -2308,11 +2306,11 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder) {
 			{
 				auto *create_info = reinterpret_cast<VkSamplerCreateInfo *>(record_item.create_info);
 				auto hash = Hashing::compute_hash_sampler(*recorder, *create_info);
-				recorder->impl->sampler_to_index[(VkSampler)record_item.handle] = hash;
-				if (!recorder->impl->samplers.count(hash))
+				sampler_to_hash[api_object_cast<VkSampler>(record_item.handle)] = hash;
+				if (!samplers.count(hash))
 				{
-					auto create_info_copy = recorder->impl->copy_sampler(create_info, recorder->impl->allocator);
-					recorder->impl->samplers[hash] = create_info_copy;
+					auto create_info_copy = copy_sampler(create_info, allocator);
+					samplers[hash] = create_info_copy;
 				}
 				break;
 			}
@@ -2320,12 +2318,12 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder) {
 			{
 				auto *create_info = reinterpret_cast<VkDescriptorSetLayoutCreateInfo *>(record_item.create_info);
 				auto hash = Hashing::compute_hash_descriptor_set_layout(*recorder, *create_info);
-				recorder->impl->descriptor_set_layout_to_index[(VkDescriptorSetLayout)record_item.handle] = hash;
-				if (!recorder->impl->descriptor_sets.count(hash))
+				descriptor_set_layout_to_hash[api_object_cast<VkDescriptorSetLayout>(record_item.handle)] = hash;
+				if (!descriptor_sets.count(hash))
 				{
-					auto create_info_copy = recorder->impl->copy_descriptor_set_layout(create_info, recorder->impl->allocator);
-					recorder->impl->remap_descriptor_set_layout_ci(create_info_copy);
-					recorder->impl->descriptor_sets[hash] = create_info_copy;
+					auto create_info_copy = copy_descriptor_set_layout(create_info, allocator);
+					remap_descriptor_set_layout_ci(create_info_copy);
+					descriptor_sets[hash] = create_info_copy;
 				}
 				break;
 			}
@@ -2333,12 +2331,12 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder) {
 			{
 				auto *create_info = reinterpret_cast<VkPipelineLayoutCreateInfo *>(record_item.create_info);
 				auto hash = Hashing::compute_hash_pipeline_layout(*recorder, *create_info);
-				recorder->impl->pipeline_layout_to_index[(VkPipelineLayout)record_item.handle] = hash;
-				if (!recorder->impl->pipeline_layouts.count(hash))
+				pipeline_layout_to_hash[api_object_cast<VkPipelineLayout>(record_item.handle)] = hash;
+				if (!pipeline_layouts.count(hash))
 				{
-					auto create_info_copy = recorder->impl->copy_pipeline_layout(create_info, recorder->impl->allocator);
-					recorder->impl->remap_pipeline_layout_ci(create_info_copy);
-					recorder->impl->pipeline_layouts[hash] = create_info_copy;
+					auto create_info_copy = copy_pipeline_layout(create_info, allocator);
+					remap_pipeline_layout_ci(create_info_copy);
+					pipeline_layouts[hash] = create_info_copy;
 				}
 				break;
 			}
@@ -2346,11 +2344,11 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder) {
 			{
 				auto *create_info = reinterpret_cast<VkRenderPassCreateInfo *>(record_item.create_info);
 				auto hash = Hashing::compute_hash_render_pass(*recorder, *create_info);
-				recorder->impl->render_pass_to_index[(VkRenderPass)record_item.handle] = hash;
-				if (!recorder->impl->render_passes.count(hash))
+				render_pass_to_hash[api_object_cast<VkRenderPass>(record_item.handle)] = hash;
+				if (!render_passes.count(hash))
 				{
-					auto create_info_copy = recorder->impl->copy_render_pass(create_info, recorder->impl->allocator);
-					recorder->impl->render_passes[hash] = create_info_copy;
+					auto create_info_copy = copy_render_pass(create_info, allocator);
+					render_passes[hash] = create_info_copy;
 				}
 				break;
 			}
@@ -2358,12 +2356,12 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder) {
 			{
 				auto *create_info = reinterpret_cast<VkShaderModuleCreateInfo *>(record_item.create_info);
 				auto hash = Hashing::compute_hash_shader_module(*recorder, *create_info);
-				recorder->impl->shader_module_to_index[(VkShaderModule)record_item.handle] = hash;
-				if (!recorder->impl->shader_modules.count(hash))
+				shader_module_to_hash[api_object_cast<VkShaderModule>(record_item.handle)] = hash;
+				if (!shader_modules.count(hash))
 				{
-					auto create_info_copy = recorder->impl->copy_shader_module(create_info, recorder->impl->allocator);
-					recorder->impl->shader_modules[hash] = create_info_copy;
-					write_buffer(recorder->impl->serialization_path, hash, recorder->serialize_shader_module(hash));
+					auto create_info_copy = copy_shader_module(create_info, allocator);
+					shader_modules[hash] = create_info_copy;
+					write_buffer(serialization_path, hash, recorder->serialize_shader_module(hash));
 				}
 				break;
 			}
@@ -2371,13 +2369,13 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder) {
 			{
 				auto *create_info = reinterpret_cast<VkGraphicsPipelineCreateInfo *>(record_item.create_info);
 				auto hash = Hashing::compute_hash_graphics_pipeline(*recorder, *create_info);
-				recorder->impl->graphics_pipeline_to_index[(VkPipeline)record_item.handle] = hash;
-				if (!recorder->impl->graphics_pipelines.count(hash))
+				graphics_pipeline_to_hash[api_object_cast<VkPipeline>(record_item.handle)] = hash;
+				if (!graphics_pipelines.count(hash))
 				{
-					auto create_info_copy = recorder->impl->copy_graphics_pipeline(create_info, recorder->impl->allocator);
-					recorder->impl->remap_graphics_pipeline_ci(create_info_copy);
-					recorder->impl->graphics_pipelines[hash] = create_info_copy;
-					write_buffer(recorder->impl->serialization_path, hash, recorder->serialize_graphics_pipeline(hash));
+					auto create_info_copy = copy_graphics_pipeline(create_info, allocator);
+					remap_graphics_pipeline_ci(create_info_copy);
+					graphics_pipelines[hash] = create_info_copy;
+					write_buffer(serialization_path, hash, recorder->serialize_graphics_pipeline(hash));
 				}
 				break;
 			}
@@ -2385,13 +2383,13 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder) {
 			{
 				auto *create_info = reinterpret_cast<VkComputePipelineCreateInfo *>(record_item.create_info);
 				auto hash = Hashing::compute_hash_compute_pipeline(*recorder, *create_info);
-				recorder->impl->compute_pipeline_to_index[(VkPipeline)record_item.handle] = hash;
-				if (!recorder->impl->compute_pipelines.count(hash))
+				compute_pipeline_to_hash[api_object_cast<VkPipeline>(record_item.handle)] = hash;
+				if (!compute_pipelines.count(hash))
 				{
-					auto create_info_copy = recorder->impl->copy_compute_pipeline(create_info, recorder->impl->allocator);
-					recorder->impl->remap_compute_pipeline_ci(create_info_copy);
-					recorder->impl->compute_pipelines[hash] = create_info_copy;
-					write_buffer(recorder->impl->serialization_path, hash, recorder->serialize_compute_pipeline(hash));
+					auto create_info_copy = copy_compute_pipeline(create_info, allocator);
+					remap_compute_pipeline_ci(create_info_copy);
+					compute_pipelines[hash] = create_info_copy;
+					write_buffer(serialization_path, hash, recorder->serialize_compute_pipeline(hash));
 				}
 				break;
 			}
@@ -3081,7 +3079,7 @@ vector<uint8_t> StateRecorder::serialize_shader_module(Hash hash) const
 	auto &alloc = doc.GetAllocator();
 
 	Value shader_modules(kObjectType);
-	if (auto pipe = serialize_obj(hash, impl->shader_modules, shader_modules, alloc))
+	serialize_obj(hash, impl->shader_modules, shader_modules, alloc);
 
 	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
 	doc.AddMember("shaderModules", shader_modules, alloc);
@@ -3097,8 +3095,6 @@ vector<uint8_t> StateRecorder::serialize_shader_module(Hash hash) const
 
 vector<uint8_t> StateRecorder::serialize() const
 {
-	uint64_t varint_spirv_offset = 0;
-
 	Document doc;
 	doc.SetObject();
 	auto &alloc = doc.GetAllocator();
@@ -3174,7 +3170,7 @@ void StateRecorder::init(const std::string &serialization_path)
 {
 	impl.reset(new Impl);
 	impl->serialization_path = serialization_path;
-	impl->worker_thread = std::thread(&StateRecorder::Impl::record_task, this);
+	impl->worker_thread = std::thread(&StateRecorder::Impl::record_task, impl.get(), this);
 }
 
 StateRecorder::StateRecorder()

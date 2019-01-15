@@ -129,7 +129,7 @@ class ResolverInterface
 {
 public:
 	virtual ~ResolverInterface() = default;
-	virtual std::vector<uint8_t> resolve(Hash hash) {
+	virtual std::vector<uint8_t> resolve(Hash /*hash*/) {
 		return {};
 	}
 };
