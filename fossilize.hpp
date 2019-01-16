@@ -165,6 +165,8 @@ public:
 	ScratchAllocator &get_allocator();
 
 	void record_application_info(const VkApplicationInfo &info);
+	void record_physical_device_features(const VkPhysicalDeviceFeatures2 &device_features);
+	void record_physical_device_features(const VkPhysicalDeviceFeatures &device_features);
 
 	// TODO: create_device which can capture which features/exts are used to create the device.
 	// This can be relevant when using more exotic features.

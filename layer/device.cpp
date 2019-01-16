@@ -61,6 +61,7 @@ static std::string getSystemProperty(const char *key)
 #endif
 
 void Device::init(VkPhysicalDevice gpu, VkDevice device, Instance *pInstance,
+                  const VkPhysicalDeviceFeatures2 &features,
                   VkLayerDispatchTable *pTable)
 {
 	this->gpu = gpu;
@@ -75,26 +76,12 @@ void Device::init(VkPhysicalDevice gpu, VkDevice device, Instance *pInstance,
 		serializationPath = logPath;
 		LOGI("Overriding serialization path: \"%s\".\n", logPath.c_str());
 	}
-
-	auto paranoid = getSystemProperty("debug.fossilize.paranoid_mode");
-	if (!paranoid.empty() && strtoul(paranoid.c_str(), nullptr, 0) != 0)
-	{
-		paranoidMode = true;
-		LOGI("Enabling paranoid serialization mode.\n");
-	}
 #else
 	const char *path = getenv("STEAM_FOSSILIZE_DUMP_PATH");
 	if (path)
 	{
 		serializationPath = path;
 		LOGI("Overriding serialization path: \"%s\".\n", path);
-	}
-
-	const char *paranoid = getenv("STEAM_FOSSILIZE_PARANOID_MODE");
-	if (paranoid && strtoul(paranoid, nullptr, 0) != 0)
-	{
-		paranoidMode = true;
-		LOGI("Enabling paranoid serialization mode.\n");
 	}
 #endif
 
@@ -103,5 +90,6 @@ void Device::init(VkPhysicalDevice gpu, VkDevice device, Instance *pInstance,
 
 	if (pInstance->getApplicationInfo())
 		recorder.record_application_info(*pInstance->getApplicationInfo());
+	recorder.record_physical_device_features(features);
 }
 }

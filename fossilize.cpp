@@ -216,6 +216,7 @@ struct StateRecorder::Impl
 	std::unordered_map<VkSampler, Hash> sampler_to_hash;
 
 	VkApplicationInfo *application_info = nullptr;
+	VkPhysicalDeviceFeatures2 *physical_device_features = nullptr;
 
 	VkDescriptorSetLayoutCreateInfo *copy_descriptor_set_layout(const VkDescriptorSetLayoutCreateInfo *create_info, ScratchAllocator &alloc);
 	VkPipelineLayoutCreateInfo *copy_pipeline_layout(const VkPipelineLayoutCreateInfo *create_info, ScratchAllocator &alloc);
@@ -225,6 +226,7 @@ struct StateRecorder::Impl
 	VkSamplerCreateInfo *copy_sampler(const VkSamplerCreateInfo *create_info, ScratchAllocator &alloc);
 	VkRenderPassCreateInfo *copy_render_pass(const VkRenderPassCreateInfo *create_info, ScratchAllocator &alloc);
 	VkApplicationInfo *copy_application_info(const VkApplicationInfo *app_info, ScratchAllocator &alloc);
+	VkPhysicalDeviceFeatures2 *copy_physical_device_features(const VkPhysicalDeviceFeatures2 *pdf, ScratchAllocator &alloc);
 
 	VkSpecializationInfo *copy_specialization_info(const VkSpecializationInfo *info, ScratchAllocator &alloc);
 
@@ -1866,6 +1868,20 @@ void StateRecorder::record_application_info(const VkApplicationInfo &info)
 	impl->application_info = impl->copy_application_info(&info, impl->allocator);
 }
 
+void StateRecorder::record_physical_device_features(const VkPhysicalDeviceFeatures2 &device_features)
+{
+	// We just ignore pNext, but it's okay to keep it. We will not need to serialize it for now.
+	std::lock_guard<std::mutex> lock(impl->record_lock);
+	impl->physical_device_features = impl->copy_physical_device_features(&device_features, impl->allocator);
+}
+
+void StateRecorder::record_physical_device_features(const VkPhysicalDeviceFeatures &device_features)
+{
+	VkPhysicalDeviceFeatures2 features = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+	features.features = device_features;
+	record_physical_device_features(features);
+}
+
 void StateRecorder::record_sampler(VkSampler sampler, const VkSamplerCreateInfo &create_info)
 {
 	if (create_info.pNext)
@@ -1992,6 +2008,15 @@ VkShaderModuleCreateInfo *StateRecorder::Impl::copy_shader_module(const VkShader
 VkSamplerCreateInfo *StateRecorder::Impl::copy_sampler(const VkSamplerCreateInfo *create_info, ScratchAllocator &alloc)
 {
 	return copy(create_info, 1, alloc);
+}
+
+VkPhysicalDeviceFeatures2 *StateRecorder::Impl::copy_physical_device_features(const VkPhysicalDeviceFeatures2 *pdf,
+                                                                              ScratchAllocator &alloc)
+{
+	// Ignore pNext. We don't need to serialize it.
+	auto *features = copy(pdf, 1, alloc);
+	features->pNext = nullptr;
+	return features;
 }
 
 VkApplicationInfo *StateRecorder::Impl::copy_application_info(const VkApplicationInfo *app_info, ScratchAllocator &alloc)
@@ -3077,6 +3102,14 @@ static void serialize_application_info(Value &value, const VkApplicationInfo &in
 	value.AddMember("apiVersion", info.apiVersion, alloc);
 }
 
+template <typename AllocType>
+static void serialize_physical_device_features(Value &value, const VkPhysicalDeviceFeatures2 &features, AllocType &alloc)
+{
+	// TODO: For now, we only care about this feature, which can definitely affect compilation.
+	// Deal with other device features if proven to be required.
+	value.AddMember("robustBufferAccess", features.features.robustBufferAccess, alloc);
+}
+
 vector<uint8_t> StateRecorder::serialize_graphics_pipeline(Hash hash) const
 {
 	Document doc;
@@ -3084,6 +3117,7 @@ vector<uint8_t> StateRecorder::serialize_graphics_pipeline(Hash hash) const
 	auto &alloc = doc.GetAllocator();
 
 	Value app_info(kObjectType);
+	Value pdf_info(kObjectType);
 	Value samplers(kObjectType);
 	Value set_layouts(kObjectType);
 	Value pipeline_layouts(kObjectType);
@@ -3093,6 +3127,8 @@ vector<uint8_t> StateRecorder::serialize_graphics_pipeline(Hash hash) const
 
 	if (impl->application_info)
 		serialize_application_info(app_info, *impl->application_info, alloc);
+	if (impl->physical_device_features)
+		serialize_physical_device_features(pdf_info, *impl->physical_device_features, alloc);
 
 	if (auto pipe = serialize_obj(hash, impl->graphics_pipelines, graphics_pipelines, alloc))
 	{
@@ -3122,6 +3158,7 @@ vector<uint8_t> StateRecorder::serialize_graphics_pipeline(Hash hash) const
 
 	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
 	doc.AddMember("applicationInfo", app_info, alloc);
+	doc.AddMember("physicalDeviceFeatures", pdf_info, alloc);
 	doc.AddMember("samplers", samplers, alloc);
 	doc.AddMember("setLayouts", set_layouts, alloc);
 	doc.AddMember("pipelineLayouts", pipeline_layouts, alloc);
@@ -3144,6 +3181,7 @@ vector<uint8_t> StateRecorder::serialize_compute_pipeline(Hash hash) const
 	auto &alloc = doc.GetAllocator();
 
 	Value app_info(kObjectType);
+	Value pdf_info(kObjectType);
 	Value samplers(kObjectType);
 	Value set_layouts(kObjectType);
 	Value pipeline_layouts(kObjectType);
@@ -3152,6 +3190,8 @@ vector<uint8_t> StateRecorder::serialize_compute_pipeline(Hash hash) const
 
 	if (impl->application_info)
 		serialize_application_info(app_info, *impl->application_info, alloc);
+	if (impl->physical_device_features)
+		serialize_physical_device_features(pdf_info, *impl->physical_device_features, alloc);
 
 	if (auto pipe = serialize_obj(hash, impl->compute_pipelines, compute_pipelines, alloc))
 	{
@@ -3179,6 +3219,7 @@ vector<uint8_t> StateRecorder::serialize_compute_pipeline(Hash hash) const
 
 	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
 	doc.AddMember("applicationInfo", app_info, alloc);
+	doc.AddMember("physicalDeviceFeatures", pdf_info, alloc);
 	doc.AddMember("samplers", samplers, alloc);
 	doc.AddMember("setLayouts", set_layouts, alloc);
 	doc.AddMember("pipelineLayouts", pipeline_layouts, alloc);
@@ -3200,14 +3241,18 @@ vector<uint8_t> StateRecorder::serialize_shader_module(Hash hash) const
 	auto &alloc = doc.GetAllocator();
 
 	Value app_info(kObjectType);
+	Value pdf_info(kObjectType);
 	Value shader_modules(kObjectType);
 
 	if (impl->application_info)
 		serialize_application_info(app_info, *impl->application_info, alloc);
+	if (impl->physical_device_features)
+		serialize_physical_device_features(pdf_info, *impl->physical_device_features, alloc);
 	serialize_obj(hash, impl->shader_modules, shader_modules, alloc);
 
 	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
 	doc.AddMember("applicationInfo", app_info, alloc);
+	doc.AddMember("physicalDeviceFeatures", pdf_info, alloc);
 	doc.AddMember("shaderModules", shader_modules, alloc);
 
 	StringBuffer buffer;
@@ -3228,9 +3273,13 @@ vector<uint8_t> StateRecorder::serialize() const
 	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
 
 	Value app_info(kObjectType);
+	Value pdf_info(kObjectType);
 	if (impl->application_info)
 		serialize_application_info(app_info, *impl->application_info, alloc);
+	if (impl->physical_device_features)
+		serialize_physical_device_features(pdf_info, *impl->physical_device_features, alloc);
 	doc.AddMember("applicationInfo", app_info, alloc);
+	doc.AddMember("physicalDeviceFeatures", pdf_info, alloc);
 
 	Value samplers(kObjectType);
 	for (auto &sampler : impl->samplers)

@@ -57,6 +57,14 @@ static inline VkLayerDeviceCreateInfo *getChainInfo(const VkDeviceCreateInfo *pC
 	return const_cast<VkLayerDeviceCreateInfo *>(chain_info);
 }
 
+static inline const void *findpNext(const void *pCreateInfo, VkStructureType sType)
+{
+	auto *s = static_cast<const VkBaseInStructure *>(pCreateInfo);
+	while (s && s->sType != sType)
+		s = s->pNext;
+	return s;
+}
+
 void layerInitDeviceDispatchTable(VkDevice device, VkLayerDispatchTable *table, PFN_vkGetDeviceProcAddr gpa);
 
 void layerInitInstanceDispatchTable(VkInstance instance, VkLayerInstanceDispatchTable *table,

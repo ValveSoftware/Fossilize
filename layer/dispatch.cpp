@@ -86,10 +86,20 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(VkPhysicalDevice gpu, const V
 	if (res != VK_SUCCESS)
 		return res;
 
+	// Build a physical device features 2 struct if we cannot find it in pCreateInfo.
+	auto *pdf2 = static_cast<const VkPhysicalDeviceFeatures2 *>(findpNext(pCreateInfo, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2));
+	VkPhysicalDeviceFeatures2 physicalDeviceFeatures2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+	if (!pdf2)
+	{
+		pdf2 = &physicalDeviceFeatures2;
+		if (pCreateInfo->pEnabledFeatures)
+			physicalDeviceFeatures2.features = *pCreateInfo->pEnabledFeatures;
+	}
+
 	{
 		lock_guard<mutex> holder{globalLock};
 		auto *device = createLayerData(getDispatchKey(*pDevice), deviceData);
-		device->init(gpu, *pDevice, layer, initDeviceTable(*pDevice, fpGetDeviceProcAddr, deviceDispatch));
+		device->init(gpu, *pDevice, layer, *pdf2, initDeviceTable(*pDevice, fpGetDeviceProcAddr, deviceDispatch));
 	}
 
 	return VK_SUCCESS;
