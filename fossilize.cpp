@@ -2149,7 +2149,7 @@ VkGraphicsPipelineCreateInfo *StateRecorder::Impl::copy_graphics_pipeline(const 
 
 	if (info->pVertexInputState)
 	{
-		if (info->pColorBlendState->pNext)
+		if (info->pVertexInputState->pNext)
 			FOSSILIZE_THROW("pNext in VkPipelineTessellationStateCreateInfo not supported.");
 		info->pVertexInputState = copy(info->pVertexInputState, 1, alloc);
 	}
@@ -2159,13 +2159,6 @@ VkGraphicsPipelineCreateInfo *StateRecorder::Impl::copy_graphics_pipeline(const 
 		if (info->pMultisampleState->pNext)
 			FOSSILIZE_THROW("pNext in VkPipelineMultisampleStateCreateInfo not supported.");
 		info->pMultisampleState = copy(info->pMultisampleState, 1, alloc);
-	}
-
-	if (info->pVertexInputState)
-	{
-		if (info->pVertexInputState->pNext)
-			FOSSILIZE_THROW("pNext in VkPipelineVertexInputStateCreateInfo not supported.");
-		info->pVertexInputState = copy(info->pVertexInputState, 1, alloc);
 	}
 
 	if (info->pViewportState)
