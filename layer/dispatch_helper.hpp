@@ -31,6 +31,7 @@
 #include <unordered_map>
 #include <algorithm>
 #include "vk_layer.h"
+#include "vk_layer_dispatch_table.h"
 #include "vulkan.h"
 
 namespace Fossilize
@@ -54,6 +55,14 @@ static inline VkLayerDeviceCreateInfo *getChainInfo(const VkDeviceCreateInfo *pC
 	       !(chain_info->sType == VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO && chain_info->function == func))
 		chain_info = static_cast<const VkLayerDeviceCreateInfo *>(chain_info->pNext);
 	return const_cast<VkLayerDeviceCreateInfo *>(chain_info);
+}
+
+static inline const void *findpNext(const void *pCreateInfo, VkStructureType sType)
+{
+	auto *s = static_cast<const VkBaseInStructure *>(pCreateInfo);
+	while (s && s->sType != sType)
+		s = s->pNext;
+	return s;
 }
 
 void layerInitDeviceDispatchTable(VkDevice device, VkLayerDispatchTable *table, PFN_vkGetDeviceProcAddr gpa);

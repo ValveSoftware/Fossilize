@@ -37,15 +37,19 @@ struct ReplayInterface : StateCreatorInterface
 {
 	StateRecorder recorder;
 
+	ReplayInterface()
+	{
+		recorder.init(nullptr);
+	}
+
 	bool enqueue_create_sampler(Hash hash, const VkSamplerCreateInfo *create_info, VkSampler *sampler) override
 	{
 		Hash recorded_hash = Hashing::compute_hash_sampler(recorder, *create_info);
 		if (recorded_hash != hash)
 			return false;
 
-		Hash sampler_index = recorder.register_sampler(hash, *create_info);
-		*sampler = fake_handle<VkSampler>(sampler_index + 1000);
-		recorder.set_sampler_handle(sampler_index, *sampler);
+		*sampler = fake_handle<VkSampler>(hash);
+		recorder.record_sampler(*sampler, *create_info);
 		return true;
 	}
 
@@ -55,9 +59,8 @@ struct ReplayInterface : StateCreatorInterface
 		if (recorded_hash != hash)
 			return false;
 
-		Hash set_index = recorder.register_descriptor_set_layout(hash, *create_info);
-		*layout = fake_handle<VkDescriptorSetLayout>(set_index + 10000);
-		recorder.set_descriptor_set_layout_handle(set_index, *layout);
+		*layout = fake_handle<VkDescriptorSetLayout>(hash);
+		recorder.record_descriptor_set_layout(*layout, *create_info);
 		return true;
 	}
 
@@ -67,9 +70,8 @@ struct ReplayInterface : StateCreatorInterface
 		if (recorded_hash != hash)
 			return false;
 
-		Hash layout_index = recorder.register_pipeline_layout(hash, *create_info);
-		*layout = fake_handle<VkPipelineLayout>(layout_index + 10000);
-		recorder.set_pipeline_layout_handle(layout_index, *layout);
+		*layout = fake_handle<VkPipelineLayout>(hash);
+		recorder.record_pipeline_layout(*layout, *create_info);
 		return true;
 	}
 
@@ -79,9 +81,8 @@ struct ReplayInterface : StateCreatorInterface
 		if (recorded_hash != hash)
 			return false;
 
-		Hash module_index = recorder.register_shader_module(hash, *create_info);
-		*module = fake_handle<VkShaderModule>(module_index + 20000);
-		recorder.set_shader_module_handle(module_index, *module);
+		*module = fake_handle<VkShaderModule>(hash);
+		recorder.record_shader_module(*module, *create_info);
 		return true;
 	}
 
@@ -91,9 +92,8 @@ struct ReplayInterface : StateCreatorInterface
 		if (recorded_hash != hash)
 			return false;
 
-		Hash pass_index = recorder.register_render_pass(hash, *create_info);
-		*render_pass = fake_handle<VkRenderPass>(pass_index + 40000);
-		recorder.set_render_pass_handle(pass_index, *render_pass);
+		*render_pass = fake_handle<VkRenderPass>(hash);
+		recorder.record_render_pass(*render_pass, *create_info);
 		return true;
 	}
 
@@ -103,9 +103,8 @@ struct ReplayInterface : StateCreatorInterface
 		if (recorded_hash != hash)
 			return false;
 
-		Hash pipe_index = recorder.register_compute_pipeline(hash, *create_info);
-		*pipeline = fake_handle<VkPipeline>(pipe_index + 40000);
-		recorder.set_compute_pipeline_handle(pipe_index, *pipeline);
+		*pipeline = fake_handle<VkPipeline>(hash);
+		recorder.record_compute_pipeline(*pipeline, *create_info);
 		return true;
 	}
 
@@ -115,9 +114,8 @@ struct ReplayInterface : StateCreatorInterface
 		if (recorded_hash != hash)
 			return false;
 
-		Hash pipe_index = recorder.register_graphics_pipeline(hash, *create_info);
-		*pipeline = fake_handle<VkPipeline>(pipe_index + 600000);
-		recorder.set_graphics_pipeline_handle(pipe_index, *pipeline);
+		*pipeline = fake_handle<VkPipeline>(hash);
+		recorder.record_graphics_pipeline(*pipeline, *create_info);
 		return true;
 	}
 };
@@ -140,11 +138,9 @@ static void record_samplers(StateRecorder &recorder)
 	sampler.magFilter = VK_FILTER_NEAREST;
 	sampler.minLod = 10.0f;
 	sampler.maxLod = 20.0f;
-	Hash index = recorder.register_sampler(Hashing::compute_hash_sampler(recorder, sampler), sampler);
-	recorder.set_sampler_handle(index, fake_handle<VkSampler>(100));
+	recorder.record_sampler(fake_handle<VkSampler>(100), sampler);
 	sampler.minLod = 11.0f;
-	index = recorder.register_sampler(Hashing::compute_hash_sampler(recorder, sampler), sampler);
-	recorder.set_sampler_handle(index, fake_handle<VkSampler>(101));
+	recorder.record_sampler(fake_handle<VkSampler>(101), sampler);
 }
 
 static void record_set_layouts(StateRecorder &recorder)
@@ -173,13 +169,11 @@ static void record_set_layouts(StateRecorder &recorder)
 	bindings[2].descriptorCount = 3;
 	bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 	bindings[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-	Hash index = recorder.register_descriptor_set_layout(Hashing::compute_hash_descriptor_set_layout(recorder, layout), layout);
-	recorder.set_descriptor_set_layout_handle(index, fake_handle<VkDescriptorSetLayout>(1000));
+	recorder.record_descriptor_set_layout(fake_handle<VkDescriptorSetLayout>(1000), layout);
 
 	layout.bindingCount = 2;
 	layout.pBindings = bindings + 1;
-	index = recorder.register_descriptor_set_layout(Hashing::compute_hash_descriptor_set_layout(recorder, layout), layout);
-	recorder.set_descriptor_set_layout_handle(index, fake_handle<VkDescriptorSetLayout>(1001));
+	recorder.record_descriptor_set_layout(fake_handle<VkDescriptorSetLayout>(1001), layout);
 }
 
 static void record_pipeline_layouts(StateRecorder &recorder)
@@ -203,18 +197,15 @@ static void record_pipeline_layouts(StateRecorder &recorder)
 	};
 	layout.pushConstantRangeCount = 2;
 	layout.pPushConstantRanges = ranges;
-	Hash index = recorder.register_pipeline_layout(Hashing::compute_hash_pipeline_layout(recorder, layout), layout);
-	recorder.set_pipeline_layout_handle(index, fake_handle<VkPipelineLayout>(10000));
+	recorder.record_pipeline_layout(fake_handle<VkPipelineLayout>(10000), layout);
 
 	VkPipelineLayoutCreateInfo layout2 = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
-	index = recorder.register_pipeline_layout(Hashing::compute_hash_pipeline_layout(recorder, layout2), layout2);
-	recorder.set_pipeline_layout_handle(index, fake_handle<VkPipelineLayout>(10001));
+	recorder.record_pipeline_layout(fake_handle<VkPipelineLayout>(10001), layout2);
 
 	VkPipelineLayoutCreateInfo layout3 = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
 	layout3.setLayoutCount = 2;
 	layout3.pSetLayouts = set_layouts1;
-	index = recorder.register_pipeline_layout(Hashing::compute_hash_pipeline_layout(recorder, layout3), layout3);
-	recorder.set_pipeline_layout_handle(index, fake_handle<VkPipelineLayout>(10002));
+	recorder.record_pipeline_layout(fake_handle<VkPipelineLayout>(10002), layout3);
 }
 
 static void record_shader_modules(StateRecorder &recorder)
@@ -224,19 +215,17 @@ static void record_shader_modules(StateRecorder &recorder)
 	info.pCode = code;
 	info.codeSize = sizeof(code);
 
-	Hash index = recorder.register_shader_module(Hashing::compute_hash_shader_module(recorder, info), info);
-	recorder.set_shader_module_handle(index, fake_handle<VkShaderModule>(5000));
+	recorder.record_shader_module(fake_handle<VkShaderModule>(5000), info);
 
 	static const uint32_t code2[] = { 0xabba1337, 0xbabba100, 0xdeadbeef, 0xcafebabe };
 	info.pCode = code2;
 	info.codeSize = sizeof(code2);
-	index = recorder.register_shader_module(Hashing::compute_hash_shader_module(recorder, info), info);
-	recorder.set_shader_module_handle(index, fake_handle<VkShaderModule>(5001));
+	recorder.record_shader_module(fake_handle<VkShaderModule>(5001), info);
 }
 
 static void record_render_passes(StateRecorder &recorder)
 {
-	VkRenderPassCreateInfo pass = { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
+	VkRenderPassCreateInfo pass = { VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
 	VkSubpassDependency deps[2] = {};
 	VkSubpassDescription subpasses[2] = {};
 	VkAttachmentDescription att[2] = {};
@@ -292,12 +281,10 @@ static void record_render_passes(StateRecorder &recorder)
 	pass.pSubpasses = subpasses;
 	pass.dependencyCount = 0;
 	pass.pDependencies = deps;
-	Hash index = recorder.register_render_pass(Hashing::compute_hash_render_pass(recorder, pass), pass);
-	recorder.set_render_pass_handle(index, fake_handle<VkRenderPass>(30000));
+	recorder.record_render_pass(fake_handle<VkRenderPass>(30000), pass);
 
 	pass.dependencyCount = 0;
-	index = recorder.register_render_pass(Hashing::compute_hash_render_pass(recorder, pass), pass);
-	recorder.set_render_pass_handle(index, fake_handle<VkRenderPass>(30001));
+	recorder.record_render_pass(fake_handle<VkRenderPass>(30001), pass);
 }
 
 static void record_compute_pipelines(StateRecorder &recorder)
@@ -321,14 +308,12 @@ static void record_compute_pipelines(StateRecorder &recorder)
 	pipe.stage.pSpecializationInfo = &spec;
 	pipe.layout = fake_handle<VkPipelineLayout>(10001);
 
-	Hash index = recorder.register_compute_pipeline(Hashing::compute_hash_compute_pipeline(recorder, pipe), pipe);
-	recorder.set_compute_pipeline_handle(index, fake_handle<VkPipeline>(80000));
+	recorder.record_compute_pipeline(fake_handle<VkPipeline>(80000), pipe);
 
 	//pipe.basePipelineHandle = fake_handle<VkPipeline>(80000);
 	pipe.basePipelineIndex = 10;
 	pipe.stage.pSpecializationInfo = nullptr;
-	index = recorder.register_compute_pipeline(Hashing::compute_hash_compute_pipeline(recorder, pipe), pipe);
-	recorder.set_compute_pipeline_handle(index, fake_handle<VkPipeline>(80001));
+	recorder.record_compute_pipeline(fake_handle<VkPipeline>(80001), pipe);
 }
 
 static void record_graphics_pipelines(StateRecorder &recorder)
@@ -481,35 +466,41 @@ static void record_graphics_pipelines(StateRecorder &recorder)
 	pipe.pRasterizationState = &rs;
 	pipe.pInputAssemblyState = &ia;
 
-	Hash index = recorder.register_graphics_pipeline(Hashing::compute_hash_graphics_pipeline(recorder, pipe), pipe);
-	recorder.set_graphics_pipeline_handle(index, fake_handle<VkPipeline>(100000));
+	recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100000), pipe);
 
 	vp.viewportCount = 0;
 	vp.scissorCount = 0;
 	pipe.basePipelineHandle = fake_handle<VkPipeline>(100000);
 	pipe.basePipelineIndex = 200;
-	index = recorder.register_graphics_pipeline(Hashing::compute_hash_graphics_pipeline(recorder, pipe), pipe);
-	recorder.set_graphics_pipeline_handle(index, fake_handle<VkPipeline>(100001));
+	recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100001), pipe);
 }
 
 int main()
 {
 	try
 	{
-		StateRecorder recorder;
+		std::vector<uint8_t> res;
+		{
+			DatabaseInterface iface;
+			StateRecorder recorder;
+
+			recorder.init(&iface);
+
+			record_samplers(recorder);
+			record_set_layouts(recorder);
+			record_pipeline_layouts(recorder);
+			record_shader_modules(recorder);
+			record_render_passes(recorder);
+			record_compute_pipelines(recorder);
+			record_graphics_pipelines(recorder);
+
+			res = recorder.serialize();
+		}
+
 		StateReplayer replayer;
 		ReplayInterface iface;
-		ResolverInterface resolver;
+		DatabaseInterface resolver;
 
-		record_samplers(recorder);
-		record_set_layouts(recorder);
-		record_pipeline_layouts(recorder);
-		record_shader_modules(recorder);
-		record_render_passes(recorder);
-		record_compute_pipelines(recorder);
-		record_graphics_pipelines(recorder);
-
-		auto res = recorder.serialize();
 		replayer.parse(iface, resolver, res.data(), res.size());
 		return EXIT_SUCCESS;
 	}

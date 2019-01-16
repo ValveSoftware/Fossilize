@@ -33,6 +33,8 @@ public:
 	{
 		bool enable_validation = false;
 		int device_index = -1;
+		const VkApplicationInfo *application_info = nullptr;
+		const VkPhysicalDeviceFeatures2 *features = nullptr;
 	};
 	bool init_device(const Options &opts);
 

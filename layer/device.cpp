@@ -21,6 +21,7 @@
  */
 
 #include "device.hpp"
+#include "instance.hpp"
 #include "utils.hpp"
 #include <cinttypes>
 #include <stdlib.h>
@@ -59,12 +60,13 @@ static std::string getSystemProperty(const char *key)
 }
 #endif
 
-void Device::init(VkPhysicalDevice gpu, VkDevice device, VkLayerInstanceDispatchTable *pInstanceTable,
+void Device::init(VkPhysicalDevice gpu, VkDevice device, Instance *pInstance,
+                  const VkPhysicalDeviceFeatures2 &features,
                   VkLayerDispatchTable *pTable)
 {
 	this->gpu = gpu;
 	this->device = device;
-	this->pInstanceTable = pInstanceTable;
+	this->pInstanceTable = pInstance->getTable();
 	this->pTable = pTable;
 
 #ifdef ANDROID
@@ -74,13 +76,6 @@ void Device::init(VkPhysicalDevice gpu, VkDevice device, VkLayerInstanceDispatch
 		serializationPath = logPath;
 		LOGI("Overriding serialization path: \"%s\".\n", logPath.c_str());
 	}
-
-	auto paranoid = getSystemProperty("debug.fossilize.paranoid_mode");
-	if (!paranoid.empty() && strtoul(paranoid.c_str(), nullptr, 0) != 0)
-	{
-		paranoidMode = true;
-		LOGI("Enabling paranoid serialization mode.\n");
-	}
 #else
 	const char *path = getenv("STEAM_FOSSILIZE_DUMP_PATH");
 	if (path)
@@ -88,53 +83,13 @@ void Device::init(VkPhysicalDevice gpu, VkDevice device, VkLayerInstanceDispatch
 		serializationPath = path;
 		LOGI("Overriding serialization path: \"%s\".\n", path);
 	}
-
-	const char *paranoid = getenv("STEAM_FOSSILIZE_PARANOID_MODE");
-	if (paranoid && strtoul(paranoid, nullptr, 0) != 0)
-	{
-		paranoidMode = true;
-		LOGI("Enabling paranoid serialization mode.\n");
-	}
 #endif
 
-#ifndef _WIN32
-#if ANDROID
-	auto sigsegv = getSystemProperty("debug.fossilize.dump_sigsegv");
-	if (!sigsegv.empty() && strtoul(sigsegv.c_str(), nullptr, 0) != 0)
-		installSegfaultHandler();
-#else
-	const char *sigsegv = getenv("STEAM_FOSSILIZE_DUMP_SIGSEGV");
-	if (sigsegv && strtoul(sigsegv, nullptr, 0) != 0)
-		installSegfaultHandler();
-#endif
-#endif
+	iface.set_base_directory(serializationPath);
+	recorder.init(&iface);
 
-	recorder.init(serializationPath);
+	if (pInstance->getApplicationInfo())
+		recorder.record_application_info(*pInstance->getApplicationInfo());
+	recorder.record_physical_device_features(features);
 }
-
-#ifndef _WIN32
-static Device *segfaultDevice = nullptr;
-
-static void segfaultHandler(int, siginfo_t *, void *)
-{
-	LOGE("Caught segmentation fault!");
-
-	// Now we can die properly.
-	kill(getpid(), SIGSEGV);
-}
-
-void Device::installSegfaultHandler()
-{
-	segfaultDevice = this;
-
-	struct sigaction sa;
-	sa.sa_flags = SA_SIGINFO | SA_RESETHAND;
-	sigemptyset(&sa.sa_mask);
-	sa.sa_sigaction = segfaultHandler;
-
-	if (sigaction(SIGSEGV, &sa, nullptr) < 0)
-		LOGE("Failed to install SIGSEGV handler!\n");
-}
-#endif
-
 }

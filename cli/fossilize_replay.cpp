@@ -26,6 +26,7 @@
 #include "cli_parser.hpp"
 #include "logging.hpp"
 #include "file.hpp"
+#include "path.hpp"
 
 #include <cinttypes>
 #include <string>
@@ -87,7 +88,7 @@ public:
 			pipelineWorkQueueMutex.unlock();
 			
 			unsigned long elapsed_ms = chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now() - start_time).count();
-			LOGI( "Compiling %d pipelines took %d ms (avg: %0.2f ms / pipeline)\n", nPipelineCount, elapsed_ms, ( float ) elapsed_ms / ( float ) nPipelineCount );
+			LOGI( "Compiling %d pipelines took %lu ms (avg: %0.2f ms / pipeline)\n", nPipelineCount, elapsed_ms, ( float ) elapsed_ms / ( float ) nPipelineCount );
 
 			// For perf testing in --loop mode
 			if ( nLoopCount > 0 )
@@ -208,16 +209,11 @@ public:
 		}
 	}
 
-	DumbReplayer(const VulkanDevice &device, const Options &opts,
+	DumbReplayer(const VulkanDevice::Options &device_opts, const Options &opts,
 	             const unordered_set<unsigned> &graphics,
 	             const unordered_set<unsigned> &compute)
-		: device(device), filter_graphics(graphics), filter_compute(compute), numWorkerThreads( opts.num_threads ), nLoopCount( opts.loop_count ),bShuttingDown( false )
+		: opts(opts), filter_graphics(graphics), filter_compute(compute), numWorkerThreads( opts.num_threads ), nLoopCount( opts.loop_count ),bShuttingDown( false ), device_opts(device_opts)
 	{
-		if (opts.pipeline_cache)
-		{
-			VkPipelineCacheCreateInfo info = { VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO };
-			vkCreatePipelineCache(device.get_device(), &info, nullptr, &pipeline_cache);
-		}
 	}
 
 	~DumbReplayer()
@@ -245,6 +241,45 @@ public:
 		for (auto &pipeline : graphics_pipelines)
 			if (pipeline.second)
 				vkDestroyPipeline(device.get_device(), pipeline.second, nullptr);
+	}
+
+	void set_application_info(const VkApplicationInfo *app, const VkPhysicalDeviceFeatures2 *features) override
+	{
+		// TODO: Could use this to create multiple VkDevices for replay as necessary if app changes.
+
+		if (!device_was_init)
+		{
+			// Now we can init the device with correct app info.
+			device_was_init = true;
+			device_opts.application_info = app;
+			device_opts.features = features;
+			if (!device.init_device(device_opts))
+			{
+				LOGE("Failed to create Vulkan device, bailing ...\n");
+				exit(EXIT_FAILURE);
+			}
+
+			if (opts.pipeline_cache)
+			{
+				VkPipelineCacheCreateInfo info = { VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO };
+				vkCreatePipelineCache(device.get_device(), &info, nullptr, &pipeline_cache);
+			}
+
+			if (app)
+			{
+				LOGI("Replaying for application:\n");
+				LOGI("  apiVersion: %u.%u.%u\n",
+				     VK_VERSION_MAJOR(app->apiVersion),
+				     VK_VERSION_MINOR(app->apiVersion),
+				     VK_VERSION_PATCH(app->apiVersion));
+				LOGI("  engineVersion: %u\n", app->engineVersion);
+				LOGI("  applicationVersion: %u\n", app->applicationVersion);
+				if (app->pEngineName)
+					LOGI("  engineName: %s\n", app->pEngineName);
+				if (app->pApplicationName)
+					LOGI("  applicationName: %s\n", app->pApplicationName);
+			}
+		}
 	}
 
 	bool enqueue_create_sampler(Hash index, const VkSamplerCreateInfo *create_info, VkSampler *sampler) override
@@ -333,7 +368,7 @@ public:
 		return true;
 	}
 
-	const VulkanDevice &device;
+	Options opts;
 	const unordered_set<unsigned> &filter_graphics;
 	const unordered_set<unsigned> &filter_compute;
 
@@ -372,43 +407,10 @@ public:
 	std::queue< PipelineWorkItem_t > pipelineWorkQueue;
 	std::condition_variable workAvailableCondition;
 	volatile bool bShuttingDown;
-};
 
-// VALVE: Modified to not use std::filesystem
-static std::vector<uint8_t> load_buffer_from_path(const std::string &path)
-{
-	std::ifstream file(path, std::ios::binary);
-
-	file.seekg(0, std::ios::end);
-	auto file_size = file.tellg();
-	file.seekg(0, std::ios::beg);
-
-	std::vector<uint8_t> file_data(file_size);
-	file.read(reinterpret_cast<char *>(file_data.data()), file_size);
-
-	return file_data;
-}
-
-struct DirectoryResolver : ResolverInterface
-{
-	DirectoryResolver(const std::string &_directory) : directory(_directory) {};
-
-	vector<uint8_t> resolve(Hash hash)
-	{
-		char filename[22];
-		sprintf(filename, "%016" PRIX64 ".json", hash);
-		// VALVE: modified to not use std::filesystem
-#if defined( WIN32 )
-		std::string separator = "\\";
-#else
-		std::string separator = "/";
-#endif
-		std::string path = directory + separator + filename;
-
-		return load_buffer_from_path(path);
-	}
-
-	std::string directory;
+	VulkanDevice device;
+	bool device_was_init = false;
+	VulkanDevice::Options device_opts;
 };
 
 static void print_help()
@@ -420,10 +422,41 @@ static void print_help()
 	     "\t[--pipeline-cache]\n"
 	     "\t[--filter-compute <index>]\n"
 	     "\t[--filter-graphics <index>]\n"
-	     "\t[--pipeline-cache]\n"
 	     "\t[--num-threads <count>]\n"
 	     "\t[--loop <count>]\n"
-	     "\tstate.json\n");
+	     "\t<JSON directory>\n");
+}
+
+// VALVE: Modified to not use std::filesystem
+static std::vector<uint8_t> load_buffer_from_path(const std::string &path)
+{
+	FILE *file = fopen(path.c_str(), "rb");
+	if (!file)
+	{
+		LOGE("Failed to open file: %s\n", path.c_str());
+		return {};
+	}
+
+	if (fseek(file, 0, SEEK_END) < 0)
+	{
+		fclose(file);
+		LOGE("Failed to seek in file: %s\n", path.c_str());
+		return {};
+	}
+
+	size_t file_size = size_t(ftell(file));
+	rewind(file);
+
+	std::vector<uint8_t> file_data(file_size);
+	if (fread(file_data.data(), 1, file_size, file) != file_size)
+	{
+		LOGE("Failed to read from file: %s\n", path.c_str());
+		fclose(file);
+		return {};
+	}
+
+	fclose(file);
+	return file_data;
 }
 
 int main(int argc, char *argv[])
@@ -472,12 +505,9 @@ int main(int argc, char *argv[])
 
 	auto start_time = chrono::steady_clock::now();
 
-	VulkanDevice device;
-	if (!device.init_device(opts))
-		return EXIT_FAILURE;
-
-	DumbReplayer replayer(device, replayer_opts, filter_graphics, filter_compute);
-	DirectoryResolver resolver(json_path);
+	DumbReplayer replayer(opts, replayer_opts, filter_graphics, filter_compute);
+	DatabaseInterface resolver;
+	resolver.set_base_directory(json_path);
 	StateReplayer state_replayer;
 
 	// VALVE: modified to not use std::filesystem
@@ -487,9 +517,13 @@ int main(int argc, char *argv[])
 			continue;
 
 		// VALVE: modified to not use std::filesystem
-		std::string path( pEntry->d_name );;
-		std::string stem = path.substr( 0, path.find( "." ) );
-		std::string ext = path.substr( path.find( "." ) );
+		std::string path( pEntry->d_name );
+		auto dotpos = path.find(".");
+		if (dotpos == std::string::npos)
+			continue;
+
+		std::string stem = path.substr( 0, dotpos );
+		std::string ext = path.substr( dotpos );
 		// check that filename is 16 char hex with json extension
 		if (stem.length() != 16)
 			continue;
@@ -503,7 +537,7 @@ int main(int argc, char *argv[])
 
 		try
 		{
-			auto state_json = load_buffer_from_path(path);
+			auto state_json = load_buffer_from_path(Path::join(json_path, path));
 			if (state_json.empty())
 			{
 				LOGE("Failed to load %s from disk.\n", pEntry->d_name);

@@ -54,6 +54,8 @@ private:
 
 using Hash = uint64_t;
 
+class Hasher;
+
 class ScratchAllocator
 {
 public:
@@ -115,6 +117,14 @@ public:
 	virtual bool set_num_compute_pipelines(unsigned /*count*/) { return true; }
 	virtual bool set_num_graphics_pipelines(unsigned /*count*/) { return true; }
 
+	// All future calls to enqueue_create_* were created using this application info.
+	// app can be nullptr, in which case no pApplicationInfo was used (allowed in Vulkan 1.0).
+	// The pointer provided in app is persistent as long as StateReplayer lives.
+	// A physical device features 2 structure is also passed in, as it could affect compilation.
+	// For now, only robustBufferAccess is used. physical_device_features can also be nullptr, in
+	// which case the relevant feature robustBufferAccess is assumed to be turned off.
+	virtual void set_application_info(const VkApplicationInfo * /*app*/, const VkPhysicalDeviceFeatures2 * /*physical_device_features*/) {}
+
 	virtual bool enqueue_create_sampler(Hash index, const VkSamplerCreateInfo *create_info, VkSampler *sampler) = 0;
 	virtual bool enqueue_create_descriptor_set_layout(Hash index, const VkDescriptorSetLayoutCreateInfo *create_info, VkDescriptorSetLayout *layout) = 0;
 	virtual bool enqueue_create_pipeline_layout(Hash index, const VkPipelineLayoutCreateInfo *create_info, VkPipelineLayout *layout) = 0;
@@ -125,13 +135,18 @@ public:
 	virtual void wait_enqueue() {}
 };
 
-class ResolverInterface
+// This is an interface to interact with an external database for blob modules.
+// It is is a simple database with key + blob.
+class DatabaseInterface
 {
 public:
-	virtual ~ResolverInterface() = default;
-	virtual std::vector<uint8_t> resolve(Hash hash) {
-		return {};
-	}
+	virtual ~DatabaseInterface() = default;
+	void set_base_directory(const std::string &base);
+	virtual std::vector<uint8_t> read_entry(Hash hash);
+	virtual bool write_entry(Hash hash, const std::vector<uint8_t> &blob);
+
+protected:
+	std::string base_directory;
 };
 
 class StateReplayer
@@ -139,7 +154,7 @@ class StateReplayer
 public:
 	StateReplayer();
 	~StateReplayer();
-	void parse(StateCreatorInterface &iface, ResolverInterface &resolver, const void *buffer, size_t size);
+	void parse(StateCreatorInterface &iface, DatabaseInterface &database, const void *buffer, size_t size);
 	ScratchAllocator &get_allocator();
 
 private:
@@ -153,6 +168,12 @@ public:
 	StateRecorder();
 	~StateRecorder();
 	ScratchAllocator &get_allocator();
+
+	// These methods should only be called at the very beginning of the application lifetime.
+	// It will affect the hash of all create info structures.
+	void record_application_info(const VkApplicationInfo &info);
+	void record_physical_device_features(const VkPhysicalDeviceFeatures2 &device_features);
+	void record_physical_device_features(const VkPhysicalDeviceFeatures &device_features);
 
 	// TODO: create_device which can capture which features/exts are used to create the device.
 	// This can be relevant when using more exotic features.
@@ -174,12 +195,14 @@ public:
 	Hash get_hash_for_render_pass(VkRenderPass render_pass) const;
 	Hash get_hash_for_sampler(VkSampler sampler) const;
 
+	void base_hash(Hasher &hasher) const;
+
 	std::vector<uint8_t> serialize_graphics_pipeline(Hash hash) const;
 	std::vector<uint8_t> serialize_compute_pipeline(Hash hash) const;
 	std::vector<uint8_t> serialize_shader_module(Hash hash) const;
 	std::vector<uint8_t> serialize() const;
 
-	void init(const std::string &serialization_path);
+	void init(DatabaseInterface *iface);
 
 private:
 	struct Impl;
@@ -195,6 +218,9 @@ Hash compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 Hash compute_hash_compute_pipeline(const StateRecorder &recorder, const VkComputePipelineCreateInfo &create_info);
 Hash compute_hash_render_pass(const StateRecorder &recorder, const VkRenderPassCreateInfo &create_info);
 Hash compute_hash_sampler(const StateRecorder &recorder, const VkSamplerCreateInfo &create_info);
+
+Hash compute_hash_application_info(const VkApplicationInfo &info);
+Hash compute_hash_physical_device_features(const VkPhysicalDeviceFeatures2 &pdf);
 }
 
 }

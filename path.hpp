@@ -1,4 +1,4 @@
-/* Copyright (c) 2018 Hans-Kristian Arntzen
+/* Copyright (c) 2017-2019 Hans-Kristian Arntzen
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -21,42 +21,26 @@
  */
 
 #pragma once
+#include <string>
+#include <utility>
+#include <vector>
 
-#include "vulkan.h"
-#include "dispatch_helper.hpp"
-#include "fossilize.hpp"
-
-namespace Fossilize
+namespace Path
 {
-class Instance
-{
-public:
-	VkInstance getInstance()
-	{
-		return instance;
-	}
+std::string join(const std::string &base, const std::string &path);
+std::string basedir(const std::string &path);
+std::string basename(const std::string &path);
+std::pair<std::string, std::string> split(const std::string &path);
+std::string relpath(const std::string &base, const std::string &path);
+std::string ext(const std::string &path);
+std::pair<std::string, std::string> protocol_split(const std::string &path);
+bool is_abspath(const std::string &path);
+bool is_root_path(const std::string &path);
+std::string canonicalize_path(const std::string &path);
+std::string enforce_protocol(const std::string &path);
+std::string get_executable_path();
 
-	VkLayerInstanceDispatchTable *getTable()
-	{
-		return pTable;
-	}
-
-	void init(VkInstance instance, const VkApplicationInfo *pApp, VkLayerInstanceDispatchTable *pTable, PFN_vkGetInstanceProcAddr gpa);
-	PFN_vkVoidFunction getProcAddr(const char *pName)
-	{
-		return gpa(instance, pName);
-	}
-
-	const VkApplicationInfo *getApplicationInfo() const
-	{
-		return pAppInfo;
-	}
-
-private:
-	ScratchAllocator alloc;
-	VkApplicationInfo *pAppInfo = nullptr;
-	VkInstance instance = VK_NULL_HANDLE;
-	VkLayerInstanceDispatchTable *pTable = nullptr;
-	PFN_vkGetInstanceProcAddr gpa = nullptr;
-};
+std::vector<std::string> split(const std::string &str, const char *delim);
+std::vector<std::string> split_no_empty(const std::string &str, const char *delim);
+std::string strip_whitespace(const std::string &str);
 }

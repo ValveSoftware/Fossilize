@@ -28,11 +28,13 @@
 
 namespace Fossilize
 {
+class Instance;
 class Device
 {
 public:
 	void init(VkPhysicalDevice gpu, VkDevice device,
-	          VkLayerInstanceDispatchTable *pInstanceTable,
+	          Instance *pInstance,
+	          const VkPhysicalDeviceFeatures2 &features,
 	          VkLayerDispatchTable *pTable);
 
 	VkLayerDispatchTable *getTable()
@@ -43,17 +45,6 @@ public:
 	StateRecorder &getRecorder()
 	{
 		return recorder;
-	}
-
-	bool serializeToPath(const std::string &json_dir);
-	const std::string &getSerializationPath() const
-	{
-		return serializationPath;
-	}
-
-	bool isParanoid() const
-	{
-		return paranoidMode;
 	}
 
 	VkDevice getDevice() const
@@ -67,18 +58,13 @@ private:
 	VkLayerInstanceDispatchTable *pInstanceTable = nullptr;
 	VkLayerDispatchTable *pTable = nullptr;
 
+	DatabaseInterface iface;
 	StateRecorder recorder;
 
 #ifdef ANDROID
 	std::string serializationPath = "/sdcard/";
 #else
 	std::string serializationPath = "";
-#endif
-
-	bool paranoidMode = false;
-
-#ifndef _WIN32
-	void installSegfaultHandler();
 #endif
 };
 }

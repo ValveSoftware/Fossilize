@@ -1,9 +1,11 @@
 cmake_minimum_required(VERSION 3.8.2)
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_C_STANDARD 99)
 project(Fossilize LANGUAGES CXX C)
 
 if (CMAKE_COMPILER_IS_GNUCXX OR (${CMAKE_CXX_COMPILER_ID} MATCHES "Clang"))
+	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fvisibility=hidden")
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fvisibility=hidden")
 	set(FOSSILIZE_CXX_FLAGS -Wall -Wextra -Wno-missing-field-initializers -Wno-empty-body)
 elseif (MSVC)
 	set(FOSSILIZE_CXX_FLAGS /D_CRT_SECURE_NO_WARNINGS /D_SCL_SECURE_NO_WARNINGS /wd4267 /wd4244 /wd4309 /wd4005 /MP /DNOMINMAX)
@@ -22,9 +24,15 @@ if (FOSSILIZE_SANITIZE_THREADS)
 	set(FOSSILIZE_LINK_FLAGS ${FOSSILIZE_LINK_FLAGS} -fsanitize=thread)
 endif()
 
-add_library(fossilize STATIC fossilize.hpp fossilize.cpp varint.cpp varint.hpp)
+add_library(fossilize STATIC
+        fossilize.hpp fossilize.cpp
+        varint.cpp varint.hpp
+        path.hpp path.cpp)
 target_include_directories(fossilize PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_options(fossilize PUBLIC ${FOSSILIZE_CXX_FLAGS})
+if (NOT MSVC)
+    target_link_libraries(fossilize -pthread)
+endif()
 
 option(FOSSILIZE_VULKAN_LAYER "Build Vulkan layer." ON)
 if (FOSSILIZE_VULKAN_LAYER)

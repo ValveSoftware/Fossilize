@@ -26,19 +26,17 @@
 #include "instance.hpp"
 #include <mutex>
 
-#ifdef _MSC_VER // For SEH access violation handling.
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#include <excpt.h>
-#endif
-
 // VALVE: do exports without .def file, see vk_layer.h for definition on non-Windows platforms
 #ifdef _MSC_VER
 #undef VK_LAYER_EXPORT
-#define VK_LAYER_EXPORT extern "C" __declspec( dllexport )
+#define VK_LAYER_EXPORT extern "C" __declspec(dllexport)
 #endif
-VK_LAYER_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr( VkInstance instance, const char *pName );
-VK_LAYER_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr( VkDevice device, const char *pName );
+
+extern "C"
+{
+VK_LAYER_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instance, const char *pName);
+VK_LAYER_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkDevice device, const char *pName);
+}
 
 using namespace std;
 
@@ -52,10 +50,26 @@ static DeviceTable deviceDispatch;
 static unordered_map<void *, unique_ptr<Instance>> instanceData;
 static unordered_map<void *, unique_ptr<Device>> deviceData;
 
+static Device *get_device_layer(VkDevice device)
+{
+	// Need to hold a lock while querying the global hashmap, but not after it.
+	Device *layer = nullptr;
+	void *key = getDispatchKey(device);
+	lock_guard<mutex> holder{ globalLock };
+	layer = getLayerData(key, deviceData);
+	return layer;
+}
+
+static Instance *get_instance_layer(VkPhysicalDevice gpu)
+{
+	lock_guard<mutex> holder{ globalLock };
+	return getLayerData(getDispatchKey(gpu), instanceData);
+}
+
 static VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(VkPhysicalDevice gpu, const VkDeviceCreateInfo *pCreateInfo,
                                                    const VkAllocationCallbacks *pAllocator, VkDevice *pDevice)
 {
-	auto *layer = getLayerData(getDispatchKey(gpu), instanceData);
+	auto *layer = get_instance_layer(gpu);
 	auto *chainInfo = getChainInfo(pCreateInfo, VK_LAYER_LINK_INFO);
 
 	auto fpGetInstanceProcAddr = chainInfo->u.pLayerInfo->pfnNextGetInstanceProcAddr;
@@ -72,15 +86,28 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(VkPhysicalDevice gpu, const V
 	if (res != VK_SUCCESS)
 		return res;
 
-	auto *device = createLayerData(getDispatchKey(*pDevice), deviceData);
-	device->init(gpu, *pDevice, layer->getTable(), initDeviceTable(*pDevice, fpGetDeviceProcAddr, deviceDispatch));
+	// Build a physical device features 2 struct if we cannot find it in pCreateInfo.
+	auto *pdf2 = static_cast<const VkPhysicalDeviceFeatures2 *>(findpNext(pCreateInfo, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2));
+	VkPhysicalDeviceFeatures2 physicalDeviceFeatures2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+	if (!pdf2)
+	{
+		pdf2 = &physicalDeviceFeatures2;
+		if (pCreateInfo->pEnabledFeatures)
+			physicalDeviceFeatures2.features = *pCreateInfo->pEnabledFeatures;
+	}
+
+	{
+		lock_guard<mutex> holder{globalLock};
+		auto *device = createLayerData(getDispatchKey(*pDevice), deviceData);
+		device->init(gpu, *pDevice, layer, *pdf2, initDeviceTable(*pDevice, fpGetDeviceProcAddr, deviceDispatch));
+	}
+
 	return VK_SUCCESS;
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(const VkInstanceCreateInfo *pCreateInfo,
                                                      const VkAllocationCallbacks *pAllocator, VkInstance *pInstance)
 {
-	lock_guard<mutex> holder{ globalLock };
 	auto *chainInfo = getChainInfo(pCreateInfo, VK_LAYER_LINK_INFO);
 
 	auto fpGetInstanceProcAddr = chainInfo->u.pLayerInfo->pfnNextGetInstanceProcAddr;
@@ -93,9 +120,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(const VkInstanceCreateInfo 
 	if (res != VK_SUCCESS)
 		return res;
 
-	auto *layer = createLayerData(getDispatchKey(*pInstance), instanceData);
-	layer->init(*pInstance, initInstanceTable(*pInstance, fpGetInstanceProcAddr, instanceDispatch),
-	            fpGetInstanceProcAddr);
+	{
+		lock_guard<mutex> holder{globalLock};
+		auto *layer = createLayerData(getDispatchKey(*pInstance), instanceData);
+		layer->init(*pInstance, pCreateInfo->pApplicationInfo,
+		            initInstanceTable(*pInstance, fpGetInstanceProcAddr, instanceDispatch), fpGetInstanceProcAddr);
+	}
 
 	return VK_SUCCESS;
 }
@@ -110,71 +140,30 @@ static VKAPI_ATTR void VKAPI_CALL DestroyInstance(VkInstance instance, const VkA
 	destroyLayerData(key, instanceData);
 }
 
-#ifdef _MSC_VER
-static int filterSEHException(int code)
-{
-	return code == EXCEPTION_ACCESS_VIOLATION ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH;
-}
-#endif
-
-static VkResult createGraphicsPipeline(Device *device, VkPipelineCache pipelineCache,
-                                       const VkGraphicsPipelineCreateInfo *pCreateInfo,
-                                       const VkAllocationCallbacks *pCallbacks,
-                                       VkPipeline *pipeline)
-{
-#ifdef _MSC_VER // Dunno how to do SIGSEGV handling on Windows, so ad-hoc SEH it is. This isn't supported on MinGW, so just MSVC for now.
-	__try
-#endif
-	{
-		return device->getTable()->CreateGraphicsPipelines(device->getDevice(), pipelineCache, 1, pCreateInfo, pCallbacks, pipeline);
-	}
-#ifdef _MSC_VER
-	__except (filterSEHException(GetExceptionCode()))
-	{
-		LOGE("Caught access violation in vkCreateGraphicsPipelines(), safety serialization before terminating ...\n");
-
-		std::terminate();
-	}
-#endif
-}
-
-static VkResult createComputePipeline(Device *device, VkPipelineCache pipelineCache,
-                                      const VkComputePipelineCreateInfo *pCreateInfo,
-                                      const VkAllocationCallbacks *pCallbacks,
-                                      VkPipeline *pipeline)
-{
-#ifdef _MSC_VER // Dunno how to do SIGSEGV handling on Windows, so ad-hoc SEH it is. This isn't supported on MinGW, so just MSVC for now.
-	__try
-#endif
-	{
-		return device->getTable()->CreateComputePipelines(device->getDevice(), pipelineCache, 1, pCreateInfo, pCallbacks, pipeline);
-	}
-#ifdef _MSC_VER
-	__except (filterSEHException(GetExceptionCode()))
-	{
-		LOGE("Caught access violation in vkCreateComputePipelines(), safety serialization before terminating ...\n");
-
-		std::terminate();
-	}
-#endif
-}
-
 static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
                                                               uint32_t createInfoCount,
                                                               const VkGraphicsPipelineCreateInfo *pCreateInfos,
                                                               const VkAllocationCallbacks *pAllocator,
                                                               VkPipeline *pPipelines)
 {
-	// VALVE: lock is held in recorder, no need for lock here: lock_guard<mutex> holder{ globalLock };
-	void *key = getDispatchKey(device);
-	auto *layer = getLayerData(key, deviceData);
+	auto *layer = get_device_layer(device);
 
 	for (uint32_t i = 0; i < createInfoCount; i++)
 	{
-		auto res = createGraphicsPipeline(layer, pipelineCache, &pCreateInfos[i], pAllocator, &pPipelines[i]);
+		auto res = layer->getTable()->CreateGraphicsPipelines(layer->getDevice(), pipelineCache, 1, &pCreateInfos[i], pAllocator, &pPipelines[i]);
 
 		if (res == VK_SUCCESS)
-			layer->getRecorder().record_graphics_pipeline(pPipelines[i], pCreateInfos[i]);
+		{
+			try
+			{
+				// Record methods may throw on unexpected input. We cannot propagate this error up.
+				layer->getRecorder().record_graphics_pipeline(pPipelines[i], pCreateInfos[i]);
+			}
+			catch (const std::exception &e)
+			{
+				LOGE("Failed to record graphics pipeline: %s\n", e.what());
+			}
+		}
 		else
 			return res;
 	}
@@ -188,16 +177,24 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelines(VkDevice device, Vk
                                                              const VkAllocationCallbacks *pAllocator,
                                                              VkPipeline *pPipelines)
 {
-	// VALVE: lock is held in recorder, no need for lock here: lock_guard<mutex> holder{ globalLock };
-	void *key = getDispatchKey(device);
-	auto *layer = getLayerData(key, deviceData);
+	auto *layer = get_device_layer(device);
 
 	for (uint32_t i = 0; i < createInfoCount; i++)
 	{
-		auto res = createComputePipeline(layer, pipelineCache, &pCreateInfos[i], pAllocator, &pPipelines[i]);
+		auto res = layer->getTable()->CreateComputePipelines(layer->getDevice(), pipelineCache, 1, &pCreateInfos[i], pAllocator, &pPipelines[i]);
 
 		if (res == VK_SUCCESS)
-			layer->getRecorder().record_compute_pipeline(pPipelines[i], pCreateInfos[i]);
+		{
+			try
+			{
+				// Record methods may throw on unexpected input. We cannot propagate this error up.
+				layer->getRecorder().record_compute_pipeline(pPipelines[i], pCreateInfos[i]);
+			}
+			catch (const std::exception &e)
+			{
+				LOGE("Failed to record compute pipeline: %s\n", e.what());
+			}
+		}
 		else
 			return res;
 	}
@@ -210,14 +207,22 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(VkDevice device,
                                                            const VkAllocationCallbacks *pAllocator,
                                                            VkPipelineLayout *pLayout)
 {
-	lock_guard<mutex> holder{ globalLock };
-	void *key = getDispatchKey(device);
-	auto *layer = getLayerData(key, deviceData);
+	auto *layer = get_device_layer(device);
 
 	VkResult result = layer->getTable()->CreatePipelineLayout(device, pCreateInfo, pAllocator, pLayout);
 
 	if (result == VK_SUCCESS)
-		layer->getRecorder().record_pipeline_layout(*pLayout, *pCreateInfo);
+	{
+		try
+		{
+			// Record methods may throw on unexpected input. We cannot propagate this error up.
+			layer->getRecorder().record_pipeline_layout(*pLayout, *pCreateInfo);
+		}
+		catch (const std::exception &e)
+		{
+			LOGE("Failed to record pipeline layout: %s\n", e.what());
+		}
+	}
 	return result;
 }
 
@@ -226,14 +231,22 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(VkDevice device,
                                                                 const VkAllocationCallbacks *pAllocator,
                                                                 VkDescriptorSetLayout *pSetLayout)
 {
-	lock_guard<mutex> holder{ globalLock };
-	void *key = getDispatchKey(device);
-	auto *layer = getLayerData(key, deviceData);
+	auto *layer = get_device_layer(device);
 
 	VkResult result = layer->getTable()->CreateDescriptorSetLayout(device, pCreateInfo, pAllocator, pSetLayout);
 
 	if (result == VK_SUCCESS)
-		layer->getRecorder().record_descriptor_set_layout(*pSetLayout, *pCreateInfo);
+	{
+		try
+		{
+			// Record methods may throw on unexpected input. We cannot propagate this error up.
+			layer->getRecorder().record_descriptor_set_layout(*pSetLayout, *pCreateInfo);
+		}
+		catch (const std::exception &e)
+		{
+			LOGE("Failed to record descriptor set layout: %s\n", e.what());
+		}
+	}
 	return result;
 }
 
@@ -270,14 +283,21 @@ static VKAPI_ATTR void VKAPI_CALL DestroyDevice(VkDevice device, const VkAllocat
 static VKAPI_ATTR VkResult VKAPI_CALL CreateSampler(VkDevice device, const VkSamplerCreateInfo *pCreateInfo,
                                                     const VkAllocationCallbacks *pCallbacks, VkSampler *pSampler)
 {
-	lock_guard<mutex> holder{ globalLock };
-	void *key = getDispatchKey(device);
-	auto *layer = getLayerData(key, deviceData);
-
+	auto *layer = get_device_layer(device);
 	auto res = layer->getTable()->CreateSampler(device, pCreateInfo, pCallbacks, pSampler);
 
 	if (res == VK_SUCCESS)
-		layer->getRecorder().record_sampler(*pSampler, *pCreateInfo);
+	{
+		try
+		{
+			// Record methods may throw on unexpected input. We cannot propagate this error up.
+			layer->getRecorder().record_sampler(*pSampler, *pCreateInfo);
+		}
+		catch (const std::exception &e)
+		{
+			LOGE("Failed to record sampler: %s\n", e.what());
+		}
+	}
 
 	return res;
 }
@@ -286,16 +306,24 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateShaderModule(VkDevice device, const 
                                                          const VkAllocationCallbacks *pCallbacks,
                                                          VkShaderModule *pShaderModule)
 {
-	lock_guard<mutex> holder{ globalLock };
-	void *key = getDispatchKey(device);
-	auto *layer = getLayerData(key, deviceData);
+	auto *layer = get_device_layer(device);
 
 	*pShaderModule = VK_NULL_HANDLE;
 
 	auto res = layer->getTable()->CreateShaderModule(device, pCreateInfo, pCallbacks, pShaderModule);
 
 	if (res == VK_SUCCESS)
-		layer->getRecorder().record_shader_module(*pShaderModule, *pCreateInfo);
+	{
+		try
+		{
+			// Record methods may throw on unexpected input. We cannot propagate this error up.
+			layer->getRecorder().record_shader_module(*pShaderModule, *pCreateInfo);
+		}
+		catch (const std::exception &e)
+		{
+			LOGE("Failed to record shader module: %s\n", e.what());
+		}
+	}
 
 	return res;
 }
@@ -303,14 +331,22 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateShaderModule(VkDevice device, const 
 static VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass(VkDevice device, const VkRenderPassCreateInfo *pCreateInfo,
                                                        const VkAllocationCallbacks *pCallbacks, VkRenderPass *pRenderPass)
 {
-	lock_guard<mutex> holder{ globalLock };
-	void *key = getDispatchKey(device);
-	auto *layer = getLayerData(key, deviceData);
+	auto *layer = get_device_layer(device);
 
 	auto res = layer->getTable()->CreateRenderPass(device, pCreateInfo, pCallbacks, pRenderPass);
 
 	if (res == VK_SUCCESS)
-		layer->getRecorder().record_render_pass(*pRenderPass, *pCreateInfo);
+	{
+		try
+		{
+			// Record methods may throw on unexpected input. We cannot propagate this error up.
+			layer->getRecorder().record_render_pass(*pRenderPass, *pCreateInfo);
+		}
+		catch (const std::exception &e)
+		{
+			LOGE("Failed to record render pass: %s\n", e.what());
+		}
+	}
 	return res;
 }
 
@@ -341,22 +377,26 @@ static PFN_vkVoidFunction interceptCoreDeviceCommand(const char *pName)
 }
 
 using namespace Fossilize;
+
+extern "C"
+{
 VK_LAYER_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkDevice device, const char *pName)
 {
-	lock_guard<mutex> holder{ globalLock };
-
 	auto proc = interceptCoreDeviceCommand(pName);
 	if (proc)
 		return proc;
 
-	auto *layer = getLayerData(getDispatchKey(device), deviceData);
+	Device *layer = nullptr;
+	{
+		lock_guard<mutex> holder{globalLock};
+		layer = getLayerData(getDispatchKey(device), deviceData);
+	}
+
 	return layer->getTable()->GetDeviceProcAddr(device, pName);
 }
 
 VK_LAYER_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instance, const char *pName)
 {
-	lock_guard<mutex> holder{ globalLock };
-
 	auto proc = interceptCoreInstanceCommand(pName);
 	if (proc)
 		return proc;
@@ -365,16 +405,22 @@ VK_LAYER_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(V
 	if (proc)
 		return proc;
 
-	auto *layer = getLayerData(getDispatchKey(instance), instanceData);
+	Instance *layer = nullptr;
+	{
+		lock_guard<mutex> holder{globalLock};
+		layer = getLayerData(getDispatchKey(instance), instanceData);
+	}
+
 	return layer->getProcAddr(pName);
 }
 
 static const VkLayerProperties layerProps[] = {
-	{ VK_LAYER_steam_fossilize, VK_MAKE_VERSION(1, 0, 70), 1, "Fossilize capture layer" },
+	{ VK_LAYER_steam_fossilize, VK_MAKE_VERSION(1, 1, 98), 1, "Fossilize capture layer" },
 };
 
-VK_LAYER_EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceExtensionProperties(const char *pLayerName, uint32_t *pPropertyCount,
-                                                                      VkExtensionProperties *pProperties)
+VK_LAYER_EXPORT VKAPI_ATTR VkResult VKAPI_CALL
+vkEnumerateInstanceExtensionProperties(const char *pLayerName, uint32_t *pPropertyCount,
+                                       VkExtensionProperties *pProperties)
 {
 	if (!pLayerName || strcmp(pLayerName, layerProps[0].layerName))
 		return VK_ERROR_LAYER_NOT_PRESENT;
@@ -389,9 +435,10 @@ VK_LAYER_EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceExtensionPrope
 	return VK_SUCCESS;
 }
 
-VK_LAYER_EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(VkPhysicalDevice, const char *pLayerName,
-                                                                    uint32_t *pPropertyCount,
-                                                                    VkExtensionProperties *pProperties)
+VK_LAYER_EXPORT VKAPI_ATTR VkResult VKAPI_CALL
+vkEnumerateDeviceExtensionProperties(VkPhysicalDevice, const char *pLayerName,
+                                     uint32_t *pPropertyCount,
+                                     VkExtensionProperties *pProperties)
 {
 	if (pLayerName && !strcmp(pLayerName, layerProps[0].layerName))
 	{
@@ -405,7 +452,7 @@ VK_LAYER_EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionPropert
 }
 
 VK_LAYER_EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceLayerProperties(uint32_t *pPropertyCount,
-                                                                  VkLayerProperties *pProperties)
+                                                                                  VkLayerProperties *pProperties)
 {
 	if (pProperties)
 	{
@@ -422,8 +469,9 @@ VK_LAYER_EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceLayerPropertie
 	}
 }
 
-VK_LAYER_EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceLayerProperties(VkPhysicalDevice, uint32_t *pPropertyCount,
-                                                                VkLayerProperties *pProperties)
+VK_LAYER_EXPORT VKAPI_ATTR VkResult VKAPI_CALL
+vkEnumerateDeviceLayerProperties(VkPhysicalDevice, uint32_t *pPropertyCount,
+                                 VkLayerProperties *pProperties)
 {
 	if (pProperties)
 	{
@@ -438,4 +486,5 @@ VK_LAYER_EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceLayerProperties(
 		*pPropertyCount = sizeof(layerProps) / sizeof(VkLayerProperties);
 		return VK_SUCCESS;
 	}
+}
 }
