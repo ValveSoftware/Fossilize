@@ -13,3 +13,6 @@
 [submodule "cli/SPIRV-Headers"]
 	path = cli/SPIRV-Headers
 	url = git://github.com/KhronosGroup/SPIRV-Headers
+[submodule "cli/dirent"]
+	path = cli/dirent
+	url = git://github.com/tronkko/dirent
