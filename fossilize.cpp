@@ -153,7 +153,7 @@ struct StateReplayer::Impl
 	void parse_render_passes(StateCreatorInterface &iface, const Value &passes);
 	void parse_compute_pipelines(StateCreatorInterface &iface, DatabaseInterface &resolver, const Value &pipelines);
 	void parse_graphics_pipelines(StateCreatorInterface &iface, DatabaseInterface &resolver, const Value &pipelines);
-	void parse_application_info(StateCreatorInterface &iface, const Value &app_info);
+	void parse_application_info(StateCreatorInterface &iface, const Value &app_info, const Value &pdf_info);
 	VkPushConstantRange *parse_push_constant_ranges(const Value &ranges);
 	VkDescriptorSetLayout *parse_set_layouts(const Value &layouts);
 	VkDescriptorSetLayoutBinding *parse_descriptor_set_bindings(const Value &bindings);
@@ -1016,9 +1016,10 @@ void StateReplayer::Impl::parse_descriptor_set_layouts(StateCreatorInterface &if
 	iface.wait_enqueue();
 }
 
-void StateReplayer::Impl::parse_application_info(StateCreatorInterface &iface, const Value &app_info)
+void StateReplayer::Impl::parse_application_info(StateCreatorInterface &iface, const Value &app_info, const Value &pdf_info)
 {
 	auto *app = allocator.allocate_cleared<VkApplicationInfo>();
+	app->sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
 	app->apiVersion = app_info["apiVersion"].GetUint();
 	app->applicationVersion = app_info["applicationVersion"].GetUint();
 	app->engineVersion = app_info["engineVersion"].GetUint();
@@ -1039,7 +1040,11 @@ void StateReplayer::Impl::parse_application_info(StateCreatorInterface &iface, c
 		app->pEngineName = name;
 	}
 
-	iface.set_application_info(app);
+	auto *pdf = allocator.allocate_cleared<VkPhysicalDeviceFeatures2>();
+	pdf->sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+	pdf->features.robustBufferAccess = pdf_info["robustBufferAccess"].GetUint();
+
+	iface.set_application_info(app, pdf);
 }
 
 void StateReplayer::Impl::parse_samplers(StateCreatorInterface &iface, const Value &samplers)
@@ -1730,10 +1735,10 @@ void StateReplayer::Impl::parse(StateCreatorInterface &iface, DatabaseInterface 
 	if (doc["version"].GetInt() != FOSSILIZE_FORMAT_VERSION)
 		FOSSILIZE_THROW("JSON version mismatches.");
 
-	if (doc.HasMember("applicationInfo"))
-		parse_application_info(iface, doc["applicationInfo"]);
+	if (doc.HasMember("applicationInfo") && doc.HasMember("physicalDeviceFeatures"))
+		parse_application_info(iface, doc["applicationInfo"], doc["physicalDeviceFeatures"]);
 	else
-		iface.set_application_info(nullptr);
+		iface.set_application_info(nullptr, nullptr);
 
 	if (doc.HasMember("shaderModules"))
 		parse_shader_modules(iface, doc["shaderModules"]);

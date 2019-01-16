@@ -216,7 +216,10 @@ bool VulkanDevice::init_device(const Options &opts)
 
 	// FIXME: Have some way to enable the right features that a repro-capture may want to use.
 	// FIXME: It is unlikely any feature other than robust access has any real impact on code-gen, but who knows.
-	gpu_features.robustBufferAccess = VK_FALSE;
+	if (gpu_features.robustBufferAccess && opts.features && opts.features->features.robustBufferAccess)
+		gpu_features.robustBufferAccess = VK_TRUE;
+	else
+		gpu_features.robustBufferAccess = VK_FALSE;
 
 	// Just pick one graphics queue.
 	// FIXME: Does shader compilation depend on which queues we have enabled?

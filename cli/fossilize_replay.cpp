@@ -243,7 +243,7 @@ public:
 				vkDestroyPipeline(device.get_device(), pipeline.second, nullptr);
 	}
 
-	void set_application_info(const VkApplicationInfo *app) override
+	void set_application_info(const VkApplicationInfo *app, const VkPhysicalDeviceFeatures2 *features) override
 	{
 		// TODO: Could use this to create multiple VkDevices for replay as necessary if app changes.
 
@@ -252,6 +252,7 @@ public:
 			// Now we can init the device with correct app info.
 			device_was_init = true;
 			device_opts.application_info = app;
+			device_opts.features = features;
 			if (!device.init_device(device_opts))
 			{
 				LOGE("Failed to create Vulkan device, bailing ...\n");

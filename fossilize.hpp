@@ -118,7 +118,10 @@ public:
 	// All future calls to enqueue_create_* were created using this application info.
 	// app can be nullptr, in which case no pApplicationInfo was used (allowed in Vulkan 1.0).
 	// The pointer provided in app is persistent as long as StateReplayer lives.
-	virtual void set_application_info(const VkApplicationInfo * /*app*/) {}
+	// A physical device features 2 structure is also passed in, as it could affect compilation.
+	// For now, only robustBufferAccess is used. physical_device_features can also be nullptr, in
+	// which case the relevant feature robustBufferAccess is assumed to be turned off.
+	virtual void set_application_info(const VkApplicationInfo * /*app*/, const VkPhysicalDeviceFeatures2 * /*physical_device_features*/) {}
 
 	virtual bool enqueue_create_sampler(Hash index, const VkSamplerCreateInfo *create_info, VkSampler *sampler) = 0;
 	virtual bool enqueue_create_descriptor_set_layout(Hash index, const VkDescriptorSetLayoutCreateInfo *create_info, VkDescriptorSetLayout *layout) = 0;
