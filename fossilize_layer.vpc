@@ -68,8 +68,10 @@ $Project "fossilize_layer"
 	$Folder "fossilize"
 	{
 		$File ".\fossilize.cpp"
+		$File ".\path.cpp"
 		$File ".\varint.cpp"
 		$File ".\fossilize.hpp"
+		$File ".\path.hpp"
 		$File ".\varint.hpp"
 	}
 }
