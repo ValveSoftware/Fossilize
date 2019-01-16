@@ -217,6 +217,8 @@ struct StateRecorder::Impl
 
 	VkApplicationInfo *application_info = nullptr;
 	VkPhysicalDeviceFeatures2 *physical_device_features = nullptr;
+	Hash application_info_hash = 0;
+	Hash physical_device_features_hash = 0;
 
 	VkDescriptorSetLayoutCreateInfo *copy_descriptor_set_layout(const VkDescriptorSetLayoutCreateInfo *create_info, ScratchAllocator &alloc);
 	VkPipelineLayoutCreateInfo *copy_pipeline_layout(const VkPipelineLayoutCreateInfo *create_info, ScratchAllocator &alloc);
@@ -267,9 +269,37 @@ static inline T api_object_cast(U obj)
 
 namespace Hashing
 {
-Hash compute_hash_sampler(const StateRecorder &, const VkSamplerCreateInfo &sampler)
+Hash compute_hash_application_info(const VkApplicationInfo &info)
 {
 	Hasher h;
+	h.u32(info.applicationVersion);
+	h.u32(info.apiVersion);
+	h.u32(info.engineVersion);
+
+	if (info.pApplicationName)
+		h.string(info.pApplicationName);
+	else
+		h.u32(0);
+
+	if (info.pEngineName)
+		h.string(info.pEngineName);
+	else
+		h.u32(0);
+
+	return h.get();
+}
+
+Hash compute_hash_physical_device_features(const VkPhysicalDeviceFeatures2 &pdf)
+{
+	Hasher h;
+	h.u32(pdf.features.robustBufferAccess);
+	return h.get();
+}
+
+Hash compute_hash_sampler(const StateRecorder &recorder, const VkSamplerCreateInfo &sampler)
+{
+	Hasher h;
+	recorder.base_hash(h);
 
 	h.u32(sampler.flags);
 	h.f32(sampler.maxAnisotropy);
@@ -294,6 +324,7 @@ Hash compute_hash_sampler(const StateRecorder &, const VkSamplerCreateInfo &samp
 Hash compute_hash_descriptor_set_layout(const StateRecorder &recorder, const VkDescriptorSetLayoutCreateInfo &layout)
 {
 	Hasher h;
+	recorder.base_hash(h);
 
 	h.u32(layout.bindingCount);
 	h.u32(layout.flags);
@@ -320,6 +351,7 @@ Hash compute_hash_descriptor_set_layout(const StateRecorder &recorder, const VkD
 Hash compute_hash_pipeline_layout(const StateRecorder &recorder, const VkPipelineLayoutCreateInfo &layout)
 {
 	Hasher h;
+	recorder.base_hash(h);
 
 	h.u32(layout.setLayoutCount);
 	for (uint32_t i = 0; i < layout.setLayoutCount; i++)
@@ -344,9 +376,11 @@ Hash compute_hash_pipeline_layout(const StateRecorder &recorder, const VkPipelin
 	return h.get();
 }
 
-Hash compute_hash_shader_module(const StateRecorder &, const VkShaderModuleCreateInfo &create_info)
+Hash compute_hash_shader_module(const StateRecorder &recorder, const VkShaderModuleCreateInfo &create_info)
 {
 	Hasher h;
+	recorder.base_hash(h);
+
 	h.data(create_info.pCode, create_info.codeSize);
 	h.u32(create_info.flags);
 	return h.get();
@@ -368,6 +402,7 @@ static void hash_specialization_info(Hasher &h, const VkSpecializationInfo &spec
 Hash compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraphicsPipelineCreateInfo &create_info)
 {
 	Hasher h;
+	recorder.base_hash(h);
 
 	h.u32(create_info.flags);
 
@@ -669,6 +704,7 @@ Hash compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 Hash compute_hash_compute_pipeline(const StateRecorder &recorder, const VkComputePipelineCreateInfo &create_info)
 {
 	Hasher h;
+	recorder.base_hash(h);
 
 	h.u64(recorder.get_hash_for_pipeline_layout(create_info.layout));
 	h.u32(create_info.flags);
@@ -759,9 +795,10 @@ static void hash_subpass(Hasher &h, const VkSubpassDescription &subpass)
 		h.u32(0);
 }
 
-Hash compute_hash_render_pass(const StateRecorder &, const VkRenderPassCreateInfo &create_info)
+Hash compute_hash_render_pass(const StateRecorder &recorder, const VkRenderPassCreateInfo &create_info)
 {
 	Hasher h;
+	recorder.base_hash(h);
 
 	h.u32(create_info.attachmentCount);
 	h.u32(create_info.dependencyCount);
@@ -1871,6 +1908,7 @@ void StateRecorder::record_application_info(const VkApplicationInfo &info)
 		FOSSILIZE_THROW("pNext in VkApplicationInfo not supported.");
 	std::lock_guard<std::mutex> lock(impl->record_lock);
 	impl->application_info = impl->copy_application_info(&info, impl->allocator);
+	impl->application_info_hash = Hashing::compute_hash_application_info(*impl->application_info);
 }
 
 void StateRecorder::record_physical_device_features(const VkPhysicalDeviceFeatures2 &device_features)
@@ -1878,6 +1916,7 @@ void StateRecorder::record_physical_device_features(const VkPhysicalDeviceFeatur
 	// We just ignore pNext, but it's okay to keep it. We will not need to serialize it for now.
 	std::lock_guard<std::mutex> lock(impl->record_lock);
 	impl->physical_device_features = impl->copy_physical_device_features(&device_features, impl->allocator);
+	impl->physical_device_features_hash = Hashing::compute_hash_physical_device_features(*impl->physical_device_features);
 }
 
 void StateRecorder::record_physical_device_features(const VkPhysicalDeviceFeatures &device_features)
@@ -1885,6 +1924,13 @@ void StateRecorder::record_physical_device_features(const VkPhysicalDeviceFeatur
 	VkPhysicalDeviceFeatures2 features = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
 	features.features = device_features;
 	record_physical_device_features(features);
+}
+
+void StateRecorder::base_hash(Hasher &hasher) const
+{
+	// This makes it so two different applications won't conflict if they use the same pipelines.
+	hasher.u64(impl->application_info_hash);
+	hasher.u64(impl->physical_device_features_hash);
 }
 
 void StateRecorder::record_sampler(VkSampler sampler, const VkSamplerCreateInfo &create_info)

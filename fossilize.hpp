@@ -54,6 +54,8 @@ private:
 
 using Hash = uint64_t;
 
+class Hasher;
+
 class ScratchAllocator
 {
 public:
@@ -167,6 +169,8 @@ public:
 	~StateRecorder();
 	ScratchAllocator &get_allocator();
 
+	// These methods should only be called at the very beginning of the application lifetime.
+	// It will affect the hash of all create info structures.
 	void record_application_info(const VkApplicationInfo &info);
 	void record_physical_device_features(const VkPhysicalDeviceFeatures2 &device_features);
 	void record_physical_device_features(const VkPhysicalDeviceFeatures &device_features);
@@ -191,6 +195,8 @@ public:
 	Hash get_hash_for_render_pass(VkRenderPass render_pass) const;
 	Hash get_hash_for_sampler(VkSampler sampler) const;
 
+	void base_hash(Hasher &hasher) const;
+
 	std::vector<uint8_t> serialize_graphics_pipeline(Hash hash) const;
 	std::vector<uint8_t> serialize_compute_pipeline(Hash hash) const;
 	std::vector<uint8_t> serialize_shader_module(Hash hash) const;
@@ -212,6 +218,9 @@ Hash compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 Hash compute_hash_compute_pipeline(const StateRecorder &recorder, const VkComputePipelineCreateInfo &create_info);
 Hash compute_hash_render_pass(const StateRecorder &recorder, const VkRenderPassCreateInfo &create_info);
 Hash compute_hash_sampler(const StateRecorder &recorder, const VkSamplerCreateInfo &create_info);
+
+Hash compute_hash_application_info(const VkApplicationInfo &info);
+Hash compute_hash_physical_device_features(const VkPhysicalDeviceFeatures2 &pdf);
 }
 
 }
