@@ -209,10 +209,10 @@ public:
 		}
 	}
 
-	DumbReplayer(const VulkanDevice::Options &device_opts, const Options &opts,
+	DumbReplayer(const VulkanDevice::Options &device_opts_, const Options &opts_,
 	             const unordered_set<unsigned> &graphics,
 	             const unordered_set<unsigned> &compute)
-		: opts(opts), filter_graphics(graphics), filter_compute(compute), numWorkerThreads( opts.num_threads ), nLoopCount( opts.loop_count ),bShuttingDown( false ), device_opts(device_opts)
+		: opts(opts_), filter_graphics(graphics), filter_compute(compute), numWorkerThreads( opts.num_threads ), nLoopCount( opts.loop_count ),bShuttingDown( false ), device_opts(device_opts_)
 	{
 	}
 

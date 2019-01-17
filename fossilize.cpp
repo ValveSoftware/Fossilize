@@ -54,8 +54,8 @@ enum
 class Hasher
 {
 public:
-	explicit Hasher(Hash h)
-		: h(h)
+	explicit Hasher(Hash h_)
+		: h(h_)
 	{
 	}
 
@@ -2330,9 +2330,9 @@ void StateRecorder::Impl::remap_descriptor_set_layout_ci(VkDescriptorSetLayoutCr
 		    (b.descriptorType == VK_DESCRIPTOR_TYPE_SAMPLER ||
 		     b.descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER))
 		{
-			auto *samplers = const_cast<VkSampler *>(b.pImmutableSamplers);
+			auto *immutable_samplers = const_cast<VkSampler *>(b.pImmutableSamplers);
 			for (uint32_t j = 0; j < b.descriptorCount; j++)
-				samplers[j] = remap_sampler_handle(samplers[j]);
+				immutable_samplers[j] = remap_sampler_handle(immutable_samplers[j]);
 		}
 	}
 }
@@ -2724,8 +2724,8 @@ static Value json_value(const VkShaderModuleCreateInfo& module, Allocator& alloc
 template <typename Allocator>
 static Value json_value(const VkRenderPassCreateInfo& pass, Allocator& alloc)
 {
-	Value p(kObjectType);
-	p.AddMember("flags", pass.flags, alloc);
+	Value json_object(kObjectType);
+	json_object.AddMember("flags", pass.flags, alloc);
 
 	Value deps(kArrayType);
 	Value subpasses(kArrayType);
@@ -2746,7 +2746,7 @@ static Value json_value(const VkRenderPassCreateInfo& pass, Allocator& alloc)
 			dep.AddMember("srcSubpass", d.srcSubpass, alloc);
 			deps.PushBack(dep, alloc);
 		}
-		p.AddMember("dependencies", deps, alloc);
+		json_object.AddMember("dependencies", deps, alloc);
 	}
 
 	if (pass.pAttachments)
@@ -2768,7 +2768,7 @@ static Value json_value(const VkRenderPassCreateInfo& pass, Allocator& alloc)
 
 			attachments.PushBack(att, alloc);
 		}
-		p.AddMember("attachments", attachments, alloc);
+		json_object.AddMember("attachments", attachments, alloc);
 	}
 
 	for (uint32_t i = 0; i < pass.subpassCount; i++)
@@ -2838,8 +2838,8 @@ static Value json_value(const VkRenderPassCreateInfo& pass, Allocator& alloc)
 
 		subpasses.PushBack(p, alloc);
 	}
-	p.AddMember("subpasses", subpasses, alloc);
-	return p;
+	json_object.AddMember("subpasses", subpasses, alloc);
+	return json_object;
 }
 
 template <typename Allocator>
@@ -3107,9 +3107,9 @@ static Value json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& all
 						   encode_base64(s.pSpecializationInfo->pData,
 										 s.pSpecializationInfo->dataSize), alloc);
 			Value map_entries(kArrayType);
-			for (uint32_t i = 0; i < s.pSpecializationInfo->mapEntryCount; i++)
+			for (uint32_t j = 0; j < s.pSpecializationInfo->mapEntryCount; j++)
 			{
-				auto &e = s.pSpecializationInfo->pMapEntries[i];
+				auto &e = s.pSpecializationInfo->pMapEntries[j];
 				Value map_entry(kObjectType);
 				map_entry.AddMember("offset", e.offset, alloc);
 				map_entry.AddMember("size", e.size, alloc);

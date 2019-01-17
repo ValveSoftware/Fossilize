@@ -45,8 +45,8 @@ using namespace std;
 using namespace Fossilize;
 struct DisasmReplayer : StateCreatorInterface
 {
-	DisasmReplayer(const VulkanDevice *device)
-		: device(device)
+	DisasmReplayer(const VulkanDevice *device_)
+		: device(device_)
 	{
 		if (device)
 		{

@@ -24,11 +24,11 @@
 
 namespace Fossilize
 {
-void Instance::init(VkInstance instance, const VkApplicationInfo *pApp, VkLayerInstanceDispatchTable *pTable, PFN_vkGetInstanceProcAddr gpa)
+void Instance::init(VkInstance instance_, const VkApplicationInfo *pApp, VkLayerInstanceDispatchTable *pTable_, PFN_vkGetInstanceProcAddr gpa_)
 {
-	this->instance = instance;
-	this->pTable = pTable;
-	this->gpa = gpa;
+	instance = instance_;
+	pTable = pTable_;
+	gpa = gpa_;
 
 	// pNext in appInfo is not supported.
 	if (pApp && !pApp->pNext)

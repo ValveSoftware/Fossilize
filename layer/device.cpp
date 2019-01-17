@@ -60,14 +60,14 @@ static std::string getSystemProperty(const char *key)
 }
 #endif
 
-void Device::init(VkPhysicalDevice gpu, VkDevice device, Instance *pInstance,
+void Device::init(VkPhysicalDevice gpu_, VkDevice device_, Instance *pInstance,
                   const VkPhysicalDeviceFeatures2 &features,
-                  VkLayerDispatchTable *pTable)
+                  VkLayerDispatchTable *pTable_)
 {
-	this->gpu = gpu;
-	this->device = device;
-	this->pInstanceTable = pInstance->getTable();
-	this->pTable = pTable;
+	gpu = gpu_;
+	device = device_;
+	pInstanceTable = pInstance->getTable();
+	pTable = pTable_;
 
 #ifdef ANDROID
 	auto logPath = getSystemProperty("debug.fossilize.dump_path");
