@@ -1055,33 +1055,38 @@ void StateReplayer::Impl::parse_descriptor_set_layouts(StateCreatorInterface &if
 
 void StateReplayer::Impl::parse_application_info(StateCreatorInterface &iface, const Value &app_info, const Value &pdf_info)
 {
-	auto *app = allocator.allocate_cleared<VkApplicationInfo>();
-	app->sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-	app->apiVersion = app_info["apiVersion"].GetUint();
-	app->applicationVersion = app_info["applicationVersion"].GetUint();
-	app->engineVersion = app_info["engineVersion"].GetUint();
-
-	if (app_info.HasMember("applicationName"))
+	if (app_info.HasMember("apiVersion") && pdf_info.HasMember("robustBufferAccess"))
 	{
-		auto len = app_info["applicationName"].GetStringLength();
-		char *name = allocator.allocate_n_cleared<char>(len + 1);
-		memcpy(name, app_info["applicationName"].GetString(), len);
-		app->pApplicationName = name;
+		auto *app = allocator.allocate_cleared<VkApplicationInfo>();
+		app->sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+		app->apiVersion = app_info["apiVersion"].GetUint();
+		app->applicationVersion = app_info["applicationVersion"].GetUint();
+		app->engineVersion = app_info["engineVersion"].GetUint();
+
+		if (app_info.HasMember("applicationName"))
+		{
+			auto len = app_info["applicationName"].GetStringLength();
+			char *name = allocator.allocate_n_cleared<char>(len + 1);
+			memcpy(name, app_info["applicationName"].GetString(), len);
+			app->pApplicationName = name;
+		}
+
+		if (app_info.HasMember("engineName"))
+		{
+			auto len = app_info["engineName"].GetStringLength();
+			char *name = allocator.allocate_n_cleared<char>(len + 1);
+			memcpy(name, app_info["engineName"].GetString(), len);
+			app->pEngineName = name;
+		}
+
+		auto *pdf = allocator.allocate_cleared<VkPhysicalDeviceFeatures2>();
+		pdf->sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+		pdf->features.robustBufferAccess = pdf_info["robustBufferAccess"].GetUint();
+
+		iface.set_application_info(app, pdf);
 	}
-
-	if (app_info.HasMember("engineName"))
-	{
-		auto len = app_info["engineName"].GetStringLength();
-		char *name = allocator.allocate_n_cleared<char>(len + 1);
-		memcpy(name, app_info["engineName"].GetString(), len);
-		app->pEngineName = name;
-	}
-
-	auto *pdf = allocator.allocate_cleared<VkPhysicalDeviceFeatures2>();
-	pdf->sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-	pdf->features.robustBufferAccess = pdf_info["robustBufferAccess"].GetUint();
-
-	iface.set_application_info(app, pdf);
+	else
+		iface.set_application_info(nullptr, nullptr);
 }
 
 void StateReplayer::Impl::parse_samplers(StateCreatorInterface &iface, const Value &samplers)
