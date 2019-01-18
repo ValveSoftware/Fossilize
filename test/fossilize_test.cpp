@@ -484,7 +484,7 @@ static bool test_database()
 
 	// Try clean write.
 	{
-		auto db = create_zip_archive_database(".__test_tmp.zip", false);
+		auto db = create_zip_archive_database(".__test_tmp.zip", DatabaseMode::OverWrite);
 		db->prepare();
 
 		if (!db->write_entry(1, {1, 2, 3}))
@@ -495,7 +495,7 @@ static bool test_database()
 
 	// Try appending now.
 	{
-		auto db = create_zip_archive_database(".__test_tmp.zip", false);
+		auto db = create_zip_archive_database(".__test_tmp.zip", DatabaseMode::Append);
 		db->prepare();
 
 		// Check that has_entry behaves.
@@ -513,7 +513,7 @@ static bool test_database()
 	// Try playback multiple times.
 	for (unsigned iter = 0; iter < 2; iter++)
 	{
-		auto db = create_zip_archive_database(".__test_tmp.zip", true);
+		auto db = create_zip_archive_database(".__test_tmp.zip", DatabaseMode::ReadOnly);
 		db->prepare();
 
 		const auto compare = [](const std::vector<uint8_t> &a, const std::vector<uint8_t> &b) -> bool {

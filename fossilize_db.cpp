@@ -66,9 +66,9 @@ static bool load_buffer_from_path(const std::string &path, vector<uint8_t> &file
 
 struct DumbDirectoryDatabase : DatabaseInterface
 {
-	void set_base_directory(const string &base)
+	DumbDirectoryDatabase(const string &base, DatabaseMode mode_)
+		: base_directory(base), mode(mode_)
 	{
-		base_directory = base;
 	}
 
 	void prepare() override
@@ -113,19 +113,19 @@ struct DumbDirectoryDatabase : DatabaseInterface
 	}
 
 	string base_directory;
+	DatabaseMode mode;
 };
 
-unique_ptr<DatabaseInterface> create_dumb_folder_database(const string &directory_path)
+unique_ptr<DatabaseInterface> create_dumb_folder_database(const string &directory_path, DatabaseMode mode)
 {
-	auto db = make_unique<DumbDirectoryDatabase>();
-	db->set_base_directory(directory_path);
+	auto db = make_unique<DumbDirectoryDatabase>(directory_path, mode);
 	return move(db);
 }
 
 struct ZipDatabase : DatabaseInterface
 {
-	ZipDatabase(const string &path_, bool readonly_)
-		: path(path_), readonly(readonly_)
+	ZipDatabase(const string &path_, DatabaseMode mode_)
+		: path(path_), mode(mode_)
 	{
 	}
 
@@ -133,7 +133,7 @@ struct ZipDatabase : DatabaseInterface
 	{
 		if (alive)
 		{
-			if (!readonly)
+			if (mode != DatabaseMode::ReadOnly)
 			{
 				if (!mz_zip_writer_finalize_archive(&mz))
 					LOGE("Failed to finalize archive.\n");
@@ -159,7 +159,7 @@ struct ZipDatabase : DatabaseInterface
 	{
 		mz_zip_zero_struct(&mz);
 
-		if (mz_zip_reader_init_file(&mz, path.c_str(), 0))
+		if (mode != DatabaseMode::OverWrite && mz_zip_reader_init_file(&mz, path.c_str(), 0))
 		{
 			// We have an existing archive.
 			unsigned files = mz_zip_reader_get_num_files(&mz);
@@ -197,7 +197,7 @@ struct ZipDatabase : DatabaseInterface
 
 			alive = true;
 		}
-		else if (!readonly)
+		else if (mode != DatabaseMode::ReadOnly)
 		{
 			if (!mz_zip_writer_init_file(&mz, path.c_str(), 0))
 			{
@@ -212,7 +212,7 @@ struct ZipDatabase : DatabaseInterface
 
 	bool read_entry(Hash hash, vector<uint8_t> &blob) override
 	{
-		if (!alive || !readonly)
+		if (!alive || mode != DatabaseMode::ReadOnly)
 			return false;
 
 		auto itr = seen_blobs.find(hash);
@@ -231,7 +231,7 @@ struct ZipDatabase : DatabaseInterface
 
 	bool write_entry(Hash hash, const vector<uint8_t> &blob) override
 	{
-		if (!alive || readonly)
+		if (!alive || mode == DatabaseMode::ReadOnly)
 			return false;
 
 		auto itr = seen_blobs.find(hash);
@@ -266,13 +266,13 @@ struct ZipDatabase : DatabaseInterface
 		size_t size;
 	};
 	unordered_map<Hash, Entry> seen_blobs;
+	DatabaseMode mode;
 	bool alive = false;
-	bool readonly;
 };
 
-unique_ptr<DatabaseInterface> create_zip_archive_database(const string &path, bool readonly)
+unique_ptr<DatabaseInterface> create_zip_archive_database(const string &path, DatabaseMode mode)
 {
-	auto db = make_unique<ZipDatabase>(path, readonly);
+	auto db = make_unique<ZipDatabase>(path, mode);
 	return move(db);
 }
 
