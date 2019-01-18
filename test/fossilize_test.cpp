@@ -481,10 +481,9 @@ int main()
 	{
 		std::vector<uint8_t> res;
 		{
-			DatabaseInterface iface;
 			StateRecorder recorder;
 
-			recorder.init(&iface);
+			recorder.init(nullptr);
 
 			record_samplers(recorder);
 			record_set_layouts(recorder);
@@ -499,9 +498,8 @@ int main()
 
 		StateReplayer replayer;
 		ReplayInterface iface;
-		DatabaseInterface resolver;
 
-		replayer.parse(iface, resolver, res.data(), res.size());
+		replayer.parse(iface, nullptr, res.data(), res.size());
 		return EXIT_SUCCESS;
 	}
 	catch (const std::exception &e)

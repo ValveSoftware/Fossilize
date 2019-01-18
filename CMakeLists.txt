@@ -24,15 +24,23 @@ if (FOSSILIZE_SANITIZE_THREADS)
 	set(FOSSILIZE_LINK_FLAGS ${FOSSILIZE_LINK_FLAGS} -fsanitize=thread)
 endif()
 
+add_library(miniz STATIC miniz/miniz.h miniz/miniz.c)
+target_include_directories(miniz PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/miniz)
+if (CMAKE_COMPILER_IS_GNUCXX OR (${CMAKE_CXX_COMPILER_ID} MATCHES "Clang"))
+    target_compile_options(miniz PRIVATE -fvisibility=hidden)
+	target_compile_definitions(miniz PRIVATE _LARGEFILE64_SOURCE)
+endif()
+
 add_library(fossilize STATIC
         fossilize.hpp fossilize.cpp
-        varint.cpp varint.hpp
+        varint.cpp varint.hpp fossilize_db.cpp fossilize_db.hpp
         path.hpp path.cpp)
 target_include_directories(fossilize PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_options(fossilize PUBLIC ${FOSSILIZE_CXX_FLAGS})
 if (NOT MSVC)
     target_link_libraries(fossilize -pthread)
 endif()
+target_link_libraries(fossilize miniz)
 
 option(FOSSILIZE_VULKAN_LAYER "Build Vulkan layer." ON)
 if (FOSSILIZE_VULKAN_LAYER)

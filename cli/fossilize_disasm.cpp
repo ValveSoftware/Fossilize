@@ -529,7 +529,6 @@ int main(int argc, char *argv[])
 	}
 
 	DisasmReplayer replayer(device.get_device() ? &device : nullptr);
-	DatabaseInterface resolver;
 	StateReplayer state_replayer;
 
 	try
@@ -540,7 +539,7 @@ int main(int argc, char *argv[])
 			LOGE("Failed to load state JSON from disk.\n");
 			return EXIT_FAILURE;
 		}
-		state_replayer.parse(replayer, resolver, state_json.data(), state_json.size());
+		state_replayer.parse(replayer, nullptr, state_json.data(), state_json.size());
 	}
 	catch (const exception &e)
 	{

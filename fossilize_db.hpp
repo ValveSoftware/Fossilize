@@ -1,4 +1,4 @@
-/* Copyright (c) 2018 Hans-Kristian Arntzen
+/* Copyright (c) 2019 Hans-Kristian Arntzen
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -22,50 +22,34 @@
 
 #pragma once
 
-#include "dispatch_helper.hpp"
-#include "fossilize.hpp"
-#include "fossilize_db.hpp"
+#include <stdint.h>
+#include <vector>
 #include <string>
+#include <memory>
+#include "fossilize.hpp"
 
 namespace Fossilize
 {
-class Instance;
-class Device
+// This is an interface to interact with an external database for blob modules.
+// It is is a simple database with key + blob.
+class DatabaseInterface
 {
 public:
-	void init(VkPhysicalDevice gpu, VkDevice device,
-	          Instance *pInstance,
-	          const VkPhysicalDeviceFeatures2 &features,
-	          VkLayerDispatchTable *pTable);
+	virtual ~DatabaseInterface() = default;
 
-	VkLayerDispatchTable *getTable()
-	{
-		return pTable;
-	}
+	// Prepares the database. It can load in the off-line archive from disk.
+	virtual void prepare() = 0;
 
-	StateRecorder &getRecorder()
-	{
-		return recorder;
-	}
+	// Reads a blob entry from database.
+	virtual bool read_entry(Hash hash, std::vector<uint8_t> &blob) = 0;
 
-	VkDevice getDevice() const
-	{
-		return device;
-	}
+	// Writes an entry to database.
+	virtual bool write_entry(Hash hash, const std::vector<uint8_t> &blob) = 0;
 
-private:
-	VkPhysicalDevice gpu = VK_NULL_HANDLE;
-	VkDevice device = VK_NULL_HANDLE;
-	VkLayerInstanceDispatchTable *pInstanceTable = nullptr;
-	VkLayerDispatchTable *pTable = nullptr;
-
-	std::unique_ptr<DatabaseInterface> iface;
-	StateRecorder recorder;
-
-#ifdef ANDROID
-	std::string serializationPath = "/sdcard/";
-#else
-	std::string serializationPath = "";
-#endif
+	// Checks if entry already exists in database, i.e. no need to serialize.
+	virtual bool has_entry(Hash hash) = 0;
 };
+
+std::unique_ptr<DatabaseInterface> create_dumb_folder_database(const std::string &directory_path);
+std::unique_ptr<DatabaseInterface> create_zip_archive_database(const std::string &path, bool readonly);
 }

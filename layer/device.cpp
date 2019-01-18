@@ -85,8 +85,8 @@ void Device::init(VkPhysicalDevice gpu_, VkDevice device_, Instance *pInstance,
 	}
 #endif
 
-	iface.set_base_directory(serializationPath);
-	recorder.init(&iface);
+	iface = create_dumb_folder_database(serializationPath);
+	recorder.init(iface.get());
 
 	if (pInstance->getApplicationInfo())
 		recorder.record_application_info(*pInstance->getApplicationInfo());

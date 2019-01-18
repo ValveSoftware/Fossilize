@@ -27,6 +27,7 @@
 #include "logging.hpp"
 #include "file.hpp"
 #include "path.hpp"
+#include "fossilize_db.hpp"
 
 #include <cinttypes>
 #include <string>
@@ -506,8 +507,7 @@ int main(int argc, char *argv[])
 	auto start_time = chrono::steady_clock::now();
 
 	DumbReplayer replayer(opts, replayer_opts, filter_graphics, filter_compute);
-	DatabaseInterface resolver;
-	resolver.set_base_directory(json_path);
+	auto resolver = create_dumb_folder_database(json_path);
 	StateReplayer state_replayer;
 
 	// VALVE: modified to not use std::filesystem
@@ -543,7 +543,7 @@ int main(int argc, char *argv[])
 				LOGE("Failed to load %s from disk.\n", pEntry->d_name);
 			}
 
-			state_replayer.parse(replayer, resolver, state_json.data(), state_json.size());
+			state_replayer.parse(replayer, resolver.get(), state_json.data(), state_json.size());
 		}
 		catch (const exception &e)
 		{

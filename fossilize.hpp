@@ -35,6 +35,8 @@
 
 namespace Fossilize
 {
+class DatabaseInterface;
+
 class Exception : public std::exception
 {
 public:
@@ -135,26 +137,12 @@ public:
 	virtual void wait_enqueue() {}
 };
 
-// This is an interface to interact with an external database for blob modules.
-// It is is a simple database with key + blob.
-class DatabaseInterface
-{
-public:
-	virtual ~DatabaseInterface() = default;
-	void set_base_directory(const std::string &base);
-	virtual std::vector<uint8_t> read_entry(Hash hash);
-	virtual bool write_entry(Hash hash, const std::vector<uint8_t> &blob);
-
-protected:
-	std::string base_directory;
-};
-
 class StateReplayer
 {
 public:
 	StateReplayer();
 	~StateReplayer();
-	void parse(StateCreatorInterface &iface, DatabaseInterface &database, const void *buffer, size_t size);
+	void parse(StateCreatorInterface &iface, DatabaseInterface *database, const void *buffer, size_t size);
 	ScratchAllocator &get_allocator();
 
 private:
