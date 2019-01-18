@@ -42,6 +42,10 @@ if (NOT MSVC)
 endif()
 target_link_libraries(fossilize miniz)
 
+if (WIN32)
+	target_include_directories(fossilize PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/cli/dirent/include)
+endif()
+
 option(FOSSILIZE_VULKAN_LAYER "Build Vulkan layer." ON)
 if (FOSSILIZE_VULKAN_LAYER)
 	set_target_properties(fossilize PROPERTIES POSITION_INDEPENDENT_CODE ON)

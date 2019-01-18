@@ -18,10 +18,6 @@ if (ANDROID)
 	target_link_libraries(cli-utils log)
 endif()
 
-if (WIN32)
-	target_include_directories(cli-utils PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/dirent/include)
-endif()
-
 function(add_fossilize_cli NAME)
 	add_executable(${NAME} ${ARGN})
 	target_compile_options(${NAME} PRIVATE ${FOSSILIZE_CXX_FLAGS})

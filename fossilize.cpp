@@ -19,7 +19,6 @@
  * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
-#include <cinttypes>
 #include <atomic>
 #include <mutex>
 #include <condition_variable>
@@ -63,11 +62,11 @@ public:
 	Hasher() = default;
 
 	template <typename T>
-	inline void data(const T *data, size_t size)
+	inline void data(const T *data_, size_t size)
 	{
-		size /= sizeof(*data);
+		size /= sizeof(*data_);
 		for (size_t i = 0; i < size; i++)
-			h = (h * 0x100000001b3ull) ^ data[i];
+			h = (h * 0x100000001b3ull) ^ data_[i];
 	}
 
 	inline void u32(uint32_t value)
@@ -899,9 +898,10 @@ static uint8_t *decode_base64(ScratchAllocator &allocator, const char *data, siz
 	return buf;
 }
 
-static uint64_t string_to_uint64(const char* str) {
-	uint64_t value;
-	sscanf(str, "%" SCNx64, &value);
+static uint64_t string_to_uint64(const char* str)
+{
+	unsigned long long value;
+	sscanf(str, "%llx", &value);
 	return value;
 }
 
@@ -2619,7 +2619,7 @@ template <typename Allocator>
 static Value uint64_string(const uint64_t value, Allocator &alloc)
 {
 	char str[17]; // 16 digits + null
-	sprintf(str, "%016" PRIX64, value);
+	sprintf(str, "%016llx", static_cast<unsigned long long>(value));
 	return Value(str, alloc);
 }
 

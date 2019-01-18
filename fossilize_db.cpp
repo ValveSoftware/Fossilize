@@ -23,7 +23,6 @@
 #include "fossilize_db.hpp"
 #include "path.hpp"
 #include "layer/utils.hpp"
-#include <inttypes.h>
 #include "miniz.h"
 #include <unordered_map>
 #include <unordered_set>
@@ -88,8 +87,8 @@ struct DumbDirectoryDatabase : DatabaseInterface
 				continue;
 
 			unsigned tag;
-			uint64_t value;
-			if (sscanf(pEntry->d_name, "%x.%" SCNx64 ".json", &tag, &value) != 2)
+			unsigned long long value;
+			if (sscanf(pEntry->d_name, "%x.%llx.json", &tag, &value) != 2)
 				continue;
 
 			if (tag >= RESOURCE_COUNT)
@@ -116,7 +115,7 @@ struct DumbDirectoryDatabase : DatabaseInterface
 			return false;
 
 		char filename[25]; // 2 digits + "." + 16 digits + ".json" + null
-		sprintf(filename, "%02x.%016" PRIX64 ".json", static_cast<unsigned>(tag), hash);
+		sprintf(filename, "%02x.%016llx.json", static_cast<unsigned>(tag), static_cast<unsigned long long>(hash));
 		auto path = Path::join(base_directory, filename);
 		return load_buffer_from_path(path, blob);
 	}
@@ -130,7 +129,7 @@ struct DumbDirectoryDatabase : DatabaseInterface
 			return true;
 
 		char filename[25]; // 2 digits + "." + 16 digits + ".json" + null
-		sprintf(filename, "%02x.%016" PRIX64 ".json", static_cast<unsigned>(tag), hash);
+		sprintf(filename, "%02x.%016llx.json", static_cast<unsigned>(tag), static_cast<unsigned long long>(hash));
 		auto path = Path::join(base_directory, filename);
 
 		FILE *file = fopen(path.c_str(), "wb");
@@ -303,7 +302,7 @@ struct ZipDatabase : DatabaseInterface
 
 		char str[32 + 1]; // 32 digits + null
 		sprintf(str, "%016x", tag);
-		sprintf(str + 16, "%016" PRIx64, hash);
+		sprintf(str + 16, "%016llx", static_cast<unsigned long long>(hash));
 		if (!mz_zip_writer_add_mem(&mz, str, blob.data(), blob.size(), MZ_NO_COMPRESSION))
 		{
 			LOGE("Failed to add blob to cache.\n");
