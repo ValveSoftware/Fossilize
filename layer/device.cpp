@@ -22,6 +22,7 @@
 
 #include "device.hpp"
 #include "instance.hpp"
+#include "path.hpp"
 #include "utils.hpp"
 #include <cinttypes>
 #include <stdlib.h>
@@ -85,7 +86,11 @@ void Device::init(VkPhysicalDevice gpu_, VkDevice device_, Instance *pInstance,
 	}
 #endif
 
-	iface = create_zip_archive_database(serializationPath, false);
+	if (Path::ext(serializationPath) == "zip")
+		iface = create_zip_archive_database(serializationPath, DatabaseMode::Append);
+	else
+		iface = create_dumb_folder_database(serializationPath, DatabaseMode::Append);
+
 	recorder.init(iface.get());
 
 	if (pInstance->getApplicationInfo())

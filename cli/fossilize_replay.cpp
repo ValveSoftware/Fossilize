@@ -33,7 +33,6 @@
 #include <string>
 #include <unordered_set>
 #include <stdlib.h>
-#include <dirent.h>	// VALVE
 #include <chrono>	// VALVE
 #include <queue>	// VALVE
 #include <thread>	// VALVE
@@ -428,38 +427,6 @@ static void print_help()
 	     "\t<JSON directory>\n");
 }
 
-// VALVE: Modified to not use std::filesystem
-static std::vector<uint8_t> load_buffer_from_path(const std::string &path)
-{
-	FILE *file = fopen(path.c_str(), "rb");
-	if (!file)
-	{
-		LOGE("Failed to open file: %s\n", path.c_str());
-		return {};
-	}
-
-	if (fseek(file, 0, SEEK_END) < 0)
-	{
-		fclose(file);
-		LOGE("Failed to seek in file: %s\n", path.c_str());
-		return {};
-	}
-
-	size_t file_size = size_t(ftell(file));
-	rewind(file);
-
-	std::vector<uint8_t> file_data(file_size);
-	if (fread(file_data.data(), 1, file_size, file) != file_size)
-	{
-		LOGE("Failed to read from file: %s\n", path.c_str());
-		fclose(file);
-		return {};
-	}
-
-	fclose(file);
-	return file_data;
-}
-
 int main(int argc, char *argv[])
 {
 	string json_path;
@@ -494,68 +461,55 @@ int main(int argc, char *argv[])
 		return EXIT_FAILURE;
 	}
 
-	// VALVE: modified to not use std::filesystem
-	struct dirent *pEntry;
-	DIR *dp;
-	dp = opendir( json_path.c_str() );
-	if ( dp == NULL )
+	auto start_time = chrono::steady_clock::now();
+	DumbReplayer replayer(opts, replayer_opts, filter_graphics, filter_compute);
+
+	unique_ptr<DatabaseInterface> resolver;
+	if (Path::ext(json_path) == "zip")
+		resolver = create_zip_archive_database(json_path, DatabaseMode::ReadOnly);
+	else
+		resolver = create_dumb_folder_database(json_path, DatabaseMode::ReadOnly);
+
+	if (!resolver->prepare())
 	{
-		LOGE("Invalid path to serialized state provided.\n");
+		LOGE("Failed to prepare database.\n");
 		return EXIT_FAILURE;
 	}
 
-	auto start_time = chrono::steady_clock::now();
-
-	DumbReplayer replayer(opts, replayer_opts, filter_graphics, filter_compute);
-	auto resolver = create_dumb_folder_database(json_path);
 	StateReplayer state_replayer;
 
-	// VALVE: modified to not use std::filesystem
-	while ( ( pEntry = readdir( dp ) ) )
+	vector<Hash> resource_hashes;
+	vector<uint8_t> state_json;
+	for (int i = 0; i < RESOURCE_COUNT; i++)
 	{
-		if ( pEntry->d_type != DT_REG)
-			continue;
-
-		// VALVE: modified to not use std::filesystem
-		std::string path( pEntry->d_name );
-		auto dotpos = path.find(".");
-		if (dotpos == std::string::npos)
-			continue;
-
-		std::string stem = path.substr( 0, dotpos );
-		std::string ext = path.substr( dotpos );
-		// check that filename is 16 char hex with json extension
-		if (stem.length() != 16)
-			continue;
-		for (auto c : stem)
+		auto tag = static_cast<ResourceTag>(i);
+		if (!resolver->get_hash_list_for_resource_tag(tag, resource_hashes))
 		{
-			if (!isxdigit(c))
-				continue;
+			LOGE("Failed to get list of resource hashes.\n");
+			return EXIT_FAILURE;
 		}
-		if (ext != ".json")
-			continue;
 
-		try
+		for (auto &hash : resource_hashes)
 		{
-			auto state_json = load_buffer_from_path(Path::join(json_path, path));
-			if (state_json.empty())
+			if (!resolver->read_entry(tag, hash, state_json))
 			{
-				LOGE("Failed to load %s from disk.\n", pEntry->d_name);
+				LOGE("Failed to load blob from cache.\n");
+				return EXIT_FAILURE;
 			}
 
-			state_replayer.parse(replayer, resolver.get(), state_json.data(), state_json.size());
-		}
-		catch (const exception &e)
-		{
-			LOGE("StateReplayer threw exception parsing %s: %s\n", pEntry->d_name, e.what());
+			try
+			{
+				state_replayer.parse(replayer, resolver.get(), state_json.data(), state_json.size());
+			}
+			catch (const exception &e)
+			{
+				LOGE("StateReplayer threw exception parsing (tag: %d, hash: 0x%llx): %s\n", i, static_cast<unsigned long long>(hash), e.what());
+			}
 		}
 	}
 
 	// VALVE: drain all outstanding pipeline compiles
 	replayer.drainWorkQueue();
-	
-	// VALVE: modified to not use std::filesystem
-	closedir( dp );
 
 	unsigned long total_size =
 		replayer.samplers.size() +

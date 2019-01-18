@@ -26,8 +26,9 @@
 #include <inttypes.h>
 #include "miniz.h"
 #include <unordered_map>
+#include <unordered_set>
 #include <algorithm>
-#include <miniz/miniz.h>
+#include <dirent.h>
 
 using namespace std;
 
@@ -74,16 +75,46 @@ struct DumbDirectoryDatabase : DatabaseInterface
 
 	bool prepare() override
 	{
+		if (mode == DatabaseMode::OverWrite)
+			return true;
+
+		DIR *dp = opendir(base_directory.c_str());
+		if (!dp)
+			return false;
+
+		while (auto *pEntry = readdir(dp))
+		{
+			if (pEntry->d_type != DT_REG)
+				continue;
+
+			unsigned tag;
+			uint64_t value;
+			if (sscanf(pEntry->d_name, "%x.%" SCNx64 ".json", &tag, &value) != 2)
+				continue;
+
+			if (tag >= RESOURCE_COUNT)
+				continue;
+
+			seen_blobs[tag].insert(value);
+		}
+
+		closedir(dp);
 		return true;
 	}
 
-	bool has_entry(ResourceTag, Hash) override
+	bool has_entry(ResourceTag tag, Hash hash) override
 	{
-		return false;
+		return seen_blobs[tag].count(hash) != 0;
 	}
 
 	bool read_entry(ResourceTag tag, Hash hash, vector<uint8_t> &blob) override
 	{
+		if (mode != DatabaseMode::ReadOnly)
+			return false;
+
+		if (!has_entry(tag, hash))
+			return false;
+
 		char filename[25]; // 2 digits + "." + 16 digits + ".json" + null
 		sprintf(filename, "%02x.%016" PRIX64 ".json", static_cast<unsigned>(tag), hash);
 		auto path = Path::join(base_directory, filename);
@@ -92,6 +123,12 @@ struct DumbDirectoryDatabase : DatabaseInterface
 
 	bool write_entry(ResourceTag tag, Hash hash, const std::vector<uint8_t> &bytes) override
 	{
+		if (mode == DatabaseMode::ReadOnly)
+			return false;
+
+		if (has_entry(tag, hash))
+			return true;
+
 		char filename[25]; // 2 digits + "." + 16 digits + ".json" + null
 		sprintf(filename, "%02x.%016" PRIX64 ".json", static_cast<unsigned>(tag), hash);
 		auto path = Path::join(base_directory, filename);
@@ -114,14 +151,21 @@ struct DumbDirectoryDatabase : DatabaseInterface
 		return true;
 	}
 
-	bool get_hash_list_for_resource_tag(ResourceTag, vector<Hash> &hashes) override
+	bool get_hash_list_for_resource_tag(ResourceTag tag, vector<Hash> &hashes) override
 	{
 		hashes.clear();
+		hashes.reserve(seen_blobs[tag].size());
+		for (auto &blob : seen_blobs[tag])
+			hashes.push_back(blob);
+
+		// Make replay more deterministic.
+		sort(begin(hashes), end(hashes));
 		return true;
 	}
 
 	string base_directory;
 	DatabaseMode mode;
+	unordered_set<Hash> seen_blobs[RESOURCE_COUNT];
 };
 
 unique_ptr<DatabaseInterface> create_dumb_folder_database(const string &directory_path, DatabaseMode mode)
@@ -273,8 +317,7 @@ struct ZipDatabase : DatabaseInterface
 
 	bool has_entry(ResourceTag tag, Hash hash) override
 	{
-		auto itr = seen_blobs[tag].find(hash);
-		return itr != end(seen_blobs[tag]);
+		return seen_blobs[tag].count(hash) != 0;
 	}
 
 	bool get_hash_list_for_resource_tag(ResourceTag tag, vector<Hash> &hashes) override

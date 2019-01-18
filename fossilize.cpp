@@ -2200,7 +2200,7 @@ VkGraphicsPipelineCreateInfo *StateRecorder::Impl::copy_graphics_pipeline(const 
 	if (info->pVertexInputState)
 	{
 		if (info->pVertexInputState->pNext)
-			FOSSILIZE_THROW("pNext in VkPipelineTessellationStateCreateInfo not supported.");
+			FOSSILIZE_THROW("pNext in VkPipelineVertexInputStateCreateInfo not supported.");
 		info->pVertexInputState = copy(info->pVertexInputState, 1, alloc);
 	}
 
@@ -2431,7 +2431,13 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder)
 {
 	// Start by preparing in the thread since we need to parse an archive potentially, and that might block a little bit.
 	if (database_iface)
-		database_iface->prepare();
+	{
+		if (!database_iface->prepare())
+		{
+			LOGE("Failed to prepare database, will not dump data to database.\n");
+			database_iface = nullptr;
+		}
+	}
 
 	for (;;)
 	{
@@ -2511,7 +2517,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder)
 				{
 					auto create_info_copy = copy_shader_module(create_info, allocator);
 					shader_modules[hash] = create_info_copy;
-					if (database_iface)
+					if (database_iface && !database_iface->has_entry(RESOURCE_SHADER_MODULE, hash))
 						database_iface->write_entry(RESOURCE_SHADER_MODULE, hash, recorder->serialize_shader_module(hash));
 				}
 				break;
@@ -2526,7 +2532,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder)
 					auto create_info_copy = copy_graphics_pipeline(create_info, allocator);
 					remap_graphics_pipeline_ci(create_info_copy);
 					graphics_pipelines[hash] = create_info_copy;
-					if (database_iface)
+					if (database_iface && !database_iface->has_entry(RESOURCE_GRAPHICS_PIPELINE, hash))
 						database_iface->write_entry(RESOURCE_GRAPHICS_PIPELINE, hash, recorder->serialize_graphics_pipeline(hash));
 				}
 				break;
@@ -2541,7 +2547,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder)
 					auto create_info_copy = copy_compute_pipeline(create_info, allocator);
 					remap_compute_pipeline_ci(create_info_copy);
 					compute_pipelines[hash] = create_info_copy;
-					if (database_iface)
+					if (database_iface && !database_iface->has_entry(RESOURCE_COMPUTE_PIPELINE, hash))
 						database_iface->write_entry(RESOURCE_COMPUTE_PIPELINE, hash, recorder->serialize_compute_pipeline(hash));
 				}
 				break;
