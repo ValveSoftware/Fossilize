@@ -178,9 +178,13 @@ struct ZipDatabase : DatabaseInterface
 				if (!string_is_hex(filename))
 					continue;
 
+				mz_zip_archive_file_stat s;
+				if (!mz_zip_reader_file_stat(&mz, i, &s))
+					continue;
+
 				uint64_t value;
 				sscanf(filename, "%" SCNx64, &value);
-				seen_blobs.emplace(value, i);
+				seen_blobs.emplace(value, Entry{ i, size_t(s.m_uncomp_size) });
 			}
 
 			// In-place update the archive. Should we consider emitting a new archive instead?
@@ -215,15 +219,8 @@ struct ZipDatabase : DatabaseInterface
 		if (itr == end(seen_blobs))
 			return false;
 
-		mz_zip_archive_file_stat s;
-		if (!mz_zip_reader_file_stat(&mz, itr->second, &s))
-		{
-			LOGE("Failed to get stat from ZIP entry.\n");
-			return false;
-		}
-
-		blob.resize(s.m_uncomp_size);
-		if (!mz_zip_reader_extract_to_mem(&mz, itr->second, blob.data(), blob.size(), 0))
+		blob.resize(itr->second.size);
+		if (!mz_zip_reader_extract_to_mem(&mz, itr->second.index, blob.data(), blob.size(), 0))
 		{
 			LOGE("Failed to extract blob.\n");
 			return false;
@@ -238,7 +235,7 @@ struct ZipDatabase : DatabaseInterface
 			return false;
 
 		auto itr = seen_blobs.find(hash);
-		if (itr == end(seen_blobs))
+		if (itr != end(seen_blobs))
 			return true;
 
 		char str[16 + 1]; // 16 digits + null
@@ -250,7 +247,8 @@ struct ZipDatabase : DatabaseInterface
 		}
 
 		// The index is irrelevant, we're not going to read from this archive any time soon.
-		seen_blobs.emplace(hash, -1u);
+		seen_blobs.emplace(hash, Entry{ -1u, blob.size() });
+		return true;
 	}
 
 	bool has_entry(Hash hash) override
@@ -261,9 +259,21 @@ struct ZipDatabase : DatabaseInterface
 
 	string path;
 	mz_zip_archive mz;
-	unordered_map<Hash, unsigned> seen_blobs;
+
+	struct Entry
+	{
+		unsigned index;
+		size_t size;
+	};
+	unordered_map<Hash, Entry> seen_blobs;
 	bool alive = false;
 	bool readonly;
 };
+
+unique_ptr<DatabaseInterface> create_zip_archive_database(const string &path, bool readonly)
+{
+	auto db = make_unique<ZipDatabase>(path, readonly);
+	return move(db);
+}
 
 }

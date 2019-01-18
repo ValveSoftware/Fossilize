@@ -21,6 +21,8 @@
  */
 
 #include "fossilize.hpp"
+#include "fossilize_db.hpp"
+#include <string.h>
 #include <stdexcept>
 
 using namespace Fossilize;
@@ -475,8 +477,76 @@ static void record_graphics_pipelines(StateRecorder &recorder)
 	recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100001), pipe);
 }
 
+static bool test_database()
+{
+	remove(".__test_tmp.zip");
+
+	// Try clean write.
+	{
+		auto db = create_zip_archive_database(".__test_tmp.zip", false);
+		db->prepare();
+
+		if (!db->write_entry(1, {1, 2, 3}))
+			return false;
+		if (!db->write_entry(2, {10, 20, 30, 40, 50}))
+			return false;
+	}
+
+	// Try appending now.
+	{
+		auto db = create_zip_archive_database(".__test_tmp.zip", false);
+		db->prepare();
+
+		// Check that has_entry behaves.
+		if (!db->has_entry(1))
+			return false;
+		if (!db->has_entry(2))
+			return false;
+		if (db->has_entry(3))
+			return false;
+
+		if (!db->write_entry(3, {1, 2, 3, 1, 2, 3}))
+			return false;
+	}
+
+	// Try playback multiple times.
+	for (unsigned iter = 0; iter < 2; iter++)
+	{
+		auto db = create_zip_archive_database(".__test_tmp.zip", true);
+		db->prepare();
+
+		const auto compare = [](const std::vector<uint8_t> &a, const std::vector<uint8_t> &b) -> bool {
+			if (a.size() != b.size())
+				return false;
+			return memcmp(a.data(), b.data(), a.size()) == 0;
+		};
+
+		if (!db->has_entry(1))
+			return false;
+		if (!db->has_entry(2))
+			return false;
+		if (!db->has_entry(3))
+			return false;
+		if (db->has_entry(4))
+			return false;
+
+		std::vector<uint8_t> blob;
+		if (!db->read_entry(1, blob) || !compare(blob, { 1, 2, 3 }))
+			return false;
+		if (!db->read_entry(2, blob) || !compare(blob, { 10, 20, 30, 40, 50 }))
+			return false;
+		if (!db->read_entry(3, blob) || !compare(blob, { 1, 2, 3, 1, 2, 3 }))
+			return false;
+	}
+
+	return true;
+}
+
 int main()
 {
+	if (!test_database())
+		return EXIT_FAILURE;
+
 	try
 	{
 		std::vector<uint8_t> res;
