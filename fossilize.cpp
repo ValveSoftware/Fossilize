@@ -2385,6 +2385,10 @@ void StateRecorder::Impl::remap_render_pass_ci(VkRenderPassCreateInfo *)
 
 void StateRecorder::Impl::record_task(StateRecorder *recorder)
 {
+	// Start by preparing in the thread since we need to parse an archive potentially, and that might block a little bit.
+	if (database_iface)
+		database_iface->prepare();
+
 	for (;;)
 	{
 		WorkItem record_item;
