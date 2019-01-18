@@ -173,7 +173,6 @@ public:
 	void record_compute_pipeline(VkPipeline pipeline, const VkComputePipelineCreateInfo &create_info);
 	void record_render_pass(VkRenderPass render_pass, const VkRenderPassCreateInfo &create_info);
 	void record_sampler(VkSampler sampler, const VkSamplerCreateInfo &create_info);
-	void record_end();
 
 	Hash get_hash_for_descriptor_set_layout(VkDescriptorSetLayout layout) const;
 	Hash get_hash_for_pipeline_layout(VkPipelineLayout layout) const;

@@ -24,6 +24,7 @@
 #include "fossilize_db.hpp"
 #include <string.h>
 #include <stdexcept>
+#include "layer/utils.hpp"
 
 using namespace Fossilize;
 
@@ -568,6 +569,9 @@ int main()
 
 		StateReplayer replayer;
 		ReplayInterface iface;
+
+		std::string serialized(res.begin(), res.end());
+		LOGI("Serialized:\n%s\n", serialized.c_str());
 
 		replayer.parse(iface, nullptr, res.data(), res.size());
 		return EXIT_SUCCESS;

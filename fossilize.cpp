@@ -154,6 +154,8 @@ struct StateReplayer::Impl
 	void parse_render_passes(StateCreatorInterface &iface, const Value &passes);
 	void parse_compute_pipelines(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines);
 	void parse_graphics_pipelines(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines);
+	void parse_compute_pipeline(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines, const Value &member);
+	void parse_graphics_pipeline(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines, const Value &member);
 	void parse_application_info(StateCreatorInterface &iface, const Value &app_info, const Value &pdf_info);
 	VkPushConstantRange *parse_push_constant_ranges(const Value &ranges);
 	VkDescriptorSetLayout *parse_set_layouts(const Value &layouts);
@@ -196,6 +198,10 @@ struct WorkItem
 
 struct StateRecorder::Impl
 {
+	~Impl();
+	void sync_thread();
+	void record_end();
+
 	ScratchAllocator allocator;
 	ScratchAllocator temp_allocator;
 	DatabaseInterface *database_iface = nullptr;
@@ -921,6 +927,20 @@ VkSampler *StateReplayer::Impl::parse_immutable_samplers(const Value &samplers)
 	return ret;
 }
 
+void StateRecorder::Impl::sync_thread()
+{
+	if (worker_thread.joinable())
+	{
+		record_end();
+		worker_thread.join();
+	}
+}
+
+StateRecorder::Impl::~Impl()
+{
+	sync_thread();
+}
+
 VkDescriptorSetLayoutBinding *StateReplayer::Impl::parse_descriptor_set_bindings(const Value &bindings)
 {
 	auto *set_bindings = allocator.allocate_n_cleared<VkDescriptorSetLayoutBinding>(bindings.Size());
@@ -1309,72 +1329,85 @@ VkSpecializationInfo *StateReplayer::Impl::parse_specialization_info(const Value
 	return spec;
 }
 
+void StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, DatabaseInterface *resolver,
+                                                 const Value &pipelines, const Value &member)
+{
+	Hash hash = string_to_uint64(member.GetString());
+	if (replayed_compute_pipelines.count(hash))
+		return;
+
+	auto *info_allocated = allocator.allocate_cleared<VkComputePipelineCreateInfo>();
+	auto &obj = pipelines[member];
+	auto &info = *info_allocated;
+	info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+	info.flags = obj["flags"].GetUint();
+	info.basePipelineIndex = obj["basePipelineIndex"].GetUint();
+
+	auto pipeline = string_to_uint64(obj["basePipelineHandle"].GetString());
+	if (pipeline > 0)
+	{
+		iface.wait_enqueue();
+		auto pipeline_iter = replayed_compute_pipelines.find(pipeline);
+
+		// If we don't have the pipeline, we might have it later in the array of graphics pipelines, queue up out of order.
+		if (pipeline_iter == replayed_compute_pipelines.end() && pipelines.HasMember(obj["basePipelineHandle"].GetString()))
+		{
+			parse_compute_pipeline(iface, resolver, pipelines, obj["basePipelineHandle"]);
+			iface.wait_enqueue();
+			pipeline_iter = replayed_compute_pipelines.find(pipeline);
+		}
+
+		// Still don't have it? Look into database.
+		if (pipeline_iter == replayed_compute_pipelines.end())
+		{
+			vector<uint8_t> external_state;
+			if (!resolver || !resolver->read_entry(pipeline, external_state))
+				FOSSILIZE_THROW("Failed to find referenced compute pipeline");
+			this->parse(iface, resolver, external_state.data(), external_state.size());
+			pipeline_iter = replayed_compute_pipelines.find(pipeline);
+			if (pipeline_iter == replayed_compute_pipelines.end())
+				FOSSILIZE_THROW("Failed to find referenced compute pipeline");
+		}
+		info.basePipelineHandle = pipeline_iter->second;
+	}
+
+	auto layout = string_to_uint64(obj["layout"].GetString());
+	if (layout > 0)
+		info.layout = replayed_pipeline_layouts[layout];
+
+	auto &stage = obj["stage"];
+	info.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	info.stage.stage = static_cast<VkShaderStageFlagBits>(stage["stage"].GetUint());
+
+	auto module = string_to_uint64(stage["module"].GetString());
+	if (module > 0)
+	{
+		auto module_iter = replayed_shader_modules.find(module);
+		if (module_iter == replayed_shader_modules.end())
+		{
+			vector<uint8_t> external_state;
+			if (!resolver || !resolver->read_entry(pipeline, external_state))
+				FOSSILIZE_THROW("Failed to find referenced shader");
+			this->parse(iface, resolver, external_state.data(), external_state.size());
+			module_iter = replayed_shader_modules.find(module);
+			if (module_iter == replayed_shader_modules.end())
+				FOSSILIZE_THROW("Failed find referenced shader module");
+		}
+		info.stage.module = module_iter->second;
+	}
+
+	info.stage.pName = duplicate_string(stage["name"].GetString(), stage["name"].GetStringLength());
+	if (stage.HasMember("specializationInfo"))
+		info.stage.pSpecializationInfo = parse_specialization_info(stage["specializationInfo"]);
+
+	if (!iface.enqueue_create_compute_pipeline(hash, &info, &replayed_compute_pipelines[hash]))
+		FOSSILIZE_THROW("Failed to create compute pipeline.");
+}
+
 void StateReplayer::Impl::parse_compute_pipelines(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines)
 {
-	auto *infos = allocator.allocate_n_cleared<VkComputePipelineCreateInfo>(pipelines.MemberCount());
-
-	unsigned index = 0;
-	for (auto itr = pipelines.MemberBegin(); itr != pipelines.MemberEnd(); ++itr, index++)
-	{
-		Hash hash = string_to_uint64(itr->name.GetString());
-		if (replayed_compute_pipelines.count(hash))
-			continue;
-		auto &obj = itr->value;
-		auto &info = infos[index];
-		info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-		info.flags = obj["flags"].GetUint();
-		info.basePipelineIndex = obj["basePipelineIndex"].GetUint();
-
-		auto pipeline = string_to_uint64(obj["basePipelineHandle"].GetString());
-		if (pipeline > 0)
-		{
-			iface.wait_enqueue();
-			auto pipeline_iter = replayed_compute_pipelines.find(pipeline);
-			if (pipeline_iter == replayed_compute_pipelines.end())
-			{
-				vector<uint8_t> external_state;
-				if (!resolver || !resolver->read_entry(pipeline, external_state))
-					FOSSILIZE_THROW("Failed to find referenced compute pipeline");
-				this->parse(iface, resolver, external_state.data(), external_state.size());
-				pipeline_iter = replayed_compute_pipelines.find(pipeline);
-				if (pipeline_iter == replayed_compute_pipelines.end())
-					FOSSILIZE_THROW("Failed to find referenced compute pipeline");
-			}
-			info.basePipelineHandle = pipeline_iter->second;
-		}
-
-		auto layout = string_to_uint64(obj["layout"].GetString());
-		if (layout > 0)
-			info.layout = replayed_pipeline_layouts[layout];
-
-		auto &stage = obj["stage"];
-		info.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-		info.stage.stage = static_cast<VkShaderStageFlagBits>(stage["stage"].GetUint());
-
-		auto module = string_to_uint64(stage["module"].GetString());
-		if (module > 0)
-		{
-			auto module_iter = replayed_shader_modules.find(module);
-			if (module_iter == replayed_shader_modules.end())
-			{
-				vector<uint8_t> external_state;
-				if (!resolver || !resolver->read_entry(pipeline, external_state))
-					FOSSILIZE_THROW("Failed to find referenced shader");
-				this->parse(iface, resolver, external_state.data(), external_state.size());
-				module_iter = replayed_shader_modules.find(module);
-				if (module_iter == replayed_shader_modules.end())
-					FOSSILIZE_THROW("Failed find referenced shader module");
-			}
-			info.stage.module = module_iter->second;
-		}
-
-		info.stage.pName = duplicate_string(stage["name"].GetString(), stage["name"].GetStringLength());
-		if (stage.HasMember("specializationInfo"))
-			info.stage.pSpecializationInfo = parse_specialization_info(stage["specializationInfo"]);
-
-		if (!iface.enqueue_create_compute_pipeline(hash, &info, &replayed_compute_pipelines[hash]))
-			FOSSILIZE_THROW("Failed to create compute pipeline.");
-	}
+	for (auto itr = pipelines.MemberBegin(); itr != pipelines.MemberEnd(); ++itr)
+		parse_compute_pipeline(iface, resolver, pipelines, itr->name);
 	iface.wait_enqueue();
 }
 
@@ -1668,79 +1701,90 @@ VkPipelineShaderStageCreateInfo *StateReplayer::Impl::parse_stages(StateCreatorI
 	return ret;
 }
 
-void StateReplayer::Impl::parse_graphics_pipelines(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines)
+void StateReplayer::Impl::parse_graphics_pipeline(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines, const Value &member)
 {
-	auto *infos = allocator.allocate_n_cleared<VkGraphicsPipelineCreateInfo>(pipelines.MemberCount());
+	Hash hash = string_to_uint64(member.GetString());
+	if (replayed_graphics_pipelines.count(hash))
+		return;
 
-	unsigned index = 0;
-	for (auto itr = pipelines.MemberBegin(); itr != pipelines.MemberEnd(); ++itr, index++)
+	auto *info_allocated = allocator.allocate_cleared<VkGraphicsPipelineCreateInfo>();
+	auto &obj = pipelines[member];
+	auto &info = *info_allocated;
+	info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+	info.flags = obj["flags"].GetUint();
+	info.basePipelineIndex = obj["basePipelineIndex"].GetUint();
+
+	auto pipeline = string_to_uint64(obj["basePipelineHandle"].GetString());
+	if (pipeline > 0)
 	{
-		Hash hash = string_to_uint64(itr->name.GetString());
-		if (replayed_graphics_pipelines.count(hash))
-			continue;
-		auto &obj = itr->value;
-		auto &info = infos[index];
-		info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-		info.flags = obj["flags"].GetUint();
-		info.basePipelineIndex = obj["basePipelineIndex"].GetUint();
+		iface.wait_enqueue();
+		auto pipeline_iter = replayed_graphics_pipelines.find(pipeline);
 
-		auto pipeline = string_to_uint64(obj["basePipelineHandle"].GetString());
-		if (pipeline > 0)
+		// If we don't have the pipeline, we might have it later in the array of graphics pipelines, queue up out of order.
+		if (pipeline_iter == replayed_graphics_pipelines.end() && pipelines.HasMember(obj["basePipelineHandle"].GetString()))
 		{
+			parse_graphics_pipeline(iface, resolver, pipelines, obj["basePipelineHandle"]);
 			iface.wait_enqueue();
-			auto pipeline_iter = replayed_graphics_pipelines.find(pipeline);
-			if (pipeline_iter == replayed_graphics_pipelines.end())
-			{
-				vector<uint8_t> external_state;
-				if (!resolver || !resolver->read_entry(pipeline, external_state))
-					FOSSILIZE_THROW("Failed to find referenced graphics pipeline");
-				this->parse(iface, resolver, external_state.data(), external_state.size());
-				pipeline_iter = replayed_graphics_pipelines.find(pipeline);
-				if (pipeline_iter == replayed_graphics_pipelines.end())
-					FOSSILIZE_THROW("Failed to find referenced graphics pipeline");
-			}
-			info.basePipelineHandle = pipeline_iter->second;
+			pipeline_iter = replayed_graphics_pipelines.find(pipeline);
 		}
 
-		auto layout = string_to_uint64(obj["layout"].GetString());
-		if (layout > 0)
-			info.layout = replayed_pipeline_layouts[layout];
-
-		auto render_pass = string_to_uint64(obj["renderPass"].GetString());
-		if (render_pass > 0)
-			info.renderPass = replayed_render_passes[render_pass];
-
-		info.subpass = obj["subpass"].GetUint();
-
-		if (obj.HasMember("stages"))
+		// Still don't have it? Look into database.
+		if (pipeline_iter == replayed_graphics_pipelines.end())
 		{
-			info.stageCount = obj["stages"].Size();
-			info.pStages = parse_stages(iface, resolver, obj["stages"]);
+			vector<uint8_t> external_state;
+			if (!resolver || !resolver->read_entry(pipeline, external_state))
+				FOSSILIZE_THROW("Failed to find referenced graphics pipeline");
+			this->parse(iface, resolver, external_state.data(), external_state.size());
+			pipeline_iter = replayed_graphics_pipelines.find(pipeline);
+			if (pipeline_iter == replayed_graphics_pipelines.end())
+				FOSSILIZE_THROW("Failed to find referenced graphics pipeline");
 		}
-
-		if (obj.HasMember("rasterizationState"))
-			info.pRasterizationState = parse_rasterization_state(obj["rasterizationState"]);
-		if (obj.HasMember("tessellationState"))
-			info.pTessellationState = parse_tessellation_state(obj["tessellationState"]);
-		if (obj.HasMember("colorBlendState"))
-			info.pColorBlendState = parse_color_blend_state(obj["colorBlendState"]);
-		if (obj.HasMember("depthStencilState"))
-			info.pDepthStencilState = parse_depth_stencil_state(obj["depthStencilState"]);
-		if (obj.HasMember("dynamicState"))
-			info.pDynamicState = parse_dynamic_state(obj["dynamicState"]);
-		if (obj.HasMember("viewportState"))
-			info.pViewportState = parse_viewport_state(obj["viewportState"]);
-		if (obj.HasMember("multisampleState"))
-			info.pMultisampleState = parse_multisample_state(obj["multisampleState"]);
-		if (obj.HasMember("inputAssemblyState"))
-			info.pInputAssemblyState = parse_input_assembly_state(obj["inputAssemblyState"]);
-		if (obj.HasMember("vertexInputState"))
-			info.pVertexInputState = parse_vertex_input_state(obj["vertexInputState"]);
-
-		if (!iface.enqueue_create_graphics_pipeline(hash, &info, &replayed_graphics_pipelines[hash]))
-			FOSSILIZE_THROW("Failed to create graphics pipeline.");
+		info.basePipelineHandle = pipeline_iter->second;
 	}
 
+	auto layout = string_to_uint64(obj["layout"].GetString());
+	if (layout > 0)
+		info.layout = replayed_pipeline_layouts[layout];
+
+	auto render_pass = string_to_uint64(obj["renderPass"].GetString());
+	if (render_pass > 0)
+		info.renderPass = replayed_render_passes[render_pass];
+
+	info.subpass = obj["subpass"].GetUint();
+
+	if (obj.HasMember("stages"))
+	{
+		info.stageCount = obj["stages"].Size();
+		info.pStages = parse_stages(iface, resolver, obj["stages"]);
+	}
+
+	if (obj.HasMember("rasterizationState"))
+		info.pRasterizationState = parse_rasterization_state(obj["rasterizationState"]);
+	if (obj.HasMember("tessellationState"))
+		info.pTessellationState = parse_tessellation_state(obj["tessellationState"]);
+	if (obj.HasMember("colorBlendState"))
+		info.pColorBlendState = parse_color_blend_state(obj["colorBlendState"]);
+	if (obj.HasMember("depthStencilState"))
+		info.pDepthStencilState = parse_depth_stencil_state(obj["depthStencilState"]);
+	if (obj.HasMember("dynamicState"))
+		info.pDynamicState = parse_dynamic_state(obj["dynamicState"]);
+	if (obj.HasMember("viewportState"))
+		info.pViewportState = parse_viewport_state(obj["viewportState"]);
+	if (obj.HasMember("multisampleState"))
+		info.pMultisampleState = parse_multisample_state(obj["multisampleState"]);
+	if (obj.HasMember("inputAssemblyState"))
+		info.pInputAssemblyState = parse_input_assembly_state(obj["inputAssemblyState"]);
+	if (obj.HasMember("vertexInputState"))
+		info.pVertexInputState = parse_vertex_input_state(obj["vertexInputState"]);
+
+	if (!iface.enqueue_create_graphics_pipeline(hash, &info, &replayed_graphics_pipelines[hash]))
+		FOSSILIZE_THROW("Failed to create graphics pipeline.");
+}
+
+void StateReplayer::Impl::parse_graphics_pipelines(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines)
+{
+	for (auto itr = pipelines.MemberBegin(); itr != pipelines.MemberEnd(); ++itr)
+		parse_graphics_pipeline(iface, resolver, pipelines, itr->name);
 	iface.wait_enqueue();
 }
 
@@ -1984,12 +2028,12 @@ void StateRecorder::record_shader_module(VkShaderModule module, const VkShaderMo
 	impl->record_cv.notify_one();
 }
 
-void StateRecorder::record_end()
+void StateRecorder::Impl::record_end()
 {
 	// Signal end of recording with empty work item
-	std::lock_guard<std::mutex> lock(impl->record_lock);
-	impl->record_queue.push({ 0, nullptr });
-	impl->record_cv.notify_one();
+	std::lock_guard<std::mutex> lock(record_lock);
+	record_queue.push({ 0, nullptr });
+	record_cv.notify_one();
 }
 
 Hash StateRecorder::get_hash_for_compute_pipeline_handle(VkPipeline pipeline) const
@@ -3251,6 +3295,8 @@ vector<uint8_t> StateRecorder::serialize_shader_module(Hash hash) const
 
 vector<uint8_t> StateRecorder::serialize() const
 {
+	impl->sync_thread();
+
 	Document doc;
 	doc.SetObject();
 	auto &alloc = doc.GetAllocator();
@@ -3344,10 +3390,6 @@ StateRecorder::StateRecorder()
 
 StateRecorder::~StateRecorder()
 {
-	record_end();
-	if (impl->worker_thread.joinable())
-		impl->worker_thread.join();
 }
-
 
 }
