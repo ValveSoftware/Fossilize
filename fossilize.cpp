@@ -1361,7 +1361,7 @@ void StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, D
 		if (pipeline_iter == replayed_compute_pipelines.end())
 		{
 			vector<uint8_t> external_state;
-			if (!resolver || !resolver->read_entry(pipeline, external_state))
+			if (!resolver || !resolver->read_entry(RESOURCE_COMPUTE_PIPELINE, pipeline, external_state))
 				FOSSILIZE_THROW("Failed to find referenced compute pipeline");
 			this->parse(iface, resolver, external_state.data(), external_state.size());
 			pipeline_iter = replayed_compute_pipelines.find(pipeline);
@@ -1386,7 +1386,7 @@ void StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, D
 		if (module_iter == replayed_shader_modules.end())
 		{
 			vector<uint8_t> external_state;
-			if (!resolver || !resolver->read_entry(pipeline, external_state))
+			if (!resolver || !resolver->read_entry(RESOURCE_SHADER_MODULE, pipeline, external_state))
 				FOSSILIZE_THROW("Failed to find referenced shader");
 			this->parse(iface, resolver, external_state.data(), external_state.size());
 			module_iter = replayed_shader_modules.find(module);
@@ -1687,7 +1687,7 @@ VkPipelineShaderStageCreateInfo *StateReplayer::Impl::parse_stages(StateCreatorI
 			if (module_iter == replayed_shader_modules.end())
 			{
 				vector<uint8_t> external_state;
-				if (!resolver || !resolver->read_entry(module, external_state))
+				if (!resolver || !resolver->read_entry(RESOURCE_SHADER_MODULE, module, external_state))
 					FOSSILIZE_THROW("Failed to find referenced shader");
 				this->parse(iface, resolver, external_state.data(), external_state.size());
 				module_iter = replayed_shader_modules.find(module);
@@ -1732,7 +1732,7 @@ void StateReplayer::Impl::parse_graphics_pipeline(StateCreatorInterface &iface, 
 		if (pipeline_iter == replayed_graphics_pipelines.end())
 		{
 			vector<uint8_t> external_state;
-			if (!resolver || !resolver->read_entry(pipeline, external_state))
+			if (!resolver || !resolver->read_entry(RESOURCE_GRAPHICS_PIPELINE, pipeline, external_state))
 				FOSSILIZE_THROW("Failed to find referenced graphics pipeline");
 			this->parse(iface, resolver, external_state.data(), external_state.size());
 			pipeline_iter = replayed_graphics_pipelines.find(pipeline);
@@ -2512,7 +2512,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder)
 					auto create_info_copy = copy_shader_module(create_info, allocator);
 					shader_modules[hash] = create_info_copy;
 					if (database_iface)
-						database_iface->write_entry(hash, recorder->serialize_shader_module(hash));
+						database_iface->write_entry(RESOURCE_SHADER_MODULE, hash, recorder->serialize_shader_module(hash));
 				}
 				break;
 			}
@@ -2527,7 +2527,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder)
 					remap_graphics_pipeline_ci(create_info_copy);
 					graphics_pipelines[hash] = create_info_copy;
 					if (database_iface)
-						database_iface->write_entry(hash, recorder->serialize_graphics_pipeline(hash));
+						database_iface->write_entry(RESOURCE_GRAPHICS_PIPELINE, hash, recorder->serialize_graphics_pipeline(hash));
 				}
 				break;
 			}
@@ -2542,7 +2542,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder)
 					remap_compute_pipeline_ci(create_info_copy);
 					compute_pipelines[hash] = create_info_copy;
 					if (database_iface)
-						database_iface->write_entry(hash, recorder->serialize_compute_pipeline(hash));
+						database_iface->write_entry(RESOURCE_COMPUTE_PIPELINE, hash, recorder->serialize_compute_pipeline(hash));
 				}
 				break;
 			}

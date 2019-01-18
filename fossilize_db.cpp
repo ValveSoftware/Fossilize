@@ -26,6 +26,7 @@
 #include <inttypes.h>
 #include "miniz.h"
 #include <unordered_map>
+#include <algorithm>
 #include <miniz/miniz.h>
 
 using namespace std;
@@ -71,27 +72,28 @@ struct DumbDirectoryDatabase : DatabaseInterface
 	{
 	}
 
-	void prepare() override
+	bool prepare() override
 	{
+		return true;
 	}
 
-	bool has_entry(Hash) override
+	bool has_entry(ResourceTag, Hash) override
 	{
 		return false;
 	}
 
-	bool read_entry(Hash hash, vector<uint8_t> &blob) override
+	bool read_entry(ResourceTag tag, Hash hash, vector<uint8_t> &blob) override
 	{
-		char filename[22];
-		sprintf(filename, "%016" PRIX64 ".json", hash);
+		char filename[25]; // 2 digits + "." + 16 digits + ".json" + null
+		sprintf(filename, "%02x.%016" PRIX64 ".json", static_cast<unsigned>(tag), hash);
 		auto path = Path::join(base_directory, filename);
 		return load_buffer_from_path(path, blob);
 	}
 
-	bool write_entry(Hash hash, const std::vector<uint8_t> &bytes) override
+	bool write_entry(ResourceTag tag, Hash hash, const std::vector<uint8_t> &bytes) override
 	{
-		char filename[22]; // 16 digits + ".json" + null
-		sprintf(filename, "%016" PRIX64 ".json", hash);
+		char filename[25]; // 2 digits + "." + 16 digits + ".json" + null
+		sprintf(filename, "%02x.%016" PRIX64 ".json", static_cast<unsigned>(tag), hash);
 		auto path = Path::join(base_directory, filename);
 
 		FILE *file = fopen(path.c_str(), "wb");
@@ -109,6 +111,12 @@ struct DumbDirectoryDatabase : DatabaseInterface
 		}
 
 		fclose(file);
+		return true;
+	}
+
+	bool get_hash_list_for_resource_tag(ResourceTag, vector<Hash> &hashes) override
+	{
+		hashes.clear();
 		return true;
 	}
 
@@ -155,7 +163,7 @@ struct ZipDatabase : DatabaseInterface
 		return true;
 	}
 
-	void prepare() override
+	bool prepare() override
 	{
 		mz_zip_zero_struct(&mz);
 
@@ -172,7 +180,7 @@ struct ZipDatabase : DatabaseInterface
 
 				mz_zip_reader_get_filename(&mz, i, filename, sizeof(filename));
 				size_t len = strlen(filename);
-				if (len != 16)
+				if (len != 32)
 					continue;
 
 				if (!string_is_hex(filename))
@@ -182,9 +190,16 @@ struct ZipDatabase : DatabaseInterface
 				if (!mz_zip_reader_file_stat(&mz, i, &s))
 					continue;
 
-				uint64_t value;
-				sscanf(filename, "%" SCNx64, &value);
-				seen_blobs.emplace(value, Entry{ i, size_t(s.m_uncomp_size) });
+				char tag_str[16 + 1] = {};
+				char value_str[16 + 1] = {};
+				memcpy(tag_str, filename, 16);
+				memcpy(value_str, filename + 16, 16);
+
+				unsigned tag = unsigned(strtoul(tag_str, nullptr, 16));
+				if (tag >= RESOURCE_COUNT)
+					continue;
+				uint64_t value = strtoull(value_str, nullptr, 16);
+				seen_blobs[tag].emplace(value, Entry{ i, size_t(s.m_uncomp_size) });
 			}
 
 			// In-place update the archive. Should we consider emitting a new archive instead?
@@ -192,7 +207,7 @@ struct ZipDatabase : DatabaseInterface
 			{
 				LOGE("Failed to initialize ZIP writer from reader.\n");
 				mz_zip_end(&mz);
-				return;
+				return false;
 			}
 
 			alive = true;
@@ -202,21 +217,25 @@ struct ZipDatabase : DatabaseInterface
 			if (!mz_zip_writer_init_file(&mz, path.c_str(), 0))
 			{
 				LOGE("Failed to open ZIP archive for writing. Cannot serialize anything to disk.\n");
-				return;
+				return false;
 			}
 
 			alive = true;
-			seen_blobs.clear();
+
+			for (auto &blob : seen_blobs)
+				blob.clear();
 		}
+
+		return true;
 	}
 
-	bool read_entry(Hash hash, vector<uint8_t> &blob) override
+	bool read_entry(ResourceTag tag, Hash hash, vector<uint8_t> &blob) override
 	{
 		if (!alive || mode != DatabaseMode::ReadOnly)
 			return false;
 
-		auto itr = seen_blobs.find(hash);
-		if (itr == end(seen_blobs))
+		auto itr = seen_blobs[tag].find(hash);
+		if (itr == end(seen_blobs[tag]))
 			return false;
 
 		blob.resize(itr->second.size);
@@ -229,17 +248,18 @@ struct ZipDatabase : DatabaseInterface
 		return true;
 	}
 
-	bool write_entry(Hash hash, const vector<uint8_t> &blob) override
+	bool write_entry(ResourceTag tag, Hash hash, const vector<uint8_t> &blob) override
 	{
 		if (!alive || mode == DatabaseMode::ReadOnly)
 			return false;
 
-		auto itr = seen_blobs.find(hash);
-		if (itr != end(seen_blobs))
+		auto itr = seen_blobs[tag].find(hash);
+		if (itr != end(seen_blobs[tag]))
 			return true;
 
-		char str[16 + 1]; // 16 digits + null
-		sprintf(str, "%016" PRIx64, hash);
+		char str[32 + 1]; // 32 digits + null
+		sprintf(str, "%016x", tag);
+		sprintf(str + 16, "%016" PRIx64, hash);
 		if (!mz_zip_writer_add_mem(&mz, str, blob.data(), blob.size(), MZ_NO_COMPRESSION))
 		{
 			LOGE("Failed to add blob to cache.\n");
@@ -247,14 +267,26 @@ struct ZipDatabase : DatabaseInterface
 		}
 
 		// The index is irrelevant, we're not going to read from this archive any time soon.
-		seen_blobs.emplace(hash, Entry{ -1u, blob.size() });
+		seen_blobs[tag].emplace(hash, Entry{ -1u, blob.size() });
 		return true;
 	}
 
-	bool has_entry(Hash hash) override
+	bool has_entry(ResourceTag tag, Hash hash) override
 	{
-		auto itr = seen_blobs.find(hash);
-		return itr != end(seen_blobs);
+		auto itr = seen_blobs[tag].find(hash);
+		return itr != end(seen_blobs[tag]);
+	}
+
+	bool get_hash_list_for_resource_tag(ResourceTag tag, vector<Hash> &hashes) override
+	{
+		hashes.clear();
+		hashes.reserve(seen_blobs[tag].size());
+		for (auto &blob : seen_blobs[tag])
+			hashes.push_back(blob.first);
+
+		// Make replay more deterministic.
+		sort(begin(hashes), end(hashes));
+		return true;
 	}
 
 	string path;
@@ -265,7 +297,8 @@ struct ZipDatabase : DatabaseInterface
 		unsigned index;
 		size_t size;
 	};
-	unordered_map<Hash, Entry> seen_blobs;
+
+	unordered_map<Hash, Entry> seen_blobs[RESOURCE_COUNT];
 	DatabaseMode mode;
 	bool alive = false;
 };

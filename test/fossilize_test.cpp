@@ -487,9 +487,9 @@ static bool test_database()
 		auto db = create_zip_archive_database(".__test_tmp.zip", DatabaseMode::OverWrite);
 		db->prepare();
 
-		if (!db->write_entry(1, {1, 2, 3}))
+		if (!db->write_entry(RESOURCE_SAMPLER, 1, {1, 2, 3}))
 			return false;
-		if (!db->write_entry(2, {10, 20, 30, 40, 50}))
+		if (!db->write_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, 2, {10, 20, 30, 40, 50}))
 			return false;
 	}
 
@@ -499,14 +499,14 @@ static bool test_database()
 		db->prepare();
 
 		// Check that has_entry behaves.
-		if (!db->has_entry(1))
+		if (!db->has_entry(RESOURCE_SAMPLER, 1))
 			return false;
-		if (!db->has_entry(2))
+		if (!db->has_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, 2))
 			return false;
-		if (db->has_entry(3))
+		if (db->has_entry(RESOURCE_SHADER_MODULE, 3))
 			return false;
 
-		if (!db->write_entry(3, {1, 2, 3, 1, 2, 3}))
+		if (!db->write_entry(RESOURCE_SHADER_MODULE, 3, {1, 2, 3, 1, 2, 3}))
 			return false;
 	}
 
@@ -522,21 +522,21 @@ static bool test_database()
 			return memcmp(a.data(), b.data(), a.size()) == 0;
 		};
 
-		if (!db->has_entry(1))
+		if (!db->has_entry(RESOURCE_SAMPLER, 1))
 			return false;
-		if (!db->has_entry(2))
+		if (!db->has_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, 2))
 			return false;
-		if (!db->has_entry(3))
+		if (!db->has_entry(RESOURCE_SHADER_MODULE, 3))
 			return false;
-		if (db->has_entry(4))
+		if (db->has_entry(RESOURCE_GRAPHICS_PIPELINE, 3))
 			return false;
 
 		std::vector<uint8_t> blob;
-		if (!db->read_entry(1, blob) || !compare(blob, { 1, 2, 3 }))
+		if (!db->read_entry(RESOURCE_SAMPLER, 1, blob) || !compare(blob, { 1, 2, 3 }))
 			return false;
-		if (!db->read_entry(2, blob) || !compare(blob, { 10, 20, 30, 40, 50 }))
+		if (!db->read_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, 2, blob) || !compare(blob, { 10, 20, 30, 40, 50 }))
 			return false;
-		if (!db->read_entry(3, blob) || !compare(blob, { 1, 2, 3, 1, 2, 3 }))
+		if (!db->read_entry(RESOURCE_SHADER_MODULE, 3, blob) || !compare(blob, { 1, 2, 3, 1, 2, 3 }))
 			return false;
 	}
 
