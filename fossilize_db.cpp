@@ -407,14 +407,23 @@ struct StreamArchive : DatabaseInterface
 					return false;
 
 				size_t offset = MagicSize;
+				size_t begin_append_offset = len;
+
 				while (offset < len)
 				{
+					begin_append_offset = offset;
+
 					char blob_name[32];
+					uint8_t blob_size[4];
+
+					// Corrupt entry. Our process might have been killed before we could write all data.
+					if (offset + sizeof(blob_name) + sizeof(blob_size) > len)
+						break;
+
 					if (fread(blob_name, 1, sizeof(blob_name), file) != sizeof(blob_name))
 						return false;
 					offset += sizeof(blob_name);
 
-					uint8_t blob_size[4];
 					if (fread(blob_size, 1, sizeof(blob_size), file) != sizeof(blob_size))
 						return false;
 					offset += sizeof(blob_size);
@@ -424,9 +433,9 @@ struct StreamArchive : DatabaseInterface
 					                        (uint32_t(blob_size[2]) << 16) |
 					                        (uint32_t(blob_size[3]) << 24);
 
-					// Corrupt archive.
+					// Corrupt entry. Our process might have been killed before we could write all data.
 					if (offset + blob_size_le > len)
-						return false;
+						break;
 
 					char tag_str[16 + 1] = {};
 					char value_str[16 + 1] = {};
@@ -446,10 +455,15 @@ struct StreamArchive : DatabaseInterface
 					offset += blob_size_le;
 				}
 
-				fseek(file, 0, SEEK_END);
+				if (mode == DatabaseMode::Append && offset != len)
+				{
+					if (fseek(file, begin_append_offset, SEEK_SET) < 0)
+						return false;
+				}
 			}
 			else
 			{
+				// Appending to a fresh file. Make sure we have the magic.
 				if (fwrite(stream_reference_magic, 1, sizeof(stream_reference_magic), file) != sizeof(stream_reference_magic))
 					return false;
 			}
