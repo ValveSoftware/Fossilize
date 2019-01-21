@@ -74,4 +74,5 @@ enum class DatabaseMode
 std::unique_ptr<DatabaseInterface> create_dumb_folder_database(const std::string &directory_path, DatabaseMode mode);
 std::unique_ptr<DatabaseInterface> create_zip_archive_database(const std::string &path, DatabaseMode mode);
 std::unique_ptr<DatabaseInterface> create_stream_archive_database(const std::string &path, DatabaseMode mode);
+std::unique_ptr<DatabaseInterface> create_database(const std::string &path, DatabaseMode mode);
 }

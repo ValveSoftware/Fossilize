@@ -469,15 +469,7 @@ int main(int argc, char *argv[])
 	DumbReplayer replayer(opts, replayer_opts, filter_graphics, filter_compute);
 
 	auto start_create_archive = chrono::steady_clock::now();
-	unique_ptr<DatabaseInterface> resolver;
-	{
-		if (Path::ext(json_path) == "foz")
-			resolver = create_stream_archive_database(json_path, DatabaseMode::ReadOnly);
-		else if (Path::ext(json_path) == "zip")
-			resolver = create_zip_archive_database(json_path, DatabaseMode::ReadOnly);
-		else
-			resolver = create_dumb_folder_database(json_path, DatabaseMode::ReadOnly);
-	}
+	auto resolver = create_database(json_path, DatabaseMode::ReadOnly);
 	auto end_create_archive = chrono::steady_clock::now();
 
 	auto start_prepare = chrono::steady_clock::now();

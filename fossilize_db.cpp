@@ -567,4 +567,15 @@ unique_ptr<DatabaseInterface> create_stream_archive_database(const string &path,
 	return move(db);
 }
 
+unique_ptr<DatabaseInterface> create_database(const string &path, DatabaseMode mode)
+{
+	auto ext = Path::ext(path);
+	if (ext == "foz")
+		return create_stream_archive_database(path, mode);
+	else if (ext == "zip")
+		return create_zip_archive_database(path, mode);
+	else
+		return create_dumb_folder_database(path, mode);
+}
+
 }
