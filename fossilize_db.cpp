@@ -380,6 +380,9 @@ struct StreamArchive : DatabaseInterface
 
 		case DatabaseMode::Append:
 			file = fopen(path.c_str(), "r+b");
+			// r+b on empty file does not seem to work on Windows, so just fall back to wb.
+			if (!file)
+				file = fopen(path.c_str(), "wb");
 			break;
 
 		case DatabaseMode::OverWrite:
@@ -554,7 +557,7 @@ struct StreamArchive : DatabaseInterface
 		uint32_t size;
 	};
 
-	FILE *file;
+	FILE *file = nullptr;
 	string path;
 	unordered_map<Hash, Entry> seen_blobs[RESOURCE_COUNT];
 	DatabaseMode mode;
