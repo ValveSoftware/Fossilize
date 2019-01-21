@@ -310,7 +310,7 @@ struct ZipDatabase : DatabaseInterface
 		}
 
 		// The index is irrelevant, we're not going to read from this archive any time soon.
-		seen_blobs[tag].emplace(hash, Entry{-1u, blob.size()});
+		seen_blobs[tag].emplace(hash, Entry{~0u, blob.size()});
 		return true;
 	}
 
