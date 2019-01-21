@@ -253,11 +253,15 @@ public:
 			device_was_init = true;
 			device_opts.application_info = app;
 			device_opts.features = features;
+			auto start_device = chrono::steady_clock::now();
 			if (!device.init_device(device_opts))
 			{
 				LOGE("Failed to create Vulkan device, bailing ...\n");
 				exit(EXIT_FAILURE);
 			}
+			auto end_device = chrono::steady_clock::now();
+			long time_ms = chrono::duration_cast<chrono::milliseconds>(end_device - start_device).count();
+			LOGI("Creating Vulkan device took: %ld ms\n", time_ms);
 
 			if (opts.pipeline_cache)
 			{
@@ -464,19 +468,25 @@ int main(int argc, char *argv[])
 	auto start_time = chrono::steady_clock::now();
 	DumbReplayer replayer(opts, replayer_opts, filter_graphics, filter_compute);
 
+	auto start_create_archive = chrono::steady_clock::now();
 	unique_ptr<DatabaseInterface> resolver;
-	if (Path::ext(json_path) == "foz")
-		resolver = create_stream_archive_database(json_path, DatabaseMode::ReadOnly);
-	else if (Path::ext(json_path) == "zip")
-		resolver = create_zip_archive_database(json_path, DatabaseMode::ReadOnly);
-	else
-		resolver = create_dumb_folder_database(json_path, DatabaseMode::ReadOnly);
+	{
+		if (Path::ext(json_path) == "foz")
+			resolver = create_stream_archive_database(json_path, DatabaseMode::ReadOnly);
+		else if (Path::ext(json_path) == "zip")
+			resolver = create_zip_archive_database(json_path, DatabaseMode::ReadOnly);
+		else
+			resolver = create_dumb_folder_database(json_path, DatabaseMode::ReadOnly);
+	}
+	auto end_create_archive = chrono::steady_clock::now();
 
+	auto start_prepare = chrono::steady_clock::now();
 	if (!resolver->prepare())
 	{
 		LOGE("Failed to prepare database.\n");
 		return EXIT_FAILURE;
 	}
+	auto end_prepare = chrono::steady_clock::now();
 
 	StateReplayer state_replayer;
 
@@ -522,9 +532,13 @@ int main(int argc, char *argv[])
 		replayer.compute_pipelines.size() +
 		replayer.graphics_pipelines.size();
 
-	unsigned long elapsed_ms = chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now() - start_time).count();
+	long elapsed_ms_prepare = chrono::duration_cast<chrono::milliseconds>(end_prepare - start_prepare).count();
+	long elapsed_ms_read_archive = chrono::duration_cast<chrono::milliseconds>(end_create_archive - start_create_archive).count();
+	long elapsed_ms = chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now() - start_time).count();
 
-	LOGI("Replayed %lu objects in %lu ms:\n", total_size, elapsed_ms);
+	LOGI("Opening archive took %ld ms:\n", elapsed_ms_read_archive);
+	LOGI("Parsing archive took %ld ms:\n", elapsed_ms_prepare);
+	LOGI("Replayed %lu objects in %ld ms:\n", total_size, elapsed_ms);
 	LOGI("  samplers:              %7lu\n", (unsigned long)replayer.samplers.size());
 	LOGI("  descriptor set layouts:%7lu\n", (unsigned long)replayer.layouts.size());
 	LOGI("  pipeline layouts:      %7lu\n", (unsigned long)replayer.pipeline_layouts.size());
