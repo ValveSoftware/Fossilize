@@ -184,16 +184,23 @@ public:
 
 	void base_hash(Hasher &hasher) const;
 
-	std::vector<uint8_t> serialize_graphics_pipeline(Hash hash) const;
-	std::vector<uint8_t> serialize_compute_pipeline(Hash hash) const;
-	std::vector<uint8_t> serialize_shader_module(Hash hash) const;
-	std::vector<uint8_t> serialize() const;
-
+	// If database is non-null, serialize should not be called, as the implementation will not retain
+	// memory for the create info structs. The database interface will be fed with all information on the fly.
 	void init(DatabaseInterface *iface);
+	std::vector<uint8_t> serialize() const;
 
 private:
 	struct Impl;
 	std::unique_ptr<Impl> impl;
+
+	void serialize_application_info(std::vector<uint8_t> &blob) const;
+	void serialize_sampler(Hash hash, const VkSamplerCreateInfo &create_info, std::vector<uint8_t> &blob) const;
+	void serialize_descriptor_set_layout(Hash hash, const VkDescriptorSetLayoutCreateInfo &create_info, std::vector<uint8_t> &blob) const;
+	void serialize_pipeline_layout(Hash hash, const VkPipelineLayoutCreateInfo &create_info, std::vector<uint8_t> &blob) const;
+	void serialize_render_pass(Hash hash, const VkRenderPassCreateInfo &create_info, std::vector<uint8_t> &blob) const;
+	void serialize_shader_module(Hash hash, const VkShaderModuleCreateInfo &create_info, std::vector<uint8_t> &blob) const;
+	void serialize_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo &create_info, std::vector<uint8_t> &blob) const;
+	void serialize_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo &create_info, std::vector<uint8_t> &blob) const;
 };
 
 namespace Hashing

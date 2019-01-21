@@ -37,10 +37,17 @@
 
 #define RAPIDJSON_HAS_STDSTRING 1
 #include "rapidjson/document.h"
+using namespace rapidjson;
+
+#ifdef PRETTY_WRITER
 #include "rapidjson/prettywriter.h"
+using CustomWriter = PrettyWriter<StringBuffer>;
+#else
+#include "rapidjson/writer.h"
+using CustomWriter = Writer<StringBuffer>;
+#endif
 
 using namespace std;
-using namespace rapidjson;
 
 namespace Fossilize
 {
@@ -48,7 +55,7 @@ namespace Fossilize
 
 enum
 {
-	FOSSILIZE_FORMAT_VERSION = 1
+	FOSSILIZE_FORMAT_VERSION = 2
 };
 
 class Hasher
@@ -1927,7 +1934,7 @@ void ScratchAllocator::reset()
 	{
 		// free all but first block
 		if (blocks.size() > 1)
-			blocks.erase(++blocks.begin(), blocks.end());
+			blocks.erase(blocks.begin() + 1, blocks.end());
 		// reset offset on first block
 		blocks[0].offset = 0;
 	}
@@ -2439,6 +2446,18 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder)
 		}
 	}
 
+	// Keep a single, pre-allocated buffer.
+	vector<uint8_t> blob;
+	blob.reserve(64 * 1024);
+
+	if (database_iface)
+	{
+		Hasher h;
+		recorder->base_hash(h);
+		recorder->serialize_application_info(blob);
+		database_iface->write_entry(RESOURCE_APPLICATION_INFO, h.get(), blob);
+	}
+
 	for (;;)
 	{
 		WorkItem record_item;
@@ -2456,99 +2475,198 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder)
 
 		try
 		{
-			switch (*reinterpret_cast<VkStructureType*>(record_item.create_info))
+			switch (reinterpret_cast<VkBaseInStructure *>(record_item.create_info)->sType)
 			{
 			case VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO:
 			{
 				auto *create_info = reinterpret_cast<VkSamplerCreateInfo *>(record_item.create_info);
 				auto hash = Hashing::compute_hash_sampler(*recorder, *create_info);
 				sampler_to_hash[api_object_cast<VkSampler>(record_item.handle)] = hash;
-				if (!samplers.count(hash))
+
+				if (database_iface)
 				{
-					auto create_info_copy = copy_sampler(create_info, allocator);
-					samplers[hash] = create_info_copy;
+					if (!database_iface->has_entry(RESOURCE_SAMPLER, hash))
+					{
+						recorder->serialize_sampler(hash, *create_info, blob);
+						database_iface->write_entry(RESOURCE_SAMPLER, hash, blob);
+					}
+				}
+				else
+				{
+					// Retain for combined serialize() later.
+					if (!samplers.count(hash))
+					{
+						auto create_info_copy = copy_sampler(create_info, allocator);
+						samplers[hash] = create_info_copy;
+					}
 				}
 				break;
 			}
-			case VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO:
-			{
-				auto *create_info = reinterpret_cast<VkDescriptorSetLayoutCreateInfo *>(record_item.create_info);
-				auto hash = Hashing::compute_hash_descriptor_set_layout(*recorder, *create_info);
-				descriptor_set_layout_to_hash[api_object_cast<VkDescriptorSetLayout>(record_item.handle)] = hash;
-				if (!descriptor_sets.count(hash))
-				{
-					auto create_info_copy = copy_descriptor_set_layout(create_info, allocator);
-					remap_descriptor_set_layout_ci(create_info_copy);
-					descriptor_sets[hash] = create_info_copy;
-				}
-				break;
-			}
-			case VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO:
-			{
-				auto *create_info = reinterpret_cast<VkPipelineLayoutCreateInfo *>(record_item.create_info);
-				auto hash = Hashing::compute_hash_pipeline_layout(*recorder, *create_info);
-				pipeline_layout_to_hash[api_object_cast<VkPipelineLayout>(record_item.handle)] = hash;
-				if (!pipeline_layouts.count(hash))
-				{
-					auto create_info_copy = copy_pipeline_layout(create_info, allocator);
-					remap_pipeline_layout_ci(create_info_copy);
-					pipeline_layouts[hash] = create_info_copy;
-				}
-				break;
-			}
+
 			case VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO:
 			{
 				auto *create_info = reinterpret_cast<VkRenderPassCreateInfo *>(record_item.create_info);
 				auto hash = Hashing::compute_hash_render_pass(*recorder, *create_info);
 				render_pass_to_hash[api_object_cast<VkRenderPass>(record_item.handle)] = hash;
-				if (!render_passes.count(hash))
+
+				if (database_iface)
 				{
-					auto create_info_copy = copy_render_pass(create_info, allocator);
-					render_passes[hash] = create_info_copy;
+					if (!database_iface->has_entry(RESOURCE_RENDER_PASS, hash))
+					{
+						recorder->serialize_render_pass(hash, *create_info, blob);
+						database_iface->write_entry(RESOURCE_RENDER_PASS, hash, blob);
+					}
+				}
+				else
+				{
+					// Retain for combined serialize() later.
+					if (!render_passes.count(hash))
+					{
+						auto create_info_copy = copy_render_pass(create_info, allocator);
+						render_passes[hash] = create_info_copy;
+					}
 				}
 				break;
 			}
+
 			case VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO:
 			{
 				auto *create_info = reinterpret_cast<VkShaderModuleCreateInfo *>(record_item.create_info);
 				auto hash = Hashing::compute_hash_shader_module(*recorder, *create_info);
 				shader_module_to_hash[api_object_cast<VkShaderModule>(record_item.handle)] = hash;
-				if (!shader_modules.count(hash))
+
+				if (database_iface)
 				{
-					auto create_info_copy = copy_shader_module(create_info, allocator);
-					shader_modules[hash] = create_info_copy;
-					if (database_iface && !database_iface->has_entry(RESOURCE_SHADER_MODULE, hash))
-						database_iface->write_entry(RESOURCE_SHADER_MODULE, hash, recorder->serialize_shader_module(hash));
+					if (!database_iface->has_entry(RESOURCE_SHADER_MODULE, hash))
+					{
+						recorder->serialize_shader_module(hash, *create_info, blob);
+						database_iface->write_entry(RESOURCE_SHADER_MODULE, hash, blob);
+					}
+				}
+				else
+				{
+					// Retain for combined serialize() later.
+					if (!shader_modules.count(hash))
+					{
+						auto create_info_copy = copy_shader_module(create_info, allocator);
+						shader_modules[hash] = create_info_copy;
+					}
 				}
 				break;
 			}
+
+			case VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO:
+			{
+				auto *create_info = reinterpret_cast<VkDescriptorSetLayoutCreateInfo *>(record_item.create_info);
+				auto hash = Hashing::compute_hash_descriptor_set_layout(*recorder, *create_info);
+				descriptor_set_layout_to_hash[api_object_cast<VkDescriptorSetLayout>(record_item.handle)] = hash;
+
+				auto create_info_copy = copy_descriptor_set_layout(create_info, allocator);
+				remap_descriptor_set_layout_ci(create_info_copy);
+
+				if (database_iface)
+				{
+					if (!database_iface->has_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, hash))
+					{
+						recorder->serialize_descriptor_set_layout(hash, *create_info_copy, blob);
+						database_iface->write_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, hash, blob);
+					}
+
+					// Don't need to keep copied data around, reset the allocator.
+					allocator.reset();
+				}
+				else
+				{
+					// Retain for combined serialize() later.
+					if (!descriptor_sets.count(hash))
+						descriptor_sets[hash] = create_info_copy;
+				}
+				break;
+			}
+
+			case VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO:
+			{
+				auto *create_info = reinterpret_cast<VkPipelineLayoutCreateInfo *>(record_item.create_info);
+				auto hash = Hashing::compute_hash_pipeline_layout(*recorder, *create_info);
+				pipeline_layout_to_hash[api_object_cast<VkPipelineLayout>(record_item.handle)] = hash;
+
+				auto create_info_copy = copy_pipeline_layout(create_info, allocator);
+				remap_pipeline_layout_ci(create_info_copy);
+
+				if (database_iface)
+				{
+					if (!database_iface->has_entry(RESOURCE_PIPELINE_LAYOUT, hash))
+					{
+						recorder->serialize_pipeline_layout(hash, *create_info_copy, blob);
+						database_iface->write_entry(RESOURCE_PIPELINE_LAYOUT, hash, blob);
+					}
+
+					// Don't need to keep copied data around, reset the allocator.
+					allocator.reset();
+				}
+				else
+				{
+					// Retain for combined serialize() later.
+					if (!pipeline_layouts.count(hash))
+						pipeline_layouts[hash] = create_info_copy;
+				}
+				break;
+			}
+
 			case VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO:
 			{
 				auto *create_info = reinterpret_cast<VkGraphicsPipelineCreateInfo *>(record_item.create_info);
 				auto hash = Hashing::compute_hash_graphics_pipeline(*recorder, *create_info);
 				graphics_pipeline_to_hash[api_object_cast<VkPipeline>(record_item.handle)] = hash;
-				if (!graphics_pipelines.count(hash))
+
+				auto create_info_copy = copy_graphics_pipeline(create_info, allocator);
+				remap_graphics_pipeline_ci(create_info_copy);
+
+				if (database_iface)
 				{
-					auto create_info_copy = copy_graphics_pipeline(create_info, allocator);
-					remap_graphics_pipeline_ci(create_info_copy);
-					graphics_pipelines[hash] = create_info_copy;
-					if (database_iface && !database_iface->has_entry(RESOURCE_GRAPHICS_PIPELINE, hash))
-						database_iface->write_entry(RESOURCE_GRAPHICS_PIPELINE, hash, recorder->serialize_graphics_pipeline(hash));
+					if (!database_iface->has_entry(RESOURCE_GRAPHICS_PIPELINE, hash))
+					{
+						recorder->serialize_graphics_pipeline(hash, *create_info_copy, blob);
+						database_iface->write_entry(RESOURCE_GRAPHICS_PIPELINE, hash, blob);
+					}
+
+					// Don't need to keep copied data around, reset the allocator.
+					allocator.reset();
+				}
+				else
+				{
+					// Retain for combined serialize() later.
+					if (!graphics_pipelines.count(hash))
+						graphics_pipelines[hash] = create_info_copy;
 				}
 				break;
 			}
+
 			case VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO:
 			{
 				auto *create_info = reinterpret_cast<VkComputePipelineCreateInfo *>(record_item.create_info);
 				auto hash = Hashing::compute_hash_compute_pipeline(*recorder, *create_info);
 				compute_pipeline_to_hash[api_object_cast<VkPipeline>(record_item.handle)] = hash;
-				if (!compute_pipelines.count(hash))
+
+				auto create_info_copy = copy_compute_pipeline(create_info, allocator);
+				remap_compute_pipeline_ci(create_info_copy);
+
+				if (database_iface)
 				{
-					auto create_info_copy = copy_compute_pipeline(create_info, allocator);
-					remap_compute_pipeline_ci(create_info_copy);
-					compute_pipelines[hash] = create_info_copy;
-					if (database_iface && !database_iface->has_entry(RESOURCE_COMPUTE_PIPELINE, hash))
-						database_iface->write_entry(RESOURCE_COMPUTE_PIPELINE, hash, recorder->serialize_compute_pipeline(hash));
+					if (!database_iface->has_entry(RESOURCE_COMPUTE_PIPELINE, hash))
+					{
+						recorder->serialize_compute_pipeline(hash, *create_info_copy, blob);
+						database_iface->write_entry(RESOURCE_COMPUTE_PIPELINE, hash, blob);
+					}
+
+					// Don't need to keep copied data around, reset the allocator.
+					allocator.reset();
+				}
+				else
+				{
+					// Retain for combined serialize() later.
+					if (!compute_pipelines.count(hash))
+						compute_pipelines[hash] = create_info_copy;
 				}
 				break;
 			}
@@ -3126,7 +3244,7 @@ static inline const CreateType serialize_obj(ObjType obj, const std::unordered_m
 }
 
 template <typename AllocType>
-static void serialize_application_info(Value &value, const VkApplicationInfo &info, AllocType &alloc)
+static void serialize_application_info_inline(Value &value, const VkApplicationInfo &info, AllocType &alloc)
 {
 	if (info.pApplicationName)
 		value.AddMember("applicationName", StringRef(info.pApplicationName), alloc);
@@ -3138,14 +3256,14 @@ static void serialize_application_info(Value &value, const VkApplicationInfo &in
 }
 
 template <typename AllocType>
-static void serialize_physical_device_features(Value &value, const VkPhysicalDeviceFeatures2 &features, AllocType &alloc)
+static void serialize_physical_device_features_inline(Value &value, const VkPhysicalDeviceFeatures2 &features, AllocType &alloc)
 {
 	// TODO: For now, we only care about this feature, which can definitely affect compilation.
 	// Deal with other device features if proven to be required.
 	value.AddMember("robustBufferAccess", features.features.robustBufferAccess, alloc);
 }
 
-vector<uint8_t> StateRecorder::serialize_graphics_pipeline(Hash hash) const
+void StateRecorder::serialize_application_info(vector<uint8_t> &blob) const
 {
 	Document doc;
 	doc.SetObject();
@@ -3153,150 +3271,192 @@ vector<uint8_t> StateRecorder::serialize_graphics_pipeline(Hash hash) const
 
 	Value app_info(kObjectType);
 	Value pdf_info(kObjectType);
-	Value samplers(kObjectType);
-	Value set_layouts(kObjectType);
-	Value pipeline_layouts(kObjectType);
-	Value shader_modules(kObjectType);
-	Value render_passes(kObjectType);
-	Value graphics_pipelines(kObjectType);
-
 	if (impl->application_info)
-		serialize_application_info(app_info, *impl->application_info, alloc);
+		serialize_application_info_inline(app_info, *impl->application_info, alloc);
 	if (impl->physical_device_features)
-		serialize_physical_device_features(pdf_info, *impl->physical_device_features, alloc);
-
-	if (auto pipe = serialize_obj(hash, impl->graphics_pipelines, graphics_pipelines, alloc))
-	{
-		if (auto pipeline_layout = serialize_obj(pipe->layout, impl->pipeline_layouts, pipeline_layouts, alloc))
-		{
-			for (uint32_t i = 0; i < pipeline_layout->setLayoutCount; i++)
-			{
-				if (auto set_layout = serialize_obj(pipeline_layout->pSetLayouts[i], impl->descriptor_sets, set_layouts, alloc))
-				{
-					for (uint32_t j = 0; j < set_layout->bindingCount; j++)
-					{
-						auto& binding = set_layout->pBindings[j];
-						if (binding.pImmutableSamplers &&
-							(binding.descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ||
-								binding.descriptorType == VK_DESCRIPTOR_TYPE_SAMPLER))
-						{
-							for (uint32_t k = 0; k < binding.descriptorCount; k++)
-								serialize_obj(binding.pImmutableSamplers[k], impl->samplers, samplers, alloc);
-						}
-					}
-				}
-			}
-		}
-
-		serialize_obj(pipe->renderPass, impl->render_passes, render_passes, alloc);
-	}
+		serialize_physical_device_features_inline(pdf_info, *impl->physical_device_features, alloc);
 
 	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
 	doc.AddMember("applicationInfo", app_info, alloc);
 	doc.AddMember("physicalDeviceFeatures", pdf_info, alloc);
+
+	StringBuffer buffer;
+	CustomWriter writer(buffer);
+	doc.Accept(writer);
+
+	blob.resize(buffer.GetSize());
+	memcpy(blob.data(), buffer.GetString(), buffer.GetSize());
+}
+
+void StateRecorder::serialize_sampler(Hash hash, const VkSamplerCreateInfo &create_info, vector<uint8_t> &blob) const
+{
+	Document doc;
+	doc.SetObject();
+	auto &alloc = doc.GetAllocator();
+
+	Value samplers(kObjectType);
+	samplers.AddMember(uint64_string(hash, alloc), json_value(create_info, alloc), alloc);
+
+	Hasher h;
+	base_hash(h);
+
+	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
+	doc.AddMember("application", uint64_string(h.get(), alloc), alloc);
 	doc.AddMember("samplers", samplers, alloc);
-	doc.AddMember("setLayouts", set_layouts, alloc);
-	doc.AddMember("pipelineLayouts", pipeline_layouts, alloc);
+
+	StringBuffer buffer;
+	CustomWriter writer(buffer);
+	doc.Accept(writer);
+
+	blob.resize(buffer.GetSize());
+	memcpy(blob.data(), buffer.GetString(), buffer.GetSize());
+}
+
+void StateRecorder::serialize_descriptor_set_layout(Hash hash, const VkDescriptorSetLayoutCreateInfo &create_info,
+                                                    vector<uint8_t> &blob) const
+{
+	Document doc;
+	doc.SetObject();
+	auto &alloc = doc.GetAllocator();
+
+	Value layouts(kObjectType);
+	layouts.AddMember(uint64_string(hash, alloc), json_value(create_info, alloc), alloc);
+
+	Hasher h;
+	base_hash(h);
+
+	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
+	doc.AddMember("application", uint64_string(h.get(), alloc), alloc);
+	doc.AddMember("setLayouts", layouts, alloc);
+
+	StringBuffer buffer;
+	CustomWriter writer(buffer);
+	doc.Accept(writer);
+
+	blob.resize(buffer.GetSize());
+	memcpy(blob.data(), buffer.GetString(), buffer.GetSize());
+}
+
+void StateRecorder::serialize_pipeline_layout(Hash hash, const VkPipelineLayoutCreateInfo &create_info,
+                                              vector<uint8_t> &blob) const
+{
+	Document doc;
+	doc.SetObject();
+	auto &alloc = doc.GetAllocator();
+
+	Value layouts(kObjectType);
+	layouts.AddMember(uint64_string(hash, alloc), json_value(create_info, alloc), alloc);
+
+	Hasher h;
+	base_hash(h);
+
+	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
+	doc.AddMember("application", uint64_string(h.get(), alloc), alloc);
+	doc.AddMember("pipelineLayouts", layouts, alloc);
+
+	StringBuffer buffer;
+	CustomWriter writer(buffer);
+	doc.Accept(writer);
+
+	blob.resize(buffer.GetSize());
+	memcpy(blob.data(), buffer.GetString(), buffer.GetSize());
+}
+
+void StateRecorder::serialize_render_pass(Hash hash, const VkRenderPassCreateInfo &create_info, vector<uint8_t> &blob) const
+{
+	Document doc;
+	doc.SetObject();
+	auto &alloc = doc.GetAllocator();
+
+	Value render_passes(kObjectType);
+	render_passes.AddMember(uint64_string(hash, alloc), json_value(create_info, alloc), alloc);
+
+	Hasher h;
+	base_hash(h);
+
+	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
+	doc.AddMember("application", uint64_string(h.get(), alloc), alloc);
 	doc.AddMember("renderPasses", render_passes, alloc);
+
+	StringBuffer buffer;
+	CustomWriter writer(buffer);
+	doc.Accept(writer);
+
+	blob.resize(buffer.GetSize());
+	memcpy(blob.data(), buffer.GetString(), buffer.GetSize());
+}
+
+void StateRecorder::serialize_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo &create_info, vector<uint8_t> &blob) const
+{
+	Document doc;
+	doc.SetObject();
+	auto &alloc = doc.GetAllocator();
+
+	Value graphics_pipelines(kObjectType);
+	graphics_pipelines.AddMember(uint64_string(hash, alloc), json_value(create_info, alloc), alloc);
+
+	Hasher h;
+	base_hash(h);
+
+	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
+	doc.AddMember("application", uint64_string(h.get(), alloc), alloc);
 	doc.AddMember("graphicsPipelines", graphics_pipelines, alloc);
 
 	StringBuffer buffer;
-	PrettyWriter<StringBuffer> writer(buffer);
+	CustomWriter writer(buffer);
 	doc.Accept(writer);
 
-	vector<uint8_t> serialize_buffer(buffer.GetSize());
-	memcpy(serialize_buffer.data(), buffer.GetString(), buffer.GetSize());
-	return serialize_buffer;
+	blob.resize(buffer.GetSize());
+	memcpy(blob.data(), buffer.GetString(), buffer.GetSize());
 }
 
-vector<uint8_t> StateRecorder::serialize_compute_pipeline(Hash hash) const
+void StateRecorder::serialize_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo &create_info, vector<uint8_t> &blob) const
 {
 	Document doc;
 	doc.SetObject();
 	auto &alloc = doc.GetAllocator();
 
-	Value app_info(kObjectType);
-	Value pdf_info(kObjectType);
-	Value samplers(kObjectType);
-	Value set_layouts(kObjectType);
-	Value pipeline_layouts(kObjectType);
-	Value shader_modules(kObjectType);
 	Value compute_pipelines(kObjectType);
+	compute_pipelines.AddMember(uint64_string(hash, alloc), json_value(create_info, alloc), alloc);
 
-	if (impl->application_info)
-		serialize_application_info(app_info, *impl->application_info, alloc);
-	if (impl->physical_device_features)
-		serialize_physical_device_features(pdf_info, *impl->physical_device_features, alloc);
-
-	if (auto pipe = serialize_obj(hash, impl->compute_pipelines, compute_pipelines, alloc))
-	{
-		if (auto pipeline_layout = serialize_obj(pipe->layout, impl->pipeline_layouts, pipeline_layouts, alloc))
-		{
-			for (uint32_t i = 0; i < pipeline_layout->setLayoutCount; i++)
-			{
-				if (auto set_layout = serialize_obj(pipeline_layout->pSetLayouts[i], impl->descriptor_sets, set_layouts, alloc))
-				{
-					for (uint32_t j = 0; j < set_layout->bindingCount; j++)
-					{
-						auto& binding = set_layout->pBindings[j];
-						if (binding.pImmutableSamplers &&
-							(binding.descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ||
-								binding.descriptorType == VK_DESCRIPTOR_TYPE_SAMPLER))
-						{
-							for (uint32_t k = 0; k < binding.descriptorCount; k++)
-								serialize_obj(binding.pImmutableSamplers[k], impl->samplers, samplers, alloc);
-						}
-					}
-				}
-			}
-		}
-	}
+	Hasher h;
+	base_hash(h);
 
 	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
-	doc.AddMember("applicationInfo", app_info, alloc);
-	doc.AddMember("physicalDeviceFeatures", pdf_info, alloc);
-	doc.AddMember("samplers", samplers, alloc);
-	doc.AddMember("setLayouts", set_layouts, alloc);
-	doc.AddMember("pipelineLayouts", pipeline_layouts, alloc);
+	doc.AddMember("application", uint64_string(h.get(), alloc), alloc);
 	doc.AddMember("computePipelines", compute_pipelines, alloc);
 
 	StringBuffer buffer;
-	PrettyWriter<StringBuffer> writer(buffer);
+	CustomWriter writer(buffer);
 	doc.Accept(writer);
 
-	vector<uint8_t> serialize_buffer(buffer.GetSize());
-	memcpy(serialize_buffer.data(), buffer.GetString(), buffer.GetSize());
-	return serialize_buffer;
+	blob.resize(buffer.GetSize());
+	memcpy(blob.data(), buffer.GetString(), buffer.GetSize());
 }
 
-vector<uint8_t> StateRecorder::serialize_shader_module(Hash hash) const
+void StateRecorder::serialize_shader_module(Hash hash, const VkShaderModuleCreateInfo &create_info, vector<uint8_t> &blob) const
 {
 	Document doc;
 	doc.SetObject();
 	auto &alloc = doc.GetAllocator();
 
-	Value app_info(kObjectType);
-	Value pdf_info(kObjectType);
 	Value shader_modules(kObjectType);
+	shader_modules.AddMember(uint64_string(hash, alloc),
+	                         json_value(create_info, alloc), alloc);
 
-	if (impl->application_info)
-		serialize_application_info(app_info, *impl->application_info, alloc);
-	if (impl->physical_device_features)
-		serialize_physical_device_features(pdf_info, *impl->physical_device_features, alloc);
-	serialize_obj(hash, impl->shader_modules, shader_modules, alloc);
+	Hasher h;
+	base_hash(h);
 
 	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
-	doc.AddMember("applicationInfo", app_info, alloc);
-	doc.AddMember("physicalDeviceFeatures", pdf_info, alloc);
+	doc.AddMember("application", uint64_string(h.get(), alloc), alloc);
 	doc.AddMember("shaderModules", shader_modules, alloc);
 
 	StringBuffer buffer;
-	PrettyWriter<StringBuffer> writer(buffer);
+	CustomWriter writer(buffer);
 	doc.Accept(writer);
 
-	vector<uint8_t> serialize_buffer(buffer.GetSize());
-	memcpy(serialize_buffer.data(), buffer.GetString(), buffer.GetSize());
-	return serialize_buffer;
+	blob.resize(buffer.GetSize());
+	memcpy(blob.data(), buffer.GetString(), buffer.GetSize());
 }
 
 vector<uint8_t> StateRecorder::serialize() const
@@ -3312,9 +3472,10 @@ vector<uint8_t> StateRecorder::serialize() const
 	Value app_info(kObjectType);
 	Value pdf_info(kObjectType);
 	if (impl->application_info)
-		serialize_application_info(app_info, *impl->application_info, alloc);
+		serialize_application_info_inline(app_info, *impl->application_info, alloc);
 	if (impl->physical_device_features)
-		serialize_physical_device_features(pdf_info, *impl->physical_device_features, alloc);
+		serialize_physical_device_features_inline(pdf_info, *impl->physical_device_features, alloc);
+
 	doc.AddMember("applicationInfo", app_info, alloc);
 	doc.AddMember("physicalDeviceFeatures", pdf_info, alloc);
 
@@ -3375,7 +3536,7 @@ vector<uint8_t> StateRecorder::serialize() const
 	doc.AddMember("graphicsPipelines", graphics_pipelines, alloc);
 
 	StringBuffer buffer;
-	PrettyWriter<StringBuffer> writer(buffer);
+	CustomWriter writer(buffer);
 	doc.Accept(writer);
 
 	vector<uint8_t> serialize_buffer(buffer.GetSize());
