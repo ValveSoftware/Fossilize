@@ -87,7 +87,7 @@ void Device::init(VkPhysicalDevice gpu_, VkDevice device_, Instance *pInstance,
 #endif
 
 	//if (serializationPath.empty())
-		serializationPath = "/tmp/fossilize.zip";
+		serializationPath = "/tmp/fossilize.foz";
 
 	if (Path::ext(serializationPath) == "foz")
 		iface = create_stream_archive_database(serializationPath, DatabaseMode::OverWrite);

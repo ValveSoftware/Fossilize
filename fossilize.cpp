@@ -1341,7 +1341,7 @@ void StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, D
 	auto &info = *info_allocated;
 	info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
 	info.flags = obj["flags"].GetUint();
-	info.basePipelineIndex = obj["basePipelineIndex"].GetUint();
+	info.basePipelineIndex = obj["basePipelineIndex"].GetInt();
 
 	auto pipeline = string_to_uint64(obj["basePipelineHandle"].GetString());
 	if (pipeline > 0)
@@ -1712,7 +1712,7 @@ void StateReplayer::Impl::parse_graphics_pipeline(StateCreatorInterface &iface, 
 	auto &info = *info_allocated;
 	info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
 	info.flags = obj["flags"].GetUint();
-	info.basePipelineIndex = obj["basePipelineIndex"].GetUint();
+	info.basePipelineIndex = obj["basePipelineIndex"].GetInt();
 
 	auto pipeline = string_to_uint64(obj["basePipelineHandle"].GetString());
 	if (pipeline > 0)
