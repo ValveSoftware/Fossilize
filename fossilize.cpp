@@ -156,7 +156,7 @@ struct StateReplayer::Impl
 	void parse_samplers(StateCreatorInterface &iface, const Value &samplers);
 	void parse_descriptor_set_layouts(StateCreatorInterface &iface, const Value &layouts);
 	void parse_pipeline_layouts(StateCreatorInterface &iface, const Value &layouts);
-	void parse_shader_modules(StateCreatorInterface &iface, const Value &modules);
+	void parse_shader_modules(StateCreatorInterface &iface, const Value &modules, const uint8_t *varint, size_t varint_size);
 	void parse_render_passes(StateCreatorInterface &iface, const Value &passes);
 	void parse_compute_pipelines(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines);
 	void parse_graphics_pipelines(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines);
@@ -996,7 +996,8 @@ VkDescriptorSetLayout *StateReplayer::Impl::parse_set_layouts(const Value &layou
 	return ret;
 }
 
-void StateReplayer::Impl::parse_shader_modules(StateCreatorInterface &iface, const Value &modules)
+void StateReplayer::Impl::parse_shader_modules(StateCreatorInterface &iface, const Value &modules,
+                                               const uint8_t *varint, size_t varint_size)
 {
 	auto *infos = allocator.allocate_n_cleared<VkShaderModuleCreateInfo>(modules.MemberCount());
 
@@ -1006,12 +1007,27 @@ void StateReplayer::Impl::parse_shader_modules(StateCreatorInterface &iface, con
 		Hash hash = string_to_uint64(itr->name.GetString());
 		if (replayed_shader_modules.count(hash))
 			continue;
+
 		auto &obj = itr->value;
 		auto &info = infos[index];
 		info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
 		info.flags = obj["flags"].GetUint();
 		info.codeSize = obj["codeSize"].GetUint64();
-		info.pCode = reinterpret_cast<uint32_t*>(decode_base64(allocator, obj["code"].GetString(), info.codeSize));
+
+		if (obj.HasMember("varintOffset") && obj.HasMember("varintSize"))
+		{
+			uint32_t *decoded = static_cast<uint32_t *>(allocator.allocate_raw(info.codeSize, 64));
+			auto offset = obj["varintOffset"].GetUint64();
+			auto size = obj["varintSize"].GetUint64();
+			if (offset + size > varint_size)
+				FOSSILIZE_THROW("Binary varint buffer overflows payload.");
+			if (!decode_varint(decoded, info.codeSize / 4, varint + offset, size))
+				FOSSILIZE_THROW("Invalid varint format.");
+			info.pCode = decoded;
+		}
+		else
+			info.pCode = reinterpret_cast<uint32_t *>(decode_base64(allocator, obj["code"].GetString(), info.codeSize));
+
 		if (!iface.enqueue_create_shader_module(hash, &info, &replayed_shader_modules[hash]))
 			FOSSILIZE_THROW("Failed to create shader module.");
 	}
@@ -1814,10 +1830,18 @@ void StateReplayer::parse(StateCreatorInterface &iface, DatabaseInterface *resol
 	impl->parse(iface, resolver, buffer, size);
 }
 
-void StateReplayer::Impl::parse(StateCreatorInterface &iface, DatabaseInterface *resolver, const void *buffer_, size_t size)
+void StateReplayer::Impl::parse(StateCreatorInterface &iface, DatabaseInterface *resolver, const void *buffer_, size_t total_size)
 {
+	// All data after a string terminating '\0' is considered binary payload
+	// which can be read for various purposes (SPIR-V varint for example).
+	const uint8_t *buffer = static_cast<const uint8_t *>(buffer_);
+	auto itr = find(buffer, buffer + total_size, '\0');
+	size_t json_size = itr - buffer;
+	const uint8_t *varint_buffer = itr + 1;
+	size_t varint_size = (buffer + total_size) - varint_buffer;
+
 	Document doc;
-	doc.Parse(reinterpret_cast<const char *>(buffer_), size);
+	doc.Parse(reinterpret_cast<const char *>(buffer), json_size);
 
 	if (doc.HasParseError())
 	{
@@ -1835,7 +1859,7 @@ void StateReplayer::Impl::parse(StateCreatorInterface &iface, DatabaseInterface 
 		iface.set_application_info(nullptr, nullptr);
 
 	if (doc.HasMember("shaderModules"))
-		parse_shader_modules(iface, doc["shaderModules"]);
+		parse_shader_modules(iface, doc["shaderModules"], varint_buffer, varint_size);
 	else
 		iface.set_num_shader_modules(0);
 
@@ -2539,8 +2563,9 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder)
 				{
 					if (!database_iface->has_entry(RESOURCE_SHADER_MODULE, hash))
 					{
-						recorder->serialize_shader_module(hash, *create_info, blob);
+						recorder->serialize_shader_module(hash, *create_info, blob, allocator);
 						database_iface->write_entry(RESOURCE_SHADER_MODULE, hash, blob);
+						allocator.reset();
 					}
 				}
 				else
@@ -3420,15 +3445,27 @@ void StateRecorder::serialize_compute_pipeline(Hash hash, const VkComputePipelin
 	memcpy(blob.data(), buffer.GetString(), buffer.GetSize());
 }
 
-void StateRecorder::serialize_shader_module(Hash hash, const VkShaderModuleCreateInfo &create_info, vector<uint8_t> &blob) const
+void StateRecorder::serialize_shader_module(Hash hash, const VkShaderModuleCreateInfo &create_info,
+                                            vector<uint8_t> &blob, ScratchAllocator &allocator) const
 {
 	Document doc;
 	doc.SetObject();
 	auto &alloc = doc.GetAllocator();
 
 	Value shader_modules(kObjectType);
-	shader_modules.AddMember(uint64_string(hash, alloc),
-	                         json_value(create_info, alloc), alloc);
+
+	size_t size = compute_size_varint(create_info.pCode, create_info.codeSize / 4);
+	uint8_t *encoded = static_cast<uint8_t *>(allocator.allocate_raw(size, 64));
+	encode_varint(encoded, create_info.pCode, create_info.codeSize / 4);
+
+	Value varint(kObjectType);
+	varint.AddMember("varintOffset", 0, alloc);
+	varint.AddMember("varintSize", size, alloc);
+	varint.AddMember("codeSize", create_info.codeSize, alloc);
+	varint.AddMember("flags", 0, alloc);
+
+	// Varint binary form, starts at offset 0 after the delim '\0' character.
+	shader_modules.AddMember(uint64_string(hash, alloc), varint, alloc);
 
 	Hasher h;
 	base_hash(h);
@@ -3441,8 +3478,10 @@ void StateRecorder::serialize_shader_module(Hash hash, const VkShaderModuleCreat
 	CustomWriter writer(buffer);
 	doc.Accept(writer);
 
-	blob.resize(buffer.GetSize());
+	blob.resize(buffer.GetSize() + 1 + size);
 	memcpy(blob.data(), buffer.GetString(), buffer.GetSize());
+	blob[buffer.GetSize()] = '\0';
+	memcpy(blob.data() + buffer.GetSize() + 1, encoded, size);
 }
 
 vector<uint8_t> StateRecorder::serialize() const
