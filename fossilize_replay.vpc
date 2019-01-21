@@ -85,9 +85,11 @@ $Project "fossilize_replay"
 	$Folder "fossilize"
 	{
 		$File ".\fossilize.cpp"
+		$File ".\fossilize_db.cpp"
 		$File ".\path.cpp"
 		$File ".\varint.cpp"
 		$File ".\fossilize.hpp"
+		$File ".\fossilize_db.hpp"
 		$File ".\path.hpp"
 		$File ".\varint.hpp"
 	}
