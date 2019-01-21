@@ -3229,20 +3229,6 @@ static Value json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& all
 	return p;
 }
 
-template <typename ObjType, typename CreateType, typename AllocType>
-static inline const CreateType serialize_obj(ObjType obj, const std::unordered_map<Hash, CreateType>& ci_map, Value& json_map, AllocType& alloc)
-{
-	auto iter = ci_map.find(api_object_cast<Hash>(obj));
-	if (iter != ci_map.end()) {
-		auto hash = uint64_string(api_object_cast<uint64_t>(obj), alloc);
-		if (!json_map.HasMember(hash)) {
-			json_map.AddMember(hash, json_value(*iter->second, alloc), alloc);
-		}
-		return iter->second;
-	}
-	return nullptr;
-}
-
 template <typename AllocType>
 static void serialize_application_info_inline(Value &value, const VkApplicationInfo &info, AllocType &alloc)
 {
