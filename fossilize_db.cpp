@@ -242,7 +242,7 @@ struct ZipDatabase : DatabaseInterface
 				if (tag >= RESOURCE_COUNT)
 					continue;
 				uint64_t value = strtoull(value_str, nullptr, 16);
-				seen_blobs[tag].emplace(value, Entry{ i, size_t(s.m_uncomp_size) });
+				seen_blobs[tag].emplace(value, Entry{i, size_t(s.m_uncomp_size)});
 			}
 
 			// In-place update the archive. Should we consider emitting a new archive instead?
@@ -310,7 +310,7 @@ struct ZipDatabase : DatabaseInterface
 		}
 
 		// The index is irrelevant, we're not going to read from this archive any time soon.
-		seen_blobs[tag].emplace(hash, Entry{ -1u, blob.size() });
+		seen_blobs[tag].emplace(hash, Entry{-1u, blob.size()});
 		return true;
 	}
 
@@ -348,6 +348,208 @@ struct ZipDatabase : DatabaseInterface
 unique_ptr<DatabaseInterface> create_zip_archive_database(const string &path, DatabaseMode mode)
 {
 	auto db = make_unique<ZipDatabase>(path, mode);
+	return move(db);
+}
+
+static const uint8_t stream_reference_magic[] = {
+	0x81, 'S', 'T', 'R', 'E', 'A', 'M', 0,
+};
+
+struct StreamArchive : DatabaseInterface
+{
+	enum { MagicSize = 8 };
+
+	StreamArchive(const string &path_, DatabaseMode mode_)
+		: path(path_), mode(mode_)
+	{
+	}
+
+	~StreamArchive()
+	{
+		if (file)
+			fclose(file);
+	}
+
+	bool prepare() override
+	{
+		switch (mode)
+		{
+		case DatabaseMode::ReadOnly:
+			file = fopen(path.c_str(), "rb");
+			break;
+
+		case DatabaseMode::Append:
+			file = fopen(path.c_str(), "r+b");
+			break;
+
+		case DatabaseMode::OverWrite:
+			file = fopen(path.c_str(), "wb");
+			break;
+		}
+
+		if (!file)
+			return false;
+
+		if (mode != DatabaseMode::OverWrite)
+		{
+			// Scan through the archive and get the list of files.
+			fseek(file, 0, SEEK_END);
+			size_t len = ftell(file);
+			rewind(file);
+
+			if (len != 0)
+			{
+				uint8_t magic[MagicSize];
+				if (fread(magic, 1, MagicSize, file) != MagicSize)
+					return false;
+
+				if (memcmp(magic, stream_reference_magic, MagicSize))
+					return false;
+
+				size_t offset = MagicSize;
+				while (offset < len)
+				{
+					char blob_name[32];
+					if (fread(blob_name, 1, sizeof(blob_name), file) != sizeof(blob_name))
+						return false;
+					offset += sizeof(blob_name);
+
+					uint8_t blob_size[4];
+					if (fread(blob_size, 1, sizeof(blob_size), file) != sizeof(blob_size))
+						return false;
+					offset += sizeof(blob_size);
+
+					uint32_t blob_size_le = uint32_t(blob_size[0]) |
+					                        (uint32_t(blob_size[1]) << 8) |
+					                        (uint32_t(blob_size[2]) << 16) |
+					                        (uint32_t(blob_size[3]) << 24);
+
+					// Corrupt archive.
+					if (offset + blob_size_le > len)
+						return false;
+
+					char tag_str[16 + 1] = {};
+					char value_str[16 + 1] = {};
+					memcpy(tag_str, blob_name, 16);
+					memcpy(value_str, blob_name + 16, 16);
+
+					unsigned tag = unsigned(strtoul(tag_str, nullptr, 16));
+					if (tag < RESOURCE_COUNT)
+					{
+						uint64_t value = strtoull(value_str, nullptr, 16);
+						seen_blobs[tag].emplace(value, Entry{offset, blob_size_le});
+					}
+
+					if (fseek(file, blob_size_le, SEEK_CUR) < 0)
+						return false;
+
+					offset += blob_size_le;
+				}
+
+				fseek(file, 0, SEEK_END);
+			}
+			else
+			{
+				if (fwrite(stream_reference_magic, 1, sizeof(stream_reference_magic), file) != sizeof(stream_reference_magic))
+					return false;
+			}
+		}
+		else
+		{
+			if (fwrite(stream_reference_magic, 1, sizeof(stream_reference_magic), file) != sizeof(stream_reference_magic))
+				return false;
+		}
+
+		alive = true;
+		return true;
+	}
+
+	bool read_entry(ResourceTag tag, Hash hash, vector<uint8_t> &blob)
+	{
+		if (!alive || mode != DatabaseMode::ReadOnly)
+			return false;
+
+		auto itr = seen_blobs[tag].find(hash);
+		if (itr == end(seen_blobs[tag]))
+			return false;
+
+		if (fseek(file, itr->second.offset, SEEK_SET) < 0)
+			return false;
+		blob.resize(itr->second.size);
+
+		if (fread(blob.data(), 1, itr->second.size, file) != itr->second.size)
+			return false;
+
+		return true;
+	}
+
+	bool write_entry(ResourceTag tag, Hash hash, const vector<uint8_t> &blob)
+	{
+		if (!alive || mode == DatabaseMode::ReadOnly)
+			return false;
+
+		auto itr = seen_blobs[tag].find(hash);
+		if (itr != end(seen_blobs[tag]))
+			return true;
+
+		char str[32 + 1]; // 32 digits + null
+		sprintf(str, "%016x", tag);
+		sprintf(str + 16, "%016llx", static_cast<unsigned long long>(hash));
+
+		if (fwrite(str, 1, 32, file) != 32)
+			return false;
+
+		const uint8_t blob_size[4] = {
+			uint8_t((blob.size() >> 0) & 0xff),
+			uint8_t((blob.size() >> 8) & 0xff),
+			uint8_t((blob.size() >> 16) & 0xff),
+			uint8_t((blob.size() >> 24) & 0xff),
+		};
+
+		if (fwrite(blob_size, 1, sizeof(blob_size), file) != sizeof(blob_size))
+			return false;
+
+		if (fwrite(blob.data(), 1, blob.size(), file) != blob.size())
+			return false;
+
+		// The entry is irrelevant, we're not going to read from this archive any time soon.
+		seen_blobs[tag].emplace(hash, Entry{0, 0});
+		return true;
+	}
+
+	bool has_entry(ResourceTag tag, Hash hash) override
+	{
+		return seen_blobs[tag].count(hash) != 0;
+	}
+
+	bool get_hash_list_for_resource_tag(ResourceTag tag, vector<Hash> &hashes) override
+	{
+		hashes.clear();
+		hashes.reserve(seen_blobs[tag].size());
+		for (auto &blob : seen_blobs[tag])
+			hashes.push_back(blob.first);
+
+		// Make replay more deterministic.
+		sort(begin(hashes), end(hashes));
+		return true;
+	}
+
+	struct Entry
+	{
+		uint64_t offset;
+		uint32_t size;
+	};
+
+	FILE *file;
+	string path;
+	unordered_map<Hash, Entry> seen_blobs[RESOURCE_COUNT];
+	DatabaseMode mode;
+	bool alive = false;
+};
+
+unique_ptr<DatabaseInterface> create_stream_archive_database(const string &path, DatabaseMode mode)
+{
+	auto db = make_unique<StreamArchive>(path, mode);
 	return move(db);
 }
 
