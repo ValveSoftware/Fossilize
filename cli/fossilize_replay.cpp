@@ -277,6 +277,58 @@ struct ThreadedReplayer : StateCreatorInterface
 				vkDestroyPipeline(device.get_device(), pipeline.second, nullptr);
 	}
 
+	bool validate_pipeline_cache_header(const vector<uint8_t> &blob)
+	{
+		if (blob.size() < 16 + VK_UUID_SIZE)
+		{
+			LOGI("Pipeline cache header is too small.\n");
+			return false;
+		}
+
+		const auto read_le = [&](unsigned offset) -> uint32_t {
+			return uint32_t(blob[offset + 0]) |
+				(uint32_t(blob[offset + 1]) << 8) |
+				(uint32_t(blob[offset + 2]) << 16) |
+				(uint32_t(blob[offset + 3]) << 24);
+		};
+
+		auto length = read_le(0);
+		if (length != 16 + VK_UUID_SIZE)
+		{
+			LOGI("Length of pipeline cache header is not as expected.\n");
+			return false;
+		}
+
+		auto version = read_le(4);
+		if (version != VK_PIPELINE_CACHE_HEADER_VERSION_ONE)
+		{
+			LOGI("Version of pipeline cache header is not 1.\n");
+			return false;
+		}
+
+		VkPhysicalDeviceProperties props = {};
+		vkGetPhysicalDeviceProperties(device.get_gpu(), &props);
+		if (props.vendorID != read_le(8))
+		{
+			LOGI("Mismatch of vendorID and cache vendorID.\n");
+			return false;
+		}
+
+		if (props.deviceID != read_le(12))
+		{
+			LOGI("Mismatch of deviceID and cache deviceID.\n");
+			return false;
+		}
+
+		if (memcmp(props.pipelineCacheUUID, blob.data() + 16, VK_UUID_SIZE) != 0)
+		{
+			LOGI("Mismatch between pipelineCacheUUID.\n");
+			return false;
+		}
+
+		return true;
+	}
+
 	void set_application_info(const VkApplicationInfo *app, const VkPhysicalDeviceFeatures2 *features) override
 	{
 		// TODO: Could use this to create multiple VkDevices for replay as necessary if app changes.
@@ -315,8 +367,13 @@ struct ThreadedReplayer : StateCreatorInterface
 							on_disk_cache.resize(len);
 							if (fread(on_disk_cache.data(), 1, len, file) == len)
 							{
-								info.pInitialData = on_disk_cache.data();
-								info.initialDataSize = on_disk_cache.size();
+								if (validate_pipeline_cache_header(on_disk_cache))
+								{
+									info.pInitialData = on_disk_cache.data();
+									info.initialDataSize = on_disk_cache.size();
+								}
+								else
+									LOGI("Failed to validate pipeline cache. Creating a blank one.\n");
 							}
 						}
 					}

@@ -49,6 +49,11 @@ public:
 		return device;
 	}
 
+	VkPhysicalDevice get_gpu() const
+	{
+		return gpu;
+	}
+
 private:
 	VkInstance instance = VK_NULL_HANDLE;
 	VkPhysicalDevice gpu = VK_NULL_HANDLE;
