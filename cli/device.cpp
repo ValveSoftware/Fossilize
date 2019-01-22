@@ -46,11 +46,16 @@ static bool find_extension(const vector<VkExtensionProperties> &exts, const char
 	return itr != end(exts);
 }
 
-static bool filter_extension(const char *ext)
+static bool filter_extension(const char *ext, bool need_disasm)
 {
 	// Ban certain extensions, because they conflict with others.
 	if (strcmp(ext, VK_AMD_NEGATIVE_VIEWPORT_HEIGHT_EXTENSION_NAME) == 0)
 		return false;
+	else if (strcmp(ext, VK_AMD_SHADER_INFO_EXTENSION_NAME) == 0 && !need_disasm)
+	{
+		// Mesa disables the pipeline cache when VK_AMD_shader_info is used, so disable this extension unless we need it.
+		return false;
+	}
 
 	return true;
 }
@@ -267,7 +272,7 @@ bool VulkanDevice::init_device(const Options &opts)
 
 	for (auto &ext : device_ext_props)
 	{
-		if (filter_extension(ext.extensionName))
+		if (filter_extension(ext.extensionName, opts.need_disasm))
 			active_device_extensions.push_back(ext.extensionName);
 	}
 

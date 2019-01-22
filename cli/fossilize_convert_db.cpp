@@ -1,4 +1,4 @@
-/* Copyright (c) 2018 Hans-Kristian Arntzen
+/* Copyright (c) 2019 Hans-Kristian Arntzen
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -20,44 +20,53 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#pragma once
+#include "fossilize_db.hpp"
+#include "layer/utils.hpp"
 
-#include "volk.h"
+using namespace Fossilize;
 
-namespace Fossilize
+static void print_help()
 {
-class VulkanDevice
+	LOGI("Usage: fossilize-convert-db input-db output-db\n");
+}
+
+int main(int argc, char *argv[])
 {
-public:
-	struct Options
+	if (argc != 3)
 	{
-		bool enable_validation = false;
-		bool need_disasm = true;
-		int device_index = -1;
-		const VkApplicationInfo *application_info = nullptr;
-		const VkPhysicalDeviceFeatures2 *features = nullptr;
-	};
-	bool init_device(const Options &opts);
-
-	VulkanDevice() = default;
-	~VulkanDevice();
-	VulkanDevice(VulkanDevice &&) = delete;
-	void operator=(VulkanDevice &&) = delete;
-
-	VkDevice get_device() const
-	{
-		return device;
+		print_help();
+		return EXIT_FAILURE;
 	}
 
-	VkPhysicalDevice get_gpu() const
+	auto input_db = create_database(argv[1], DatabaseMode::ReadOnly);
+	auto output_db = create_database(argv[2], DatabaseMode::OverWrite);
+	if (!input_db || !input_db->prepare())
 	{
-		return gpu;
+		LOGE("Failed to load database: %s\n", argv[1]);
+		return EXIT_FAILURE;
 	}
 
-private:
-	VkInstance instance = VK_NULL_HANDLE;
-	VkPhysicalDevice gpu = VK_NULL_HANDLE;
-	VkDevice device = VK_NULL_HANDLE;
-	VkDebugReportCallbackEXT callback = VK_NULL_HANDLE;
-};
+	if (!output_db || !output_db->prepare())
+	{
+		LOGE("Failed to open database for writing: %s\n", argv[2]);
+		return EXIT_FAILURE;
+	}
+
+	for (unsigned i = 0; i < RESOURCE_COUNT; i++)
+	{
+		auto tag = static_cast<ResourceTag>(i);
+
+		std::vector<Hash> hashes;
+		if (!input_db->get_hash_list_for_resource_tag(tag, hashes))
+			return EXIT_FAILURE;
+
+		for (auto &hash : hashes)
+		{
+			std::vector<uint8_t> blob;
+			if (!input_db->read_entry(tag, hash, blob))
+				return EXIT_FAILURE;
+			if (!output_db->write_entry(tag, hash, blob))
+				return EXIT_FAILURE;
+		}
+	}
 }

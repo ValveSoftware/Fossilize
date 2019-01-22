@@ -141,7 +141,6 @@ int main(int argc, char *argv[])
 	try
 	{
 		OptimizeReplayer replayer;
-		DatabaseInterface resolver;
 		StateReplayer state_replayer;
 		auto state_json = load_buffer_from_file(json_path.c_str());
 		if (state_json.empty())
@@ -150,7 +149,7 @@ int main(int argc, char *argv[])
 			return EXIT_FAILURE;
 		}
 
-		state_replayer.parse(replayer, resolver, state_json.data(), state_json.size());
+		state_replayer.parse(replayer, nullptr, state_json.data(), state_json.size());
 		auto serialized = replayer.recorder.serialize();
 		if (!write_buffer_to_file(json_output_path.c_str(), serialized.data(), serialized.size()))
 		{

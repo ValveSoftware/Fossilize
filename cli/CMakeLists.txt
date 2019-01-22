@@ -18,10 +18,6 @@ if (ANDROID)
 	target_link_libraries(cli-utils log)
 endif()
 
-if (WIN32)
-	target_include_directories(cli-utils PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/dirent/include)
-endif()
-
 function(add_fossilize_cli NAME)
 	add_executable(${NAME} ${ARGN})
 	target_compile_options(${NAME} PRIVATE ${FOSSILIZE_CXX_FLAGS})
@@ -32,6 +28,7 @@ function(add_fossilize_cli NAME)
 endfunction()
 
 add_fossilize_cli(fossilize-replay fossilize_replay.cpp)
+add_fossilize_cli(fossilize-convert-db fossilize_convert_db.cpp)
 add_fossilize_cli(fossilize-disasm fossilize_disasm.cpp)
 target_link_libraries(fossilize-disasm SPIRV-Tools spirv-cross-glsl)
 add_fossilize_cli(fossilize-opt fossilize_opt.cpp)

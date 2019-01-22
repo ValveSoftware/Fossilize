@@ -21,7 +21,10 @@
  */
 
 #include "fossilize.hpp"
+#include "fossilize_db.hpp"
+#include <string.h>
 #include <stdexcept>
+#include "layer/utils.hpp"
 
 using namespace Fossilize;
 
@@ -475,16 +478,86 @@ static void record_graphics_pipelines(StateRecorder &recorder)
 	recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100001), pipe);
 }
 
+static bool test_database()
+{
+	remove(".__test_tmp.zip");
+
+	// Try clean write.
+	{
+		auto db = create_stream_archive_database(".__test_tmp.zip", DatabaseMode::OverWrite);
+		if (!db->prepare())
+			return false;
+
+		if (!db->write_entry(RESOURCE_SAMPLER, 1, {1, 2, 3}))
+			return false;
+		if (!db->write_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, 2, {10, 20, 30, 40, 50}))
+			return false;
+	}
+
+	// Try appending now.
+	{
+		auto db = create_stream_archive_database(".__test_tmp.zip", DatabaseMode::Append);
+		if (!db->prepare())
+			return false;
+
+		// Check that has_entry behaves.
+		if (!db->has_entry(RESOURCE_SAMPLER, 1))
+			return false;
+		if (!db->has_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, 2))
+			return false;
+		if (db->has_entry(RESOURCE_SHADER_MODULE, 3))
+			return false;
+
+		if (!db->write_entry(RESOURCE_SHADER_MODULE, 3, {1, 2, 3, 1, 2, 3}))
+			return false;
+	}
+
+	// Try playback multiple times.
+	for (unsigned iter = 0; iter < 2; iter++)
+	{
+		auto db = create_stream_archive_database(".__test_tmp.zip", DatabaseMode::ReadOnly);
+		if (!db->prepare())
+			return false;
+
+		const auto compare = [](const std::vector<uint8_t> &a, const std::vector<uint8_t> &b) -> bool {
+			if (a.size() != b.size())
+				return false;
+			return memcmp(a.data(), b.data(), a.size()) == 0;
+		};
+
+		if (!db->has_entry(RESOURCE_SAMPLER, 1))
+			return false;
+		if (!db->has_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, 2))
+			return false;
+		if (!db->has_entry(RESOURCE_SHADER_MODULE, 3))
+			return false;
+		if (db->has_entry(RESOURCE_GRAPHICS_PIPELINE, 3))
+			return false;
+
+		std::vector<uint8_t> blob;
+		if (!db->read_entry(RESOURCE_SAMPLER, 1, blob) || !compare(blob, { 1, 2, 3 }))
+			return false;
+		if (!db->read_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, 2, blob) || !compare(blob, { 10, 20, 30, 40, 50 }))
+			return false;
+		if (!db->read_entry(RESOURCE_SHADER_MODULE, 3, blob) || !compare(blob, { 1, 2, 3, 1, 2, 3 }))
+			return false;
+	}
+
+	return true;
+}
+
 int main()
 {
+	if (!test_database())
+		return EXIT_FAILURE;
+
 	try
 	{
 		std::vector<uint8_t> res;
 		{
-			DatabaseInterface iface;
 			StateRecorder recorder;
 
-			recorder.init(&iface);
+			recorder.init(nullptr);
 
 			record_samplers(recorder);
 			record_set_layouts(recorder);
@@ -499,9 +572,11 @@ int main()
 
 		StateReplayer replayer;
 		ReplayInterface iface;
-		DatabaseInterface resolver;
 
-		replayer.parse(iface, resolver, res.data(), res.size());
+		std::string serialized(res.begin(), res.end());
+		LOGI("Serialized:\n%s\n", serialized.c_str());
+
+		replayer.parse(iface, nullptr, res.data(), res.size());
 		return EXIT_SUCCESS;
 	}
 	catch (const std::exception &e)

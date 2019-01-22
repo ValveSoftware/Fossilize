@@ -19,7 +19,6 @@
  * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
-#include <cinttypes>
 #include <atomic>
 #include <mutex>
 #include <condition_variable>
@@ -33,14 +32,22 @@
 #include <string.h>
 #include "varint.hpp"
 #include "path.hpp"
+#include "fossilize_db.hpp"
 #include "layer/utils.hpp"
 
 #define RAPIDJSON_HAS_STDSTRING 1
 #include "rapidjson/document.h"
+using namespace rapidjson;
+
+#ifdef PRETTY_WRITER
 #include "rapidjson/prettywriter.h"
+using CustomWriter = PrettyWriter<StringBuffer>;
+#else
+#include "rapidjson/writer.h"
+using CustomWriter = Writer<StringBuffer>;
+#endif
 
 using namespace std;
-using namespace rapidjson;
 
 namespace Fossilize
 {
@@ -48,7 +55,7 @@ namespace Fossilize
 
 enum
 {
-	FOSSILIZE_FORMAT_VERSION = 1
+	FOSSILIZE_FORMAT_VERSION = 2
 };
 
 class Hasher
@@ -62,11 +69,11 @@ public:
 	Hasher() = default;
 
 	template <typename T>
-	inline void data(const T *data, size_t size)
+	inline void data(const T *data_, size_t size)
 	{
-		size /= sizeof(*data);
+		size /= sizeof(*data_);
 		for (size_t i = 0; i < size; i++)
-			h = (h * 0x100000001b3ull) ^ data[i];
+			h = (h * 0x100000001b3ull) ^ data_[i];
 	}
 
 	inline void u32(uint32_t value)
@@ -135,7 +142,7 @@ struct HashedInfo
 
 struct StateReplayer::Impl
 {
-	void parse(StateCreatorInterface &iface, DatabaseInterface &resolver, const void *buffer, size_t size);
+	void parse(StateCreatorInterface &iface, DatabaseInterface *resolver, const void *buffer, size_t size);
 	ScratchAllocator allocator;
 
 	std::unordered_map<Hash, VkSampler> replayed_samplers;
@@ -149,10 +156,12 @@ struct StateReplayer::Impl
 	void parse_samplers(StateCreatorInterface &iface, const Value &samplers);
 	void parse_descriptor_set_layouts(StateCreatorInterface &iface, const Value &layouts);
 	void parse_pipeline_layouts(StateCreatorInterface &iface, const Value &layouts);
-	void parse_shader_modules(StateCreatorInterface &iface, const Value &modules);
+	void parse_shader_modules(StateCreatorInterface &iface, const Value &modules, const uint8_t *varint, size_t varint_size);
 	void parse_render_passes(StateCreatorInterface &iface, const Value &passes);
-	void parse_compute_pipelines(StateCreatorInterface &iface, DatabaseInterface &resolver, const Value &pipelines);
-	void parse_graphics_pipelines(StateCreatorInterface &iface, DatabaseInterface &resolver, const Value &pipelines);
+	void parse_compute_pipelines(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines);
+	void parse_graphics_pipelines(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines);
+	void parse_compute_pipeline(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines, const Value &member);
+	void parse_graphics_pipeline(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines, const Value &member);
 	void parse_application_info(StateCreatorInterface &iface, const Value &app_info, const Value &pdf_info);
 	VkPushConstantRange *parse_push_constant_ranges(const Value &ranges);
 	VkDescriptorSetLayout *parse_set_layouts(const Value &layouts);
@@ -176,7 +185,7 @@ struct StateReplayer::Impl
 	VkPipelineViewportStateCreateInfo *parse_viewport_state(const Value &state);
 	VkPipelineDynamicStateCreateInfo *parse_dynamic_state(const Value &state);
 	VkPipelineTessellationStateCreateInfo *parse_tessellation_state(const Value &state);
-	VkPipelineShaderStageCreateInfo *parse_stages(StateCreatorInterface &iface, DatabaseInterface &resolver, const Value &stages);
+	VkPipelineShaderStageCreateInfo *parse_stages(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &stages);
 	VkVertexInputAttributeDescription *parse_vertex_attributes(const Value &attributes);
 	VkVertexInputBindingDescription *parse_vertex_bindings(const Value &bindings);
 	VkPipelineColorBlendAttachmentState *parse_blend_attachments(const Value &attachments);
@@ -195,6 +204,10 @@ struct WorkItem
 
 struct StateRecorder::Impl
 {
+	~Impl();
+	void sync_thread();
+	void record_end();
+
 	ScratchAllocator allocator;
 	ScratchAllocator temp_allocator;
 	DatabaseInterface *database_iface = nullptr;
@@ -892,9 +905,10 @@ static uint8_t *decode_base64(ScratchAllocator &allocator, const char *data, siz
 	return buf;
 }
 
-static uint64_t string_to_uint64(const char* str) {
-	uint64_t value;
-	sscanf(str, "%" SCNx64, &value);
+static uint64_t string_to_uint64(const char* str)
+{
+	unsigned long long value;
+	sscanf(str, "%llx", &value);
 	return value;
 }
 
@@ -918,6 +932,20 @@ VkSampler *StateReplayer::Impl::parse_immutable_samplers(const Value &samplers)
 	}
 
 	return ret;
+}
+
+void StateRecorder::Impl::sync_thread()
+{
+	if (worker_thread.joinable())
+	{
+		record_end();
+		worker_thread.join();
+	}
+}
+
+StateRecorder::Impl::~Impl()
+{
+	sync_thread();
 }
 
 VkDescriptorSetLayoutBinding *StateReplayer::Impl::parse_descriptor_set_bindings(const Value &bindings)
@@ -968,7 +996,8 @@ VkDescriptorSetLayout *StateReplayer::Impl::parse_set_layouts(const Value &layou
 	return ret;
 }
 
-void StateReplayer::Impl::parse_shader_modules(StateCreatorInterface &iface, const Value &modules)
+void StateReplayer::Impl::parse_shader_modules(StateCreatorInterface &iface, const Value &modules,
+                                               const uint8_t *varint, size_t varint_size)
 {
 	auto *infos = allocator.allocate_n_cleared<VkShaderModuleCreateInfo>(modules.MemberCount());
 
@@ -978,16 +1007,32 @@ void StateReplayer::Impl::parse_shader_modules(StateCreatorInterface &iface, con
 		Hash hash = string_to_uint64(itr->name.GetString());
 		if (replayed_shader_modules.count(hash))
 			continue;
+
 		auto &obj = itr->value;
 		auto &info = infos[index];
 		info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
 		info.flags = obj["flags"].GetUint();
 		info.codeSize = obj["codeSize"].GetUint64();
-		info.pCode = reinterpret_cast<uint32_t*>(decode_base64(allocator, obj["code"].GetString(), info.codeSize));
+
+		if (obj.HasMember("varintOffset") && obj.HasMember("varintSize"))
+		{
+			uint32_t *decoded = static_cast<uint32_t *>(allocator.allocate_raw(info.codeSize, 64));
+			auto offset = obj["varintOffset"].GetUint64();
+			auto size = obj["varintSize"].GetUint64();
+			if (offset + size > varint_size)
+				FOSSILIZE_THROW("Binary varint buffer overflows payload.");
+			if (!decode_varint(decoded, info.codeSize / 4, varint + offset, size))
+				FOSSILIZE_THROW("Invalid varint format.");
+			info.pCode = decoded;
+		}
+		else
+			info.pCode = reinterpret_cast<uint32_t *>(decode_base64(allocator, obj["code"].GetString(), info.codeSize));
+
 		if (!iface.enqueue_create_shader_module(hash, &info, &replayed_shader_modules[hash]))
 			FOSSILIZE_THROW("Failed to create shader module.");
 	}
-	iface.wait_enqueue();
+
+	iface.notify_replayed_resources_for_type();
 }
 
 void StateReplayer::Impl::parse_pipeline_layouts(StateCreatorInterface &iface, const Value &layouts)
@@ -1021,7 +1066,8 @@ void StateReplayer::Impl::parse_pipeline_layouts(StateCreatorInterface &iface, c
 		if (!iface.enqueue_create_pipeline_layout(hash, &info, &replayed_pipeline_layouts[hash]))
 			FOSSILIZE_THROW("Failed to create pipeline layout.");
 	}
-	iface.wait_enqueue();
+
+	iface.notify_replayed_resources_for_type();
 }
 
 void StateReplayer::Impl::parse_descriptor_set_layouts(StateCreatorInterface &iface, const Value &layouts)
@@ -1050,7 +1096,8 @@ void StateReplayer::Impl::parse_descriptor_set_layouts(StateCreatorInterface &if
 		if (!iface.enqueue_create_descriptor_set_layout(hash, &info, &replayed_descriptor_set_layouts[hash]))
 			FOSSILIZE_THROW("Failed to create descriptor set layout.");
 	}
-	iface.wait_enqueue();
+
+	iface.notify_replayed_resources_for_type();
 }
 
 void StateReplayer::Impl::parse_application_info(StateCreatorInterface &iface, const Value &app_info, const Value &pdf_info)
@@ -1123,7 +1170,8 @@ void StateReplayer::Impl::parse_samplers(StateCreatorInterface &iface, const Val
 		if (!iface.enqueue_create_sampler(hash, &info, &replayed_samplers[hash]))
 			FOSSILIZE_THROW("Failed to create sampler.");
 	}
-	iface.wait_enqueue();
+
+	iface.notify_replayed_resources_for_type();
 }
 
 VkAttachmentDescription *StateReplayer::Impl::parse_render_pass_attachments(const Value &attachments)
@@ -1276,7 +1324,7 @@ void StateReplayer::Impl::parse_render_passes(StateCreatorInterface &iface, cons
 			FOSSILIZE_THROW("Failed to create render pass.");
 	}
 
-	iface.wait_enqueue();
+	iface.notify_replayed_resources_for_type();
 }
 
 VkSpecializationMapEntry *StateReplayer::Impl::parse_map_entries(const Value &map_entries)
@@ -1308,73 +1356,92 @@ VkSpecializationInfo *StateReplayer::Impl::parse_specialization_info(const Value
 	return spec;
 }
 
-void StateReplayer::Impl::parse_compute_pipelines(StateCreatorInterface &iface, DatabaseInterface &resolver, const Value &pipelines)
+void StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, DatabaseInterface *resolver,
+                                                 const Value &pipelines, const Value &member)
 {
-	auto *infos = allocator.allocate_n_cleared<VkComputePipelineCreateInfo>(pipelines.MemberCount());
+	Hash hash = string_to_uint64(member.GetString());
+	if (replayed_compute_pipelines.count(hash))
+		return;
 
-	unsigned index = 0;
-	for (auto itr = pipelines.MemberBegin(); itr != pipelines.MemberEnd(); ++itr, index++)
+	auto *info_allocated = allocator.allocate_cleared<VkComputePipelineCreateInfo>();
+	auto &obj = pipelines[member];
+	auto &info = *info_allocated;
+	info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+	info.flags = obj["flags"].GetUint();
+	info.basePipelineIndex = obj["basePipelineIndex"].GetInt();
+
+	auto pipeline = string_to_uint64(obj["basePipelineHandle"].GetString());
+	if (pipeline > 0)
 	{
-		Hash hash = string_to_uint64(itr->name.GetString());
-		if (replayed_compute_pipelines.count(hash))
-			continue;
-		auto &obj = itr->value;
-		auto &info = infos[index];
-		info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-		info.flags = obj["flags"].GetUint();
-		info.basePipelineIndex = obj["basePipelineIndex"].GetUint();
+		// This is pretty bad for multithreaded replay, but this should be very rare.
+		iface.sync_threads();
+		auto pipeline_iter = replayed_compute_pipelines.find(pipeline);
 
-		auto pipeline = string_to_uint64(obj["basePipelineHandle"].GetString());
-		if (pipeline > 0)
+		// If we don't have the pipeline, we might have it later in the array of graphics pipelines, queue up out of order.
+		if (pipeline_iter == replayed_compute_pipelines.end() && pipelines.HasMember(obj["basePipelineHandle"].GetString()))
 		{
-			iface.wait_enqueue();
-			auto pipeline_iter = replayed_compute_pipelines.find(pipeline);
+			parse_compute_pipeline(iface, resolver, pipelines, obj["basePipelineHandle"]);
+			iface.sync_threads();
+			pipeline_iter = replayed_compute_pipelines.find(pipeline);
+		}
+
+		// Still don't have it? Look into database.
+		if (pipeline_iter == replayed_compute_pipelines.end())
+		{
+			vector<uint8_t> external_state;
+			if (!resolver || !resolver->read_entry(RESOURCE_COMPUTE_PIPELINE, pipeline, external_state))
+				FOSSILIZE_THROW("Failed to find referenced compute pipeline");
+			this->parse(iface, resolver, external_state.data(), external_state.size());
+			iface.sync_threads();
+
+			pipeline_iter = replayed_compute_pipelines.find(pipeline);
 			if (pipeline_iter == replayed_compute_pipelines.end())
-			{
-				auto external_state = resolver.read_entry(pipeline);
-				if (external_state.empty())
-					FOSSILIZE_THROW("Failed to find referenced compute pipeline");
-				this->parse(iface, resolver, external_state.data(), external_state.size());
-				pipeline_iter = replayed_compute_pipelines.find(pipeline);
-				if (pipeline_iter == replayed_compute_pipelines.end())
-					FOSSILIZE_THROW("Failed to find referenced compute pipeline");
-			}
-			info.basePipelineHandle = pipeline_iter->second;
+				FOSSILIZE_THROW("Failed to find referenced compute pipeline");
 		}
-
-		auto layout = string_to_uint64(obj["layout"].GetString());
-		if (layout > 0)
-			info.layout = replayed_pipeline_layouts[layout];
-
-		auto &stage = obj["stage"];
-		info.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-		info.stage.stage = static_cast<VkShaderStageFlagBits>(stage["stage"].GetUint());
-
-		auto module = string_to_uint64(stage["module"].GetString());
-		if (module > 0)
-		{
-			auto module_iter = replayed_shader_modules.find(module);
-			if (module_iter == replayed_shader_modules.end())
-			{
-				auto external_state = resolver.read_entry(module);
-				if (external_state.empty())
-					FOSSILIZE_THROW("Failed to find referenced shader");
-				this->parse(iface, resolver, external_state.data(), external_state.size());
-				module_iter = replayed_shader_modules.find(module);
-				if (module_iter == replayed_shader_modules.end())
-					FOSSILIZE_THROW("Failed find referenced shader module");
-			}
-			info.stage.module = module_iter->second;
-		}
-
-		info.stage.pName = duplicate_string(stage["name"].GetString(), stage["name"].GetStringLength());
-		if (stage.HasMember("specializationInfo"))
-			info.stage.pSpecializationInfo = parse_specialization_info(stage["specializationInfo"]);
-
-		if (!iface.enqueue_create_compute_pipeline(hash, &info, &replayed_compute_pipelines[hash]))
-			FOSSILIZE_THROW("Failed to create compute pipeline.");
+		info.basePipelineHandle = pipeline_iter->second;
 	}
-	iface.wait_enqueue();
+
+	auto layout = string_to_uint64(obj["layout"].GetString());
+	if (layout > 0)
+		info.layout = replayed_pipeline_layouts[layout];
+
+	auto &stage = obj["stage"];
+	info.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	info.stage.stage = static_cast<VkShaderStageFlagBits>(stage["stage"].GetUint());
+
+	auto module = string_to_uint64(stage["module"].GetString());
+	if (module > 0)
+	{
+		auto module_iter = replayed_shader_modules.find(module);
+		if (module_iter == replayed_shader_modules.end())
+		{
+			vector<uint8_t> external_state;
+			if (!resolver || !resolver->read_entry(RESOURCE_SHADER_MODULE, pipeline, external_state))
+				FOSSILIZE_THROW("Failed to find referenced shader");
+			this->parse(iface, resolver, external_state.data(), external_state.size());
+			iface.sync_shader_modules();
+			module_iter = replayed_shader_modules.find(module);
+			if (module_iter == replayed_shader_modules.end())
+				FOSSILIZE_THROW("Failed find referenced shader module");
+		}
+		else
+			iface.sync_shader_modules();
+		info.stage.module = module_iter->second;
+	}
+
+	info.stage.pName = duplicate_string(stage["name"].GetString(), stage["name"].GetStringLength());
+	if (stage.HasMember("specializationInfo"))
+		info.stage.pSpecializationInfo = parse_specialization_info(stage["specializationInfo"]);
+
+	if (!iface.enqueue_create_compute_pipeline(hash, &info, &replayed_compute_pipelines[hash]))
+		FOSSILIZE_THROW("Failed to create compute pipeline.");
+}
+
+void StateReplayer::Impl::parse_compute_pipelines(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines)
+{
+	for (auto itr = pipelines.MemberBegin(); itr != pipelines.MemberEnd(); ++itr)
+		parse_compute_pipeline(iface, resolver, pipelines, itr->name);
+	iface.notify_replayed_resources_for_type();
 }
 
 VkVertexInputAttributeDescription *StateReplayer::Impl::parse_vertex_attributes(const rapidjson::Value &attributes)
@@ -1631,7 +1698,7 @@ VkPipelineViewportStateCreateInfo *StateReplayer::Impl::parse_viewport_state(con
 	return state;
 }
 
-VkPipelineShaderStageCreateInfo *StateReplayer::Impl::parse_stages(StateCreatorInterface &iface, DatabaseInterface &resolver, const rapidjson::Value &stages)
+VkPipelineShaderStageCreateInfo *StateReplayer::Impl::parse_stages(StateCreatorInterface &iface, DatabaseInterface *resolver, const rapidjson::Value &stages)
 {
 	auto *state = allocator.allocate_n_cleared<VkPipelineShaderStageCreateInfo>(stages.Size());
 	auto *ret = state;
@@ -1652,14 +1719,18 @@ VkPipelineShaderStageCreateInfo *StateReplayer::Impl::parse_stages(StateCreatorI
 			auto module_iter = replayed_shader_modules.find(module);
 			if (module_iter == replayed_shader_modules.end())
 			{
-				auto external_state = resolver.read_entry(module);
-				if (external_state.empty())
+				vector<uint8_t> external_state;
+				if (!resolver || !resolver->read_entry(RESOURCE_SHADER_MODULE, module, external_state))
 					FOSSILIZE_THROW("Failed to find referenced shader");
 				this->parse(iface, resolver, external_state.data(), external_state.size());
+				iface.sync_shader_modules();
 				module_iter = replayed_shader_modules.find(module);
 				if (module_iter == replayed_shader_modules.end())
 					FOSSILIZE_THROW("Failed to find referenced shader module");
 			}
+			else
+				iface.sync_shader_modules();
+
 			state->module = module_iter->second;
 		}
 	}
@@ -1667,80 +1738,93 @@ VkPipelineShaderStageCreateInfo *StateReplayer::Impl::parse_stages(StateCreatorI
 	return ret;
 }
 
-void StateReplayer::Impl::parse_graphics_pipelines(StateCreatorInterface &iface, DatabaseInterface &resolver, const Value &pipelines)
+void StateReplayer::Impl::parse_graphics_pipeline(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines, const Value &member)
 {
-	auto *infos = allocator.allocate_n_cleared<VkGraphicsPipelineCreateInfo>(pipelines.MemberCount());
+	Hash hash = string_to_uint64(member.GetString());
+	if (replayed_graphics_pipelines.count(hash))
+		return;
 
-	unsigned index = 0;
-	for (auto itr = pipelines.MemberBegin(); itr != pipelines.MemberEnd(); ++itr, index++)
+	auto *info_allocated = allocator.allocate_cleared<VkGraphicsPipelineCreateInfo>();
+	auto &obj = pipelines[member];
+	auto &info = *info_allocated;
+	info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+	info.flags = obj["flags"].GetUint();
+	info.basePipelineIndex = obj["basePipelineIndex"].GetInt();
+
+	auto pipeline = string_to_uint64(obj["basePipelineHandle"].GetString());
+	if (pipeline > 0)
 	{
-		Hash hash = string_to_uint64(itr->name.GetString());
-		if (replayed_graphics_pipelines.count(hash))
-			continue;
-		auto &obj = itr->value;
-		auto &info = infos[index];
-		info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-		info.flags = obj["flags"].GetUint();
-		info.basePipelineIndex = obj["basePipelineIndex"].GetUint();
+		// This is pretty bad for multithreaded replay, but this should be very rare.
+		iface.sync_threads();
+		auto pipeline_iter = replayed_graphics_pipelines.find(pipeline);
 
-		auto pipeline = string_to_uint64(obj["basePipelineHandle"].GetString());
-		if (pipeline > 0)
+		// If we don't have the pipeline, we might have it later in the array of graphics pipelines, queue up out of order.
+		if (pipeline_iter == replayed_graphics_pipelines.end() && pipelines.HasMember(obj["basePipelineHandle"].GetString()))
 		{
-			iface.wait_enqueue();
-			auto pipeline_iter = replayed_graphics_pipelines.find(pipeline);
+			parse_graphics_pipeline(iface, resolver, pipelines, obj["basePipelineHandle"]);
+			iface.sync_threads();
+			pipeline_iter = replayed_graphics_pipelines.find(pipeline);
+		}
+
+		// Still don't have it? Look into database.
+		if (pipeline_iter == replayed_graphics_pipelines.end())
+		{
+			vector<uint8_t> external_state;
+			if (!resolver || !resolver->read_entry(RESOURCE_GRAPHICS_PIPELINE, pipeline, external_state))
+				FOSSILIZE_THROW("Failed to find referenced graphics pipeline");
+			this->parse(iface, resolver, external_state.data(), external_state.size());
+			iface.sync_threads();
+			pipeline_iter = replayed_graphics_pipelines.find(pipeline);
 			if (pipeline_iter == replayed_graphics_pipelines.end())
-			{
-				auto external_state = resolver.read_entry(pipeline);
-				if (external_state.empty())
-					FOSSILIZE_THROW("Failed to find referenced graphics pipeline");
-				this->parse(iface, resolver, external_state.data(), external_state.size());
-				pipeline_iter = replayed_graphics_pipelines.find(pipeline);
-				if (pipeline_iter == replayed_graphics_pipelines.end())
-					FOSSILIZE_THROW("Failed to find referenced graphics pipeline");
-			}
-			info.basePipelineHandle = pipeline_iter->second;
+				FOSSILIZE_THROW("Failed to find referenced graphics pipeline");
 		}
-
-		auto layout = string_to_uint64(obj["layout"].GetString());
-		if (layout > 0)
-			info.layout = replayed_pipeline_layouts[layout];
-
-		auto render_pass = string_to_uint64(obj["renderPass"].GetString());
-		if (render_pass > 0)
-			info.renderPass = replayed_render_passes[render_pass];
-
-		info.subpass = obj["subpass"].GetUint();
-
-		if (obj.HasMember("stages"))
-		{
-			info.stageCount = obj["stages"].Size();
-			info.pStages = parse_stages(iface, resolver, obj["stages"]);
-		}
-
-		if (obj.HasMember("rasterizationState"))
-			info.pRasterizationState = parse_rasterization_state(obj["rasterizationState"]);
-		if (obj.HasMember("tessellationState"))
-			info.pTessellationState = parse_tessellation_state(obj["tessellationState"]);
-		if (obj.HasMember("colorBlendState"))
-			info.pColorBlendState = parse_color_blend_state(obj["colorBlendState"]);
-		if (obj.HasMember("depthStencilState"))
-			info.pDepthStencilState = parse_depth_stencil_state(obj["depthStencilState"]);
-		if (obj.HasMember("dynamicState"))
-			info.pDynamicState = parse_dynamic_state(obj["dynamicState"]);
-		if (obj.HasMember("viewportState"))
-			info.pViewportState = parse_viewport_state(obj["viewportState"]);
-		if (obj.HasMember("multisampleState"))
-			info.pMultisampleState = parse_multisample_state(obj["multisampleState"]);
-		if (obj.HasMember("inputAssemblyState"))
-			info.pInputAssemblyState = parse_input_assembly_state(obj["inputAssemblyState"]);
-		if (obj.HasMember("vertexInputState"))
-			info.pVertexInputState = parse_vertex_input_state(obj["vertexInputState"]);
-
-		if (!iface.enqueue_create_graphics_pipeline(hash, &info, &replayed_graphics_pipelines[hash]))
-			FOSSILIZE_THROW("Failed to create graphics pipeline.");
+		info.basePipelineHandle = pipeline_iter->second;
 	}
 
-	iface.wait_enqueue();
+	auto layout = string_to_uint64(obj["layout"].GetString());
+	if (layout > 0)
+		info.layout = replayed_pipeline_layouts[layout];
+
+	auto render_pass = string_to_uint64(obj["renderPass"].GetString());
+	if (render_pass > 0)
+		info.renderPass = replayed_render_passes[render_pass];
+
+	info.subpass = obj["subpass"].GetUint();
+
+	if (obj.HasMember("stages"))
+	{
+		info.stageCount = obj["stages"].Size();
+		info.pStages = parse_stages(iface, resolver, obj["stages"]);
+	}
+
+	if (obj.HasMember("rasterizationState"))
+		info.pRasterizationState = parse_rasterization_state(obj["rasterizationState"]);
+	if (obj.HasMember("tessellationState"))
+		info.pTessellationState = parse_tessellation_state(obj["tessellationState"]);
+	if (obj.HasMember("colorBlendState"))
+		info.pColorBlendState = parse_color_blend_state(obj["colorBlendState"]);
+	if (obj.HasMember("depthStencilState"))
+		info.pDepthStencilState = parse_depth_stencil_state(obj["depthStencilState"]);
+	if (obj.HasMember("dynamicState"))
+		info.pDynamicState = parse_dynamic_state(obj["dynamicState"]);
+	if (obj.HasMember("viewportState"))
+		info.pViewportState = parse_viewport_state(obj["viewportState"]);
+	if (obj.HasMember("multisampleState"))
+		info.pMultisampleState = parse_multisample_state(obj["multisampleState"]);
+	if (obj.HasMember("inputAssemblyState"))
+		info.pInputAssemblyState = parse_input_assembly_state(obj["inputAssemblyState"]);
+	if (obj.HasMember("vertexInputState"))
+		info.pVertexInputState = parse_vertex_input_state(obj["vertexInputState"]);
+
+	if (!iface.enqueue_create_graphics_pipeline(hash, &info, &replayed_graphics_pipelines[hash]))
+		FOSSILIZE_THROW("Failed to create graphics pipeline.");
+}
+
+void StateReplayer::Impl::parse_graphics_pipelines(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines)
+{
+	for (auto itr = pipelines.MemberBegin(); itr != pipelines.MemberEnd(); ++itr)
+		parse_graphics_pipeline(iface, resolver, pipelines, itr->name);
+	iface.notify_replayed_resources_for_type();
 }
 
 StateReplayer::StateReplayer()
@@ -1757,15 +1841,29 @@ ScratchAllocator &StateReplayer::get_allocator()
 	return impl->allocator;
 }
 
-void StateReplayer::parse(StateCreatorInterface &iface, DatabaseInterface &resolver, const void *buffer, size_t size)
+void StateReplayer::parse(StateCreatorInterface &iface, DatabaseInterface *resolver, const void *buffer, size_t size)
 {
 	impl->parse(iface, resolver, buffer, size);
 }
 
-void StateReplayer::Impl::parse(StateCreatorInterface &iface, DatabaseInterface &resolver, const void *buffer_, size_t size)
+void StateReplayer::Impl::parse(StateCreatorInterface &iface, DatabaseInterface *resolver, const void *buffer_, size_t total_size)
 {
+	// All data after a string terminating '\0' is considered binary payload
+	// which can be read for various purposes (SPIR-V varint for example).
+	const uint8_t *buffer = static_cast<const uint8_t *>(buffer_);
+	auto itr = find(buffer, buffer + total_size, '\0');
+	const uint8_t *varint_buffer = nullptr;
+	size_t varint_size = 0;
+	size_t json_size = itr - buffer;
+
+	if (itr < buffer + total_size)
+	{
+		varint_buffer = itr + 1;
+		varint_size = (buffer + total_size) - varint_buffer;
+	}
+
 	Document doc;
-	doc.Parse(reinterpret_cast<const char *>(buffer_), size);
+	doc.Parse(reinterpret_cast<const char *>(buffer), json_size);
 
 	if (doc.HasParseError())
 	{
@@ -1783,39 +1881,25 @@ void StateReplayer::Impl::parse(StateCreatorInterface &iface, DatabaseInterface 
 		iface.set_application_info(nullptr, nullptr);
 
 	if (doc.HasMember("shaderModules"))
-		parse_shader_modules(iface, doc["shaderModules"]);
-	else
-		iface.set_num_shader_modules(0);
+		parse_shader_modules(iface, doc["shaderModules"], varint_buffer, varint_size);
 
 	if (doc.HasMember("samplers"))
 		parse_samplers(iface, doc["samplers"]);
-	else
-		iface.set_num_samplers(0);
 
 	if (doc.HasMember("setLayouts"))
 		parse_descriptor_set_layouts(iface, doc["setLayouts"]);
-	else
-		iface.set_num_descriptor_set_layouts(0);
 
 	if (doc.HasMember("pipelineLayouts"))
 		parse_pipeline_layouts(iface, doc["pipelineLayouts"]);
-	else
-		iface.set_num_pipeline_layouts(0);
 
 	if (doc.HasMember("renderPasses"))
 		parse_render_passes(iface, doc["renderPasses"]);
-	else
-		iface.set_num_render_passes(0);
 
 	if (doc.HasMember("computePipelines"))
 		parse_compute_pipelines(iface, resolver, doc["computePipelines"]);
-	else
-		iface.set_num_compute_pipelines(0);
 
 	if (doc.HasMember("graphicsPipelines"))
 		parse_graphics_pipelines(iface, resolver, doc["graphicsPipelines"]);
-	else
-		iface.set_num_graphics_pipelines(0);
 }
 
 template <typename T>
@@ -1882,7 +1966,7 @@ void ScratchAllocator::reset()
 	{
 		// free all but first block
 		if (blocks.size() > 1)
-			blocks.erase(++blocks.begin(), blocks.end());
+			blocks.erase(blocks.begin() + 1, blocks.end());
 		// reset offset on first block
 		blocks[0].offset = 0;
 	}
@@ -1983,12 +2067,12 @@ void StateRecorder::record_shader_module(VkShaderModule module, const VkShaderMo
 	impl->record_cv.notify_one();
 }
 
-void StateRecorder::record_end()
+void StateRecorder::Impl::record_end()
 {
 	// Signal end of recording with empty work item
-	std::lock_guard<std::mutex> lock(impl->record_lock);
-	impl->record_queue.push({ 0, nullptr });
-	impl->record_cv.notify_one();
+	std::lock_guard<std::mutex> lock(record_lock);
+	record_queue.push({ 0, nullptr });
+	record_cv.notify_one();
 }
 
 Hash StateRecorder::get_hash_for_compute_pipeline_handle(VkPipeline pipeline) const
@@ -2155,7 +2239,7 @@ VkGraphicsPipelineCreateInfo *StateRecorder::Impl::copy_graphics_pipeline(const 
 	if (info->pVertexInputState)
 	{
 		if (info->pVertexInputState->pNext)
-			FOSSILIZE_THROW("pNext in VkPipelineTessellationStateCreateInfo not supported.");
+			FOSSILIZE_THROW("pNext in VkPipelineVertexInputStateCreateInfo not supported.");
 		info->pVertexInputState = copy(info->pVertexInputState, 1, alloc);
 	}
 
@@ -2382,77 +2466,30 @@ void StateRecorder::Impl::remap_render_pass_ci(VkRenderPassCreateInfo *)
 	// nothing to do
 }
 
-// VALVE: Modified to not use std::filesystem
-static std::vector<uint8_t> load_buffer_from_path(const std::string &path)
-{
-	FILE *file = fopen(path.c_str(), "rb");
-	if (!file)
-	{
-		LOGE("Failed to open file: %s\n", path.c_str());
-		return {};
-	}
-
-	if (fseek(file, 0, SEEK_END) < 0)
-	{
-		fclose(file);
-		LOGE("Failed to seek in file: %s\n", path.c_str());
-		return {};
-	}
-
-	size_t file_size = size_t(ftell(file));
-	rewind(file);
-
-	std::vector<uint8_t> file_data(file_size);
-	if (fread(file_data.data(), 1, file_size, file) != file_size)
-	{
-		LOGE("Failed to read from file: %s\n", path.c_str());
-		fclose(file);
-		return {};
-	}
-
-	fclose(file);
-	return file_data;
-}
-
-void DatabaseInterface::set_base_directory(const std::string &base)
-{
-	base_directory = base;
-}
-
-std::vector<uint8_t> DatabaseInterface::read_entry(Hash hash)
-{
-	char filename[22];
-	sprintf(filename, "%016" PRIX64 ".json", hash);
-	auto path = Path::join(base_directory, filename);
-	return load_buffer_from_path(path);
-}
-
-bool DatabaseInterface::write_entry(Hash hash, const std::vector<uint8_t> &bytes)
-{
-	char filename[22]; // 16 digits + ".json" + null
-	sprintf(filename, "%016" PRIX64 ".json", hash);
-	auto path = Path::join(base_directory, filename);
-
-	FILE *file = fopen(path.c_str(), "wb");
-	if (!file)
-	{
-		LOGE("Failed to write serialized state to disk (%s).\n", path.c_str());
-		return false;
-	}
-
-	if (fwrite(bytes.data(), 1, bytes.size(), file) != bytes.size())
-	{
-		LOGE("Failed to write serialized state to disk.\n");
-		fclose(file);
-		return false;
-	}
-
-	fclose(file);
-	return true;
-}
-
 void StateRecorder::Impl::record_task(StateRecorder *recorder)
 {
+	// Start by preparing in the thread since we need to parse an archive potentially, and that might block a little bit.
+	if (database_iface)
+	{
+		if (!database_iface->prepare())
+		{
+			LOGE("Failed to prepare database, will not dump data to database.\n");
+			database_iface = nullptr;
+		}
+	}
+
+	// Keep a single, pre-allocated buffer.
+	vector<uint8_t> blob;
+	blob.reserve(64 * 1024);
+
+	if (database_iface)
+	{
+		Hasher h;
+		recorder->base_hash(h);
+		recorder->serialize_application_info(blob);
+		database_iface->write_entry(RESOURCE_APPLICATION_INFO, h.get(), blob);
+	}
+
 	for (;;)
 	{
 		WorkItem record_item;
@@ -2470,99 +2507,199 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder)
 
 		try
 		{
-			switch (*reinterpret_cast<VkStructureType*>(record_item.create_info))
+			switch (reinterpret_cast<VkBaseInStructure *>(record_item.create_info)->sType)
 			{
 			case VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO:
 			{
 				auto *create_info = reinterpret_cast<VkSamplerCreateInfo *>(record_item.create_info);
 				auto hash = Hashing::compute_hash_sampler(*recorder, *create_info);
 				sampler_to_hash[api_object_cast<VkSampler>(record_item.handle)] = hash;
-				if (!samplers.count(hash))
+
+				if (database_iface)
 				{
-					auto create_info_copy = copy_sampler(create_info, allocator);
-					samplers[hash] = create_info_copy;
+					if (!database_iface->has_entry(RESOURCE_SAMPLER, hash))
+					{
+						recorder->serialize_sampler(hash, *create_info, blob);
+						database_iface->write_entry(RESOURCE_SAMPLER, hash, blob);
+					}
+				}
+				else
+				{
+					// Retain for combined serialize() later.
+					if (!samplers.count(hash))
+					{
+						auto create_info_copy = copy_sampler(create_info, allocator);
+						samplers[hash] = create_info_copy;
+					}
 				}
 				break;
 			}
-			case VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO:
-			{
-				auto *create_info = reinterpret_cast<VkDescriptorSetLayoutCreateInfo *>(record_item.create_info);
-				auto hash = Hashing::compute_hash_descriptor_set_layout(*recorder, *create_info);
-				descriptor_set_layout_to_hash[api_object_cast<VkDescriptorSetLayout>(record_item.handle)] = hash;
-				if (!descriptor_sets.count(hash))
-				{
-					auto create_info_copy = copy_descriptor_set_layout(create_info, allocator);
-					remap_descriptor_set_layout_ci(create_info_copy);
-					descriptor_sets[hash] = create_info_copy;
-				}
-				break;
-			}
-			case VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO:
-			{
-				auto *create_info = reinterpret_cast<VkPipelineLayoutCreateInfo *>(record_item.create_info);
-				auto hash = Hashing::compute_hash_pipeline_layout(*recorder, *create_info);
-				pipeline_layout_to_hash[api_object_cast<VkPipelineLayout>(record_item.handle)] = hash;
-				if (!pipeline_layouts.count(hash))
-				{
-					auto create_info_copy = copy_pipeline_layout(create_info, allocator);
-					remap_pipeline_layout_ci(create_info_copy);
-					pipeline_layouts[hash] = create_info_copy;
-				}
-				break;
-			}
+
 			case VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO:
 			{
 				auto *create_info = reinterpret_cast<VkRenderPassCreateInfo *>(record_item.create_info);
 				auto hash = Hashing::compute_hash_render_pass(*recorder, *create_info);
 				render_pass_to_hash[api_object_cast<VkRenderPass>(record_item.handle)] = hash;
-				if (!render_passes.count(hash))
+
+				if (database_iface)
 				{
-					auto create_info_copy = copy_render_pass(create_info, allocator);
-					render_passes[hash] = create_info_copy;
+					if (!database_iface->has_entry(RESOURCE_RENDER_PASS, hash))
+					{
+						recorder->serialize_render_pass(hash, *create_info, blob);
+						database_iface->write_entry(RESOURCE_RENDER_PASS, hash, blob);
+					}
+				}
+				else
+				{
+					// Retain for combined serialize() later.
+					if (!render_passes.count(hash))
+					{
+						auto create_info_copy = copy_render_pass(create_info, allocator);
+						render_passes[hash] = create_info_copy;
+					}
 				}
 				break;
 			}
+
 			case VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO:
 			{
 				auto *create_info = reinterpret_cast<VkShaderModuleCreateInfo *>(record_item.create_info);
 				auto hash = Hashing::compute_hash_shader_module(*recorder, *create_info);
 				shader_module_to_hash[api_object_cast<VkShaderModule>(record_item.handle)] = hash;
-				if (!shader_modules.count(hash))
+
+				if (database_iface)
 				{
-					auto create_info_copy = copy_shader_module(create_info, allocator);
-					shader_modules[hash] = create_info_copy;
-					if (database_iface)
-						database_iface->write_entry(hash, recorder->serialize_shader_module(hash));
+					if (!database_iface->has_entry(RESOURCE_SHADER_MODULE, hash))
+					{
+						recorder->serialize_shader_module(hash, *create_info, blob, allocator);
+						database_iface->write_entry(RESOURCE_SHADER_MODULE, hash, blob);
+						allocator.reset();
+					}
+				}
+				else
+				{
+					// Retain for combined serialize() later.
+					if (!shader_modules.count(hash))
+					{
+						auto create_info_copy = copy_shader_module(create_info, allocator);
+						shader_modules[hash] = create_info_copy;
+					}
 				}
 				break;
 			}
+
+			case VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO:
+			{
+				auto *create_info = reinterpret_cast<VkDescriptorSetLayoutCreateInfo *>(record_item.create_info);
+				auto hash = Hashing::compute_hash_descriptor_set_layout(*recorder, *create_info);
+				descriptor_set_layout_to_hash[api_object_cast<VkDescriptorSetLayout>(record_item.handle)] = hash;
+
+				auto create_info_copy = copy_descriptor_set_layout(create_info, allocator);
+				remap_descriptor_set_layout_ci(create_info_copy);
+
+				if (database_iface)
+				{
+					if (!database_iface->has_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, hash))
+					{
+						recorder->serialize_descriptor_set_layout(hash, *create_info_copy, blob);
+						database_iface->write_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, hash, blob);
+					}
+
+					// Don't need to keep copied data around, reset the allocator.
+					allocator.reset();
+				}
+				else
+				{
+					// Retain for combined serialize() later.
+					if (!descriptor_sets.count(hash))
+						descriptor_sets[hash] = create_info_copy;
+				}
+				break;
+			}
+
+			case VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO:
+			{
+				auto *create_info = reinterpret_cast<VkPipelineLayoutCreateInfo *>(record_item.create_info);
+				auto hash = Hashing::compute_hash_pipeline_layout(*recorder, *create_info);
+				pipeline_layout_to_hash[api_object_cast<VkPipelineLayout>(record_item.handle)] = hash;
+
+				auto create_info_copy = copy_pipeline_layout(create_info, allocator);
+				remap_pipeline_layout_ci(create_info_copy);
+
+				if (database_iface)
+				{
+					if (!database_iface->has_entry(RESOURCE_PIPELINE_LAYOUT, hash))
+					{
+						recorder->serialize_pipeline_layout(hash, *create_info_copy, blob);
+						database_iface->write_entry(RESOURCE_PIPELINE_LAYOUT, hash, blob);
+					}
+
+					// Don't need to keep copied data around, reset the allocator.
+					allocator.reset();
+				}
+				else
+				{
+					// Retain for combined serialize() later.
+					if (!pipeline_layouts.count(hash))
+						pipeline_layouts[hash] = create_info_copy;
+				}
+				break;
+			}
+
 			case VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO:
 			{
 				auto *create_info = reinterpret_cast<VkGraphicsPipelineCreateInfo *>(record_item.create_info);
 				auto hash = Hashing::compute_hash_graphics_pipeline(*recorder, *create_info);
 				graphics_pipeline_to_hash[api_object_cast<VkPipeline>(record_item.handle)] = hash;
-				if (!graphics_pipelines.count(hash))
+
+				auto create_info_copy = copy_graphics_pipeline(create_info, allocator);
+				remap_graphics_pipeline_ci(create_info_copy);
+
+				if (database_iface)
 				{
-					auto create_info_copy = copy_graphics_pipeline(create_info, allocator);
-					remap_graphics_pipeline_ci(create_info_copy);
-					graphics_pipelines[hash] = create_info_copy;
-					if (database_iface)
-						database_iface->write_entry(hash, recorder->serialize_graphics_pipeline(hash));
+					if (!database_iface->has_entry(RESOURCE_GRAPHICS_PIPELINE, hash))
+					{
+						recorder->serialize_graphics_pipeline(hash, *create_info_copy, blob);
+						database_iface->write_entry(RESOURCE_GRAPHICS_PIPELINE, hash, blob);
+					}
+
+					// Don't need to keep copied data around, reset the allocator.
+					allocator.reset();
+				}
+				else
+				{
+					// Retain for combined serialize() later.
+					if (!graphics_pipelines.count(hash))
+						graphics_pipelines[hash] = create_info_copy;
 				}
 				break;
 			}
+
 			case VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO:
 			{
 				auto *create_info = reinterpret_cast<VkComputePipelineCreateInfo *>(record_item.create_info);
 				auto hash = Hashing::compute_hash_compute_pipeline(*recorder, *create_info);
 				compute_pipeline_to_hash[api_object_cast<VkPipeline>(record_item.handle)] = hash;
-				if (!compute_pipelines.count(hash))
+
+				auto create_info_copy = copy_compute_pipeline(create_info, allocator);
+				remap_compute_pipeline_ci(create_info_copy);
+
+				if (database_iface)
 				{
-					auto create_info_copy = copy_compute_pipeline(create_info, allocator);
-					remap_compute_pipeline_ci(create_info_copy);
-					compute_pipelines[hash] = create_info_copy;
-					if (database_iface)
-						database_iface->write_entry(hash, recorder->serialize_compute_pipeline(hash));
+					if (!database_iface->has_entry(RESOURCE_COMPUTE_PIPELINE, hash))
+					{
+						recorder->serialize_compute_pipeline(hash, *create_info_copy, blob);
+						database_iface->write_entry(RESOURCE_COMPUTE_PIPELINE, hash, blob);
+					}
+
+					// Don't need to keep copied data around, reset the allocator.
+					allocator.reset();
+				}
+				else
+				{
+					// Retain for combined serialize() later.
+					if (!compute_pipelines.count(hash))
+						compute_pipelines[hash] = create_info_copy;
 				}
 				break;
 			}
@@ -2633,7 +2770,7 @@ template <typename Allocator>
 static Value uint64_string(const uint64_t value, Allocator &alloc)
 {
 	char str[17]; // 16 digits + null
-	sprintf(str, "%016" PRIX64, value);
+	sprintf(str, "%016llx", static_cast<unsigned long long>(value));
 	return Value(str, alloc);
 }
 
@@ -3125,22 +3262,8 @@ static Value json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& all
 	return p;
 }
 
-template <typename ObjType, typename CreateType, typename AllocType>
-static inline const CreateType serialize_obj(ObjType obj, const std::unordered_map<Hash, CreateType>& ci_map, Value& json_map, AllocType& alloc)
-{
-	auto iter = ci_map.find(api_object_cast<Hash>(obj));
-	if (iter != ci_map.end()) {
-		auto hash = uint64_string(api_object_cast<uint64_t>(obj), alloc);
-		if (!json_map.HasMember(hash)) {
-			json_map.AddMember(hash, json_value(*iter->second, alloc), alloc);
-		}
-		return iter->second;
-	}
-	return nullptr;
-}
-
 template <typename AllocType>
-static void serialize_application_info(Value &value, const VkApplicationInfo &info, AllocType &alloc)
+static void serialize_application_info_inline(Value &value, const VkApplicationInfo &info, AllocType &alloc)
 {
 	if (info.pApplicationName)
 		value.AddMember("applicationName", StringRef(info.pApplicationName), alloc);
@@ -3152,14 +3275,14 @@ static void serialize_application_info(Value &value, const VkApplicationInfo &in
 }
 
 template <typename AllocType>
-static void serialize_physical_device_features(Value &value, const VkPhysicalDeviceFeatures2 &features, AllocType &alloc)
+static void serialize_physical_device_features_inline(Value &value, const VkPhysicalDeviceFeatures2 &features, AllocType &alloc)
 {
 	// TODO: For now, we only care about this feature, which can definitely affect compilation.
 	// Deal with other device features if proven to be required.
 	value.AddMember("robustBufferAccess", features.features.robustBufferAccess, alloc);
 }
 
-vector<uint8_t> StateRecorder::serialize_graphics_pipeline(Hash hash) const
+void StateRecorder::serialize_application_info(vector<uint8_t> &blob) const
 {
 	Document doc;
 	doc.SetObject();
@@ -3167,154 +3290,212 @@ vector<uint8_t> StateRecorder::serialize_graphics_pipeline(Hash hash) const
 
 	Value app_info(kObjectType);
 	Value pdf_info(kObjectType);
-	Value samplers(kObjectType);
-	Value set_layouts(kObjectType);
-	Value pipeline_layouts(kObjectType);
-	Value shader_modules(kObjectType);
-	Value render_passes(kObjectType);
-	Value graphics_pipelines(kObjectType);
-
 	if (impl->application_info)
-		serialize_application_info(app_info, *impl->application_info, alloc);
+		serialize_application_info_inline(app_info, *impl->application_info, alloc);
 	if (impl->physical_device_features)
-		serialize_physical_device_features(pdf_info, *impl->physical_device_features, alloc);
-
-	if (auto pipe = serialize_obj(hash, impl->graphics_pipelines, graphics_pipelines, alloc))
-	{
-		if (auto pipeline_layout = serialize_obj(pipe->layout, impl->pipeline_layouts, pipeline_layouts, alloc))
-		{
-			for (uint32_t i = 0; i < pipeline_layout->setLayoutCount; i++)
-			{
-				if (auto set_layout = serialize_obj(pipeline_layout->pSetLayouts[i], impl->descriptor_sets, set_layouts, alloc))
-				{
-					for (uint32_t j = 0; j < set_layout->bindingCount; j++)
-					{
-						auto& binding = set_layout->pBindings[j];
-						if (binding.pImmutableSamplers &&
-							(binding.descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ||
-								binding.descriptorType == VK_DESCRIPTOR_TYPE_SAMPLER))
-						{
-							for (uint32_t k = 0; k < binding.descriptorCount; k++)
-								serialize_obj(binding.pImmutableSamplers[k], impl->samplers, samplers, alloc);
-						}
-					}
-				}
-			}
-		}
-
-		serialize_obj(pipe->renderPass, impl->render_passes, render_passes, alloc);
-	}
+		serialize_physical_device_features_inline(pdf_info, *impl->physical_device_features, alloc);
 
 	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
 	doc.AddMember("applicationInfo", app_info, alloc);
 	doc.AddMember("physicalDeviceFeatures", pdf_info, alloc);
+
+	StringBuffer buffer;
+	CustomWriter writer(buffer);
+	doc.Accept(writer);
+
+	blob.resize(buffer.GetSize());
+	memcpy(blob.data(), buffer.GetString(), buffer.GetSize());
+}
+
+void StateRecorder::serialize_sampler(Hash hash, const VkSamplerCreateInfo &create_info, vector<uint8_t> &blob) const
+{
+	Document doc;
+	doc.SetObject();
+	auto &alloc = doc.GetAllocator();
+
+	Value samplers(kObjectType);
+	samplers.AddMember(uint64_string(hash, alloc), json_value(create_info, alloc), alloc);
+
+	Hasher h;
+	base_hash(h);
+
+	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
+	doc.AddMember("application", uint64_string(h.get(), alloc), alloc);
 	doc.AddMember("samplers", samplers, alloc);
-	doc.AddMember("setLayouts", set_layouts, alloc);
-	doc.AddMember("pipelineLayouts", pipeline_layouts, alloc);
+
+	StringBuffer buffer;
+	CustomWriter writer(buffer);
+	doc.Accept(writer);
+
+	blob.resize(buffer.GetSize());
+	memcpy(blob.data(), buffer.GetString(), buffer.GetSize());
+}
+
+void StateRecorder::serialize_descriptor_set_layout(Hash hash, const VkDescriptorSetLayoutCreateInfo &create_info,
+                                                    vector<uint8_t> &blob) const
+{
+	Document doc;
+	doc.SetObject();
+	auto &alloc = doc.GetAllocator();
+
+	Value layouts(kObjectType);
+	layouts.AddMember(uint64_string(hash, alloc), json_value(create_info, alloc), alloc);
+
+	Hasher h;
+	base_hash(h);
+
+	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
+	doc.AddMember("application", uint64_string(h.get(), alloc), alloc);
+	doc.AddMember("setLayouts", layouts, alloc);
+
+	StringBuffer buffer;
+	CustomWriter writer(buffer);
+	doc.Accept(writer);
+
+	blob.resize(buffer.GetSize());
+	memcpy(blob.data(), buffer.GetString(), buffer.GetSize());
+}
+
+void StateRecorder::serialize_pipeline_layout(Hash hash, const VkPipelineLayoutCreateInfo &create_info,
+                                              vector<uint8_t> &blob) const
+{
+	Document doc;
+	doc.SetObject();
+	auto &alloc = doc.GetAllocator();
+
+	Value layouts(kObjectType);
+	layouts.AddMember(uint64_string(hash, alloc), json_value(create_info, alloc), alloc);
+
+	Hasher h;
+	base_hash(h);
+
+	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
+	doc.AddMember("application", uint64_string(h.get(), alloc), alloc);
+	doc.AddMember("pipelineLayouts", layouts, alloc);
+
+	StringBuffer buffer;
+	CustomWriter writer(buffer);
+	doc.Accept(writer);
+
+	blob.resize(buffer.GetSize());
+	memcpy(blob.data(), buffer.GetString(), buffer.GetSize());
+}
+
+void StateRecorder::serialize_render_pass(Hash hash, const VkRenderPassCreateInfo &create_info, vector<uint8_t> &blob) const
+{
+	Document doc;
+	doc.SetObject();
+	auto &alloc = doc.GetAllocator();
+
+	Value render_passes(kObjectType);
+	render_passes.AddMember(uint64_string(hash, alloc), json_value(create_info, alloc), alloc);
+
+	Hasher h;
+	base_hash(h);
+
+	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
+	doc.AddMember("application", uint64_string(h.get(), alloc), alloc);
 	doc.AddMember("renderPasses", render_passes, alloc);
+
+	StringBuffer buffer;
+	CustomWriter writer(buffer);
+	doc.Accept(writer);
+
+	blob.resize(buffer.GetSize());
+	memcpy(blob.data(), buffer.GetString(), buffer.GetSize());
+}
+
+void StateRecorder::serialize_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo &create_info, vector<uint8_t> &blob) const
+{
+	Document doc;
+	doc.SetObject();
+	auto &alloc = doc.GetAllocator();
+
+	Value graphics_pipelines(kObjectType);
+	graphics_pipelines.AddMember(uint64_string(hash, alloc), json_value(create_info, alloc), alloc);
+
+	Hasher h;
+	base_hash(h);
+
+	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
+	doc.AddMember("application", uint64_string(h.get(), alloc), alloc);
 	doc.AddMember("graphicsPipelines", graphics_pipelines, alloc);
 
 	StringBuffer buffer;
-	PrettyWriter<StringBuffer> writer(buffer);
+	CustomWriter writer(buffer);
 	doc.Accept(writer);
 
-	vector<uint8_t> serialize_buffer(buffer.GetSize());
-	memcpy(serialize_buffer.data(), buffer.GetString(), buffer.GetSize());
-	return serialize_buffer;
+	blob.resize(buffer.GetSize());
+	memcpy(blob.data(), buffer.GetString(), buffer.GetSize());
 }
 
-vector<uint8_t> StateRecorder::serialize_compute_pipeline(Hash hash) const
+void StateRecorder::serialize_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo &create_info, vector<uint8_t> &blob) const
 {
 	Document doc;
 	doc.SetObject();
 	auto &alloc = doc.GetAllocator();
 
-	Value app_info(kObjectType);
-	Value pdf_info(kObjectType);
-	Value samplers(kObjectType);
-	Value set_layouts(kObjectType);
-	Value pipeline_layouts(kObjectType);
-	Value shader_modules(kObjectType);
 	Value compute_pipelines(kObjectType);
+	compute_pipelines.AddMember(uint64_string(hash, alloc), json_value(create_info, alloc), alloc);
 
-	if (impl->application_info)
-		serialize_application_info(app_info, *impl->application_info, alloc);
-	if (impl->physical_device_features)
-		serialize_physical_device_features(pdf_info, *impl->physical_device_features, alloc);
-
-	if (auto pipe = serialize_obj(hash, impl->compute_pipelines, compute_pipelines, alloc))
-	{
-		if (auto pipeline_layout = serialize_obj(pipe->layout, impl->pipeline_layouts, pipeline_layouts, alloc))
-		{
-			for (uint32_t i = 0; i < pipeline_layout->setLayoutCount; i++)
-			{
-				if (auto set_layout = serialize_obj(pipeline_layout->pSetLayouts[i], impl->descriptor_sets, set_layouts, alloc))
-				{
-					for (uint32_t j = 0; j < set_layout->bindingCount; j++)
-					{
-						auto& binding = set_layout->pBindings[j];
-						if (binding.pImmutableSamplers &&
-							(binding.descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ||
-								binding.descriptorType == VK_DESCRIPTOR_TYPE_SAMPLER))
-						{
-							for (uint32_t k = 0; k < binding.descriptorCount; k++)
-								serialize_obj(binding.pImmutableSamplers[k], impl->samplers, samplers, alloc);
-						}
-					}
-				}
-			}
-		}
-	}
+	Hasher h;
+	base_hash(h);
 
 	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
-	doc.AddMember("applicationInfo", app_info, alloc);
-	doc.AddMember("physicalDeviceFeatures", pdf_info, alloc);
-	doc.AddMember("samplers", samplers, alloc);
-	doc.AddMember("setLayouts", set_layouts, alloc);
-	doc.AddMember("pipelineLayouts", pipeline_layouts, alloc);
+	doc.AddMember("application", uint64_string(h.get(), alloc), alloc);
 	doc.AddMember("computePipelines", compute_pipelines, alloc);
 
 	StringBuffer buffer;
-	PrettyWriter<StringBuffer> writer(buffer);
+	CustomWriter writer(buffer);
 	doc.Accept(writer);
 
-	vector<uint8_t> serialize_buffer(buffer.GetSize());
-	memcpy(serialize_buffer.data(), buffer.GetString(), buffer.GetSize());
-	return serialize_buffer;
+	blob.resize(buffer.GetSize());
+	memcpy(blob.data(), buffer.GetString(), buffer.GetSize());
 }
 
-vector<uint8_t> StateRecorder::serialize_shader_module(Hash hash) const
+void StateRecorder::serialize_shader_module(Hash hash, const VkShaderModuleCreateInfo &create_info,
+                                            vector<uint8_t> &blob, ScratchAllocator &allocator) const
 {
 	Document doc;
 	doc.SetObject();
 	auto &alloc = doc.GetAllocator();
 
-	Value app_info(kObjectType);
-	Value pdf_info(kObjectType);
 	Value shader_modules(kObjectType);
 
-	if (impl->application_info)
-		serialize_application_info(app_info, *impl->application_info, alloc);
-	if (impl->physical_device_features)
-		serialize_physical_device_features(pdf_info, *impl->physical_device_features, alloc);
-	serialize_obj(hash, impl->shader_modules, shader_modules, alloc);
+	size_t size = compute_size_varint(create_info.pCode, create_info.codeSize / 4);
+	uint8_t *encoded = static_cast<uint8_t *>(allocator.allocate_raw(size, 64));
+	encode_varint(encoded, create_info.pCode, create_info.codeSize / 4);
+
+	Value varint(kObjectType);
+	varint.AddMember("varintOffset", 0, alloc);
+	varint.AddMember("varintSize", size, alloc);
+	varint.AddMember("codeSize", create_info.codeSize, alloc);
+	varint.AddMember("flags", 0, alloc);
+
+	// Varint binary form, starts at offset 0 after the delim '\0' character.
+	shader_modules.AddMember(uint64_string(hash, alloc), varint, alloc);
+
+	Hasher h;
+	base_hash(h);
 
 	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
-	doc.AddMember("applicationInfo", app_info, alloc);
-	doc.AddMember("physicalDeviceFeatures", pdf_info, alloc);
+	doc.AddMember("application", uint64_string(h.get(), alloc), alloc);
 	doc.AddMember("shaderModules", shader_modules, alloc);
 
 	StringBuffer buffer;
-	PrettyWriter<StringBuffer> writer(buffer);
+	CustomWriter writer(buffer);
 	doc.Accept(writer);
 
-	vector<uint8_t> serialize_buffer(buffer.GetSize());
-	memcpy(serialize_buffer.data(), buffer.GetString(), buffer.GetSize());
-	return serialize_buffer;
+	blob.resize(buffer.GetSize() + 1 + size);
+	memcpy(blob.data(), buffer.GetString(), buffer.GetSize());
+	blob[buffer.GetSize()] = '\0';
+	memcpy(blob.data() + buffer.GetSize() + 1, encoded, size);
 }
 
 vector<uint8_t> StateRecorder::serialize() const
 {
+	impl->sync_thread();
+
 	Document doc;
 	doc.SetObject();
 	auto &alloc = doc.GetAllocator();
@@ -3324,9 +3505,10 @@ vector<uint8_t> StateRecorder::serialize() const
 	Value app_info(kObjectType);
 	Value pdf_info(kObjectType);
 	if (impl->application_info)
-		serialize_application_info(app_info, *impl->application_info, alloc);
+		serialize_application_info_inline(app_info, *impl->application_info, alloc);
 	if (impl->physical_device_features)
-		serialize_physical_device_features(pdf_info, *impl->physical_device_features, alloc);
+		serialize_physical_device_features_inline(pdf_info, *impl->physical_device_features, alloc);
+
 	doc.AddMember("applicationInfo", app_info, alloc);
 	doc.AddMember("physicalDeviceFeatures", pdf_info, alloc);
 
@@ -3387,7 +3569,7 @@ vector<uint8_t> StateRecorder::serialize() const
 	doc.AddMember("graphicsPipelines", graphics_pipelines, alloc);
 
 	StringBuffer buffer;
-	PrettyWriter<StringBuffer> writer(buffer);
+	CustomWriter writer(buffer);
 	doc.Accept(writer);
 
 	vector<uint8_t> serialize_buffer(buffer.GetSize());
@@ -3408,10 +3590,6 @@ StateRecorder::StateRecorder()
 
 StateRecorder::~StateRecorder()
 {
-	record_end();
-	if (impl->worker_thread.joinable())
-		impl->worker_thread.join();
 }
-
 
 }

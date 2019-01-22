@@ -35,6 +35,8 @@
 
 namespace Fossilize
 {
+class DatabaseInterface;
+
 class Exception : public std::exception
 {
 public:
@@ -109,13 +111,6 @@ class StateCreatorInterface
 {
 public:
 	virtual ~StateCreatorInterface() = default;
-	virtual bool set_num_samplers(unsigned /*count*/) { return true; }
-	virtual bool set_num_descriptor_set_layouts(unsigned /*count*/) { return true; }
-	virtual bool set_num_pipeline_layouts(unsigned /*count*/) { return true; }
-	virtual bool set_num_shader_modules(unsigned /*count*/) { return true; }
-	virtual bool set_num_render_passes(unsigned /*count*/) { return true; }
-	virtual bool set_num_compute_pipelines(unsigned /*count*/) { return true; }
-	virtual bool set_num_graphics_pipelines(unsigned /*count*/) { return true; }
 
 	// All future calls to enqueue_create_* were created using this application info.
 	// app can be nullptr, in which case no pApplicationInfo was used (allowed in Vulkan 1.0).
@@ -132,21 +127,17 @@ public:
 	virtual bool enqueue_create_render_pass(Hash index, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass) = 0;
 	virtual bool enqueue_create_compute_pipeline(Hash index, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) = 0;
 	virtual bool enqueue_create_graphics_pipeline(Hash index, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline) = 0;
-	virtual void wait_enqueue() {}
-};
 
-// This is an interface to interact with an external database for blob modules.
-// It is is a simple database with key + blob.
-class DatabaseInterface
-{
-public:
-	virtual ~DatabaseInterface() = default;
-	void set_base_directory(const std::string &base);
-	virtual std::vector<uint8_t> read_entry(Hash hash);
-	virtual bool write_entry(Hash hash, const std::vector<uint8_t> &blob);
+	// Hard dependency, replayer must sync all its workers. This is only called for derived pipelines,
+	// which need to have their parent be compiled before we can create the derived one.
+	virtual void sync_threads() {}
 
-protected:
-	std::string base_directory;
+	// Wait for all shader modules to be ready.
+	virtual void sync_shader_modules() {}
+
+	// Notifies the replayer that we are done replaying a type.
+	// Replay can ignore this if it deals with synchronization between replayed types.
+	virtual void notify_replayed_resources_for_type() {}
 };
 
 class StateReplayer
@@ -154,7 +145,7 @@ class StateReplayer
 public:
 	StateReplayer();
 	~StateReplayer();
-	void parse(StateCreatorInterface &iface, DatabaseInterface &database, const void *buffer, size_t size);
+	void parse(StateCreatorInterface &iface, DatabaseInterface *database, const void *buffer, size_t size);
 	ScratchAllocator &get_allocator();
 
 private:
@@ -185,7 +176,6 @@ public:
 	void record_compute_pipeline(VkPipeline pipeline, const VkComputePipelineCreateInfo &create_info);
 	void record_render_pass(VkRenderPass render_pass, const VkRenderPassCreateInfo &create_info);
 	void record_sampler(VkSampler sampler, const VkSamplerCreateInfo &create_info);
-	void record_end();
 
 	Hash get_hash_for_descriptor_set_layout(VkDescriptorSetLayout layout) const;
 	Hash get_hash_for_pipeline_layout(VkPipelineLayout layout) const;
@@ -197,16 +187,23 @@ public:
 
 	void base_hash(Hasher &hasher) const;
 
-	std::vector<uint8_t> serialize_graphics_pipeline(Hash hash) const;
-	std::vector<uint8_t> serialize_compute_pipeline(Hash hash) const;
-	std::vector<uint8_t> serialize_shader_module(Hash hash) const;
-	std::vector<uint8_t> serialize() const;
-
+	// If database is non-null, serialize should not be called, as the implementation will not retain
+	// memory for the create info structs. The database interface will be fed with all information on the fly.
 	void init(DatabaseInterface *iface);
+	std::vector<uint8_t> serialize() const;
 
 private:
 	struct Impl;
 	std::unique_ptr<Impl> impl;
+
+	void serialize_application_info(std::vector<uint8_t> &blob) const;
+	void serialize_sampler(Hash hash, const VkSamplerCreateInfo &create_info, std::vector<uint8_t> &blob) const;
+	void serialize_descriptor_set_layout(Hash hash, const VkDescriptorSetLayoutCreateInfo &create_info, std::vector<uint8_t> &blob) const;
+	void serialize_pipeline_layout(Hash hash, const VkPipelineLayoutCreateInfo &create_info, std::vector<uint8_t> &blob) const;
+	void serialize_render_pass(Hash hash, const VkRenderPassCreateInfo &create_info, std::vector<uint8_t> &blob) const;
+	void serialize_shader_module(Hash hash, const VkShaderModuleCreateInfo &create_info, std::vector<uint8_t> &blob, ScratchAllocator &allocator) const;
+	void serialize_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo &create_info, std::vector<uint8_t> &blob) const;
+	void serialize_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo &create_info, std::vector<uint8_t> &blob) const;
 };
 
 namespace Hashing

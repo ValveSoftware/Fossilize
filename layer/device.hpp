@@ -24,6 +24,7 @@
 
 #include "dispatch_helper.hpp"
 #include "fossilize.hpp"
+#include "fossilize_db.hpp"
 #include <string>
 
 namespace Fossilize
@@ -58,7 +59,7 @@ private:
 	VkLayerInstanceDispatchTable *pInstanceTable = nullptr;
 	VkLayerDispatchTable *pTable = nullptr;
 
-	DatabaseInterface iface;
+	std::unique_ptr<DatabaseInterface> iface;
 	StateRecorder recorder;
 
 #ifdef ANDROID

@@ -22,6 +22,7 @@
 
 #include "device.hpp"
 #include "instance.hpp"
+#include "path.hpp"
 #include "utils.hpp"
 #include <cinttypes>
 #include <stdlib.h>
@@ -85,8 +86,8 @@ void Device::init(VkPhysicalDevice gpu_, VkDevice device_, Instance *pInstance,
 	}
 #endif
 
-	iface.set_base_directory(serializationPath);
-	recorder.init(&iface);
+	iface = create_database(serializationPath, DatabaseMode::Append);
+	recorder.init(iface.get());
 
 	if (pInstance->getApplicationInfo())
 		recorder.record_application_info(*pInstance->getApplicationInfo());
