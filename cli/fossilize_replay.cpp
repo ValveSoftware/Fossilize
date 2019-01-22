@@ -39,6 +39,7 @@
 #include <thread>	// VALVE
 #include <mutex>	// VALVE
 #include <condition_variable> // VALVE
+#include <atomic>
 #include <fstream>
 #include <atomic>
 
@@ -590,12 +591,12 @@ struct ThreadedReplayer : StateCreatorInterface
 	std::condition_variable work_done_condition;
 
 	// Feed statistics from the worker threads.
-	std::atomic_uint64_t graphics_pipeline_ns;
-	std::atomic_uint64_t compute_pipeline_ns;
-	std::atomic_uint64_t shader_module_ns;
-	std::atomic_uint graphics_pipeline_count;
-	std::atomic_uint compute_pipeline_count;
-	std::atomic_uint shader_module_count;
+	std::atomic< std::uint64_t > graphics_pipeline_ns;
+	std::atomic< std::uint64_t > compute_pipeline_ns;
+	std::atomic< std::uint64_t > shader_module_ns;
+	std::atomic< std::uint32_t > graphics_pipeline_count;
+	std::atomic< std::uint32_t > compute_pipeline_count;
+	std::atomic< std::uint32_t > shader_module_count;
 
 	bool shutting_down = false;
 

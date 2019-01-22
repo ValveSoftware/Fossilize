@@ -27,9 +27,18 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <algorithm>
+#include <memory>
 #include <dirent.h>
 
 using namespace std;
+
+// VALVE: Workaround not having std::make_unique in steamrt (C++14 feature) - checking in now to fix buildbot, will try to see if I can
+// fix with vpc options shortly
+template< typename T, typename... Args >
+std::unique_ptr<T> my_make_unique( Args&&... args )
+{
+	return std::unique_ptr< T >(new T( std::forward< Args >( args )... ) );
+}
 
 namespace Fossilize
 {
@@ -169,7 +178,7 @@ struct DumbDirectoryDatabase : DatabaseInterface
 
 unique_ptr<DatabaseInterface> create_dumb_folder_database(const string &directory_path, DatabaseMode mode)
 {
-	auto db = make_unique<DumbDirectoryDatabase>(directory_path, mode);
+	auto db = my_make_unique<DumbDirectoryDatabase>(directory_path, mode);
 	return move(db);
 }
 
@@ -347,7 +356,7 @@ struct ZipDatabase : DatabaseInterface
 
 unique_ptr<DatabaseInterface> create_zip_archive_database(const string &path, DatabaseMode mode)
 {
-	auto db = make_unique<ZipDatabase>(path, mode);
+	auto db = my_make_unique<ZipDatabase>(path, mode);
 	return move(db);
 }
 
@@ -566,7 +575,7 @@ struct StreamArchive : DatabaseInterface
 
 unique_ptr<DatabaseInterface> create_stream_archive_database(const string &path, DatabaseMode mode)
 {
-	auto db = make_unique<StreamArchive>(path, mode);
+	auto db = my_make_unique<StreamArchive>(path, mode);
 	return move(db);
 }
 
