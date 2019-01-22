@@ -37,6 +37,7 @@ $Configuration
 		$AdditionalIncludeDirectories		"$BASE;.\rapidjson\include"
 		$AdditionalIncludeDirectories		"$BASE;.\khronos;.\khronos\vulkan"
 		$AdditionalIncludeDirectories		"$BASE;.\cli\volk"
+		$AdditionalIncludeDirectories		"$BASE;.\miniz"
 		$AdditionalIncludeDirectories		"$BASE;.\cli\dirent\include" [$WINDOWS]
 		$AdditionalIncludeDirectories		"$BASE;..;."
 
@@ -92,5 +93,11 @@ $Project "fossilize_replay"
 		$File ".\fossilize_db.hpp"
 		$File ".\path.hpp"
 		$File ".\varint.hpp"
+	}
+
+	$Folder "miniz"
+	{
+		$File ".\miniz\miniz.c"
+		$File ".\miniz\miniz.h"
 	}
 }

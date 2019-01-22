@@ -37,7 +37,9 @@ $Configuration
 		$PreprocessorDefinitions			"$BASE;DONT_WRAP_FILEIO" [$POSIX]
 		$AdditionalIncludeDirectories		"$BASE;.\rapidjson\include"
 		$AdditionalIncludeDirectories		"$BASE;.\khronos\vulkan"
+		$AdditionalIncludeDirectories		"$BASE;.\miniz"
 		$AdditionalIncludeDirectories		"$BASE;..;."
+		$AdditionalIncludeDirectories		"$BASE;.\cli\dirent\include" [$WINDOWS]
 		$TreatWarningsAsErrors				"false"
 		$WarningLevel						"Level 2 (/W2)"
 		$GCC_ExtraCompilerFlags				"$BASE -Wno-shadow" [$LINUXALL]
@@ -75,5 +77,11 @@ $Project "fossilize_layer"
 		$File ".\fossilize_db.hpp"
 		$File ".\path.hpp"
 		$File ".\varint.hpp"
+	}
+
+	$Folder "miniz"
+	{
+		$File ".\miniz\miniz.c"
+		$File ".\miniz\miniz.h"
 	}
 }
