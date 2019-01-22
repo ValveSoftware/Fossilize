@@ -1852,9 +1852,15 @@ void StateReplayer::Impl::parse(StateCreatorInterface &iface, DatabaseInterface 
 	// which can be read for various purposes (SPIR-V varint for example).
 	const uint8_t *buffer = static_cast<const uint8_t *>(buffer_);
 	auto itr = find(buffer, buffer + total_size, '\0');
+	const uint8_t *varint_buffer = nullptr;
+	size_t varint_size = 0;
 	size_t json_size = itr - buffer;
-	const uint8_t *varint_buffer = itr + 1;
-	size_t varint_size = (buffer + total_size) - varint_buffer;
+
+	if (itr < buffer + total_size)
+	{
+		varint_buffer = itr + 1;
+		varint_size = (buffer + total_size) - varint_buffer;
+	}
 
 	Document doc;
 	doc.Parse(reinterpret_cast<const char *>(buffer), json_size);
