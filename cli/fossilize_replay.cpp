@@ -33,6 +33,7 @@
 #include <string>
 #include <unordered_set>
 #include <stdlib.h>
+#include <string.h>
 #include <chrono>	// VALVE
 #include <queue>	// VALVE
 #include <thread>	// VALVE
