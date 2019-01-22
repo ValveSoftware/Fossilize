@@ -1031,7 +1031,8 @@ void StateReplayer::Impl::parse_shader_modules(StateCreatorInterface &iface, con
 		if (!iface.enqueue_create_shader_module(hash, &info, &replayed_shader_modules[hash]))
 			FOSSILIZE_THROW("Failed to create shader module.");
 	}
-	iface.wait_enqueue();
+
+	iface.notify_replayed_resources_for_type();
 }
 
 void StateReplayer::Impl::parse_pipeline_layouts(StateCreatorInterface &iface, const Value &layouts)
@@ -1065,7 +1066,8 @@ void StateReplayer::Impl::parse_pipeline_layouts(StateCreatorInterface &iface, c
 		if (!iface.enqueue_create_pipeline_layout(hash, &info, &replayed_pipeline_layouts[hash]))
 			FOSSILIZE_THROW("Failed to create pipeline layout.");
 	}
-	iface.wait_enqueue();
+
+	iface.notify_replayed_resources_for_type();
 }
 
 void StateReplayer::Impl::parse_descriptor_set_layouts(StateCreatorInterface &iface, const Value &layouts)
@@ -1094,7 +1096,8 @@ void StateReplayer::Impl::parse_descriptor_set_layouts(StateCreatorInterface &if
 		if (!iface.enqueue_create_descriptor_set_layout(hash, &info, &replayed_descriptor_set_layouts[hash]))
 			FOSSILIZE_THROW("Failed to create descriptor set layout.");
 	}
-	iface.wait_enqueue();
+
+	iface.notify_replayed_resources_for_type();
 }
 
 void StateReplayer::Impl::parse_application_info(StateCreatorInterface &iface, const Value &app_info, const Value &pdf_info)
@@ -1167,7 +1170,8 @@ void StateReplayer::Impl::parse_samplers(StateCreatorInterface &iface, const Val
 		if (!iface.enqueue_create_sampler(hash, &info, &replayed_samplers[hash]))
 			FOSSILIZE_THROW("Failed to create sampler.");
 	}
-	iface.wait_enqueue();
+
+	iface.notify_replayed_resources_for_type();
 }
 
 VkAttachmentDescription *StateReplayer::Impl::parse_render_pass_attachments(const Value &attachments)
@@ -1320,7 +1324,7 @@ void StateReplayer::Impl::parse_render_passes(StateCreatorInterface &iface, cons
 			FOSSILIZE_THROW("Failed to create render pass.");
 	}
 
-	iface.wait_enqueue();
+	iface.notify_replayed_resources_for_type();
 }
 
 VkSpecializationMapEntry *StateReplayer::Impl::parse_map_entries(const Value &map_entries)
@@ -1369,14 +1373,15 @@ void StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, D
 	auto pipeline = string_to_uint64(obj["basePipelineHandle"].GetString());
 	if (pipeline > 0)
 	{
-		iface.wait_enqueue();
+		// This is pretty bad for multithreaded replay, but this should be very rare.
+		iface.sync_threads();
 		auto pipeline_iter = replayed_compute_pipelines.find(pipeline);
 
 		// If we don't have the pipeline, we might have it later in the array of graphics pipelines, queue up out of order.
 		if (pipeline_iter == replayed_compute_pipelines.end() && pipelines.HasMember(obj["basePipelineHandle"].GetString()))
 		{
 			parse_compute_pipeline(iface, resolver, pipelines, obj["basePipelineHandle"]);
-			iface.wait_enqueue();
+			iface.sync_threads();
 			pipeline_iter = replayed_compute_pipelines.find(pipeline);
 		}
 
@@ -1387,6 +1392,8 @@ void StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, D
 			if (!resolver || !resolver->read_entry(RESOURCE_COMPUTE_PIPELINE, pipeline, external_state))
 				FOSSILIZE_THROW("Failed to find referenced compute pipeline");
 			this->parse(iface, resolver, external_state.data(), external_state.size());
+			iface.sync_threads();
+
 			pipeline_iter = replayed_compute_pipelines.find(pipeline);
 			if (pipeline_iter == replayed_compute_pipelines.end())
 				FOSSILIZE_THROW("Failed to find referenced compute pipeline");
@@ -1412,10 +1419,13 @@ void StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, D
 			if (!resolver || !resolver->read_entry(RESOURCE_SHADER_MODULE, pipeline, external_state))
 				FOSSILIZE_THROW("Failed to find referenced shader");
 			this->parse(iface, resolver, external_state.data(), external_state.size());
+			iface.sync_shader_modules();
 			module_iter = replayed_shader_modules.find(module);
 			if (module_iter == replayed_shader_modules.end())
 				FOSSILIZE_THROW("Failed find referenced shader module");
 		}
+		else
+			iface.sync_shader_modules();
 		info.stage.module = module_iter->second;
 	}
 
@@ -1431,7 +1441,7 @@ void StateReplayer::Impl::parse_compute_pipelines(StateCreatorInterface &iface, 
 {
 	for (auto itr = pipelines.MemberBegin(); itr != pipelines.MemberEnd(); ++itr)
 		parse_compute_pipeline(iface, resolver, pipelines, itr->name);
-	iface.wait_enqueue();
+	iface.notify_replayed_resources_for_type();
 }
 
 VkVertexInputAttributeDescription *StateReplayer::Impl::parse_vertex_attributes(const rapidjson::Value &attributes)
@@ -1713,10 +1723,14 @@ VkPipelineShaderStageCreateInfo *StateReplayer::Impl::parse_stages(StateCreatorI
 				if (!resolver || !resolver->read_entry(RESOURCE_SHADER_MODULE, module, external_state))
 					FOSSILIZE_THROW("Failed to find referenced shader");
 				this->parse(iface, resolver, external_state.data(), external_state.size());
+				iface.sync_shader_modules();
 				module_iter = replayed_shader_modules.find(module);
 				if (module_iter == replayed_shader_modules.end())
 					FOSSILIZE_THROW("Failed to find referenced shader module");
 			}
+			else
+				iface.sync_shader_modules();
+
 			state->module = module_iter->second;
 		}
 	}
@@ -1740,14 +1754,15 @@ void StateReplayer::Impl::parse_graphics_pipeline(StateCreatorInterface &iface, 
 	auto pipeline = string_to_uint64(obj["basePipelineHandle"].GetString());
 	if (pipeline > 0)
 	{
-		iface.wait_enqueue();
+		// This is pretty bad for multithreaded replay, but this should be very rare.
+		iface.sync_threads();
 		auto pipeline_iter = replayed_graphics_pipelines.find(pipeline);
 
 		// If we don't have the pipeline, we might have it later in the array of graphics pipelines, queue up out of order.
 		if (pipeline_iter == replayed_graphics_pipelines.end() && pipelines.HasMember(obj["basePipelineHandle"].GetString()))
 		{
 			parse_graphics_pipeline(iface, resolver, pipelines, obj["basePipelineHandle"]);
-			iface.wait_enqueue();
+			iface.sync_threads();
 			pipeline_iter = replayed_graphics_pipelines.find(pipeline);
 		}
 
@@ -1758,6 +1773,7 @@ void StateReplayer::Impl::parse_graphics_pipeline(StateCreatorInterface &iface, 
 			if (!resolver || !resolver->read_entry(RESOURCE_GRAPHICS_PIPELINE, pipeline, external_state))
 				FOSSILIZE_THROW("Failed to find referenced graphics pipeline");
 			this->parse(iface, resolver, external_state.data(), external_state.size());
+			iface.sync_threads();
 			pipeline_iter = replayed_graphics_pipelines.find(pipeline);
 			if (pipeline_iter == replayed_graphics_pipelines.end())
 				FOSSILIZE_THROW("Failed to find referenced graphics pipeline");
@@ -1808,7 +1824,7 @@ void StateReplayer::Impl::parse_graphics_pipelines(StateCreatorInterface &iface,
 {
 	for (auto itr = pipelines.MemberBegin(); itr != pipelines.MemberEnd(); ++itr)
 		parse_graphics_pipeline(iface, resolver, pipelines, itr->name);
-	iface.wait_enqueue();
+	iface.notify_replayed_resources_for_type();
 }
 
 StateReplayer::StateReplayer()
@@ -1860,38 +1876,24 @@ void StateReplayer::Impl::parse(StateCreatorInterface &iface, DatabaseInterface 
 
 	if (doc.HasMember("shaderModules"))
 		parse_shader_modules(iface, doc["shaderModules"], varint_buffer, varint_size);
-	else
-		iface.set_num_shader_modules(0);
 
 	if (doc.HasMember("samplers"))
 		parse_samplers(iface, doc["samplers"]);
-	else
-		iface.set_num_samplers(0);
 
 	if (doc.HasMember("setLayouts"))
 		parse_descriptor_set_layouts(iface, doc["setLayouts"]);
-	else
-		iface.set_num_descriptor_set_layouts(0);
 
 	if (doc.HasMember("pipelineLayouts"))
 		parse_pipeline_layouts(iface, doc["pipelineLayouts"]);
-	else
-		iface.set_num_pipeline_layouts(0);
 
 	if (doc.HasMember("renderPasses"))
 		parse_render_passes(iface, doc["renderPasses"]);
-	else
-		iface.set_num_render_passes(0);
 
 	if (doc.HasMember("computePipelines"))
 		parse_compute_pipelines(iface, resolver, doc["computePipelines"]);
-	else
-		iface.set_num_compute_pipelines(0);
 
 	if (doc.HasMember("graphicsPipelines"))
 		parse_graphics_pipelines(iface, resolver, doc["graphicsPipelines"]);
-	else
-		iface.set_num_graphics_pipelines(0);
 }
 
 template <typename T>

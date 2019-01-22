@@ -85,55 +85,6 @@ struct DisasmReplayer : StateCreatorInterface
 		}
 	}
 
-	bool set_num_samplers(unsigned count) override
-	{
-		samplers.resize(count);
-		sampler_infos.resize(count);
-		return true;
-	}
-
-	bool set_num_descriptor_set_layouts(unsigned count) override
-	{
-		layouts.resize(count);
-		set_layout_infos.resize(count);
-		return true;
-	}
-
-	bool set_num_pipeline_layouts(unsigned count) override
-	{
-		pipeline_layouts.resize(count);
-		pipeline_layout_infos.resize(count);
-		return true;
-	}
-
-	bool set_num_shader_modules(unsigned count) override
-	{
-		shader_modules.resize(count);
-		shader_module_infos.resize(count);
-		return true;
-	}
-
-	bool set_num_render_passes(unsigned count) override
-	{
-		render_passes.resize(count);
-		render_pass_infos.resize(count);
-		return true;
-	}
-
-	bool set_num_compute_pipelines(unsigned count) override
-	{
-		compute_pipelines.resize(count);
-		compute_infos.resize(count);
-		return true;
-	}
-
-	bool set_num_graphics_pipelines(unsigned count) override
-	{
-		graphics_pipelines.resize(count);
-		graphics_infos.resize(count);
-		return true;
-	}
-
 	bool enqueue_create_sampler(Hash index, const VkSamplerCreateInfo *create_info, VkSampler *sampler) override
 	{
 		if (device)

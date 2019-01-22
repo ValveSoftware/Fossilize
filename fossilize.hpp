@@ -111,13 +111,6 @@ class StateCreatorInterface
 {
 public:
 	virtual ~StateCreatorInterface() = default;
-	virtual bool set_num_samplers(unsigned /*count*/) { return true; }
-	virtual bool set_num_descriptor_set_layouts(unsigned /*count*/) { return true; }
-	virtual bool set_num_pipeline_layouts(unsigned /*count*/) { return true; }
-	virtual bool set_num_shader_modules(unsigned /*count*/) { return true; }
-	virtual bool set_num_render_passes(unsigned /*count*/) { return true; }
-	virtual bool set_num_compute_pipelines(unsigned /*count*/) { return true; }
-	virtual bool set_num_graphics_pipelines(unsigned /*count*/) { return true; }
 
 	// All future calls to enqueue_create_* were created using this application info.
 	// app can be nullptr, in which case no pApplicationInfo was used (allowed in Vulkan 1.0).
@@ -134,7 +127,17 @@ public:
 	virtual bool enqueue_create_render_pass(Hash index, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass) = 0;
 	virtual bool enqueue_create_compute_pipeline(Hash index, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) = 0;
 	virtual bool enqueue_create_graphics_pipeline(Hash index, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline) = 0;
-	virtual void wait_enqueue() {}
+
+	// Hard dependency, replayer must sync all its workers. This is only called for derived pipelines,
+	// which need to have their parent be compiled before we can create the derived one.
+	virtual void sync_threads() {}
+
+	// Wait for all shader modules to be ready.
+	virtual void sync_shader_modules() {}
+
+	// Notifies the replayer that we are done replaying a type.
+	// Replay can ignore this if it deals with synchronization between replayed types.
+	virtual void notify_replayed_resources_for_type() {}
 };
 
 class StateReplayer

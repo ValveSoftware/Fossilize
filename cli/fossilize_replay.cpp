@@ -39,185 +39,199 @@
 #include <mutex>	// VALVE
 #include <condition_variable> // VALVE
 #include <fstream>
+#include <atomic>
 
 using namespace Fossilize;
 using namespace std;
 
-struct DumbReplayer : StateCreatorInterface
+struct ThreadedReplayer : StateCreatorInterface
 {
 	struct Options
 	{
 		bool pipeline_cache = false;
 
 		// VALVE: Add multi-threaded pipeline creation
-		uint32_t num_threads = thread::hardware_concurrency();
+		unsigned num_threads = thread::hardware_concurrency();
 
 		// VALVE: --loop option for testing performance
-		int32_t loop_count = 0;
+		unsigned loop_count = 1;
 	};
 
-public:
-	
-	// VALVE: Kick off threads to perform pipeline compiles
-	void drainWorkQueue()
+	ThreadedReplayer(const VulkanDevice::Options &device_opts_, const Options &opts_,
+	             const unordered_set<Hash> &graphics,
+	             const unordered_set<Hash> &compute)
+		: opts(opts_), filter_graphics(graphics), filter_compute(compute),
+		  num_worker_threads(opts.num_threads ), loop_count(opts.loop_count),
+		  device_opts(device_opts_)
 	{
-		int32_t nPipelineCount = ( int32_t ) pipelineWorkQueue.size();
-		std::queue< PipelineWorkItem_t > pipelineWorkQueueCopy;
-		if ( nLoopCount > 0 )
-		{
-			pipelineWorkQueueCopy = pipelineWorkQueue;
-		}
+		// Cannot use initializers for atomics.
+		graphics_pipeline_ns.store(0);
+		compute_pipeline_ns.store(0);
+		shader_module_ns.store(0);
+		graphics_pipeline_count.store(0);
+		compute_pipeline_count.store(0);
+		shader_module_count.store(0);
 
 		// Create a thread pool with the # of specified worker threads (defaults to thread::hardware_concurrency()).
-		std::vector< std::thread > threadPool;
-		for ( int32_t i = 0; i < numWorkerThreads; i++ )
-		{
-			threadPool.push_back( std::thread( &DumbReplayer::workerThreadRun, this ) );
-		}
+		for (unsigned i = 0; i < num_worker_threads; i++)
+			thread_pool.push_back(std::thread(&ThreadedReplayer::worker_thread, this));
+	}
 
-		auto start_time = chrono::steady_clock::now();
-		do 
+	void sync_worker_threads()
+	{
+		unique_lock<mutex> lock(pipeline_work_queue_mutex);
+		work_done_condition.wait(lock, [&]() -> bool {
+			return queued_count == completed_count;
+		});
+	}
+
+	void worker_thread()
+	{
+		uint64_t graphics_ns = 0;
+		unsigned graphics_count = 0;
+
+		uint64_t compute_ns = 0;
+		unsigned compute_count = 0;
+
+		uint64_t shader_ns = 0;
+		unsigned shader_count = 0;
+
+		for (;;)
 		{
-			pipelineWorkQueueMutex.lock();
-			while ( !pipelineWorkQueue.empty() )
+			PipelineWorkItem work_item;
 			{
-				pipelineWorkQueueMutex.unlock();
-				workAvailableCondition.notify_all();
-				pipelineWorkQueueMutex.lock();
+				unique_lock<mutex> lock(pipeline_work_queue_mutex);
+				work_available_condition.wait(lock, [&]() -> bool {
+					return shutting_down || !pipeline_work_queue.empty();
+				});
+
+				if (shutting_down)
+					break;
+
+				work_item = pipeline_work_queue.front();
+				pipeline_work_queue.pop();
 			}
-			pipelineWorkQueueMutex.unlock();
-			
-			unsigned long elapsed_ms = chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now() - start_time).count();
-			LOGI( "Compiling %d pipelines took %lu ms (avg: %0.2f ms / pipeline)\n", nPipelineCount, elapsed_ms, ( float ) elapsed_ms / ( float ) nPipelineCount );
 
-			// For perf testing in --loop mode
-			if ( nLoopCount > 0 )
+			switch (work_item.tag)
 			{
-				std::lock_guard< std::mutex> lock( pipelineWorkQueueMutex );
-				// Copy all the work back on to the queue
-				pipelineWorkQueue = pipelineWorkQueueCopy;
-				nLoopCount--;
-
-				// Free all pipelines so we don't keep growing
-				for ( auto it = graphics_pipelines.begin(); it != graphics_pipelines.end(); it++ )
+			case RESOURCE_SHADER_MODULE:
+			{
+				for (unsigned i = 0; i < loop_count; i++)
 				{
-					if ( it->second != VK_NULL_HANDLE )
+					// Avoid leak.
+					if (*work_item.hash_map_entry.shader_module != VK_NULL_HANDLE)
+						vkDestroyShaderModule(device.get_device(), *work_item.hash_map_entry.shader_module, nullptr);
+					*work_item.hash_map_entry.shader_module = VK_NULL_HANDLE;
+
+					auto start_time = chrono::steady_clock::now();
+					if (vkCreateShaderModule(device.get_device(), work_item.create_info.shader_module_create_info,
+					                         nullptr, work_item.output.shader_module) == VK_SUCCESS)
 					{
-						vkDestroyPipeline( device.get_device(), it->second, nullptr );
-						it->second = VK_NULL_HANDLE;
+						auto end_time = chrono::steady_clock::now();
+						auto duration_ns = chrono::duration_cast<chrono::nanoseconds>(end_time - start_time).count();
+						shader_module_ns += duration_ns;
+						shader_module_count++;
+						*work_item.hash_map_entry.shader_module = *work_item.output.shader_module;
+					}
+					else
+					{
+						LOGE("Failed to create shader module for hash 0x%llx.\n",
+						     static_cast<unsigned long long>(work_item.hash));
 					}
 				}
-				graphics_pipelines.clear();
+				break;
+			}
 
-				// Free all pipelines so we don't keep growing
-				for ( auto it = compute_pipelines.begin(); it != compute_pipelines.end(); it++ )
+			case RESOURCE_GRAPHICS_PIPELINE:
+			{
+				for (unsigned i = 0; i < loop_count; i++)
 				{
-					if ( it->second != VK_NULL_HANDLE )
+					// Avoid leak.
+					if (*work_item.hash_map_entry.pipeline != VK_NULL_HANDLE)
+						vkDestroyPipeline(device.get_device(), *work_item.hash_map_entry.pipeline, nullptr);
+					*work_item.hash_map_entry.pipeline = VK_NULL_HANDLE;
+
+					auto start_time = chrono::steady_clock::now();
+					if (vkCreateGraphicsPipelines(device.get_device(), pipeline_cache, 1, work_item.create_info.graphics_create_info,
+					                              nullptr, work_item.output.pipeline) == VK_SUCCESS)
 					{
-						vkDestroyPipeline( device.get_device(), it->second, nullptr );
-						it->second = VK_NULL_HANDLE;
+						auto end_time = chrono::steady_clock::now();
+						auto duration_ns = chrono::duration_cast<chrono::nanoseconds>(end_time - start_time).count();
+						graphics_pipeline_ns += duration_ns;
+						graphics_pipeline_count++;
+						*work_item.hash_map_entry.pipeline = *work_item.output.pipeline;
+					}
+					else
+					{
+						LOGE("Failed to create graphics pipeline for hash 0x%llx.\n",
+						     static_cast<unsigned long long>(work_item.hash));
 					}
 				}
-				compute_pipelines.clear();
-
-
+				break;
 			}
-			start_time = chrono::steady_clock::now();
 
-		} while ( nLoopCount > 0 );
-
-		bShuttingDown = true;
-		workAvailableCondition.notify_all();
-		for ( int32_t i = 0; i < numWorkerThreads; i++ )
-		{
-			threadPool[ i ].join();
-		}
-	}
-
-	// VALVE: Worker thread function - grab work item off of the queue and perform the compile
-	void workerThreadRun()
-	{
-		// If user asked for a pipeline cache, create a pipeline cache on each thread
-		VkPipelineCache perThreadPipelineCache = VK_NULL_HANDLE;
-		if ( pipeline_cache != VK_NULL_HANDLE )
-		{
-			VkPipelineCacheCreateInfo info = { VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO };
-			vkCreatePipelineCache( device.get_device(), &info, nullptr, &perThreadPipelineCache );
-		}
-
-		while ( !bShuttingDown )
-		{
-			PipelineWorkItem_t workItem;
+			case RESOURCE_COMPUTE_PIPELINE:
 			{
-				std::unique_lock< std::mutex > lock( pipelineWorkQueueMutex );
-				workAvailableCondition.wait( lock, [&] 
+				for (unsigned i = 0; i < loop_count; i++)
+				{
+					// Avoid leak.
+					if (*work_item.hash_map_entry.pipeline != VK_NULL_HANDLE)
+						vkDestroyPipeline(device.get_device(), *work_item.hash_map_entry.pipeline, nullptr);
+					*work_item.hash_map_entry.pipeline = VK_NULL_HANDLE;
+
+					auto start_time = chrono::steady_clock::now();
+					if (vkCreateComputePipelines(device.get_device(), pipeline_cache, 1,
+					                             work_item.create_info.compute_create_info,
+					                             nullptr, work_item.output.pipeline) == VK_SUCCESS)
 					{
-						if ( bShuttingDown )
-						{
-							return true;
-						}
-						if ( !pipelineWorkQueue.empty() )
-						{
-							workItem = pipelineWorkQueue.front();
-							pipelineWorkQueue.pop();
-							return true;
-						}
-						return false;
-					} );
+						auto end_time = chrono::steady_clock::now();
+						auto duration_ns = chrono::duration_cast<chrono::nanoseconds>(end_time - start_time).count();
+						compute_pipeline_ns += duration_ns;
+						compute_pipeline_count++;
+						*work_item.hash_map_entry.pipeline = *work_item.output.pipeline;
+					}
+					else
+					{
+						LOGE("Failed to create compute pipeline for hash 0x%llx.\n",
+						     static_cast<unsigned long long>(work_item.hash));
+					}
+				}
+				break;
 			}
 
-			if ( bShuttingDown )
-				continue;
-			
-			// Create graphics or compute pipeline
-			if ( workItem.pGraphicsPipelineCreateInfo )
-			{
-				if ( vkCreateGraphicsPipelines( device.get_device(), perThreadPipelineCache, 1, workItem.pGraphicsPipelineCreateInfo, nullptr, workItem.ppPipeline ) != VK_SUCCESS)
-				{
-					LOGE("Creating graphics pipeline %0" PRIX64 " failed\n", workItem.index);
-				}
-				else
-				{
-					// Insert back into the map - needs a lock to be thread safe
-					std::lock_guard< std::mutex > lock( pipelineWorkQueueMutex );
-					graphics_pipelines[ workItem.index ] = *workItem.ppPipeline;
-				}
+			default:
+				break;
 			}
-			else if ( workItem.pComputePipelineCreateInfo )
+
 			{
-				if ( vkCreateComputePipelines( device.get_device(), perThreadPipelineCache, 1, workItem.pComputePipelineCreateInfo, nullptr, workItem.ppPipeline ) != VK_SUCCESS)
-				{
-					LOGE("Creating compute pipeline %0" PRIX64 " failed\n", workItem.index);
-				}
-				else
-				{
-					// Insert back into the map - needs a lock to be thread safe
-					std::lock_guard< std::mutex > lock( pipelineWorkQueueMutex );
-					compute_pipelines[ workItem.index ] = *workItem.ppPipeline;
-				}
+				lock_guard<mutex> lock(pipeline_work_queue_mutex);
+				completed_count++;
+				if (completed_count == queued_count) // Makes sense to signal main thread now.
+					work_done_condition.notify_one();
 			}
 		}
 
-		// Merge worker thread pipeline cache to the main cache
-		if ( perThreadPipelineCache != VK_NULL_HANDLE )
+		graphics_pipeline_count.fetch_add(graphics_count, std::memory_order_relaxed);
+		graphics_pipeline_ns.fetch_add(graphics_ns, std::memory_order_relaxed);
+		compute_pipeline_count.fetch_add(compute_count, std::memory_order_relaxed);
+		compute_pipeline_ns.fetch_add(compute_ns, std::memory_order_relaxed);
+		shader_module_count.fetch_add(shader_count, std::memory_order_relaxed);
+		shader_module_ns.fetch_add(shader_ns, std::memory_order_relaxed);
+	}
+
+	~ThreadedReplayer()
+	{
+		// Signal that it's time for threads to die.
 		{
-			{
-				std::lock_guard< std::mutex > lock( pipelineWorkQueueMutex );
-				vkMergePipelineCaches( device.get_device(), pipeline_cache, 1, &perThreadPipelineCache );
-			}
-			vkDestroyPipelineCache( device.get_device(), perThreadPipelineCache, nullptr );
+			lock_guard<mutex> lock(pipeline_work_queue_mutex);
+			shutting_down = true;
+			work_available_condition.notify_all();
 		}
-	}
 
-	DumbReplayer(const VulkanDevice::Options &device_opts_, const Options &opts_,
-	             const unordered_set<unsigned> &graphics,
-	             const unordered_set<unsigned> &compute)
-		: opts(opts_), filter_graphics(graphics), filter_compute(compute), numWorkerThreads( opts.num_threads ), nLoopCount( opts.loop_count ),bShuttingDown( false ), device_opts(device_opts_)
-	{
-	}
+		for (auto &thread : thread_pool)
+			if (thread.joinable())
+				thread.join();
 
-	~DumbReplayer()
-	{
 		if (pipeline_cache)
 			vkDestroyPipelineCache(device.get_device(), pipeline_cache, nullptr);
 		for (auto &sampler : samplers)
@@ -253,6 +267,7 @@ public:
 			device_was_init = true;
 			device_opts.application_info = app;
 			device_opts.features = features;
+			device_opts.need_disasm = false;
 			auto start_device = chrono::steady_clock::now();
 			if (!device.init_device(device_opts))
 			{
@@ -288,6 +303,7 @@ public:
 
 	bool enqueue_create_sampler(Hash index, const VkSamplerCreateInfo *create_info, VkSampler *sampler) override
 	{
+		// Playback in-order.
 		if (vkCreateSampler(device.get_device(), create_info, nullptr, sampler) != VK_SUCCESS)
 		{
 			LOGE("Creating sampler %0" PRIX64 " Failed!\n", index);
@@ -299,6 +315,7 @@ public:
 
 	bool enqueue_create_descriptor_set_layout(Hash index, const VkDescriptorSetLayoutCreateInfo *create_info, VkDescriptorSetLayout *layout) override
 	{
+		// Playback in-order.
 		if (vkCreateDescriptorSetLayout(device.get_device(), create_info, nullptr, layout) != VK_SUCCESS)
 		{
 			LOGE("Creating descriptor set layout %0" PRIX64 " Failed!\n", index);
@@ -310,6 +327,7 @@ public:
 
 	bool enqueue_create_pipeline_layout(Hash index, const VkPipelineLayoutCreateInfo *create_info, VkPipelineLayout *layout) override
 	{
+		// Playback in-order.
 		if (vkCreatePipelineLayout(device.get_device(), create_info, nullptr, layout) != VK_SUCCESS)
 		{
 			LOGE("Creating pipeline layout %0" PRIX64 " Failed!\n", index);
@@ -319,19 +337,9 @@ public:
 		return true;
 	}
 
-	bool enqueue_create_shader_module(Hash index, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module) override
-	{
-		if (vkCreateShaderModule(device.get_device(), create_info, nullptr, module) != VK_SUCCESS)
-		{
-			LOGE("Creating shader module %0" PRIX64 " Failed!\n", index);
-			return false;
-		}
-		shader_modules[index] = *module;
-		return true;
-	}
-
 	bool enqueue_create_render_pass(Hash index, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass) override
 	{
+		// Playback in-order.
 		if (vkCreateRenderPass(device.get_device(), create_info, nullptr, render_pass) != VK_SUCCESS)
 		{
 			LOGE("Creating render pass %0" PRIX64 " Failed!\n", index);
@@ -341,14 +349,46 @@ public:
 		return true;
 	}
 
-	bool enqueue_create_compute_pipeline(Hash index, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) override
+	bool enqueue_create_shader_module(Hash hash, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module) override
 	{
-		if ((filter_compute.empty() && filter_graphics.empty()) || filter_compute.count(index))
+		PipelineWorkItem work_item;
+		work_item.hash = hash;
+		work_item.tag = RESOURCE_SHADER_MODULE;
+		work_item.output.shader_module = module;
+		// Pointer to value in std::unordered_map remains fixed per spec (node-based).
+		work_item.hash_map_entry.shader_module = &shader_modules[hash];
+		work_item.create_info.shader_module_create_info = create_info;
+
 		{
-			PipelineWorkItem_t workItem( index );
-			workItem.pComputePipelineCreateInfo = create_info;
-			workItem.ppPipeline = pipeline;
-			pipelineWorkQueue.push( workItem );
+			// Pipeline parsing with pipeline creation.
+			lock_guard<mutex> lock(pipeline_work_queue_mutex);
+			pipeline_work_queue.push(work_item);
+			work_available_condition.notify_one();
+			queued_count++;
+		}
+
+		return true;
+	}
+
+	bool enqueue_create_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) override
+	{
+		if ((filter_compute.empty() && filter_graphics.empty()) || filter_compute.count(hash))
+		{
+			PipelineWorkItem work_item;
+			work_item.hash = hash;
+			work_item.tag = RESOURCE_COMPUTE_PIPELINE;
+			work_item.output.pipeline = pipeline;
+			// Pointer to value in std::unordered_map remains fixed per spec (node-based).
+			work_item.hash_map_entry.pipeline = &compute_pipelines[hash];
+			work_item.create_info.compute_create_info = create_info;
+
+			{
+				// Pipeline parsing with pipeline creation.
+				lock_guard<mutex> lock(pipeline_work_queue_mutex);
+				pipeline_work_queue.push(work_item);
+				work_available_condition.notify_one();
+				queued_count++;
+			}
 		}
 		else
 			*pipeline = VK_NULL_HANDLE;
@@ -356,25 +396,40 @@ public:
 		return true;
 	}
 
-	bool enqueue_create_graphics_pipeline(Hash index, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline) override
+	bool enqueue_create_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
-		if ((filter_graphics.empty() && filter_compute.empty()) || filter_graphics.count(index))
+		if ((filter_graphics.empty() && filter_compute.empty()) || filter_graphics.count(hash))
 		{
-			PipelineWorkItem_t workItem( index );
-			workItem.pGraphicsPipelineCreateInfo = create_info;
-			workItem.ppPipeline = pipeline;
-			pipelineWorkQueue.push( workItem );
-			
+			PipelineWorkItem work_item;
+			work_item.hash = hash;
+			work_item.tag = RESOURCE_GRAPHICS_PIPELINE;
+			work_item.output.pipeline = pipeline;
+			// Pointer to value in std::unordered_map remains fixed per spec (node-based).
+			work_item.hash_map_entry.pipeline = &graphics_pipelines[hash];
+			work_item.create_info.graphics_create_info = create_info;
+
+			{
+				// Pipeline parsing with pipeline creation.
+				lock_guard<mutex> lock(pipeline_work_queue_mutex);
+				pipeline_work_queue.push(work_item);
+				work_available_condition.notify_one();
+				queued_count++;
+			}
 		}
 		else
 			*pipeline = VK_NULL_HANDLE;
 
 		return true;
+	}
+
+	void sync_threads() override
+	{
+		sync_worker_threads();
 	}
 
 	Options opts;
-	const unordered_set<unsigned> &filter_graphics;
-	const unordered_set<unsigned> &filter_compute;
+	const unordered_set<Hash> &filter_graphics;
+	const unordered_set<Hash> &filter_compute;
 
 	std::unordered_map<Hash, VkSampler> samplers;
 	std::unordered_map<Hash, VkDescriptorSetLayout> layouts;
@@ -386,31 +441,50 @@ public:
 	VkPipelineCache pipeline_cache = VK_NULL_HANDLE;
 
 	// VALVE: multi-threaded work queue for replayer
-	struct PipelineWorkItem_t
+	struct PipelineWorkItem
 	{
-		PipelineWorkItem_t() :
-			PipelineWorkItem_t( Hash() )
-		{
-		}
-		PipelineWorkItem_t( Hash idx ) : 
-			index( idx ),
-			pGraphicsPipelineCreateInfo( nullptr ),
-			pComputePipelineCreateInfo( nullptr ),
-			ppPipeline( nullptr )
-		{
-		}
+		Hash hash = 0;
+		ResourceTag tag = RESOURCE_COUNT;
 
-		Hash index;
-		const VkGraphicsPipelineCreateInfo *pGraphicsPipelineCreateInfo;
-		const VkComputePipelineCreateInfo *pComputePipelineCreateInfo;
-		VkPipeline *ppPipeline;
+		union
+		{
+			const VkGraphicsPipelineCreateInfo *graphics_create_info;
+			const VkComputePipelineCreateInfo *compute_create_info;
+			const VkShaderModuleCreateInfo *shader_module_create_info;
+		} create_info = {};
+
+		union
+		{
+			VkPipeline *pipeline;
+			VkShaderModule *shader_module;
+		} output = {};
+
+		union
+		{
+			VkPipeline *pipeline;
+			VkShaderModule *shader_module;
+		} hash_map_entry = {};
 	};
-	int32_t numWorkerThreads;
-	int32_t nLoopCount;
-	std::mutex pipelineWorkQueueMutex;
-	std::queue< PipelineWorkItem_t > pipelineWorkQueue;
-	std::condition_variable workAvailableCondition;
-	volatile bool bShuttingDown;
+
+	unsigned num_worker_threads = 0;
+	unsigned loop_count = 0;
+	unsigned queued_count = 0;
+	unsigned completed_count = 0;
+	std::vector<std::thread> thread_pool;
+	std::mutex pipeline_work_queue_mutex;
+	std::queue<PipelineWorkItem> pipeline_work_queue;
+	std::condition_variable work_available_condition;
+	std::condition_variable work_done_condition;
+
+	// Feed statistics from the worker threads.
+	std::atomic_uint64_t graphics_pipeline_ns;
+	std::atomic_uint64_t compute_pipeline_ns;
+	std::atomic_uint64_t shader_module_ns;
+	std::atomic_uint graphics_pipeline_count;
+	std::atomic_uint compute_pipeline_count;
+	std::atomic_uint shader_module_count;
+
+	bool shutting_down = false;
 
 	VulkanDevice device;
 	bool device_was_init = false;
@@ -428,17 +502,18 @@ static void print_help()
 	     "\t[--filter-graphics <index>]\n"
 	     "\t[--num-threads <count>]\n"
 	     "\t[--loop <count>]\n"
-	     "\t<JSON directory>\n");
+	     "\t<Database>\n");
 }
 
 int main(int argc, char *argv[])
 {
 	string json_path;
 	VulkanDevice::Options opts;
-	DumbReplayer::Options replayer_opts;
+	ThreadedReplayer::Options replayer_opts;
 
-	unordered_set<unsigned> filter_graphics;
-	unordered_set<unsigned> filter_compute;
+	// TODO: Make this useable again.
+	unordered_set<Hash> filter_graphics;
+	unordered_set<Hash> filter_compute;
 
 	CLICallbacks cbs;
 	cbs.default_handler = [&](const char *arg) { json_path = arg; };
@@ -466,7 +541,7 @@ int main(int argc, char *argv[])
 	}
 
 	auto start_time = chrono::steady_clock::now();
-	DumbReplayer replayer(opts, replayer_opts, filter_graphics, filter_compute);
+	ThreadedReplayer replayer(opts, replayer_opts, filter_graphics, filter_compute);
 
 	auto start_create_archive = chrono::steady_clock::now();
 	auto resolver = create_database(json_path, DatabaseMode::ReadOnly);
@@ -484,9 +559,20 @@ int main(int argc, char *argv[])
 
 	vector<Hash> resource_hashes;
 	vector<uint8_t> state_json;
-	for (int i = 0; i < RESOURCE_COUNT; i++)
+
+	static const ResourceTag playback_order[] = {
+		RESOURCE_APPLICATION_INFO, // This will create the device, etc.
+		RESOURCE_SHADER_MODULE, // Kick off shader modules first since it can be done in a thread while we deal with trivial objects.
+		RESOURCE_SAMPLER, // Trivial, run in main thread.
+		RESOURCE_DESCRIPTOR_SET_LAYOUT, // Trivial, run in main thread
+		RESOURCE_PIPELINE_LAYOUT, // Trivial, run in main thread
+		RESOURCE_RENDER_PASS, // Trivial, run in main thread
+		RESOURCE_GRAPHICS_PIPELINE, // Multi-threaded
+		RESOURCE_COMPUTE_PIPELINE, // Multi-threaded
+	};
+
+	for (auto &tag : playback_order)
 	{
-		auto tag = static_cast<ResourceTag>(i);
 		if (!resolver->get_hash_list_for_resource_tag(tag, resource_hashes))
 		{
 			LOGE("Failed to get list of resource hashes.\n");
@@ -507,13 +593,17 @@ int main(int argc, char *argv[])
 			}
 			catch (const exception &e)
 			{
-				LOGE("StateReplayer threw exception parsing (tag: %d, hash: 0x%llx): %s\n", i, static_cast<unsigned long long>(hash), e.what());
+				LOGE("StateReplayer threw exception parsing (tag: %d, hash: 0x%llx): %s\n", tag, static_cast<unsigned long long>(hash), e.what());
 			}
 		}
+
+		// Before continuing with pipelines, make sure the threaded shader modules have been created.
+		if (tag == RESOURCE_RENDER_PASS)
+			replayer.sync_worker_threads();
 	}
 
 	// VALVE: drain all outstanding pipeline compiles
-	replayer.drainWorkQueue();
+	replayer.sync_worker_threads();
 
 	unsigned long total_size =
 		replayer.samplers.size() +
@@ -530,6 +620,19 @@ int main(int argc, char *argv[])
 
 	LOGI("Opening archive took %ld ms:\n", elapsed_ms_read_archive);
 	LOGI("Parsing archive took %ld ms:\n", elapsed_ms_prepare);
+
+	LOGI("Playing back %u shader modules took %.3f s\n",
+	     replayer.shader_module_count.load(),
+	     replayer.shader_module_ns.load() * 1e-9);
+
+	LOGI("Playing back %u graphics pipelines took %.3f s\n",
+	     replayer.graphics_pipeline_count.load(),
+	     replayer.graphics_pipeline_ns.load() * 1e-9);
+
+	LOGI("Playing back %u compute pipelines took %.3f s\n",
+	     replayer.compute_pipeline_count.load(),
+	     replayer.compute_pipeline_ns.load() * 1e-9);
+
 	LOGI("Replayed %lu objects in %ld ms:\n", total_size, elapsed_ms);
 	LOGI("  samplers:              %7lu\n", (unsigned long)replayer.samplers.size());
 	LOGI("  descriptor set layouts:%7lu\n", (unsigned long)replayer.layouts.size());

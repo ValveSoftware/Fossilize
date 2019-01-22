@@ -32,6 +32,7 @@ public:
 	struct Options
 	{
 		bool enable_validation = false;
+		bool need_disasm = true;
 		int device_index = -1;
 		const VkApplicationInfo *application_info = nullptr;
 		const VkPhysicalDeviceFeatures2 *features = nullptr;
