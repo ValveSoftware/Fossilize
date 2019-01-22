@@ -621,15 +621,15 @@ int main(int argc, char *argv[])
 	LOGI("Opening archive took %ld ms:\n", elapsed_ms_read_archive);
 	LOGI("Parsing archive took %ld ms:\n", elapsed_ms_prepare);
 
-	LOGI("Playing back %u shader modules took %.3f s\n",
+	LOGI("Playing back %u shader modules took %.3f s (accumulated time)\n",
 	     replayer.shader_module_count.load(),
 	     replayer.shader_module_ns.load() * 1e-9);
 
-	LOGI("Playing back %u graphics pipelines took %.3f s\n",
+	LOGI("Playing back %u graphics pipelines took %.3f s (accumulated time)\n",
 	     replayer.graphics_pipeline_count.load(),
 	     replayer.graphics_pipeline_ns.load() * 1e-9);
 
-	LOGI("Playing back %u compute pipelines took %.3f s\n",
+	LOGI("Playing back %u compute pipelines took %.3f s (accumulated time)\n",
 	     replayer.compute_pipeline_count.load(),
 	     replayer.compute_pipeline_ns.load() * 1e-9);
 
