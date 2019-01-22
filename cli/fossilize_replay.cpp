@@ -49,6 +49,7 @@ struct ThreadedReplayer : StateCreatorInterface
 	struct Options
 	{
 		bool pipeline_cache = false;
+		string on_disk_pipeline_cache_path;
 
 		// VALVE: Add multi-threaded pipeline creation
 		unsigned num_threads = thread::hardware_concurrency();
@@ -233,7 +234,26 @@ struct ThreadedReplayer : StateCreatorInterface
 				thread.join();
 
 		if (pipeline_cache)
+		{
+			if (!opts.on_disk_pipeline_cache_path.empty())
+			{
+				size_t pipeline_cache_size = 0;
+				if (vkGetPipelineCacheData(device.get_device(), pipeline_cache, &pipeline_cache_size, nullptr) == VK_SUCCESS)
+				{
+					vector<uint8_t> pipeline_buffer(pipeline_cache_size);
+					if (vkGetPipelineCacheData(device.get_device(), pipeline_cache, &pipeline_cache_size, pipeline_buffer.data()) == VK_SUCCESS)
+					{
+						FILE *file = fopen(opts.on_disk_pipeline_cache_path.c_str(), "wb");
+						if (!file || fwrite(pipeline_buffer.data(), 1, pipeline_buffer.size(), file) != pipeline_buffer.size())
+							LOGE("Failed to write pipeline cache data to disk.\n");
+						if (file)
+							fclose(file);
+					}
+				}
+			}
 			vkDestroyPipelineCache(device.get_device(), pipeline_cache, nullptr);
+		}
+
 		for (auto &sampler : samplers)
 			if (sampler.second)
 				vkDestroySampler(device.get_device(), sampler.second, nullptr);
@@ -274,15 +294,50 @@ struct ThreadedReplayer : StateCreatorInterface
 				LOGE("Failed to create Vulkan device, bailing ...\n");
 				exit(EXIT_FAILURE);
 			}
-			auto end_device = chrono::steady_clock::now();
-			long time_ms = chrono::duration_cast<chrono::milliseconds>(end_device - start_device).count();
-			LOGI("Creating Vulkan device took: %ld ms\n", time_ms);
 
 			if (opts.pipeline_cache)
 			{
 				VkPipelineCacheCreateInfo info = { VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO };
-				vkCreatePipelineCache(device.get_device(), &info, nullptr, &pipeline_cache);
+				vector<uint8_t> on_disk_cache;
+
+				// Try to load on-disk cache.
+				if (!opts.on_disk_pipeline_cache_path.empty())
+				{
+					FILE *file = fopen(opts.on_disk_pipeline_cache_path.c_str(), "rb");
+					if (file)
+					{
+						fseek(file, 0, SEEK_END);
+						size_t len = ftell(file);
+						rewind(file);
+
+						if (len != 0)
+						{
+							on_disk_cache.resize(len);
+							if (fread(on_disk_cache.data(), 1, len, file) == len)
+							{
+								info.pInitialData = on_disk_cache.data();
+								info.initialDataSize = on_disk_cache.size();
+							}
+						}
+					}
+				}
+
+				if (vkCreatePipelineCache(device.get_device(), &info, nullptr, &pipeline_cache) != VK_SUCCESS)
+				{
+					LOGE("Failed to create pipeline cache, trying to create a blank one.\n");
+					info.initialDataSize = 0;
+					info.pInitialData = nullptr;
+					if (vkCreatePipelineCache(device.get_device(), &info, nullptr, &pipeline_cache) != VK_SUCCESS)
+					{
+						LOGE("Failed to create pipeline cache.\n");
+						pipeline_cache = VK_NULL_HANDLE;
+					}
+				}
 			}
+
+			auto end_device = chrono::steady_clock::now();
+			long time_ms = chrono::duration_cast<chrono::milliseconds>(end_device - start_device).count();
+			LOGI("Creating Vulkan device took: %ld ms\n", time_ms);
 
 			if (app)
 			{
@@ -502,6 +557,7 @@ static void print_help()
 	     "\t[--filter-graphics <index>]\n"
 	     "\t[--num-threads <count>]\n"
 	     "\t[--loop <count>]\n"
+	     "\t[--on-disk-pipeline-cache <path>]\n"
 	     "\t<Database>\n");
 }
 
@@ -521,6 +577,7 @@ int main(int argc, char *argv[])
 	cbs.add("--device-index", [&](CLIParser &parser) { opts.device_index = parser.next_uint(); });
 	cbs.add("--enable-validation", [&](CLIParser &) { opts.enable_validation = true; });
 	cbs.add("--pipeline-cache", [&](CLIParser &) { replayer_opts.pipeline_cache = true; });
+	cbs.add("--on-disk-pipeline-cache", [&](CLIParser &parser) { replayer_opts.on_disk_pipeline_cache_path = parser.next_string(); });
 	cbs.add("--filter-compute", [&](CLIParser &parser) { filter_compute.insert(parser.next_uint()); });
 	cbs.add("--filter-graphics", [&](CLIParser &parser) { filter_graphics.insert(parser.next_uint()); });
 	cbs.add("--num-threads", [&](CLIParser &parser) { replayer_opts.num_threads = parser.next_uint(); });
@@ -539,6 +596,12 @@ int main(int argc, char *argv[])
 		print_help();
 		return EXIT_FAILURE;
 	}
+
+	if (replayer_opts.num_threads < 1)
+		replayer_opts.num_threads = 1;
+
+	if (!replayer_opts.on_disk_pipeline_cache_path.empty())
+		replayer_opts.pipeline_cache = true;
 
 	auto start_time = chrono::steady_clock::now();
 	ThreadedReplayer replayer(opts, replayer_opts, filter_graphics, filter_compute);
