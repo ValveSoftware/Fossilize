@@ -38,8 +38,8 @@ int main(int argc, char *argv[])
 		return EXIT_FAILURE;
 	}
 
-	auto input_db = create_database(argv[1], DatabaseMode::ReadOnly);
-	auto output_db = create_database(argv[2], DatabaseMode::OverWrite);
+	auto input_db = std::unique_ptr<DatabaseInterface>(create_database(argv[1], DatabaseMode::ReadOnly));
+	auto output_db = std::unique_ptr<DatabaseInterface>(create_database(argv[2], DatabaseMode::OverWrite));
 	if (!input_db || !input_db->prepare())
 	{
 		LOGE("Failed to load database: %s\n", argv[1]);
@@ -56,16 +56,23 @@ int main(int argc, char *argv[])
 	{
 		auto tag = static_cast<ResourceTag>(i);
 
-		std::vector<Hash> hashes;
-		if (!input_db->get_hash_list_for_resource_tag(tag, hashes))
+		size_t hash_count = 0;
+		if (!input_db->get_hash_list_for_resource_tag(tag, &hash_count, nullptr))
+			return EXIT_FAILURE;
+		std::vector<Hash> hashes(hash_count);
+		if (!input_db->get_hash_list_for_resource_tag(tag, &hash_count, hashes.data()))
 			return EXIT_FAILURE;
 
 		for (auto &hash : hashes)
 		{
-			std::vector<uint8_t> blob;
-			if (!input_db->read_entry(tag, hash, blob))
+			size_t blob_size = 0;
+			if (!input_db->read_entry(tag, hash, &blob_size, nullptr))
 				return EXIT_FAILURE;
-			if (!output_db->write_entry(tag, hash, blob))
+			std::vector<uint8_t> blob(blob_size);
+			if (!input_db->read_entry(tag, hash, &blob_size, blob.data()))
+				return EXIT_FAILURE;
+
+			if (!output_db->write_entry(tag, hash, blob.data(), blob.size()))
 				return EXIT_FAILURE;
 		}
 	}

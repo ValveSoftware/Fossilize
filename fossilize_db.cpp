@@ -32,48 +32,8 @@
 
 using namespace std;
 
-// VALVE: Workaround not having std::make_unique in steamrt (C++14 feature) - checking in now to fix buildbot, will try to see if I can
-// fix with vpc options shortly
-template< typename T, typename... Args >
-std::unique_ptr<T> my_make_unique( Args&&... args )
-{
-	return std::unique_ptr< T >(new T( std::forward< Args >( args )... ) );
-}
-
 namespace Fossilize
 {
-// VALVE: Modified to not use std::filesystem
-static bool load_buffer_from_path(const std::string &path, vector<uint8_t> &file_data)
-{
-	FILE *file = fopen(path.c_str(), "rb");
-	if (!file)
-	{
-		LOGE("Failed to open file: %s\n", path.c_str());
-		return false;
-	}
-
-	if (fseek(file, 0, SEEK_END) < 0)
-	{
-		fclose(file);
-		LOGE("Failed to seek in file: %s\n", path.c_str());
-		return false;
-	}
-
-	size_t file_size = size_t(ftell(file));
-	rewind(file);
-
-	file_data.resize(file_size);
-	if (fread(file_data.data(), 1, file_size, file) != file_size)
-	{
-		LOGE("Failed to read from file: %s\n", path.c_str());
-		fclose(file);
-		return false;
-	}
-
-	fclose(file);
-	return true;
-}
-
 struct DumbDirectoryDatabase : DatabaseInterface
 {
 	DumbDirectoryDatabase(const string &base, DatabaseMode mode_)
@@ -115,7 +75,7 @@ struct DumbDirectoryDatabase : DatabaseInterface
 		return seen_blobs[tag].count(hash) != 0;
 	}
 
-	bool read_entry(ResourceTag tag, Hash hash, vector<uint8_t> &blob) override
+	bool read_entry(ResourceTag tag, Hash hash, size_t *blob_size, void *blob) override
 	{
 		if (mode != DatabaseMode::ReadOnly)
 			return false;
@@ -123,13 +83,55 @@ struct DumbDirectoryDatabase : DatabaseInterface
 		if (!has_entry(tag, hash))
 			return false;
 
+		if (!blob_size)
+			return false;
+
 		char filename[25]; // 2 digits + "." + 16 digits + ".json" + null
 		sprintf(filename, "%02x.%016llx.json", static_cast<unsigned>(tag), static_cast<unsigned long long>(hash));
 		auto path = Path::join(base_directory, filename);
-		return load_buffer_from_path(path, blob);
+
+		FILE *file = fopen(path.c_str(), "rb");
+		if (!file)
+		{
+			LOGE("Failed to open file: %s\n", path.c_str());
+			return false;
+		}
+
+		if (fseek(file, 0, SEEK_END) < 0)
+		{
+			fclose(file);
+			LOGE("Failed to seek in file: %s\n", path.c_str());
+			return false;
+		}
+
+		size_t file_size = size_t(ftell(file));
+		rewind(file);
+
+		if (blob)
+		{
+			if (*blob_size != file_size)
+			{
+				fclose(file);
+				return false;
+			}
+		}
+		else
+			*blob_size = file_size;
+
+		if (blob)
+		{
+			if (fread(blob, 1, file_size, file) != file_size)
+			{
+				fclose(file);
+				return false;
+			}
+		}
+
+		fclose(file);
+		return true;
 	}
 
-	bool write_entry(ResourceTag tag, Hash hash, const std::vector<uint8_t> &bytes) override
+	bool write_entry(ResourceTag tag, Hash hash, const void *blob, size_t size) override
 	{
 		if (mode == DatabaseMode::ReadOnly)
 			return false;
@@ -148,7 +150,7 @@ struct DumbDirectoryDatabase : DatabaseInterface
 			return false;
 		}
 
-		if (fwrite(bytes.data(), 1, bytes.size(), file) != bytes.size())
+		if (fwrite(blob, 1, size, file) != size)
 		{
 			LOGE("Failed to write serialized state to disk.\n");
 			fclose(file);
@@ -159,15 +161,26 @@ struct DumbDirectoryDatabase : DatabaseInterface
 		return true;
 	}
 
-	bool get_hash_list_for_resource_tag(ResourceTag tag, vector<Hash> &hashes) override
+	bool get_hash_list_for_resource_tag(ResourceTag tag, size_t *hash_count, Hash *hashes) override
 	{
-		hashes.clear();
-		hashes.reserve(seen_blobs[tag].size());
-		for (auto &blob : seen_blobs[tag])
-			hashes.push_back(blob);
+		size_t size = seen_blobs[tag].size();
+		if (hashes)
+		{
+			if (size != *hash_count)
+				return false;
+		}
+		else
+			*hash_count = size;
 
-		// Make replay more deterministic.
-		sort(begin(hashes), end(hashes));
+		if (hashes)
+		{
+			Hash *iter = hashes;
+			for (auto &blob : seen_blobs[tag])
+				*iter++ = blob;
+
+			// Make replay more deterministic.
+			sort(hashes, hashes + size);
+		}
 		return true;
 	}
 
@@ -176,10 +189,10 @@ struct DumbDirectoryDatabase : DatabaseInterface
 	unordered_set<Hash> seen_blobs[RESOURCE_COUNT];
 };
 
-unique_ptr<DatabaseInterface> create_dumb_folder_database(const string &directory_path, DatabaseMode mode)
+DatabaseInterface *create_dumb_folder_database(const char *directory_path, DatabaseMode mode)
 {
-	auto db = my_make_unique<DumbDirectoryDatabase>(directory_path, mode);
-	return move(db);
+	auto *db = new DumbDirectoryDatabase(directory_path, mode);
+	return db;
 }
 
 struct ZipDatabase : DatabaseInterface
@@ -281,7 +294,7 @@ struct ZipDatabase : DatabaseInterface
 		return true;
 	}
 
-	bool read_entry(ResourceTag tag, Hash hash, vector<uint8_t> &blob) override
+	bool read_entry(ResourceTag tag, Hash hash, size_t *blob_size, void *blob) override
 	{
 		if (!alive || mode != DatabaseMode::ReadOnly)
 			return false;
@@ -290,17 +303,27 @@ struct ZipDatabase : DatabaseInterface
 		if (itr == end(seen_blobs[tag]))
 			return false;
 
-		blob.resize(itr->second.size);
-		if (!mz_zip_reader_extract_to_mem(&mz, itr->second.index, blob.data(), blob.size(), 0))
+		if (blob)
 		{
-			LOGE("Failed to extract blob.\n");
-			return false;
+			if (*blob_size != itr->second.size)
+				*blob_size = itr->second.size;
+		}
+		else
+			*blob_size = itr->second.size;
+
+		if (blob)
+		{
+			if (!mz_zip_reader_extract_to_mem(&mz, itr->second.index, blob, itr->second.size, 0))
+			{
+				LOGE("Failed to extract blob.\n");
+				return false;
+			}
 		}
 
 		return true;
 	}
 
-	bool write_entry(ResourceTag tag, Hash hash, const vector<uint8_t> &blob) override
+	bool write_entry(ResourceTag tag, Hash hash, const void *blob, size_t size) override
 	{
 		if (!alive || mode == DatabaseMode::ReadOnly)
 			return false;
@@ -312,14 +335,14 @@ struct ZipDatabase : DatabaseInterface
 		char str[32 + 1]; // 32 digits + null
 		sprintf(str, "%016x", tag);
 		sprintf(str + 16, "%016llx", static_cast<unsigned long long>(hash));
-		if (!mz_zip_writer_add_mem(&mz, str, blob.data(), blob.size(), MZ_NO_COMPRESSION))
+		if (!mz_zip_writer_add_mem(&mz, str, blob, size, MZ_NO_COMPRESSION))
 		{
 			LOGE("Failed to add blob to cache.\n");
 			return false;
 		}
 
 		// The index is irrelevant, we're not going to read from this archive any time soon.
-		seen_blobs[tag].emplace(hash, Entry{~0u, blob.size()});
+		seen_blobs[tag].emplace(hash, Entry{~0u, size});
 		return true;
 	}
 
@@ -328,15 +351,26 @@ struct ZipDatabase : DatabaseInterface
 		return seen_blobs[tag].count(hash) != 0;
 	}
 
-	bool get_hash_list_for_resource_tag(ResourceTag tag, vector<Hash> &hashes) override
+	bool get_hash_list_for_resource_tag(ResourceTag tag, size_t *hash_count, Hash *hashes) override
 	{
-		hashes.clear();
-		hashes.reserve(seen_blobs[tag].size());
-		for (auto &blob : seen_blobs[tag])
-			hashes.push_back(blob.first);
+		size_t size = seen_blobs[tag].size();
+		if (hashes)
+		{
+			if (size != *hash_count)
+				return false;
+		}
+		else
+			*hash_count = size;
 
-		// Make replay more deterministic.
-		sort(begin(hashes), end(hashes));
+		if (hashes)
+		{
+			Hash *iter = hashes;
+			for (auto &blob : seen_blobs[tag])
+				*iter++ = blob.first;
+
+			// Make replay more deterministic.
+			sort(hashes, hashes + size);
+		}
 		return true;
 	}
 
@@ -354,19 +388,22 @@ struct ZipDatabase : DatabaseInterface
 	bool alive = false;
 };
 
-unique_ptr<DatabaseInterface> create_zip_archive_database(const string &path, DatabaseMode mode)
+DatabaseInterface *create_zip_archive_database(const char *path, DatabaseMode mode)
 {
-	auto db = my_make_unique<ZipDatabase>(path, mode);
-	return move(db);
+	auto *db = new ZipDatabase(path, mode);
+	return db;
 }
 
-static const uint8_t stream_reference_magic[] = {
-	0x81, 'S', 'T', 'R', 'E', 'A', 'M', 0,
+static const uint8_t stream_reference_magic_and_version[16] = {
+	0x81, 'F', 'O', 'Z',
+	'I', 'L', 'L', 'I',
+	'Z', 'E', 'D', 'B',
+	0, 0, 0, 3, // 4 bytes to use for versioning.
 };
 
 struct StreamArchive : DatabaseInterface
 {
-	enum { MagicSize = 8 };
+	enum { MagicSize = sizeof(stream_reference_magic_and_version) };
 
 	StreamArchive(const string &path_, DatabaseMode mode_)
 		: path(path_), mode(mode_)
@@ -415,7 +452,7 @@ struct StreamArchive : DatabaseInterface
 				if (fread(magic, 1, MagicSize, file) != MagicSize)
 					return false;
 
-				if (memcmp(magic, stream_reference_magic, MagicSize))
+				if (memcmp(magic, stream_reference_magic_and_version, MagicSize))
 					return false;
 
 				size_t offset = MagicSize;
@@ -426,16 +463,32 @@ struct StreamArchive : DatabaseInterface
 					begin_append_offset = offset;
 
 					char blob_name[32];
+					uint8_t blob_checksum[4];
 					uint8_t blob_size[4];
 
 					// Corrupt entry. Our process might have been killed before we could write all data.
-					if (offset + sizeof(blob_name) + sizeof(blob_size) > len)
+					if (offset + sizeof(blob_checksum) + sizeof(blob_name) + sizeof(blob_size) > len)
 						break;
 
+					// NAME
 					if (fread(blob_name, 1, sizeof(blob_name), file) != sizeof(blob_name))
 						return false;
 					offset += sizeof(blob_name);
 
+					// CHECKSUM
+					if (fread(blob_checksum, 1, sizeof(blob_checksum), file) != sizeof(blob_checksum))
+						return false;
+					offset += sizeof(blob_checksum);
+
+					// Verify the checksum is using the reserved value of 0 for now.
+					uint32_t blob_checksum_le = uint32_t(blob_checksum[0]) |
+					                            (uint32_t(blob_checksum[1]) << 8) |
+					                            (uint32_t(blob_checksum[2]) << 16) |
+					                            (uint32_t(blob_checksum[3]) << 24);
+					if (blob_checksum_le != 0)
+						break;
+
+					// SIZE
 					if (fread(blob_size, 1, sizeof(blob_size), file) != sizeof(blob_size))
 						return false;
 					offset += sizeof(blob_size);
@@ -476,21 +529,25 @@ struct StreamArchive : DatabaseInterface
 			else
 			{
 				// Appending to a fresh file. Make sure we have the magic.
-				if (fwrite(stream_reference_magic, 1, sizeof(stream_reference_magic), file) != sizeof(stream_reference_magic))
+				if (fwrite(stream_reference_magic_and_version, 1,
+				           sizeof(stream_reference_magic_and_version), file) != sizeof(stream_reference_magic_and_version))
 					return false;
 			}
 		}
 		else
 		{
-			if (fwrite(stream_reference_magic, 1, sizeof(stream_reference_magic), file) != sizeof(stream_reference_magic))
+			if (fwrite(stream_reference_magic_and_version, 1, sizeof(stream_reference_magic_and_version), file) !=
+			    sizeof(stream_reference_magic_and_version))
+			{
 				return false;
+			}
 		}
 
 		alive = true;
 		return true;
 	}
 
-	bool read_entry(ResourceTag tag, Hash hash, vector<uint8_t> &blob)
+	bool read_entry(ResourceTag tag, Hash hash, size_t *blob_size, void *blob) override
 	{
 		if (!alive || mode != DatabaseMode::ReadOnly)
 			return false;
@@ -499,17 +556,27 @@ struct StreamArchive : DatabaseInterface
 		if (itr == end(seen_blobs[tag]))
 			return false;
 
-		if (fseek(file, itr->second.offset, SEEK_SET) < 0)
-			return false;
-		blob.resize(itr->second.size);
+		if (blob)
+		{
+			if (*blob_size != itr->second.size)
+				return false;
+		}
+		else
+			*blob_size = itr->second.size;
 
-		if (fread(blob.data(), 1, itr->second.size, file) != itr->second.size)
-			return false;
+		if (blob)
+		{
+			if (fseek(file, itr->second.offset, SEEK_SET) < 0)
+				return false;
+
+			if (fread(blob, 1, itr->second.size, file) != itr->second.size)
+				return false;
+		}
 
 		return true;
 	}
 
-	bool write_entry(ResourceTag tag, Hash hash, const vector<uint8_t> &blob)
+	bool write_entry(ResourceTag tag, Hash hash, const void *blob, size_t size) override
 	{
 		if (!alive || mode == DatabaseMode::ReadOnly)
 			return false;
@@ -525,17 +592,22 @@ struct StreamArchive : DatabaseInterface
 		if (fwrite(str, 1, 32, file) != 32)
 			return false;
 
+		// Reserve 4 bytes for a checksum. For now, just write out 0.
+		const char reserved_checksum[4] = {};
+		if (fwrite(reserved_checksum, 1, sizeof(reserved_checksum), file) != sizeof(reserved_checksum))
+			return false;
+
 		const uint8_t blob_size[4] = {
-			uint8_t((blob.size() >> 0) & 0xff),
-			uint8_t((blob.size() >> 8) & 0xff),
-			uint8_t((blob.size() >> 16) & 0xff),
-			uint8_t((blob.size() >> 24) & 0xff),
+			uint8_t((size >> 0) & 0xff),
+			uint8_t((size >> 8) & 0xff),
+			uint8_t((size >> 16) & 0xff),
+			uint8_t((size >> 24) & 0xff),
 		};
 
 		if (fwrite(blob_size, 1, sizeof(blob_size), file) != sizeof(blob_size))
 			return false;
 
-		if (fwrite(blob.data(), 1, blob.size(), file) != blob.size())
+		if (fwrite(blob, 1, size, file) != size)
 			return false;
 
 		// The entry is irrelevant, we're not going to read from this archive any time soon.
@@ -548,15 +620,26 @@ struct StreamArchive : DatabaseInterface
 		return seen_blobs[tag].count(hash) != 0;
 	}
 
-	bool get_hash_list_for_resource_tag(ResourceTag tag, vector<Hash> &hashes) override
+	bool get_hash_list_for_resource_tag(ResourceTag tag, size_t *hash_count, Hash *hashes) override
 	{
-		hashes.clear();
-		hashes.reserve(seen_blobs[tag].size());
-		for (auto &blob : seen_blobs[tag])
-			hashes.push_back(blob.first);
+		size_t size = seen_blobs[tag].size();
+		if (hashes)
+		{
+			if (size != *hash_count)
+				return false;
+		}
+		else
+			*hash_count = size;
 
-		// Make replay more deterministic.
-		sort(begin(hashes), end(hashes));
+		if (hashes)
+		{
+			Hash *iter = hashes;
+			for (auto &blob : seen_blobs[tag])
+				*iter++ = blob.first;
+
+			// Make replay more deterministic.
+			sort(hashes, hashes + size);
+		}
 		return true;
 	}
 
@@ -573,13 +656,13 @@ struct StreamArchive : DatabaseInterface
 	bool alive = false;
 };
 
-unique_ptr<DatabaseInterface> create_stream_archive_database(const string &path, DatabaseMode mode)
+DatabaseInterface *create_stream_archive_database(const char *path, DatabaseMode mode)
 {
-	auto db = my_make_unique<StreamArchive>(path, mode);
-	return move(db);
+	auto *db = new StreamArchive(path, mode);
+	return db;
 }
 
-unique_ptr<DatabaseInterface> create_database(const string &path, DatabaseMode mode)
+DatabaseInterface *create_database(const char *path, DatabaseMode mode)
 {
 	auto ext = Path::ext(path);
 	if (ext == "foz")

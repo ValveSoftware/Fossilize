@@ -22,11 +22,9 @@
 
 #pragma once
 
-#include <stdint.h>
-#include <vector>
-#include <string>
-#include <memory>
 #include "fossilize.hpp"
+#include <stdint.h>
+#include <stddef.h>
 
 namespace Fossilize
 {
@@ -54,15 +52,19 @@ public:
 	virtual bool prepare() = 0;
 
 	// Reads a blob entry from database.
-	virtual bool read_entry(ResourceTag tag, Hash hash, std::vector<uint8_t> &blob) = 0;
+	// Arguments are similar to Vulkan, call the query function twice.
+	// First, call with buffer == nullptr to query size.
+	// Then, pass in allocated buffer, *size must match the previously queried size.
+	virtual bool read_entry(ResourceTag tag, Hash hash, size_t *size, void *buffer) = 0;
 
 	// Writes an entry to database.
-	virtual bool write_entry(ResourceTag tag, Hash hash, const std::vector<uint8_t> &blob) = 0;
+	virtual bool write_entry(ResourceTag tag, Hash hash, const void *buffer, size_t size) = 0;
 
 	// Checks if entry already exists in database, i.e. no need to serialize.
 	virtual bool has_entry(ResourceTag tag, Hash hash) = 0;
 
-	virtual bool get_hash_list_for_resource_tag(ResourceTag tag, std::vector<Hash> &hashes) = 0;
+	// Arguments are similar to Vulkan, call the query function twice.
+	virtual bool get_hash_list_for_resource_tag(ResourceTag tag, size_t *num_hashes, Hash *hash) = 0;
 };
 
 enum class DatabaseMode
@@ -72,8 +74,8 @@ enum class DatabaseMode
 	OverWrite
 };
 
-std::unique_ptr<DatabaseInterface> create_dumb_folder_database(const std::string &directory_path, DatabaseMode mode);
-std::unique_ptr<DatabaseInterface> create_zip_archive_database(const std::string &path, DatabaseMode mode);
-std::unique_ptr<DatabaseInterface> create_stream_archive_database(const std::string &path, DatabaseMode mode);
-std::unique_ptr<DatabaseInterface> create_database(const std::string &path, DatabaseMode mode);
+DatabaseInterface *create_dumb_folder_database(const char *directory_path, DatabaseMode mode);
+DatabaseInterface *create_zip_archive_database(const char *path, DatabaseMode mode);
+DatabaseInterface *create_stream_archive_database(const char *path, DatabaseMode mode);
+DatabaseInterface *create_database(const char *path, DatabaseMode mode);
 }

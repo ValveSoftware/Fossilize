@@ -666,7 +666,7 @@ int main(int argc, char *argv[])
 	ThreadedReplayer replayer(opts, replayer_opts, filter_graphics, filter_compute);
 
 	auto start_create_archive = chrono::steady_clock::now();
-	auto resolver = create_database(json_path, DatabaseMode::ReadOnly);
+	auto resolver = unique_ptr<DatabaseInterface>(create_database(json_path.c_str(), DatabaseMode::ReadOnly));
 	auto end_create_archive = chrono::steady_clock::now();
 
 	auto start_prepare = chrono::steady_clock::now();
@@ -695,7 +695,16 @@ int main(int argc, char *argv[])
 
 	for (auto &tag : playback_order)
 	{
-		if (!resolver->get_hash_list_for_resource_tag(tag, resource_hashes))
+		size_t resource_hash_count = 0;
+		if (!resolver->get_hash_list_for_resource_tag(tag, &resource_hash_count, nullptr))
+		{
+			LOGE("Failed to get list of resource hashes.\n");
+			return EXIT_FAILURE;
+		}
+
+		resource_hashes.resize(resource_hash_count);
+
+		if (!resolver->get_hash_list_for_resource_tag(tag, &resource_hash_count, resource_hashes.data()))
 		{
 			LOGE("Failed to get list of resource hashes.\n");
 			return EXIT_FAILURE;
@@ -703,7 +712,16 @@ int main(int argc, char *argv[])
 
 		for (auto &hash : resource_hashes)
 		{
-			if (!resolver->read_entry(tag, hash, state_json))
+			size_t state_json_size = 0;
+			if (!resolver->read_entry(tag, hash, &state_json_size, nullptr))
+			{
+				LOGE("Failed to load blob from cache.\n");
+				return EXIT_FAILURE;
+			}
+
+			state_json.resize(state_json_size);
+
+			if (!resolver->read_entry(tag, hash, &state_json_size, state_json.data()))
 			{
 				LOGE("Failed to load blob from cache.\n");
 				return EXIT_FAILURE;

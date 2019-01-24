@@ -484,19 +484,23 @@ static bool test_database()
 
 	// Try clean write.
 	{
-		auto db = create_stream_archive_database(".__test_tmp.zip", DatabaseMode::OverWrite);
+		auto db = std::unique_ptr<DatabaseInterface>(create_stream_archive_database(".__test_tmp.zip", DatabaseMode::OverWrite));
 		if (!db->prepare())
 			return false;
 
-		if (!db->write_entry(RESOURCE_SAMPLER, 1, {1, 2, 3}))
+		static const uint8_t entry1[] = { 1, 2, 3 };
+
+		if (!db->write_entry(RESOURCE_SAMPLER, 1, entry1, sizeof(entry1)))
 			return false;
-		if (!db->write_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, 2, {10, 20, 30, 40, 50}))
+
+		static const uint8_t entry2[] = { 10, 20, 30, 40, 50 };
+		if (!db->write_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, 2, entry2, sizeof(entry2)))
 			return false;
 	}
 
 	// Try appending now.
 	{
-		auto db = create_stream_archive_database(".__test_tmp.zip", DatabaseMode::Append);
+		auto db = std::unique_ptr<DatabaseInterface>(create_stream_archive_database(".__test_tmp.zip", DatabaseMode::Append));
 		if (!db->prepare())
 			return false;
 
@@ -508,14 +512,15 @@ static bool test_database()
 		if (db->has_entry(RESOURCE_SHADER_MODULE, 3))
 			return false;
 
-		if (!db->write_entry(RESOURCE_SHADER_MODULE, 3, {1, 2, 3, 1, 2, 3}))
+		static const uint8_t entry3[] = { 1, 2, 3, 1, 2, 3 };
+		if (!db->write_entry(RESOURCE_SHADER_MODULE, 3, entry3, sizeof(entry3)))
 			return false;
 	}
 
 	// Try playback multiple times.
 	for (unsigned iter = 0; iter < 2; iter++)
 	{
-		auto db = create_stream_archive_database(".__test_tmp.zip", DatabaseMode::ReadOnly);
+		auto db = std::unique_ptr<DatabaseInterface>(create_stream_archive_database(".__test_tmp.zip", DatabaseMode::ReadOnly));
 		if (!db->prepare())
 			return false;
 
@@ -534,12 +539,31 @@ static bool test_database()
 		if (db->has_entry(RESOURCE_GRAPHICS_PIPELINE, 3))
 			return false;
 
+		size_t blob_size;
 		std::vector<uint8_t> blob;
-		if (!db->read_entry(RESOURCE_SAMPLER, 1, blob) || !compare(blob, { 1, 2, 3 }))
+
+		if (!db->read_entry(RESOURCE_SAMPLER, 1, &blob_size, nullptr))
 			return false;
-		if (!db->read_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, 2, blob) || !compare(blob, { 10, 20, 30, 40, 50 }))
+		blob.resize(blob_size);
+		if (!db->read_entry(RESOURCE_SAMPLER, 1, &blob_size, blob.data()))
 			return false;
-		if (!db->read_entry(RESOURCE_SHADER_MODULE, 3, blob) || !compare(blob, { 1, 2, 3, 1, 2, 3 }))
+		if (!compare(blob, { 1, 2, 3 }))
+			return false;
+
+		if (!db->read_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, 2, &blob_size, nullptr))
+			return false;
+		blob.resize(blob_size);
+		if (!db->read_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, 2, &blob_size, blob.data()))
+			return false;
+		if (!compare(blob, { 10, 20, 30, 40, 50 }))
+			return false;
+
+		if (!db->read_entry(RESOURCE_SHADER_MODULE, 3, &blob_size, nullptr))
+			return false;
+		blob.resize(blob_size);
+		if (!db->read_entry(RESOURCE_SHADER_MODULE, 3, &blob_size, blob.data()))
+			return false;
+		if (!compare(blob, { 1, 2, 3, 1, 2, 3 }))
 			return false;
 	}
 
