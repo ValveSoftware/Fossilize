@@ -55,7 +55,7 @@ namespace Fossilize
 
 enum
 {
-	FOSSILIZE_FORMAT_VERSION = 2
+	FOSSILIZE_FORMAT_VERSION = 3
 };
 
 class Hasher
@@ -230,8 +230,7 @@ struct StateRecorder::Impl
 
 	VkApplicationInfo *application_info = nullptr;
 	VkPhysicalDeviceFeatures2 *physical_device_features = nullptr;
-	Hash application_info_hash = 0;
-	Hash physical_device_features_hash = 0;
+	StateRecorderApplicationFeatureHash application_feature_hash = {};
 
 	VkDescriptorSetLayoutCreateInfo *copy_descriptor_set_layout(const VkDescriptorSetLayoutCreateInfo *create_info, ScratchAllocator &alloc);
 	VkPipelineLayoutCreateInfo *copy_pipeline_layout(const VkPipelineLayoutCreateInfo *create_info, ScratchAllocator &alloc);
@@ -261,6 +260,15 @@ struct StateRecorder::Impl
 	void remap_sampler_ci(VkSamplerCreateInfo *create_info);
 	void remap_render_pass_ci(VkRenderPassCreateInfo *create_info);
 
+	void serialize_application_info(std::vector<uint8_t> &blob) const;
+	void serialize_sampler(Hash hash, const VkSamplerCreateInfo &create_info, std::vector<uint8_t> &blob) const;
+	void serialize_descriptor_set_layout(Hash hash, const VkDescriptorSetLayoutCreateInfo &create_info, std::vector<uint8_t> &blob) const;
+	void serialize_pipeline_layout(Hash hash, const VkPipelineLayoutCreateInfo &create_info, std::vector<uint8_t> &blob) const;
+	void serialize_render_pass(Hash hash, const VkRenderPassCreateInfo &create_info, std::vector<uint8_t> &blob) const;
+	void serialize_shader_module(Hash hash, const VkShaderModuleCreateInfo &create_info, std::vector<uint8_t> &blob, ScratchAllocator &allocator) const;
+	void serialize_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo &create_info, std::vector<uint8_t> &blob) const;
+	void serialize_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo &create_info, std::vector<uint8_t> &blob) const;
+
 	std::mutex record_lock;
 	std::condition_variable record_cv;
 	std::queue<WorkItem> record_queue;
@@ -282,7 +290,7 @@ static inline T api_object_cast(U obj)
 
 namespace Hashing
 {
-Hash compute_hash_application_info(const VkApplicationInfo &info)
+static Hash compute_hash_application_info(const VkApplicationInfo &info)
 {
 	Hasher h;
 	h.u32(info.applicationVersion);
@@ -302,17 +310,35 @@ Hash compute_hash_application_info(const VkApplicationInfo &info)
 	return h.get();
 }
 
-Hash compute_hash_physical_device_features(const VkPhysicalDeviceFeatures2 &pdf)
+static Hash compute_hash_physical_device_features(const VkPhysicalDeviceFeatures2 &pdf)
 {
 	Hasher h;
 	h.u32(pdf.features.robustBufferAccess);
 	return h.get();
 }
 
-Hash compute_hash_sampler(const StateRecorder &recorder, const VkSamplerCreateInfo &sampler)
+StateRecorderApplicationFeatureHash compute_application_feature_hash(const VkApplicationInfo *info,
+                                                                     const VkPhysicalDeviceFeatures2 *features)
+{
+	StateRecorderApplicationFeatureHash hash = {};
+	if (info)
+		hash.application_info_hash = compute_hash_application_info(*info);
+	if (features)
+		hash.physical_device_features_hash = compute_hash_physical_device_features(*features);
+	return hash;
+}
+
+static void hash_application_feature_info(Hasher &hasher, const StateRecorderApplicationFeatureHash &base_hash)
+{
+	// This makes it so two different applications won't conflict if they use the same pipelines.
+	hasher.u64(base_hash.application_info_hash);
+	hasher.u64(base_hash.physical_device_features_hash);
+}
+
+Hash compute_hash_sampler(const StateRecorderApplicationFeatureHash &base_hash, const VkSamplerCreateInfo &sampler)
 {
 	Hasher h;
-	recorder.base_hash(h);
+	hash_application_feature_info(h, base_hash);
 
 	h.u32(sampler.flags);
 	h.f32(sampler.maxAnisotropy);
@@ -337,7 +363,7 @@ Hash compute_hash_sampler(const StateRecorder &recorder, const VkSamplerCreateIn
 Hash compute_hash_descriptor_set_layout(const StateRecorder &recorder, const VkDescriptorSetLayoutCreateInfo &layout)
 {
 	Hasher h;
-	recorder.base_hash(h);
+	hash_application_feature_info(h, recorder.get_application_feature_hash());
 
 	h.u32(layout.bindingCount);
 	h.u32(layout.flags);
@@ -364,7 +390,7 @@ Hash compute_hash_descriptor_set_layout(const StateRecorder &recorder, const VkD
 Hash compute_hash_pipeline_layout(const StateRecorder &recorder, const VkPipelineLayoutCreateInfo &layout)
 {
 	Hasher h;
-	recorder.base_hash(h);
+	hash_application_feature_info(h, recorder.get_application_feature_hash());
 
 	h.u32(layout.setLayoutCount);
 	for (uint32_t i = 0; i < layout.setLayoutCount; i++)
@@ -389,10 +415,10 @@ Hash compute_hash_pipeline_layout(const StateRecorder &recorder, const VkPipelin
 	return h.get();
 }
 
-Hash compute_hash_shader_module(const StateRecorder &recorder, const VkShaderModuleCreateInfo &create_info)
+Hash compute_hash_shader_module(const StateRecorderApplicationFeatureHash &base_hash, const VkShaderModuleCreateInfo &create_info)
 {
 	Hasher h;
-	recorder.base_hash(h);
+	hash_application_feature_info(h, base_hash);
 
 	h.data(create_info.pCode, create_info.codeSize);
 	h.u32(create_info.flags);
@@ -415,7 +441,7 @@ static void hash_specialization_info(Hasher &h, const VkSpecializationInfo &spec
 Hash compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraphicsPipelineCreateInfo &create_info)
 {
 	Hasher h;
-	recorder.base_hash(h);
+	hash_application_feature_info(h, recorder.get_application_feature_hash());
 
 	h.u32(create_info.flags);
 
@@ -717,7 +743,7 @@ Hash compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 Hash compute_hash_compute_pipeline(const StateRecorder &recorder, const VkComputePipelineCreateInfo &create_info)
 {
 	Hasher h;
-	recorder.base_hash(h);
+	hash_application_feature_info(h, recorder.get_application_feature_hash());
 
 	h.u64(recorder.get_hash_for_pipeline_layout(create_info.layout));
 	h.u32(create_info.flags);
@@ -808,10 +834,10 @@ static void hash_subpass(Hasher &h, const VkSubpassDescription &subpass)
 		h.u32(0);
 }
 
-Hash compute_hash_render_pass(const StateRecorder &recorder, const VkRenderPassCreateInfo &create_info)
+Hash compute_hash_render_pass(const StateRecorderApplicationFeatureHash &base_hash, const VkRenderPassCreateInfo &create_info)
 {
 	Hasher h;
-	recorder.base_hash(h);
+	hash_application_feature_info(h, base_hash);
 
 	h.u32(create_info.attachmentCount);
 	h.u32(create_info.dependencyCount);
@@ -1845,11 +1871,12 @@ void StateReplayer::Impl::parse_graphics_pipelines(StateCreatorInterface &iface,
 
 StateReplayer::StateReplayer()
 {
-	impl.reset(new Impl);
+	impl = new Impl;
 }
 
 StateReplayer::~StateReplayer()
 {
+	delete impl;
 }
 
 ScratchAllocator &StateReplayer::get_allocator()
@@ -1936,12 +1963,30 @@ T *StateRecorder::Impl::copy(const T *src, size_t count, ScratchAllocator &alloc
 	return new_data;
 }
 
-ScratchAllocator::Block::Block(size_t size)
+struct ScratchAllocator::Impl
+{
+	struct Block
+	{
+		Block(size_t size);
+		size_t offset = 0;
+		std::vector<uint8_t> blob;
+	};
+	std::vector<Block> blocks;
+
+	void add_block(size_t minimum_size);
+};
+
+ScratchAllocator::ScratchAllocator()
+{
+	impl = new Impl;
+}
+
+ScratchAllocator::Impl::Block::Block(size_t size)
 {
 	blob.resize(size);
 }
 
-void ScratchAllocator::add_block(size_t minimum_size)
+void ScratchAllocator::Impl::add_block(size_t minimum_size)
 {
 	if (minimum_size < 64 * 1024)
 		minimum_size = 64 * 1024;
@@ -1958,10 +2003,10 @@ void *ScratchAllocator::allocate_raw_cleared(size_t size, size_t alignment)
 
 void *ScratchAllocator::allocate_raw(size_t size, size_t alignment)
 {
-	if (blocks.empty())
-		add_block(size + alignment);
+	if (impl->blocks.empty())
+		impl->add_block(size + alignment);
 
-	auto &block = blocks.back();
+	auto &block = impl->blocks.back();
 
 	size_t offset = (block.offset + alignment - 1) & ~(alignment - 1);
 	size_t required_size = offset + size;
@@ -1972,19 +2017,19 @@ void *ScratchAllocator::allocate_raw(size_t size, size_t alignment)
 		return ret;
 	}
 
-	add_block(size + alignment);
+	impl->add_block(size + alignment);
 	return allocate_raw(size, alignment);
 }
 
 void ScratchAllocator::reset()
 {
-	if (blocks.size() > 0)
+	if (impl->blocks.size() > 0)
 	{
 		// free all but first block
-		if (blocks.size() > 1)
-			blocks.erase(blocks.begin() + 1, blocks.end());
+		if (impl->blocks.size() > 1)
+			impl->blocks.erase(impl->blocks.begin() + 1, impl->blocks.end());
 		// reset offset on first block
-		blocks[0].offset = 0;
+		impl->blocks[0].offset = 0;
 	}
 }
 
@@ -2013,7 +2058,7 @@ void StateRecorder::record_application_info(const VkApplicationInfo &info)
 		FOSSILIZE_THROW("pNext in VkApplicationInfo not supported.");
 	std::lock_guard<std::mutex> lock(impl->record_lock);
 	impl->application_info = impl->copy_application_info(&info, impl->allocator);
-	impl->application_info_hash = Hashing::compute_hash_application_info(*impl->application_info);
+	impl->application_feature_hash.application_info_hash = Hashing::compute_hash_application_info(*impl->application_info);
 }
 
 void StateRecorder::record_physical_device_features(const VkPhysicalDeviceFeatures2 &device_features)
@@ -2021,7 +2066,12 @@ void StateRecorder::record_physical_device_features(const VkPhysicalDeviceFeatur
 	// We just ignore pNext, but it's okay to keep it. We will not need to serialize it for now.
 	std::lock_guard<std::mutex> lock(impl->record_lock);
 	impl->physical_device_features = impl->copy_physical_device_features(&device_features, impl->allocator);
-	impl->physical_device_features_hash = Hashing::compute_hash_physical_device_features(*impl->physical_device_features);
+	impl->application_feature_hash.physical_device_features_hash = Hashing::compute_hash_physical_device_features(*impl->physical_device_features);
+}
+
+const StateRecorderApplicationFeatureHash &StateRecorder::get_application_feature_hash() const
+{
+	return impl->application_feature_hash;
 }
 
 void StateRecorder::record_physical_device_features(const VkPhysicalDeviceFeatures &device_features)
@@ -2029,13 +2079,6 @@ void StateRecorder::record_physical_device_features(const VkPhysicalDeviceFeatur
 	VkPhysicalDeviceFeatures2 features = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
 	features.features = device_features;
 	record_physical_device_features(features);
-}
-
-void StateRecorder::base_hash(Hasher &hasher) const
-{
-	// This makes it so two different applications won't conflict if they use the same pipelines.
-	hasher.u64(impl->application_info_hash);
-	hasher.u64(impl->physical_device_features_hash);
 }
 
 void StateRecorder::record_sampler(VkSampler sampler, const VkSamplerCreateInfo &create_info)
@@ -2501,8 +2544,8 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder)
 	if (database_iface)
 	{
 		Hasher h;
-		recorder->base_hash(h);
-		recorder->serialize_application_info(blob);
+		Hashing::hash_application_feature_info(h, application_feature_hash);
+		serialize_application_info(blob);
 		database_iface->write_entry(RESOURCE_APPLICATION_INFO, h.get(), blob.data(), blob.size());
 	}
 
@@ -2528,14 +2571,14 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder)
 			case VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO:
 			{
 				auto *create_info = reinterpret_cast<VkSamplerCreateInfo *>(record_item.create_info);
-				auto hash = Hashing::compute_hash_sampler(*recorder, *create_info);
+				auto hash = Hashing::compute_hash_sampler(application_feature_hash, *create_info);
 				sampler_to_hash[api_object_cast<VkSampler>(record_item.handle)] = hash;
 
 				if (database_iface)
 				{
 					if (!database_iface->has_entry(RESOURCE_SAMPLER, hash))
 					{
-						recorder->serialize_sampler(hash, *create_info, blob);
+						serialize_sampler(hash, *create_info, blob);
 						database_iface->write_entry(RESOURCE_SAMPLER, hash, blob.data(), blob.size());
 					}
 				}
@@ -2554,14 +2597,14 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder)
 			case VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO:
 			{
 				auto *create_info = reinterpret_cast<VkRenderPassCreateInfo *>(record_item.create_info);
-				auto hash = Hashing::compute_hash_render_pass(*recorder, *create_info);
+				auto hash = Hashing::compute_hash_render_pass(application_feature_hash, *create_info);
 				render_pass_to_hash[api_object_cast<VkRenderPass>(record_item.handle)] = hash;
 
 				if (database_iface)
 				{
 					if (!database_iface->has_entry(RESOURCE_RENDER_PASS, hash))
 					{
-						recorder->serialize_render_pass(hash, *create_info, blob);
+						serialize_render_pass(hash, *create_info, blob);
 						database_iface->write_entry(RESOURCE_RENDER_PASS, hash, blob.data(), blob.size());
 					}
 				}
@@ -2580,14 +2623,14 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder)
 			case VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO:
 			{
 				auto *create_info = reinterpret_cast<VkShaderModuleCreateInfo *>(record_item.create_info);
-				auto hash = Hashing::compute_hash_shader_module(*recorder, *create_info);
+				auto hash = Hashing::compute_hash_shader_module(application_feature_hash, *create_info);
 				shader_module_to_hash[api_object_cast<VkShaderModule>(record_item.handle)] = hash;
 
 				if (database_iface)
 				{
 					if (!database_iface->has_entry(RESOURCE_SHADER_MODULE, hash))
 					{
-						recorder->serialize_shader_module(hash, *create_info, blob, allocator);
+						serialize_shader_module(hash, *create_info, blob, allocator);
 						database_iface->write_entry(RESOURCE_SHADER_MODULE, hash, blob.data(), blob.size());
 						allocator.reset();
 					}
@@ -2617,7 +2660,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder)
 				{
 					if (!database_iface->has_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, hash))
 					{
-						recorder->serialize_descriptor_set_layout(hash, *create_info_copy, blob);
+						serialize_descriptor_set_layout(hash, *create_info_copy, blob);
 						database_iface->write_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, hash, blob.data(), blob.size());
 					}
 
@@ -2646,7 +2689,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder)
 				{
 					if (!database_iface->has_entry(RESOURCE_PIPELINE_LAYOUT, hash))
 					{
-						recorder->serialize_pipeline_layout(hash, *create_info_copy, blob);
+						serialize_pipeline_layout(hash, *create_info_copy, blob);
 						database_iface->write_entry(RESOURCE_PIPELINE_LAYOUT, hash, blob.data(), blob.size());
 					}
 
@@ -2675,7 +2718,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder)
 				{
 					if (!database_iface->has_entry(RESOURCE_GRAPHICS_PIPELINE, hash))
 					{
-						recorder->serialize_graphics_pipeline(hash, *create_info_copy, blob);
+						serialize_graphics_pipeline(hash, *create_info_copy, blob);
 						database_iface->write_entry(RESOURCE_GRAPHICS_PIPELINE, hash, blob.data(), blob.size());
 					}
 
@@ -2704,7 +2747,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder)
 				{
 					if (!database_iface->has_entry(RESOURCE_COMPUTE_PIPELINE, hash))
 					{
-						recorder->serialize_compute_pipeline(hash, *create_info_copy, blob);
+						serialize_compute_pipeline(hash, *create_info_copy, blob);
 						database_iface->write_entry(RESOURCE_COMPUTE_PIPELINE, hash, blob.data(), blob.size());
 					}
 
@@ -3298,7 +3341,7 @@ static void serialize_physical_device_features_inline(Value &value, const VkPhys
 	value.AddMember("robustBufferAccess", features.features.robustBufferAccess, alloc);
 }
 
-void StateRecorder::serialize_application_info(vector<uint8_t> &blob) const
+void StateRecorder::Impl::serialize_application_info(vector<uint8_t> &blob) const
 {
 	Document doc;
 	doc.SetObject();
@@ -3306,10 +3349,10 @@ void StateRecorder::serialize_application_info(vector<uint8_t> &blob) const
 
 	Value app_info(kObjectType);
 	Value pdf_info(kObjectType);
-	if (impl->application_info)
-		serialize_application_info_inline(app_info, *impl->application_info, alloc);
-	if (impl->physical_device_features)
-		serialize_physical_device_features_inline(pdf_info, *impl->physical_device_features, alloc);
+	if (application_info)
+		serialize_application_info_inline(app_info, *application_info, alloc);
+	if (physical_device_features)
+		serialize_physical_device_features_inline(pdf_info, *physical_device_features, alloc);
 
 	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
 	doc.AddMember("applicationInfo", app_info, alloc);
@@ -3323,21 +3366,21 @@ void StateRecorder::serialize_application_info(vector<uint8_t> &blob) const
 	memcpy(blob.data(), buffer.GetString(), buffer.GetSize());
 }
 
-void StateRecorder::serialize_sampler(Hash hash, const VkSamplerCreateInfo &create_info, vector<uint8_t> &blob) const
+void StateRecorder::Impl::serialize_sampler(Hash hash, const VkSamplerCreateInfo &create_info, vector<uint8_t> &blob) const
 {
 	Document doc;
 	doc.SetObject();
 	auto &alloc = doc.GetAllocator();
 
-	Value samplers(kObjectType);
-	samplers.AddMember(uint64_string(hash, alloc), json_value(create_info, alloc), alloc);
+	Value serialized_samplers(kObjectType);
+	serialized_samplers.AddMember(uint64_string(hash, alloc), json_value(create_info, alloc), alloc);
 
 	Hasher h;
-	base_hash(h);
+	Hashing::hash_application_feature_info(h, application_feature_hash);
 
 	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
 	doc.AddMember("application", uint64_string(h.get(), alloc), alloc);
-	doc.AddMember("samplers", samplers, alloc);
+	doc.AddMember("samplers", serialized_samplers, alloc);
 
 	StringBuffer buffer;
 	CustomWriter writer(buffer);
@@ -3347,8 +3390,8 @@ void StateRecorder::serialize_sampler(Hash hash, const VkSamplerCreateInfo &crea
 	memcpy(blob.data(), buffer.GetString(), buffer.GetSize());
 }
 
-void StateRecorder::serialize_descriptor_set_layout(Hash hash, const VkDescriptorSetLayoutCreateInfo &create_info,
-                                                    vector<uint8_t> &blob) const
+void StateRecorder::Impl::serialize_descriptor_set_layout(Hash hash, const VkDescriptorSetLayoutCreateInfo &create_info,
+                                                          vector<uint8_t> &blob) const
 {
 	Document doc;
 	doc.SetObject();
@@ -3358,7 +3401,7 @@ void StateRecorder::serialize_descriptor_set_layout(Hash hash, const VkDescripto
 	layouts.AddMember(uint64_string(hash, alloc), json_value(create_info, alloc), alloc);
 
 	Hasher h;
-	base_hash(h);
+	Hashing::hash_application_feature_info(h, application_feature_hash);
 
 	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
 	doc.AddMember("application", uint64_string(h.get(), alloc), alloc);
@@ -3372,8 +3415,8 @@ void StateRecorder::serialize_descriptor_set_layout(Hash hash, const VkDescripto
 	memcpy(blob.data(), buffer.GetString(), buffer.GetSize());
 }
 
-void StateRecorder::serialize_pipeline_layout(Hash hash, const VkPipelineLayoutCreateInfo &create_info,
-                                              vector<uint8_t> &blob) const
+void StateRecorder::Impl::serialize_pipeline_layout(Hash hash, const VkPipelineLayoutCreateInfo &create_info,
+                                                    vector<uint8_t> &blob) const
 {
 	Document doc;
 	doc.SetObject();
@@ -3383,7 +3426,7 @@ void StateRecorder::serialize_pipeline_layout(Hash hash, const VkPipelineLayoutC
 	layouts.AddMember(uint64_string(hash, alloc), json_value(create_info, alloc), alloc);
 
 	Hasher h;
-	base_hash(h);
+	Hashing::hash_application_feature_info(h, application_feature_hash);
 
 	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
 	doc.AddMember("application", uint64_string(h.get(), alloc), alloc);
@@ -3397,21 +3440,21 @@ void StateRecorder::serialize_pipeline_layout(Hash hash, const VkPipelineLayoutC
 	memcpy(blob.data(), buffer.GetString(), buffer.GetSize());
 }
 
-void StateRecorder::serialize_render_pass(Hash hash, const VkRenderPassCreateInfo &create_info, vector<uint8_t> &blob) const
+void StateRecorder::Impl::serialize_render_pass(Hash hash, const VkRenderPassCreateInfo &create_info, vector<uint8_t> &blob) const
 {
 	Document doc;
 	doc.SetObject();
 	auto &alloc = doc.GetAllocator();
 
-	Value render_passes(kObjectType);
-	render_passes.AddMember(uint64_string(hash, alloc), json_value(create_info, alloc), alloc);
+	Value serialized_render_passes(kObjectType);
+	serialized_render_passes.AddMember(uint64_string(hash, alloc), json_value(create_info, alloc), alloc);
 
 	Hasher h;
-	base_hash(h);
+	Hashing::hash_application_feature_info(h, application_feature_hash);
 
 	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
 	doc.AddMember("application", uint64_string(h.get(), alloc), alloc);
-	doc.AddMember("renderPasses", render_passes, alloc);
+	doc.AddMember("renderPasses", serialized_render_passes, alloc);
 
 	StringBuffer buffer;
 	CustomWriter writer(buffer);
@@ -3421,21 +3464,21 @@ void StateRecorder::serialize_render_pass(Hash hash, const VkRenderPassCreateInf
 	memcpy(blob.data(), buffer.GetString(), buffer.GetSize());
 }
 
-void StateRecorder::serialize_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo &create_info, vector<uint8_t> &blob) const
+void StateRecorder::Impl::serialize_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo &create_info, vector<uint8_t> &blob) const
 {
 	Document doc;
 	doc.SetObject();
 	auto &alloc = doc.GetAllocator();
 
-	Value graphics_pipelines(kObjectType);
-	graphics_pipelines.AddMember(uint64_string(hash, alloc), json_value(create_info, alloc), alloc);
+	Value serialized_graphics_pipelines(kObjectType);
+	serialized_graphics_pipelines.AddMember(uint64_string(hash, alloc), json_value(create_info, alloc), alloc);
 
 	Hasher h;
-	base_hash(h);
+	Hashing::hash_application_feature_info(h, application_feature_hash);
 
 	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
 	doc.AddMember("application", uint64_string(h.get(), alloc), alloc);
-	doc.AddMember("graphicsPipelines", graphics_pipelines, alloc);
+	doc.AddMember("graphicsPipelines", serialized_graphics_pipelines, alloc);
 
 	StringBuffer buffer;
 	CustomWriter writer(buffer);
@@ -3445,21 +3488,21 @@ void StateRecorder::serialize_graphics_pipeline(Hash hash, const VkGraphicsPipel
 	memcpy(blob.data(), buffer.GetString(), buffer.GetSize());
 }
 
-void StateRecorder::serialize_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo &create_info, vector<uint8_t> &blob) const
+void StateRecorder::Impl::serialize_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo &create_info, vector<uint8_t> &blob) const
 {
 	Document doc;
 	doc.SetObject();
 	auto &alloc = doc.GetAllocator();
 
-	Value compute_pipelines(kObjectType);
-	compute_pipelines.AddMember(uint64_string(hash, alloc), json_value(create_info, alloc), alloc);
+	Value serialized_compute_pipelines(kObjectType);
+	serialized_compute_pipelines.AddMember(uint64_string(hash, alloc), json_value(create_info, alloc), alloc);
 
 	Hasher h;
-	base_hash(h);
+	Hashing::hash_application_feature_info(h, application_feature_hash);
 
 	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
 	doc.AddMember("application", uint64_string(h.get(), alloc), alloc);
-	doc.AddMember("computePipelines", compute_pipelines, alloc);
+	doc.AddMember("computePipelines", serialized_compute_pipelines, alloc);
 
 	StringBuffer buffer;
 	CustomWriter writer(buffer);
@@ -3469,17 +3512,17 @@ void StateRecorder::serialize_compute_pipeline(Hash hash, const VkComputePipelin
 	memcpy(blob.data(), buffer.GetString(), buffer.GetSize());
 }
 
-void StateRecorder::serialize_shader_module(Hash hash, const VkShaderModuleCreateInfo &create_info,
-                                            vector<uint8_t> &blob, ScratchAllocator &allocator) const
+void StateRecorder::Impl::serialize_shader_module(Hash hash, const VkShaderModuleCreateInfo &create_info,
+                                                  vector<uint8_t> &blob, ScratchAllocator &blob_allocator) const
 {
 	Document doc;
 	doc.SetObject();
 	auto &alloc = doc.GetAllocator();
 
-	Value shader_modules(kObjectType);
+	Value serialized_shader_modules(kObjectType);
 
 	size_t size = compute_size_varint(create_info.pCode, create_info.codeSize / 4);
-	uint8_t *encoded = static_cast<uint8_t *>(allocator.allocate_raw(size, 64));
+	uint8_t *encoded = static_cast<uint8_t *>(blob_allocator.allocate_raw(size, 64));
 	encode_varint(encoded, create_info.pCode, create_info.codeSize / 4);
 
 	Value varint(kObjectType);
@@ -3489,14 +3532,14 @@ void StateRecorder::serialize_shader_module(Hash hash, const VkShaderModuleCreat
 	varint.AddMember("flags", 0, alloc);
 
 	// Varint binary form, starts at offset 0 after the delim '\0' character.
-	shader_modules.AddMember(uint64_string(hash, alloc), varint, alloc);
+	serialized_shader_modules.AddMember(uint64_string(hash, alloc), varint, alloc);
 
 	Hasher h;
-	base_hash(h);
+	Hashing::hash_application_feature_info(h, application_feature_hash);
 
 	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
 	doc.AddMember("application", uint64_string(h.get(), alloc), alloc);
-	doc.AddMember("shaderModules", shader_modules, alloc);
+	doc.AddMember("shaderModules", serialized_shader_modules, alloc);
 
 	StringBuffer buffer;
 	CustomWriter writer(buffer);
@@ -3508,8 +3551,11 @@ void StateRecorder::serialize_shader_module(Hash hash, const VkShaderModuleCreat
 	memcpy(blob.data() + buffer.GetSize() + 1, encoded, size);
 }
 
-vector<uint8_t> StateRecorder::serialize() const
+bool StateRecorder::serialize(uint8_t **serialized_data, size_t *serialized_size)
 {
+	if (impl->database_iface)
+		return false;
+
 	impl->sync_thread();
 
 	Document doc;
@@ -3588,24 +3634,36 @@ vector<uint8_t> StateRecorder::serialize() const
 	CustomWriter writer(buffer);
 	doc.Accept(writer);
 
-	vector<uint8_t> serialize_buffer(buffer.GetSize());
-	memcpy(serialize_buffer.data(), buffer.GetString(), buffer.GetSize());
-	return serialize_buffer;
+	*serialized_size = buffer.GetSize();
+	*serialized_data = new uint8_t[buffer.GetSize()];
+	if (*serialized_data)
+	{
+		memcpy(*serialized_data, buffer.GetString(), buffer.GetSize());
+		return true;
+	}
+	else
+		return false;
 }
 
-void StateRecorder::init(DatabaseInterface *iface)
+void StateRecorder::free_serialized(uint8_t *serialized)
 {
-	impl.reset(new Impl);
+	delete[] serialized;
+}
+
+void StateRecorder::init_recording_thread(DatabaseInterface *iface)
+{
 	impl->database_iface = iface;
-	impl->worker_thread = std::thread(&StateRecorder::Impl::record_task, impl.get(), this);
+	impl->worker_thread = std::thread(&StateRecorder::Impl::record_task, impl, this);
 }
 
 StateRecorder::StateRecorder()
 {
+	impl = new Impl;
 }
 
 StateRecorder::~StateRecorder()
 {
+	delete impl;
 }
 
 }

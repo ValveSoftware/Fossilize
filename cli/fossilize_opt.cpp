@@ -150,11 +150,17 @@ int main(int argc, char *argv[])
 		}
 
 		state_replayer.parse(replayer, nullptr, state_json.data(), state_json.size());
-		auto serialized = replayer.recorder.serialize();
-		if (!write_buffer_to_file(json_output_path.c_str(), serialized.data(), serialized.size()))
+
+		uint8_t *serialized;
+		size_t serialized_size;
+		if (replayer.recorder.serialize(&serialized, &serialized_size))
 		{
-			LOGE("Failed to write buffer to file: %s.\n", json_output_path.c_str());
-			return EXIT_FAILURE;
+			if (!write_buffer_to_file(json_output_path.c_str(), serialized, serialized_size))
+			{
+				LOGE("Failed to write buffer to file: %s.\n", json_output_path.c_str());
+				return EXIT_FAILURE;
+			}
+			StateRecorder::free_serialized(serialized);
 		}
 	}
 	catch (const exception &e)

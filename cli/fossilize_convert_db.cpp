@@ -21,6 +21,8 @@
  */
 
 #include "fossilize_db.hpp"
+#include <memory>
+#include <vector>
 #include "layer/utils.hpp"
 
 using namespace Fossilize;

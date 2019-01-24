@@ -24,6 +24,8 @@
 #include "fossilize_db.hpp"
 #include <string.h>
 #include <stdexcept>
+#include <memory>
+#include <vector>
 #include "layer/utils.hpp"
 
 using namespace Fossilize;
@@ -39,15 +41,16 @@ static inline T fake_handle(uint64_t value)
 struct ReplayInterface : StateCreatorInterface
 {
 	StateRecorder recorder;
+	StateRecorderApplicationFeatureHash feature_hash;
 
 	ReplayInterface()
 	{
-		recorder.init(nullptr);
+		feature_hash = Hashing::compute_application_feature_hash(nullptr, nullptr);
 	}
 
 	bool enqueue_create_sampler(Hash hash, const VkSamplerCreateInfo *create_info, VkSampler *sampler) override
 	{
-		Hash recorded_hash = Hashing::compute_hash_sampler(recorder, *create_info);
+		Hash recorded_hash = Hashing::compute_hash_sampler(feature_hash, *create_info);
 		if (recorded_hash != hash)
 			return false;
 
@@ -80,7 +83,7 @@ struct ReplayInterface : StateCreatorInterface
 
 	bool enqueue_create_shader_module(Hash hash, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module) override
 	{
-		Hash recorded_hash = Hashing::compute_hash_shader_module(recorder, *create_info);
+		Hash recorded_hash = Hashing::compute_hash_shader_module(feature_hash, *create_info);
 		if (recorded_hash != hash)
 			return false;
 
@@ -91,7 +94,7 @@ struct ReplayInterface : StateCreatorInterface
 
 	bool enqueue_create_render_pass(Hash hash, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass) override
 	{
-		Hash recorded_hash = Hashing::compute_hash_render_pass(recorder, *create_info);
+		Hash recorded_hash = Hashing::compute_hash_render_pass(feature_hash, *create_info);
 		if (recorded_hash != hash)
 			return false;
 
@@ -580,9 +583,6 @@ int main()
 		std::vector<uint8_t> res;
 		{
 			StateRecorder recorder;
-
-			recorder.init(nullptr);
-
 			record_samplers(recorder);
 			record_set_layouts(recorder);
 			record_pipeline_layouts(recorder);
@@ -591,7 +591,12 @@ int main()
 			record_compute_pipelines(recorder);
 			record_graphics_pipelines(recorder);
 
-			res = recorder.serialize();
+			uint8_t *serialized;
+			size_t serialized_size;
+			if (!recorder.serialize(&serialized, &serialized_size))
+				return EXIT_FAILURE;
+			res = std::vector<uint8_t>(serialized, serialized + serialized_size);
+			StateRecorder::free_serialized(serialized);
 		}
 
 		StateReplayer replayer;
