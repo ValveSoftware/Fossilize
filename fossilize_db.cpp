@@ -395,8 +395,8 @@ DatabaseInterface *create_zip_archive_database(const char *path, DatabaseMode mo
 }
 
 static const uint8_t stream_reference_magic_and_version[16] = {
-	0x81, 'F', 'O', 'Z',
-	'I', 'L', 'L', 'I',
+	0x81, 'F', 'O', 'S',
+	'S', 'I', 'L', 'I',
 	'Z', 'E', 'D', 'B',
 	0, 0, 0, 3, // 4 bytes to use for versioning.
 };
