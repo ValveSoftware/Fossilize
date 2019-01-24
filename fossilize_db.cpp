@@ -303,10 +303,13 @@ struct ZipDatabase : DatabaseInterface
 		if (itr == end(seen_blobs[tag]))
 			return false;
 
+		if (!blob_size)
+			return false;
+
 		if (blob)
 		{
 			if (*blob_size != itr->second.size)
-				*blob_size = itr->second.size;
+				return false;
 		}
 		else
 			*blob_size = itr->second.size;
@@ -554,6 +557,9 @@ struct StreamArchive : DatabaseInterface
 
 		auto itr = seen_blobs[tag].find(hash);
 		if (itr == end(seen_blobs[tag]))
+			return false;
+
+		if (!blob_size)
 			return false;
 
 		if (blob)
