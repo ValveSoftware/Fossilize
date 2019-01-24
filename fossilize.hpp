@@ -63,6 +63,7 @@ class ScratchAllocator
 {
 public:
 	ScratchAllocator();
+	~ScratchAllocator();
 
 	// alignof(T) doesn't work on MSVC 2013.
 	template <typename T>
@@ -174,12 +175,13 @@ public:
 	// It will affect the hash of all create info structures.
 	// These are never recorded in a thread, so it's safe to query the application/feature hash right after calling these methods.
 	void record_application_info(const VkApplicationInfo &info);
-	void record_physical_device_features(const VkPhysicalDeviceFeatures2 &device_features);
-	void record_physical_device_features(const VkPhysicalDeviceFeatures &device_features);
-	const StateRecorderApplicationFeatureHash &get_application_feature_hash() const;
 
 	// TODO: create_device which can capture which features/exts are used to create the device.
 	// This can be relevant when using more exotic features.
+	void record_physical_device_features(const VkPhysicalDeviceFeatures2 &device_features);
+	void record_physical_device_features(const VkPhysicalDeviceFeatures &device_features);
+
+	const StateRecorderApplicationFeatureHash &get_application_feature_hash() const;
 
 	void record_descriptor_set_layout(VkDescriptorSetLayout set_layout, const VkDescriptorSetLayoutCreateInfo &layout_info);
 	void record_pipeline_layout(VkPipelineLayout pipeline_layout, const VkPipelineLayoutCreateInfo &layout_info);
@@ -189,6 +191,7 @@ public:
 	void record_render_pass(VkRenderPass render_pass, const VkRenderPassCreateInfo &create_info);
 	void record_sampler(VkSampler sampler, const VkSamplerCreateInfo &create_info);
 
+	// Used by hashing functions in Hashing namespace. Should be considered an implementation detail.
 	Hash get_hash_for_descriptor_set_layout(VkDescriptorSetLayout layout) const;
 	Hash get_hash_for_pipeline_layout(VkPipelineLayout layout) const;
 	Hash get_hash_for_shader_module(VkShaderModule module) const;
@@ -198,8 +201,15 @@ public:
 	Hash get_hash_for_sampler(VkSampler sampler) const;
 
 	// If database is non-null, serialize cannot not be called later, as the implementation will not retain
-	// memory for the create info structs. The database interface will be fed with all information on the fly.
-	// This call can be omitted, in which case all recording calls will be called inline.
+	// memory for the create info structs, but rather rely on the database interface to make objects persist.
+	// The database interface will be fed with all information on the fly.
+	//
+	// This call can be omitted, in which case all recording calls will be called inline instead.
+	// This is mostly useful for testing purposes.
+	//
+	// NOTE: If iface is non-null,
+	// prepare() will be called asynchronously on the DatabaseInterface to hide the cost of up-front file I/O.
+	// Do not attempt to call prepare() on the calling thread!
 	void init_recording_thread(DatabaseInterface *iface);
 
 	// Serializes and allocates data for it. This can only be used if a database interface was not used.
@@ -231,6 +241,7 @@ Hash compute_hash_render_pass(const StateRecorderApplicationFeatureHash &base_ha
 
 // If you are recording in threaded mode, these must only be called from the recording thread,
 // as the dependent objects might not have been recorded yet, and thus the mapping of dependent objects is unknown.
+// If you need to use these for whatever reason, you cannot use StateRecorder in the threaded mode.
 Hash compute_hash_descriptor_set_layout(const StateRecorder &recorder, const VkDescriptorSetLayoutCreateInfo &layout);
 Hash compute_hash_pipeline_layout(const StateRecorder &recorder, const VkPipelineLayoutCreateInfo &layout);
 Hash compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraphicsPipelineCreateInfo &create_info);

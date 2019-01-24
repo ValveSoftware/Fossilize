@@ -37,13 +37,13 @@
 
 #define RAPIDJSON_HAS_STDSTRING 1
 #include "rapidjson/document.h"
+#include "rapidjson/prettywriter.h"
+#include "rapidjson/writer.h"
 using namespace rapidjson;
 
 #ifdef PRETTY_WRITER
-#include "rapidjson/prettywriter.h"
 using CustomWriter = PrettyWriter<StringBuffer>;
 #else
-#include "rapidjson/writer.h"
 using CustomWriter = Writer<StringBuffer>;
 #endif
 
@@ -274,7 +274,7 @@ struct StateRecorder::Impl
 	std::queue<WorkItem> record_queue;
 	std::thread worker_thread;
 
-	void record_task(StateRecorder *recorder);
+	void record_task(StateRecorder *recorder, bool looping);
 
 	template <typename T>
 	T *copy(const T *src, size_t count, ScratchAllocator &alloc);
@@ -1981,6 +1981,11 @@ ScratchAllocator::ScratchAllocator()
 	impl = new Impl;
 }
 
+ScratchAllocator::~ScratchAllocator()
+{
+	delete impl;
+}
+
 ScratchAllocator::Impl::Block::Block(size_t size)
 {
 	blob.resize(size);
@@ -2038,20 +2043,6 @@ ScratchAllocator &StateRecorder::get_allocator()
 	return impl->allocator;
 }
 
-void StateRecorder::record_descriptor_set_layout(VkDescriptorSetLayout set_layout, const VkDescriptorSetLayoutCreateInfo &create_info)
-{
-	std::lock_guard<std::mutex> lock(impl->record_lock);
-	impl->record_queue.push({ api_object_cast<uint64_t>(set_layout), reinterpret_cast<void *>(impl->copy_descriptor_set_layout(&create_info, impl->temp_allocator)) });
-	impl->record_cv.notify_one();
-}
-
-void StateRecorder::record_pipeline_layout(VkPipelineLayout pipeline_layout, const VkPipelineLayoutCreateInfo &create_info)
-{
-	std::lock_guard<std::mutex> lock(impl->record_lock);
-	impl->record_queue.push({ api_object_cast<uint64_t>(pipeline_layout), reinterpret_cast<void *>(impl->copy_pipeline_layout(&create_info, impl->temp_allocator)) });
-	impl->record_cv.notify_one();
-}
-
 void StateRecorder::record_application_info(const VkApplicationInfo &info)
 {
 	if (info.pNext)
@@ -2083,47 +2074,115 @@ void StateRecorder::record_physical_device_features(const VkPhysicalDeviceFeatur
 
 void StateRecorder::record_sampler(VkSampler sampler, const VkSamplerCreateInfo &create_info)
 {
-	if (create_info.pNext)
-		FOSSILIZE_THROW("pNext in VkSamplerCreateInfo not supported.");
-	std::lock_guard<std::mutex> lock(impl->record_lock);
-	impl->record_queue.push({ api_object_cast<uint64_t>(sampler), reinterpret_cast<void *>(impl->copy_sampler(&create_info, impl->temp_allocator)) });
-	impl->record_cv.notify_one();
+	{
+		if (create_info.pNext)
+			FOSSILIZE_THROW("pNext in VkSamplerCreateInfo not supported.");
+		std::lock_guard<std::mutex> lock(impl->record_lock);
+		impl->record_queue.push({api_object_cast<uint64_t>(sampler),
+		                         reinterpret_cast<void *>(impl->copy_sampler(&create_info, impl->temp_allocator))});
+		impl->record_cv.notify_one();
+	}
+
+	// Thread is not running, drain the queue ourselves.
+	if (!impl->worker_thread.joinable())
+		impl->record_task(this, false);
+}
+
+void StateRecorder::record_descriptor_set_layout(VkDescriptorSetLayout set_layout, const VkDescriptorSetLayoutCreateInfo &create_info)
+{
+	{
+		std::lock_guard<std::mutex> lock(impl->record_lock);
+		impl->record_queue.push({api_object_cast<uint64_t>(set_layout),
+		                         reinterpret_cast<void *>(impl->copy_descriptor_set_layout(&create_info,
+		                                                                                   impl->temp_allocator))});
+		impl->record_cv.notify_one();
+	}
+
+	// Thread is not running, drain the queue ourselves.
+	if (!impl->worker_thread.joinable())
+		impl->record_task(this, false);
+}
+
+void StateRecorder::record_pipeline_layout(VkPipelineLayout pipeline_layout, const VkPipelineLayoutCreateInfo &create_info)
+{
+	{
+		std::lock_guard<std::mutex> lock(impl->record_lock);
+		impl->record_queue.push({api_object_cast<uint64_t>(pipeline_layout),
+		                         reinterpret_cast<void *>(impl->copy_pipeline_layout(&create_info,
+		                                                                             impl->temp_allocator))});
+		impl->record_cv.notify_one();
+	}
+
+	// Thread is not running, drain the queue ourselves.
+	if (!impl->worker_thread.joinable())
+		impl->record_task(this, false);
 }
 
 void StateRecorder::record_graphics_pipeline(VkPipeline pipeline, const VkGraphicsPipelineCreateInfo &create_info)
 {
-	if (create_info.pNext)
-		FOSSILIZE_THROW("pNext in VkGraphicsPipelineCreateInfo not supported.");
-	std::lock_guard<std::mutex> lock(impl->record_lock);
-	impl->record_queue.push({ api_object_cast<uint64_t>(pipeline), reinterpret_cast<void *>(impl->copy_graphics_pipeline(&create_info, impl->temp_allocator)) });
-	impl->record_cv.notify_one();
+	{
+		if (create_info.pNext)
+			FOSSILIZE_THROW("pNext in VkGraphicsPipelineCreateInfo not supported.");
+		std::lock_guard<std::mutex> lock(impl->record_lock);
+		impl->record_queue.push({api_object_cast<uint64_t>(pipeline),
+		                         reinterpret_cast<void *>(impl->copy_graphics_pipeline(&create_info,
+		                                                                               impl->temp_allocator))});
+		impl->record_cv.notify_one();
+	}
+
+	// Thread is not running, drain the queue ourselves.
+	if (!impl->worker_thread.joinable())
+		impl->record_task(this, false);
 }
 
 void StateRecorder::record_compute_pipeline(VkPipeline pipeline, const VkComputePipelineCreateInfo &create_info)
 {
-	if (create_info.pNext)
-		FOSSILIZE_THROW("pNext in VkComputePipelineCreateInfo not supported.");
-	std::lock_guard<std::mutex> lock(impl->record_lock);
-	impl->record_queue.push({ api_object_cast<uint64_t>(pipeline), reinterpret_cast<void *>(impl->copy_compute_pipeline(&create_info, impl->temp_allocator)) });
-	impl->record_cv.notify_one();
+	{
+		if (create_info.pNext)
+			FOSSILIZE_THROW("pNext in VkComputePipelineCreateInfo not supported.");
+		std::lock_guard<std::mutex> lock(impl->record_lock);
+		impl->record_queue.push({api_object_cast<uint64_t>(pipeline),
+		                         reinterpret_cast<void *>(impl->copy_compute_pipeline(&create_info,
+		                                                                              impl->temp_allocator))});
+		impl->record_cv.notify_one();
+	}
+
+	// Thread is not running, drain the queue ourselves.
+	if (!impl->worker_thread.joinable())
+		impl->record_task(this, false);
 }
 
 void StateRecorder::record_render_pass(VkRenderPass render_pass, const VkRenderPassCreateInfo &create_info)
 {
-	if (create_info.pNext)
-		FOSSILIZE_THROW("pNext in VkRenderPassCreateInfo not supported.");
-	std::lock_guard<std::mutex> lock(impl->record_lock);
-	impl->record_queue.push({ api_object_cast<uint64_t>(render_pass), reinterpret_cast<void *>(impl->copy_render_pass(&create_info, impl->temp_allocator)) });
-	impl->record_cv.notify_one();
+	{
+		if (create_info.pNext)
+			FOSSILIZE_THROW("pNext in VkRenderPassCreateInfo not supported.");
+		std::lock_guard<std::mutex> lock(impl->record_lock);
+		impl->record_queue.push({api_object_cast<uint64_t>(render_pass),
+		                         reinterpret_cast<void *>(impl->copy_render_pass(&create_info, impl->temp_allocator))});
+		impl->record_cv.notify_one();
+	}
+
+	// Thread is not running, drain the queue ourselves.
+	if (!impl->worker_thread.joinable())
+		impl->record_task(this, false);
 }
 
 void StateRecorder::record_shader_module(VkShaderModule module, const VkShaderModuleCreateInfo &create_info)
 {
-	if (create_info.pNext)
-		FOSSILIZE_THROW("pNext in VkShaderModuleCreateInfo not supported.");
-	std::lock_guard<std::mutex> lock(impl->record_lock);
-	impl->record_queue.push({ api_object_cast<uint64_t>(module), reinterpret_cast<void *>(impl->copy_shader_module(&create_info, impl->temp_allocator)) });
-	impl->record_cv.notify_one();
+	{
+		if (create_info.pNext)
+			FOSSILIZE_THROW("pNext in VkShaderModuleCreateInfo not supported.");
+		std::lock_guard<std::mutex> lock(impl->record_lock);
+		impl->record_queue.push({api_object_cast<uint64_t>(module),
+		                         reinterpret_cast<void *>(impl->copy_shader_module(&create_info,
+		                                                                           impl->temp_allocator))});
+		impl->record_cv.notify_one();
+	}
+
+	// Thread is not running, drain the queue ourselves.
+	if (!impl->worker_thread.joinable())
+		impl->record_task(this, false);
 }
 
 void StateRecorder::Impl::record_end()
@@ -2525,11 +2584,12 @@ void StateRecorder::Impl::remap_render_pass_ci(VkRenderPassCreateInfo *)
 	// nothing to do
 }
 
-void StateRecorder::Impl::record_task(StateRecorder *recorder)
+void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 {
 	// Start by preparing in the thread since we need to parse an archive potentially, and that might block a little bit.
 	if (database_iface)
 	{
+		assert(looping);
 		if (!database_iface->prepare())
 		{
 			LOGE("Failed to prepare database, will not dump data to database.\n");
@@ -2543,6 +2603,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder)
 
 	if (database_iface)
 	{
+		assert(looping);
 		Hasher h;
 		Hashing::hash_application_feature_info(h, application_feature_hash);
 		serialize_application_info(blob);
@@ -2556,13 +2617,19 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder)
 			std::unique_lock<std::mutex> lock(record_lock);
 			if (record_queue.empty())
 				temp_allocator.reset();
+
+			// Having this check here allows us to call record_task from a single threaded variant.
+			// This is mostly used for testing purposes.
+			if (!looping && record_queue.empty())
+				break;
+
 			record_cv.wait(lock, [&] { return !record_queue.empty(); });
 			record_item = record_queue.front();
 			record_queue.pop();
 		}
 
 		if (!record_item.create_info)
-			return;
+			break;
 
 		try
 		{
@@ -2771,6 +2838,11 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder)
 			LOGE("%s\n", e.what());
 		}
 	}
+
+	// We no longer need a reference to this.
+	// This should allow us to call init_recording_thread again if we want,
+	// or emit some final single threaded recording tasks.
+	database_iface = nullptr;
 }
 
 static char base64(uint32_t v)
@@ -3631,7 +3703,7 @@ bool StateRecorder::serialize(uint8_t **serialized_data, size_t *serialized_size
 	doc.AddMember("graphicsPipelines", graphics_pipelines, alloc);
 
 	StringBuffer buffer;
-	CustomWriter writer(buffer);
+	PrettyWriter<StringBuffer> writer(buffer);
 	doc.Accept(writer);
 
 	*serialized_size = buffer.GetSize();
@@ -3653,7 +3725,7 @@ void StateRecorder::free_serialized(uint8_t *serialized)
 void StateRecorder::init_recording_thread(DatabaseInterface *iface)
 {
 	impl->database_iface = iface;
-	impl->worker_thread = std::thread(&StateRecorder::Impl::record_task, impl, this);
+	impl->worker_thread = std::thread(&StateRecorder::Impl::record_task, impl, this, true);
 }
 
 StateRecorder::StateRecorder()

@@ -41,11 +41,19 @@ static inline T fake_handle(uint64_t value)
 struct ReplayInterface : StateCreatorInterface
 {
 	StateRecorder recorder;
-	StateRecorderApplicationFeatureHash feature_hash;
+	StateRecorderApplicationFeatureHash feature_hash = {};
 
 	ReplayInterface()
 	{
-		feature_hash = Hashing::compute_application_feature_hash(nullptr, nullptr);
+	}
+
+	void set_application_info(const VkApplicationInfo *info, const VkPhysicalDeviceFeatures2 *features) override
+	{
+		feature_hash = Hashing::compute_application_feature_hash(info, features);
+		if (info)
+			recorder.record_application_info(*info);
+		if (features)
+			recorder.record_physical_device_features(*features);
 	}
 
 	bool enqueue_create_sampler(Hash hash, const VkSamplerCreateInfo *create_info, VkSampler *sampler) override
@@ -583,6 +591,18 @@ int main()
 		std::vector<uint8_t> res;
 		{
 			StateRecorder recorder;
+
+			VkApplicationInfo app_info = { VK_STRUCTURE_TYPE_APPLICATION_INFO };
+			app_info.pEngineName = "test";
+			app_info.pApplicationName = "testy";
+			app_info.engineVersion = 1234;
+			app_info.applicationVersion = 123515;
+			app_info.apiVersion = VK_API_VERSION_1_1;
+			recorder.record_application_info(app_info);
+
+			VkPhysicalDeviceFeatures2 features = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+			recorder.record_physical_device_features(features);
+
 			record_samplers(recorder);
 			record_set_layouts(recorder);
 			record_pipeline_layouts(recorder);
