@@ -591,12 +591,12 @@ struct ThreadedReplayer : StateCreatorInterface
 	std::condition_variable work_done_condition;
 
 	// Feed statistics from the worker threads.
-	std::atomic< std::uint64_t > graphics_pipeline_ns;
-	std::atomic< std::uint64_t > compute_pipeline_ns;
-	std::atomic< std::uint64_t > shader_module_ns;
-	std::atomic< std::uint32_t > graphics_pipeline_count;
-	std::atomic< std::uint32_t > compute_pipeline_count;
-	std::atomic< std::uint32_t > shader_module_count;
+	std::atomic<std::uint64_t> graphics_pipeline_ns;
+	std::atomic<std::uint64_t> compute_pipeline_ns;
+	std::atomic<std::uint64_t> shader_module_ns;
+	std::atomic<std::uint32_t> graphics_pipeline_count;
+	std::atomic<std::uint32_t> compute_pipeline_count;
+	std::atomic<std::uint32_t> shader_module_count;
 
 	bool shutting_down = false;
 
