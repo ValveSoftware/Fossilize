@@ -24,6 +24,8 @@
 #include "fossilize_db.hpp"
 #include <string.h>
 #include <stdexcept>
+#include <memory>
+#include <vector>
 #include "layer/utils.hpp"
 
 using namespace Fossilize;
@@ -39,15 +41,24 @@ static inline T fake_handle(uint64_t value)
 struct ReplayInterface : StateCreatorInterface
 {
 	StateRecorder recorder;
+	StateRecorderApplicationFeatureHash feature_hash = {};
 
 	ReplayInterface()
 	{
-		recorder.init(nullptr);
+	}
+
+	void set_application_info(const VkApplicationInfo *info, const VkPhysicalDeviceFeatures2 *features) override
+	{
+		feature_hash = Hashing::compute_application_feature_hash(info, features);
+		if (info)
+			recorder.record_application_info(*info);
+		if (features)
+			recorder.record_physical_device_features(*features);
 	}
 
 	bool enqueue_create_sampler(Hash hash, const VkSamplerCreateInfo *create_info, VkSampler *sampler) override
 	{
-		Hash recorded_hash = Hashing::compute_hash_sampler(recorder, *create_info);
+		Hash recorded_hash = Hashing::compute_hash_sampler(feature_hash, *create_info);
 		if (recorded_hash != hash)
 			return false;
 
@@ -80,7 +91,7 @@ struct ReplayInterface : StateCreatorInterface
 
 	bool enqueue_create_shader_module(Hash hash, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module) override
 	{
-		Hash recorded_hash = Hashing::compute_hash_shader_module(recorder, *create_info);
+		Hash recorded_hash = Hashing::compute_hash_shader_module(feature_hash, *create_info);
 		if (recorded_hash != hash)
 			return false;
 
@@ -91,7 +102,7 @@ struct ReplayInterface : StateCreatorInterface
 
 	bool enqueue_create_render_pass(Hash hash, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass) override
 	{
-		Hash recorded_hash = Hashing::compute_hash_render_pass(recorder, *create_info);
+		Hash recorded_hash = Hashing::compute_hash_render_pass(feature_hash, *create_info);
 		if (recorded_hash != hash)
 			return false;
 
@@ -484,19 +495,23 @@ static bool test_database()
 
 	// Try clean write.
 	{
-		auto db = create_stream_archive_database(".__test_tmp.zip", DatabaseMode::OverWrite);
+		auto db = std::unique_ptr<DatabaseInterface>(create_stream_archive_database(".__test_tmp.zip", DatabaseMode::OverWrite));
 		if (!db->prepare())
 			return false;
 
-		if (!db->write_entry(RESOURCE_SAMPLER, 1, {1, 2, 3}))
+		static const uint8_t entry1[] = { 1, 2, 3 };
+
+		if (!db->write_entry(RESOURCE_SAMPLER, 1, entry1, sizeof(entry1)))
 			return false;
-		if (!db->write_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, 2, {10, 20, 30, 40, 50}))
+
+		static const uint8_t entry2[] = { 10, 20, 30, 40, 50 };
+		if (!db->write_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, 2, entry2, sizeof(entry2)))
 			return false;
 	}
 
 	// Try appending now.
 	{
-		auto db = create_stream_archive_database(".__test_tmp.zip", DatabaseMode::Append);
+		auto db = std::unique_ptr<DatabaseInterface>(create_stream_archive_database(".__test_tmp.zip", DatabaseMode::Append));
 		if (!db->prepare())
 			return false;
 
@@ -508,14 +523,15 @@ static bool test_database()
 		if (db->has_entry(RESOURCE_SHADER_MODULE, 3))
 			return false;
 
-		if (!db->write_entry(RESOURCE_SHADER_MODULE, 3, {1, 2, 3, 1, 2, 3}))
+		static const uint8_t entry3[] = { 1, 2, 3, 1, 2, 3 };
+		if (!db->write_entry(RESOURCE_SHADER_MODULE, 3, entry3, sizeof(entry3)))
 			return false;
 	}
 
 	// Try playback multiple times.
 	for (unsigned iter = 0; iter < 2; iter++)
 	{
-		auto db = create_stream_archive_database(".__test_tmp.zip", DatabaseMode::ReadOnly);
+		auto db = std::unique_ptr<DatabaseInterface>(create_stream_archive_database(".__test_tmp.zip", DatabaseMode::ReadOnly));
 		if (!db->prepare())
 			return false;
 
@@ -534,12 +550,31 @@ static bool test_database()
 		if (db->has_entry(RESOURCE_GRAPHICS_PIPELINE, 3))
 			return false;
 
+		size_t blob_size;
 		std::vector<uint8_t> blob;
-		if (!db->read_entry(RESOURCE_SAMPLER, 1, blob) || !compare(blob, { 1, 2, 3 }))
+
+		if (!db->read_entry(RESOURCE_SAMPLER, 1, &blob_size, nullptr))
 			return false;
-		if (!db->read_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, 2, blob) || !compare(blob, { 10, 20, 30, 40, 50 }))
+		blob.resize(blob_size);
+		if (!db->read_entry(RESOURCE_SAMPLER, 1, &blob_size, blob.data()))
 			return false;
-		if (!db->read_entry(RESOURCE_SHADER_MODULE, 3, blob) || !compare(blob, { 1, 2, 3, 1, 2, 3 }))
+		if (!compare(blob, { 1, 2, 3 }))
+			return false;
+
+		if (!db->read_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, 2, &blob_size, nullptr))
+			return false;
+		blob.resize(blob_size);
+		if (!db->read_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, 2, &blob_size, blob.data()))
+			return false;
+		if (!compare(blob, { 10, 20, 30, 40, 50 }))
+			return false;
+
+		if (!db->read_entry(RESOURCE_SHADER_MODULE, 3, &blob_size, nullptr))
+			return false;
+		blob.resize(blob_size);
+		if (!db->read_entry(RESOURCE_SHADER_MODULE, 3, &blob_size, blob.data()))
+			return false;
+		if (!compare(blob, { 1, 2, 3, 1, 2, 3 }))
 			return false;
 	}
 
@@ -557,7 +592,16 @@ int main()
 		{
 			StateRecorder recorder;
 
-			recorder.init(nullptr);
+			VkApplicationInfo app_info = { VK_STRUCTURE_TYPE_APPLICATION_INFO };
+			app_info.pEngineName = "test";
+			app_info.pApplicationName = "testy";
+			app_info.engineVersion = 1234;
+			app_info.applicationVersion = 123515;
+			app_info.apiVersion = VK_API_VERSION_1_1;
+			recorder.record_application_info(app_info);
+
+			VkPhysicalDeviceFeatures2 features = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+			recorder.record_physical_device_features(features);
 
 			record_samplers(recorder);
 			record_set_layouts(recorder);
@@ -567,7 +611,12 @@ int main()
 			record_compute_pipelines(recorder);
 			record_graphics_pipelines(recorder);
 
-			res = recorder.serialize();
+			uint8_t *serialized;
+			size_t serialized_size;
+			if (!recorder.serialize(&serialized, &serialized_size))
+				return EXIT_FAILURE;
+			res = std::vector<uint8_t>(serialized, serialized + serialized_size);
+			StateRecorder::free_serialized(serialized);
 		}
 
 		StateReplayer replayer;
