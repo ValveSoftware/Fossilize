@@ -75,9 +75,9 @@ struct DumbDirectoryDatabase : DatabaseInterface
 		return seen_blobs[tag].count(hash) != 0;
 	}
 
-	bool read_entry(ResourceTag tag, Hash hash, size_t *blob_size, void *blob, PayloadFlags flags) override
+	bool read_entry(ResourceTag tag, Hash hash, size_t *blob_size, void *blob, PayloadReadFlags flags) override
 	{
-		if ((flags & PAYLOAD_RAW_FOSSILIZE_DB_BIT) != 0)
+		if ((flags & PAYLOAD_READ_RAW_FOSSILIZE_DB_BIT) != 0)
 			return false;
 
 		if (mode != DatabaseMode::ReadOnly)
@@ -134,9 +134,9 @@ struct DumbDirectoryDatabase : DatabaseInterface
 		return true;
 	}
 
-	bool write_entry(ResourceTag tag, Hash hash, const void *blob, size_t size, PayloadFlags flags) override
+	bool write_entry(ResourceTag tag, Hash hash, const void *blob, size_t size, PayloadWriteFlags flags) override
 	{
-		if ((flags & PAYLOAD_RAW_FOSSILIZE_DB_BIT) != 0)
+		if ((flags & PAYLOAD_WRITE_RAW_FOSSILIZE_DB_BIT) != 0)
 			return false;
 
 		if (mode == DatabaseMode::ReadOnly)
@@ -299,9 +299,9 @@ struct ZipDatabase : DatabaseInterface
 		return true;
 	}
 
-	bool read_entry(ResourceTag tag, Hash hash, size_t *blob_size, void *blob, PayloadFlags flags) override
+	bool read_entry(ResourceTag tag, Hash hash, size_t *blob_size, void *blob, PayloadReadFlags flags) override
 	{
-		if ((flags & PAYLOAD_RAW_FOSSILIZE_DB_BIT) != 0)
+		if ((flags & PAYLOAD_READ_RAW_FOSSILIZE_DB_BIT) != 0)
 			return false;
 
 		if (!alive || mode != DatabaseMode::ReadOnly)
@@ -334,9 +334,9 @@ struct ZipDatabase : DatabaseInterface
 		return true;
 	}
 
-	bool write_entry(ResourceTag tag, Hash hash, const void *blob, size_t size, PayloadFlags flags) override
+	bool write_entry(ResourceTag tag, Hash hash, const void *blob, size_t size, PayloadWriteFlags flags) override
 	{
-		if ((flags & PAYLOAD_RAW_FOSSILIZE_DB_BIT) != 0)
+		if ((flags & PAYLOAD_WRITE_RAW_FOSSILIZE_DB_BIT) != 0)
 			return false;
 
 		if (!alive || mode == DatabaseMode::ReadOnly)
@@ -353,7 +353,7 @@ struct ZipDatabase : DatabaseInterface
 		unsigned mz_flags;
 		if ((flags & PAYLOAD_WRITE_COMPRESS_BIT) != 0)
 		{
-			if ((flags & PAYLOAD_BEST_COMPRESSION_BIT) != 0)
+			if ((flags & PAYLOAD_WRITE_BEST_COMPRESSION_BIT) != 0)
 				mz_flags = MZ_BEST_COMPRESSION;
 			else
 				mz_flags = MZ_BEST_SPEED;
@@ -584,7 +584,7 @@ struct StreamArchive : DatabaseInterface
 		return true;
 	}
 
-	bool read_entry(ResourceTag tag, Hash hash, size_t *blob_size, void *blob, PayloadFlags flags) override
+	bool read_entry(ResourceTag tag, Hash hash, size_t *blob_size, void *blob, PayloadReadFlags flags) override
 	{
 		if (!alive || mode != DatabaseMode::ReadOnly)
 			return false;
@@ -596,7 +596,7 @@ struct StreamArchive : DatabaseInterface
 		if (!blob_size)
 			return false;
 
-		uint32_t out_size = (flags & PAYLOAD_RAW_FOSSILIZE_DB_BIT) != 0 ?
+		uint32_t out_size = (flags & PAYLOAD_READ_RAW_FOSSILIZE_DB_BIT) != 0 ?
 		                    (itr->second.header.payload_size + sizeof(PayloadHeaderRaw)) :
 		                    itr->second.header.uncompressed_size;
 
@@ -610,7 +610,7 @@ struct StreamArchive : DatabaseInterface
 
 		if (blob)
 		{
-			if ((flags & PAYLOAD_RAW_FOSSILIZE_DB_BIT) != 0)
+			if ((flags & PAYLOAD_READ_RAW_FOSSILIZE_DB_BIT) != 0)
 			{
 				// Include the header.
 				if (fseek(file, itr->second.offset - sizeof(PayloadHeaderRaw), SEEK_SET) < 0)
@@ -674,7 +674,7 @@ struct StreamArchive : DatabaseInterface
 		convert_to_le(le_output + 12, &header.uncompressed_size, 1);
 	}
 
-	bool write_entry(ResourceTag tag, Hash hash, const void *blob, size_t size, PayloadFlags flags) override
+	bool write_entry(ResourceTag tag, Hash hash, const void *blob, size_t size, PayloadWriteFlags flags) override
 	{
 		if (!alive || mode == DatabaseMode::ReadOnly)
 			return false;
@@ -690,7 +690,7 @@ struct StreamArchive : DatabaseInterface
 		if (fwrite(str, 1, 32, file) != 32)
 			return false;
 
-		if ((flags & PAYLOAD_RAW_FOSSILIZE_DB_BIT) != 0)
+		if ((flags & PAYLOAD_WRITE_RAW_FOSSILIZE_DB_BIT) != 0)
 		{
 			// The raw payload already contains the header, so just dump it straight to disk.
 			if (size < sizeof(PayloadHeaderRaw))
@@ -718,7 +718,7 @@ struct StreamArchive : DatabaseInterface
 
 			mz_ulong zsize = zlib_buffer_size;
 			if (mz_compress2(zlib_buffer, &zsize, static_cast<const unsigned char *>(blob), size,
-			                 (flags & PAYLOAD_BEST_COMPRESSION_BIT) != 0 ? MZ_BEST_COMPRESSION : MZ_BEST_SPEED) != MZ_OK)
+			                 (flags & PAYLOAD_WRITE_BEST_COMPRESSION_BIT) != 0 ? MZ_BEST_COMPRESSION : MZ_BEST_SPEED) != MZ_OK)
 				return false;
 
 			header.payload_size = uint32_t(zsize);

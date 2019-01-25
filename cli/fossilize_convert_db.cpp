@@ -68,16 +68,16 @@ int main(int argc, char *argv[])
 		for (auto &hash : hashes)
 		{
 			size_t blob_size = 0;
-			if (!input_db->read_entry(tag, hash, &blob_size, nullptr, 0))
+			if (!input_db->read_entry(tag, hash, &blob_size, nullptr, PAYLOAD_READ_NO_FLAGS))
 				return EXIT_FAILURE;
 			std::vector<uint8_t> blob(blob_size);
-			if (!input_db->read_entry(tag, hash, &blob_size, blob.data(), 0))
+			if (!input_db->read_entry(tag, hash, &blob_size, blob.data(), PAYLOAD_READ_NO_FLAGS))
 				return EXIT_FAILURE;
 
 			if (!output_db->write_entry(tag, hash, blob.data(), blob.size(),
 					PAYLOAD_WRITE_COMPUTE_CHECKSUM_BIT |
 					PAYLOAD_WRITE_COMPRESS_BIT |
-					PAYLOAD_BEST_COMPRESSION_BIT))
+					PAYLOAD_WRITE_BEST_COMPRESSION_BIT))
 			{
 				return EXIT_FAILURE;
 			}

@@ -1412,11 +1412,19 @@ void StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, D
 		if (pipeline_iter == replayed_compute_pipelines.end())
 		{
 			size_t external_state_size = 0;
-			if (!resolver || !resolver->read_entry(RESOURCE_COMPUTE_PIPELINE, pipeline, &external_state_size, nullptr, 0))
+			if (!resolver || !resolver->read_entry(RESOURCE_COMPUTE_PIPELINE, pipeline, &external_state_size, nullptr,
+			                                       PAYLOAD_READ_NO_FLAGS))
+			{
 				FOSSILIZE_THROW("Failed to find referenced compute pipeline");
+			}
+
 			vector<uint8_t> external_state(external_state_size);
-			if (!resolver->read_entry(RESOURCE_COMPUTE_PIPELINE, pipeline, &external_state_size, external_state.data(), 0))
+
+			if (!resolver->read_entry(RESOURCE_COMPUTE_PIPELINE, pipeline, &external_state_size, external_state.data(),
+			                          PAYLOAD_READ_NO_FLAGS))
+			{
 				FOSSILIZE_THROW("Failed to find referenced compute pipeline");
+			}
 
 			this->parse(iface, resolver, external_state.data(), external_state.size());
 			iface.sync_threads();
@@ -1443,11 +1451,19 @@ void StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, D
 		if (module_iter == replayed_shader_modules.end())
 		{
 			size_t external_state_size = 0;
-			if (!resolver || !resolver->read_entry(RESOURCE_SHADER_MODULE, pipeline, &external_state_size, nullptr, 0))
+			if (!resolver || !resolver->read_entry(RESOURCE_SHADER_MODULE, pipeline, &external_state_size, nullptr,
+			                                       PAYLOAD_READ_NO_FLAGS))
+			{
 				FOSSILIZE_THROW("Failed to find referenced shader");
+			}
+
 			vector<uint8_t> external_state(external_state_size);
-			if (!resolver->read_entry(RESOURCE_SHADER_MODULE, pipeline, &external_state_size, external_state.data(), 0))
+
+			if (!resolver->read_entry(RESOURCE_SHADER_MODULE, pipeline, &external_state_size, external_state.data(),
+			                          PAYLOAD_READ_NO_FLAGS))
+			{
 				FOSSILIZE_THROW("Failed to find referenced shader");
+			}
 
 			this->parse(iface, resolver, external_state.data(), external_state.size());
 			iface.sync_shader_modules();
@@ -1751,11 +1767,19 @@ VkPipelineShaderStageCreateInfo *StateReplayer::Impl::parse_stages(StateCreatorI
 			if (module_iter == replayed_shader_modules.end())
 			{
 				size_t external_state_size = 0;
-				if (!resolver || !resolver->read_entry(RESOURCE_SHADER_MODULE, module, &external_state_size, nullptr, 0))
+				if (!resolver || !resolver->read_entry(RESOURCE_SHADER_MODULE, module, &external_state_size, nullptr,
+				                                       PAYLOAD_READ_NO_FLAGS))
+				{
 					FOSSILIZE_THROW("Failed to find referenced shader");
+				}
+
 				vector<uint8_t> external_state(external_state_size);
-				if (!resolver->read_entry(RESOURCE_SHADER_MODULE, module, &external_state_size, external_state.data(), 0))
+
+				if (!resolver->read_entry(RESOURCE_SHADER_MODULE, module, &external_state_size, external_state.data(),
+				                          PAYLOAD_READ_NO_FLAGS))
+				{
 					FOSSILIZE_THROW("Failed to find referenced shader");
+				}
 
 				this->parse(iface, resolver, external_state.data(), external_state.size());
 				iface.sync_shader_modules();
@@ -1805,11 +1829,19 @@ void StateReplayer::Impl::parse_graphics_pipeline(StateCreatorInterface &iface, 
 		if (pipeline_iter == replayed_graphics_pipelines.end())
 		{
 			size_t external_state_size = 0;
-			if (!resolver || !resolver->read_entry(RESOURCE_GRAPHICS_PIPELINE, pipeline, &external_state_size, nullptr, 0))
+			if (!resolver || !resolver->read_entry(RESOURCE_GRAPHICS_PIPELINE, pipeline, &external_state_size, nullptr,
+			                                       PAYLOAD_READ_NO_FLAGS))
+			{
 				FOSSILIZE_THROW("Failed to find referenced graphics pipeline");
+			}
+
 			vector<uint8_t> external_state(external_state_size);
-			if (!resolver->read_entry(RESOURCE_GRAPHICS_PIPELINE, pipeline, &external_state_size, external_state.data(), 0))
+
+			if (!resolver->read_entry(RESOURCE_GRAPHICS_PIPELINE, pipeline, &external_state_size, external_state.data(),
+			                          PAYLOAD_READ_NO_FLAGS))
+			{
 				FOSSILIZE_THROW("Failed to find referenced graphics pipeline");
+			}
 
 			this->parse(iface, resolver, external_state.data(), external_state.size());
 			iface.sync_threads();
@@ -2593,7 +2625,7 @@ void StateRecorder::Impl::remap_render_pass_ci(VkRenderPassCreateInfo *)
 
 void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 {
-	PayloadFlags payload_flags = 0;
+	PayloadWriteFlags payload_flags = 0;
 	if (compression)
 		payload_flags |= PAYLOAD_WRITE_COMPRESS_BIT;
 	if (checksum)
@@ -2625,7 +2657,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 
 	for (;;)
 	{
-		WorkItem record_item;
+		WorkItem record_item = {};
 		{
 			std::unique_lock<std::mutex> lock(record_lock);
 			if (record_queue.empty())
