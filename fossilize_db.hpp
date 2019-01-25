@@ -41,6 +41,25 @@ enum ResourceTag
 	RESOURCE_COUNT = 8
 };
 
+enum PayloadFlagBits
+{
+	// Can only be used for the stream_archive_database.
+	// If used, the blob data is considered opaque and may be compressed in some unspecified scheme.
+	// The only use for this flag is to transparently transfer payloads to other archives of same type.
+	// Both read_entry and write_entry must use this flag.
+	PAYLOAD_RAW_FOSSILIZE_DB_BIT = 1 << 0,
+
+	// If applicable to the backend, compresses the payload.
+	PAYLOAD_WRITE_COMPRESS_BIT = 1 << 1,
+
+	// If WRITE_COMPRESS_BIT is set, prefer slower compression algorithms.
+	PAYLOAD_BEST_COMPRESSION_BIT = 1 << 2,
+
+	// Compute checksum of payload for more robustness.
+	PAYLOAD_WRITE_COMPUTE_CHECKSUM_BIT = 1 << 3
+};
+using PayloadFlags = uint32_t;
+
 // This is an interface to interact with an external database for blob modules.
 // It is is a simple database with key + blob.
 class DatabaseInterface
@@ -55,10 +74,10 @@ public:
 	// Arguments are similar to Vulkan, call the query function twice.
 	// First, call with buffer == nullptr to query size.
 	// Then, pass in allocated buffer, *size must match the previously queried size.
-	virtual bool read_entry(ResourceTag tag, Hash hash, size_t *size, void *buffer) = 0;
+	virtual bool read_entry(ResourceTag tag, Hash hash, size_t *size, void *buffer, PayloadFlags flags) = 0;
 
 	// Writes an entry to database.
-	virtual bool write_entry(ResourceTag tag, Hash hash, const void *buffer, size_t size) = 0;
+	virtual bool write_entry(ResourceTag tag, Hash hash, const void *buffer, size_t size, PayloadFlags flags) = 0;
 
 	// Checks if entry already exists in database, i.e. no need to serialize.
 	virtual bool has_entry(ResourceTag tag, Hash hash) = 0;

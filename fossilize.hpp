@@ -35,6 +35,11 @@
 
 namespace Fossilize
 {
+enum
+{
+	FOSSILIZE_FORMAT_VERSION = 4
+};
+
 class DatabaseInterface;
 
 // TODO: Do we want to get rid of this?
