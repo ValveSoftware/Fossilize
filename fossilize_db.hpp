@@ -78,6 +78,7 @@ using PayloadReadFlags = uint32_t;
 
 // This is an interface to interact with an external database for blob modules.
 // It is is a simple database with key + blob.
+// NOTE: The database is NOT thread-safe.
 class DatabaseInterface
 {
 public:

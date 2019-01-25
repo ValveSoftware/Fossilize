@@ -28,6 +28,7 @@ function(add_fossilize_cli NAME)
 endfunction()
 
 add_fossilize_cli(fossilize-replay fossilize_replay.cpp)
+add_fossilize_cli(fossilize-bench fossilize_bench.cpp)
 add_fossilize_cli(fossilize-convert-db fossilize_convert_db.cpp)
 add_fossilize_cli(fossilize-disasm fossilize_disasm.cpp)
 target_link_libraries(fossilize-disasm SPIRV-Tools spirv-cross-glsl)
