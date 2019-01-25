@@ -176,6 +176,10 @@ public:
 	~StateRecorder();
 	ScratchAllocator &get_allocator();
 
+	// Call before init_recording_thread.
+	void set_database_enable_compression(bool enable);
+	void set_database_enable_checksum(bool enable);
+
 	// These methods should only be called at the very beginning of the application lifetime.
 	// It will affect the hash of all create info structures.
 	// These are never recorded in a thread, so it's safe to query the application/feature hash right after calling these methods.

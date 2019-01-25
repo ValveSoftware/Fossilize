@@ -268,6 +268,9 @@ struct StateRecorder::Impl
 	std::queue<WorkItem> record_queue;
 	std::thread worker_thread;
 
+	bool compression = false;
+	bool checksum = false;
+
 	void record_task(StateRecorder *recorder, bool looping);
 
 	template <typename T>
@@ -2037,6 +2040,16 @@ ScratchAllocator &StateRecorder::get_allocator()
 	return impl->allocator;
 }
 
+void StateRecorder::set_database_enable_checksum(bool enable)
+{
+	impl->checksum = enable;
+}
+
+void StateRecorder::set_database_enable_compression(bool enable)
+{
+	impl->compression = enable;
+}
+
 void StateRecorder::record_application_info(const VkApplicationInfo &info)
 {
 	if (info.pNext)
@@ -2580,6 +2593,12 @@ void StateRecorder::Impl::remap_render_pass_ci(VkRenderPassCreateInfo *)
 
 void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 {
+	PayloadFlags payload_flags = 0;
+	if (compression)
+		payload_flags |= PAYLOAD_WRITE_COMPRESS_BIT;
+	if (checksum)
+		payload_flags |= PAYLOAD_WRITE_COMPUTE_CHECKSUM_BIT;
+
 	// Start by preparing in the thread since we need to parse an archive potentially, and that might block a little bit.
 	if (database_iface)
 	{
@@ -2601,7 +2620,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 		Hasher h;
 		Hashing::hash_application_feature_info(h, application_feature_hash);
 		serialize_application_info(blob);
-		database_iface->write_entry(RESOURCE_APPLICATION_INFO, h.get(), blob.data(), blob.size(), 0);
+		database_iface->write_entry(RESOURCE_APPLICATION_INFO, h.get(), blob.data(), blob.size(), payload_flags);
 	}
 
 	for (;;)
@@ -2640,7 +2659,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 					if (!database_iface->has_entry(RESOURCE_SAMPLER, hash))
 					{
 						serialize_sampler(hash, *create_info, blob);
-						database_iface->write_entry(RESOURCE_SAMPLER, hash, blob.data(), blob.size(), 0);
+						database_iface->write_entry(RESOURCE_SAMPLER, hash, blob.data(), blob.size(), payload_flags);
 					}
 				}
 				else
@@ -2666,7 +2685,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 					if (!database_iface->has_entry(RESOURCE_RENDER_PASS, hash))
 					{
 						serialize_render_pass(hash, *create_info, blob);
-						database_iface->write_entry(RESOURCE_RENDER_PASS, hash, blob.data(), blob.size(), 0);
+						database_iface->write_entry(RESOURCE_RENDER_PASS, hash, blob.data(), blob.size(), payload_flags);
 					}
 				}
 				else
@@ -2692,7 +2711,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 					if (!database_iface->has_entry(RESOURCE_SHADER_MODULE, hash))
 					{
 						serialize_shader_module(hash, *create_info, blob, allocator);
-						database_iface->write_entry(RESOURCE_SHADER_MODULE, hash, blob.data(), blob.size(), 0);
+						database_iface->write_entry(RESOURCE_SHADER_MODULE, hash, blob.data(), blob.size(), payload_flags);
 						allocator.reset();
 					}
 				}
@@ -2722,7 +2741,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 					if (!database_iface->has_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, hash))
 					{
 						serialize_descriptor_set_layout(hash, *create_info_copy, blob);
-						database_iface->write_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, hash, blob.data(), blob.size(), 0);
+						database_iface->write_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, hash, blob.data(), blob.size(), payload_flags);
 					}
 
 					// Don't need to keep copied data around, reset the allocator.
@@ -2751,7 +2770,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 					if (!database_iface->has_entry(RESOURCE_PIPELINE_LAYOUT, hash))
 					{
 						serialize_pipeline_layout(hash, *create_info_copy, blob);
-						database_iface->write_entry(RESOURCE_PIPELINE_LAYOUT, hash, blob.data(), blob.size(), 0);
+						database_iface->write_entry(RESOURCE_PIPELINE_LAYOUT, hash, blob.data(), blob.size(), payload_flags);
 					}
 
 					// Don't need to keep copied data around, reset the allocator.
@@ -2780,7 +2799,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 					if (!database_iface->has_entry(RESOURCE_GRAPHICS_PIPELINE, hash))
 					{
 						serialize_graphics_pipeline(hash, *create_info_copy, blob);
-						database_iface->write_entry(RESOURCE_GRAPHICS_PIPELINE, hash, blob.data(), blob.size(), 0);
+						database_iface->write_entry(RESOURCE_GRAPHICS_PIPELINE, hash, blob.data(), blob.size(), payload_flags);
 					}
 
 					// Don't need to keep copied data around, reset the allocator.
@@ -2809,7 +2828,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 					if (!database_iface->has_entry(RESOURCE_COMPUTE_PIPELINE, hash))
 					{
 						serialize_compute_pipeline(hash, *create_info_copy, blob);
-						database_iface->write_entry(RESOURCE_COMPUTE_PIPELINE, hash, blob.data(), blob.size(), 0);
+						database_iface->write_entry(RESOURCE_COMPUTE_PIPELINE, hash, blob.data(), blob.size(), payload_flags);
 					}
 
 					// Don't need to keep copied data around, reset the allocator.

@@ -87,6 +87,8 @@ void Device::init(VkPhysicalDevice gpu_, VkDevice device_, Instance *pInstance,
 #endif
 
 	iface = std::unique_ptr<DatabaseInterface>(create_database(serializationPath.c_str(), DatabaseMode::Append));
+	recorder.set_database_enable_compression(true);
+	recorder.set_database_enable_checksum(true);
 	recorder.init_recording_thread(iface.get());
 
 	if (pInstance->getApplicationInfo())
