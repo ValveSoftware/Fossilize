@@ -184,38 +184,155 @@ static void bench_recorder(const char *path, bool compressed, bool checksum)
 	}
 }
 
+struct ReplayInterface : StateCreatorInterface
+{
+	bool enqueue_create_sampler(Hash, const VkSamplerCreateInfo *, VkSampler *) override
+	{
+		return true;
+	}
+
+	bool enqueue_create_descriptor_set_layout(Hash, const VkDescriptorSetLayoutCreateInfo *, VkDescriptorSetLayout *) override
+	{
+		return true;
+	}
+
+	bool enqueue_create_pipeline_layout(Hash, const VkPipelineLayoutCreateInfo *, VkPipelineLayout *) override
+	{
+		return true;
+	}
+
+	bool enqueue_create_shader_module(Hash, const VkShaderModuleCreateInfo *, VkShaderModule *) override
+	{
+		return true;
+	}
+
+	bool enqueue_create_render_pass(Hash, const VkRenderPassCreateInfo *, VkRenderPass *) override
+	{
+		return true;
+	}
+
+	bool enqueue_create_compute_pipeline(Hash, const VkComputePipelineCreateInfo *, VkPipeline *) override
+	{
+		return true;
+	}
+
+	bool enqueue_create_graphics_pipeline(Hash, const VkGraphicsPipelineCreateInfo *, VkPipeline *) override
+	{
+		return true;
+	}
+};
+
+static bool dummy_replay_archive(const char *path)
+{
+	auto iface = std::unique_ptr<DatabaseInterface>(create_database(path, DatabaseMode::ReadOnly));
+	if (!iface->prepare())
+		return false;
+	StateReplayer state_replayer;
+	ReplayInterface replayer;
+
+	std::vector<Hash> resource_hashes;
+	std::vector<uint8_t> state_json;
+
+	static const ResourceTag playback_order[] = {
+		RESOURCE_APPLICATION_INFO, // This will create the device, etc.
+		RESOURCE_SHADER_MODULE, // Kick off shader modules first since it can be done in a thread while we deal with trivial objects.
+		RESOURCE_SAMPLER, // Trivial, run in main thread.
+		RESOURCE_DESCRIPTOR_SET_LAYOUT, // Trivial, run in main thread
+		RESOURCE_PIPELINE_LAYOUT, // Trivial, run in main thread
+		RESOURCE_RENDER_PASS, // Trivial, run in main thread
+		RESOURCE_GRAPHICS_PIPELINE, // Multi-threaded
+		RESOURCE_COMPUTE_PIPELINE, // Multi-threaded
+	};
+
+	for (auto &tag : playback_order)
+	{
+		size_t resource_hash_count = 0;
+		if (!iface->get_hash_list_for_resource_tag(tag, &resource_hash_count, nullptr))
+		{
+			LOGE("Failed to get list of resource hashes.\n");
+			return false;
+		}
+
+		resource_hashes.resize(resource_hash_count);
+
+		if (!iface->get_hash_list_for_resource_tag(tag, &resource_hash_count, resource_hashes.data()))
+		{
+			LOGE("Failed to get list of resource hashes.\n");
+			return false;
+		}
+
+		for (auto &hash : resource_hashes)
+		{
+			size_t state_json_size = 0;
+			if (!iface->read_entry(tag, hash, &state_json_size, nullptr, 0))
+			{
+				LOGE("Failed to load blob from cache.\n");
+				return false;
+			}
+
+			state_json.resize(state_json_size);
+
+			if (!iface->read_entry(tag, hash, &state_json_size, state_json.data(), 0))
+			{
+				LOGE("Failed to load blob from cache.\n");
+				return EXIT_FAILURE;
+			}
+
+			try
+			{
+				state_replayer.parse(replayer, nullptr, state_json.data(), state_json.size());
+			}
+			catch (const std::exception &e)
+			{
+				LOGE("StateReplayer threw exception parsing (tag: %d, hash: 0x%llx): %s\n", tag, static_cast<unsigned long long>(hash), e.what());
+			}
+		}
+	}
+
+	return true;
+}
+
 int main()
 {
-	// Simple benchmark for a ton of resources.
+	for (unsigned i = 0; i < 2; i++)
 	{
-		auto begin_compressed = std::chrono::steady_clock::now();
-		bench_recorder(".test.compressed.foz", true, true);
-		auto end_compressed = std::chrono::steady_clock::now();
-		auto len = std::chrono::duration_cast<std::chrono::nanoseconds>(end_compressed - begin_compressed).count();
-		LOGI("[WRITE] Compressed & checksum: %.3f ms\n", len * 1e-6);
-	}
+		const char *path_compressed = i ? ".test.compressed.zip" : ".test.compressed.foz";
+		const char *path_uncompressed = i ? ".test.uncompressed.zip" : ".test.uncompressed.foz";
 
-	{
-		auto begin_uncompressed = std::chrono::steady_clock::now();
-		bench_recorder(".test.uncompressed.foz", false, true);
-		auto end_uncompressed = std::chrono::steady_clock::now();
-		auto len = std::chrono::duration_cast<std::chrono::nanoseconds>(end_uncompressed - begin_uncompressed).count();
-		LOGI("[WRITE] Uncompressed & checksum: %.3f ms\n", len * 1e-6);
-	}
+		if (i)
+			LOGI("=== Testing ZIP (miniz) ===\n");
+		else
+			LOGI("=== Testing Fossilize DB ===\n");
 
-	{
-		auto begin_compressed = std::chrono::steady_clock::now();
-		bench_recorder(".test.compressed.foz", true, false);
-		auto end_compressed = std::chrono::steady_clock::now();
-		auto len = std::chrono::duration_cast<std::chrono::nanoseconds>(end_compressed - begin_compressed).count();
-		LOGI("[WRITE] Compressed: %.3f ms\n", len * 1e-6);
-	}
+		const auto run = [&](bool compressed, bool checksum) {
+			const char *path = compressed ? path_compressed : path_uncompressed;
+			auto begin_time = std::chrono::steady_clock::now();
+			bench_recorder(path, compressed, checksum);
+			auto end_time = std::chrono::steady_clock::now();
+			auto len = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - begin_time).count();
 
-	{
-		auto begin_uncompressed = std::chrono::steady_clock::now();
-		bench_recorder(".test.uncompressed.foz", false, false);
-		auto end_uncompressed = std::chrono::steady_clock::now();
-		auto len = std::chrono::duration_cast<std::chrono::nanoseconds>(end_uncompressed - begin_uncompressed).count();
-		LOGI("[WRITE] Uncompressed: %.3f ms\n", len * 1e-6);
+			if (compressed && checksum)
+				LOGI("[WRITE] Compressed & checksum: %.3f ms\n", len * 1e-6);
+			else if (compressed)
+				LOGI("[WRITE] Compressed: %.3f ms\n", len * 1e-6);
+			else if (checksum)
+				LOGI("[WRITE] Uncompressed & checksum: %.3f ms\n", len * 1e-6);
+			else
+				LOGI("[WRITE] Uncompressed: %.3f ms\n", len * 1e-6);
+
+			begin_time = std::chrono::steady_clock::now();
+			if (!dummy_replay_archive(path))
+				LOGE("Failed to replay archive.\n");
+			remove(path);
+			end_time = std::chrono::steady_clock::now();
+			len = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - begin_time).count();
+			LOGI("[READ]: %.3f ms\n", len * 1e-6);
+		};
+
+		run(false, false);
+		run(false, true);
+		run(true, false);
+		run(true, true);
+		LOGI("===================\n\n");
 	}
 }
