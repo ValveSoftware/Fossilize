@@ -75,8 +75,11 @@ struct DumbDirectoryDatabase : DatabaseInterface
 		return seen_blobs[tag].count(hash) != 0;
 	}
 
-	bool read_entry(ResourceTag tag, Hash hash, size_t *blob_size, void *blob) override
+	bool read_entry(ResourceTag tag, Hash hash, size_t *blob_size, void *blob, PayloadReadFlags flags) override
 	{
+		if ((flags & PAYLOAD_READ_RAW_FOSSILIZE_DB_BIT) != 0)
+			return false;
+
 		if (mode != DatabaseMode::ReadOnly)
 			return false;
 
@@ -131,8 +134,11 @@ struct DumbDirectoryDatabase : DatabaseInterface
 		return true;
 	}
 
-	bool write_entry(ResourceTag tag, Hash hash, const void *blob, size_t size) override
+	bool write_entry(ResourceTag tag, Hash hash, const void *blob, size_t size, PayloadWriteFlags flags) override
 	{
+		if ((flags & PAYLOAD_WRITE_RAW_FOSSILIZE_DB_BIT) != 0)
+			return false;
+
 		if (mode == DatabaseMode::ReadOnly)
 			return false;
 
@@ -200,6 +206,7 @@ struct ZipDatabase : DatabaseInterface
 	ZipDatabase(const string &path_, DatabaseMode mode_)
 		: path(path_), mode(mode_)
 	{
+		mz_zip_zero_struct(&mz);
 	}
 
 	~ZipDatabase()
@@ -221,7 +228,7 @@ struct ZipDatabase : DatabaseInterface
 	{
 		while (*str)
 		{
-			if (!isxdigit(*str))
+			if (!isxdigit(uint8_t(*str)))
 				return false;
 			str++;
 		}
@@ -230,8 +237,6 @@ struct ZipDatabase : DatabaseInterface
 
 	bool prepare() override
 	{
-		mz_zip_zero_struct(&mz);
-
 		if (mode != DatabaseMode::OverWrite && mz_zip_reader_init_file(&mz, path.c_str(), 0))
 		{
 			// We have an existing archive.
@@ -294,8 +299,11 @@ struct ZipDatabase : DatabaseInterface
 		return true;
 	}
 
-	bool read_entry(ResourceTag tag, Hash hash, size_t *blob_size, void *blob) override
+	bool read_entry(ResourceTag tag, Hash hash, size_t *blob_size, void *blob, PayloadReadFlags flags) override
 	{
+		if ((flags & PAYLOAD_READ_RAW_FOSSILIZE_DB_BIT) != 0)
+			return false;
+
 		if (!alive || mode != DatabaseMode::ReadOnly)
 			return false;
 
@@ -326,8 +334,11 @@ struct ZipDatabase : DatabaseInterface
 		return true;
 	}
 
-	bool write_entry(ResourceTag tag, Hash hash, const void *blob, size_t size) override
+	bool write_entry(ResourceTag tag, Hash hash, const void *blob, size_t size, PayloadWriteFlags flags) override
 	{
+		if ((flags & PAYLOAD_WRITE_RAW_FOSSILIZE_DB_BIT) != 0)
+			return false;
+
 		if (!alive || mode == DatabaseMode::ReadOnly)
 			return false;
 
@@ -338,7 +349,19 @@ struct ZipDatabase : DatabaseInterface
 		char str[32 + 1]; // 32 digits + null
 		sprintf(str, "%016x", tag);
 		sprintf(str + 16, "%016llx", static_cast<unsigned long long>(hash));
-		if (!mz_zip_writer_add_mem(&mz, str, blob, size, MZ_NO_COMPRESSION))
+
+		unsigned mz_flags;
+		if ((flags & PAYLOAD_WRITE_COMPRESS_BIT) != 0)
+		{
+			if ((flags & PAYLOAD_WRITE_BEST_COMPRESSION_BIT) != 0)
+				mz_flags = MZ_BEST_COMPRESSION;
+			else
+				mz_flags = MZ_BEST_SPEED;
+		}
+		else
+			mz_flags = MZ_NO_COMPRESSION;
+
+		if (!mz_zip_writer_add_mem(&mz, str, blob, size, mz_flags))
 		{
 			LOGE("Failed to add blob to cache.\n");
 			return false;
@@ -401,12 +424,35 @@ static const uint8_t stream_reference_magic_and_version[16] = {
 	0x81, 'F', 'O', 'S',
 	'S', 'I', 'L', 'I',
 	'Z', 'E', 'D', 'B',
-	0, 0, 0, 3, // 4 bytes to use for versioning.
+	0, 0, 0, FOSSILIZE_FORMAT_VERSION, // 4 bytes to use for versioning.
 };
 
 struct StreamArchive : DatabaseInterface
 {
 	enum { MagicSize = sizeof(stream_reference_magic_and_version) };
+	enum { FOSSILIZE_COMPRESSION_NONE = 1, FOSSILIZE_COMPRESSION_DEFLATE = 2 };
+
+	// All multi-byte entities are little-endian.
+
+	// A payload contains:
+	// 4 byte payload size (after the header).
+	// 4 byte identifier (compression type)
+	// 4 byte checksum of raw (compressed) payload (CRC32, from zlib)
+	// 4 byte uncompressed size
+	// raw payload uint8[payload size].
+
+	struct PayloadHeader
+	{
+		uint32_t payload_size;
+		uint32_t format;
+		uint32_t crc;
+		uint32_t uncompressed_size;
+	};
+
+	struct PayloadHeaderRaw
+	{
+		uint8_t data[4 * 4];
+	};
 
 	StreamArchive(const string &path_, DatabaseMode mode_)
 		: path(path_), mode(mode_)
@@ -415,6 +461,7 @@ struct StreamArchive : DatabaseInterface
 
 	~StreamArchive()
 	{
+		free(zlib_buffer);
 		if (file)
 			fclose(file);
 	}
@@ -466,11 +513,11 @@ struct StreamArchive : DatabaseInterface
 					begin_append_offset = offset;
 
 					char blob_name[32];
-					uint8_t blob_checksum[4];
-					uint8_t blob_size[4];
+					PayloadHeaderRaw header_raw = {};
+					PayloadHeader header = {};
 
 					// Corrupt entry. Our process might have been killed before we could write all data.
-					if (offset + sizeof(blob_checksum) + sizeof(blob_name) + sizeof(blob_size) > len)
+					if (offset + sizeof(blob_name) + sizeof(header_raw) > len)
 						break;
 
 					// NAME
@@ -478,31 +525,15 @@ struct StreamArchive : DatabaseInterface
 						return false;
 					offset += sizeof(blob_name);
 
-					// CHECKSUM
-					if (fread(blob_checksum, 1, sizeof(blob_checksum), file) != sizeof(blob_checksum))
+					// HEADER
+					if (fread(&header_raw, 1, sizeof(header_raw), file) != sizeof(header_raw))
 						return false;
-					offset += sizeof(blob_checksum);
+					offset += sizeof(header_raw);
 
-					// Verify the checksum is using the reserved value of 0 for now.
-					uint32_t blob_checksum_le = uint32_t(blob_checksum[0]) |
-					                            (uint32_t(blob_checksum[1]) << 8) |
-					                            (uint32_t(blob_checksum[2]) << 16) |
-					                            (uint32_t(blob_checksum[3]) << 24);
-					if (blob_checksum_le != 0)
-						break;
-
-					// SIZE
-					if (fread(blob_size, 1, sizeof(blob_size), file) != sizeof(blob_size))
-						return false;
-					offset += sizeof(blob_size);
-
-					uint32_t blob_size_le = uint32_t(blob_size[0]) |
-					                        (uint32_t(blob_size[1]) << 8) |
-					                        (uint32_t(blob_size[2]) << 16) |
-					                        (uint32_t(blob_size[3]) << 24);
+					convert_from_le(header, header_raw);
 
 					// Corrupt entry. Our process might have been killed before we could write all data.
-					if (offset + blob_size_le > len)
+					if (offset + header.payload_size > len)
 						break;
 
 					char tag_str[16 + 1] = {};
@@ -510,17 +541,20 @@ struct StreamArchive : DatabaseInterface
 					memcpy(tag_str, blob_name, 16);
 					memcpy(value_str, blob_name + 16, 16);
 
-					unsigned tag = unsigned(strtoul(tag_str, nullptr, 16));
+					auto tag = unsigned(strtoul(tag_str, nullptr, 16));
 					if (tag < RESOURCE_COUNT)
 					{
 						uint64_t value = strtoull(value_str, nullptr, 16);
-						seen_blobs[tag].emplace(value, Entry{offset, blob_size_le});
+						Entry entry = {};
+						entry.header = header;
+						entry.offset = offset;
+						seen_blobs[tag].emplace(value, entry);
 					}
 
-					if (fseek(file, blob_size_le, SEEK_CUR) < 0)
+					if (fseek(file, header.payload_size, SEEK_CUR) < 0)
 						return false;
 
-					offset += blob_size_le;
+					offset += header.payload_size;
 				}
 
 				if (mode == DatabaseMode::Append && offset != len)
@@ -550,7 +584,7 @@ struct StreamArchive : DatabaseInterface
 		return true;
 	}
 
-	bool read_entry(ResourceTag tag, Hash hash, size_t *blob_size, void *blob) override
+	bool read_entry(ResourceTag tag, Hash hash, size_t *blob_size, void *blob, PayloadReadFlags flags) override
 	{
 		if (!alive || mode != DatabaseMode::ReadOnly)
 			return false;
@@ -562,27 +596,85 @@ struct StreamArchive : DatabaseInterface
 		if (!blob_size)
 			return false;
 
+		uint32_t out_size = (flags & PAYLOAD_READ_RAW_FOSSILIZE_DB_BIT) != 0 ?
+		                    (itr->second.header.payload_size + sizeof(PayloadHeaderRaw)) :
+		                    itr->second.header.uncompressed_size;
+
 		if (blob)
 		{
-			if (*blob_size != itr->second.size)
+			if (*blob_size != out_size)
 				return false;
 		}
 		else
-			*blob_size = itr->second.size;
+			*blob_size = out_size;
 
 		if (blob)
 		{
-			if (fseek(file, itr->second.offset, SEEK_SET) < 0)
-				return false;
+			if ((flags & PAYLOAD_READ_RAW_FOSSILIZE_DB_BIT) != 0)
+			{
+				// Include the header.
+				if (fseek(file, itr->second.offset - sizeof(PayloadHeaderRaw), SEEK_SET) < 0)
+					return false;
 
-			if (fread(blob, 1, itr->second.size, file) != itr->second.size)
-				return false;
+				size_t read_size = itr->second.header.payload_size + sizeof(PayloadHeaderRaw);
+				if (fread(blob, 1, read_size, file) != read_size)
+					return false;
+			}
+			else
+			{
+				if (!decode_payload(blob, out_size, itr->second))
+					return false;
+			}
 		}
 
 		return true;
 	}
 
-	bool write_entry(ResourceTag tag, Hash hash, const void *blob, size_t size) override
+	static void convert_from_le(uint32_t *output, const uint8_t *le_input, unsigned word_count)
+	{
+		for (unsigned i = 0; i < word_count; i++)
+		{
+			uint32_t v =
+					(uint32_t(le_input[0]) << 0) |
+					(uint32_t(le_input[1]) << 8) |
+					(uint32_t(le_input[2]) << 16) |
+					(uint32_t(le_input[3]) << 24);
+
+			*output++ = v;
+			le_input += 4;
+		}
+	}
+
+	static void convert_from_le(PayloadHeader &header, const PayloadHeaderRaw &raw)
+	{
+		convert_from_le(&header.payload_size, raw.data + 0, 1);
+		convert_from_le(&header.format, raw.data + 4, 1);
+		convert_from_le(&header.crc, raw.data + 8, 1);
+		convert_from_le(&header.uncompressed_size, raw.data + 12, 1);
+	}
+
+	static void convert_to_le(uint8_t *le_output, const uint32_t *value_input, unsigned count)
+	{
+		for (unsigned i = 0; i < count; i++)
+		{
+			uint32_t v = value_input[i];
+			*le_output++ = uint8_t((v >> 0) & 0xffu);
+			*le_output++ = uint8_t((v >> 8) & 0xffu);
+			*le_output++ = uint8_t((v >> 16) & 0xffu);
+			*le_output++ = uint8_t((v >> 24) & 0xffu);
+		}
+	}
+
+	static void convert_to_le(PayloadHeaderRaw &raw, const PayloadHeader &header)
+	{
+		uint8_t *le_output = raw.data;
+		convert_to_le(le_output + 0, &header.payload_size, 1);
+		convert_to_le(le_output + 4, &header.format, 1);
+		convert_to_le(le_output + 8, &header.crc, 1);
+		convert_to_le(le_output + 12, &header.uncompressed_size, 1);
+	}
+
+	bool write_entry(ResourceTag tag, Hash hash, const void *blob, size_t size, PayloadWriteFlags flags) override
 	{
 		if (!alive || mode == DatabaseMode::ReadOnly)
 			return false;
@@ -598,23 +690,74 @@ struct StreamArchive : DatabaseInterface
 		if (fwrite(str, 1, 32, file) != 32)
 			return false;
 
-		// Reserve 4 bytes for a checksum. For now, just write out 0.
-		const char reserved_checksum[4] = {};
-		if (fwrite(reserved_checksum, 1, sizeof(reserved_checksum), file) != sizeof(reserved_checksum))
-			return false;
+		if ((flags & PAYLOAD_WRITE_RAW_FOSSILIZE_DB_BIT) != 0)
+		{
+			// The raw payload already contains the header, so just dump it straight to disk.
+			if (size < sizeof(PayloadHeaderRaw))
+				return false;
+			if (fwrite(blob, 1, size, file) != size)
+				return false;
+		}
+		else if ((flags & PAYLOAD_WRITE_COMPRESS_BIT) != 0)
+		{
+			auto compressed_bound = mz_compressBound(size);
 
-		const uint8_t blob_size[4] = {
-			uint8_t((size >> 0) & 0xff),
-			uint8_t((size >> 8) & 0xff),
-			uint8_t((size >> 16) & 0xff),
-			uint8_t((size >> 24) & 0xff),
-		};
+			if (zlib_buffer_size < compressed_bound)
+			{
+				auto *new_zlib_buffer = static_cast<uint8_t *>(realloc(zlib_buffer, compressed_bound));
+				if (new_zlib_buffer)
+				{
+					zlib_buffer = new_zlib_buffer;
+					zlib_buffer_size = compressed_bound;
+				}
+				else
+				{
+					free(zlib_buffer);
+					zlib_buffer = nullptr;
+					zlib_buffer_size = 0;
+				}
+			}
 
-		if (fwrite(blob_size, 1, sizeof(blob_size), file) != sizeof(blob_size))
-			return false;
+			if (!zlib_buffer)
+				return false;
 
-		if (fwrite(blob, 1, size, file) != size)
-			return false;
+			PayloadHeader header = {};
+			PayloadHeaderRaw header_raw = {};
+			header.uncompressed_size = uint32_t(size);
+			header.format = FOSSILIZE_COMPRESSION_DEFLATE;
+
+			mz_ulong zsize = zlib_buffer_size;
+			if (mz_compress2(zlib_buffer, &zsize, static_cast<const unsigned char *>(blob), size,
+			                 (flags & PAYLOAD_WRITE_BEST_COMPRESSION_BIT) != 0 ? MZ_BEST_COMPRESSION : MZ_BEST_SPEED) != MZ_OK)
+				return false;
+
+			header.payload_size = uint32_t(zsize);
+			if ((flags & PAYLOAD_WRITE_COMPUTE_CHECKSUM_BIT) != 0)
+				header.crc = uint32_t(mz_crc32(MZ_CRC32_INIT, zlib_buffer, zsize));
+
+			convert_to_le(header_raw, header);
+			if (fwrite(&header_raw, 1, sizeof(header_raw), file) != sizeof(header_raw))
+				return false;
+
+			if (fwrite(zlib_buffer, 1, header.payload_size, file) != header.payload_size)
+				return false;
+		}
+		else
+		{
+			uint32_t crc = 0;
+			if ((flags & PAYLOAD_WRITE_COMPUTE_CHECKSUM_BIT) != 0)
+				crc = uint32_t(mz_crc32(MZ_CRC32_INIT, static_cast<const unsigned char *>(blob), size));
+
+			PayloadHeader header = { uint32_t(size), FOSSILIZE_COMPRESSION_NONE, crc, uint32_t(size) };
+			PayloadHeaderRaw raw = {};
+			convert_to_le(raw, header);
+
+			if (fwrite(&raw, 1, sizeof(raw), file) != sizeof(raw))
+				return false;
+
+			if (fwrite(blob, 1, size, file) != size)
+				return false;
+		}
 
 		// The entry is irrelevant, we're not going to read from this archive any time soon.
 		seen_blobs[tag].emplace(hash, Entry{0, 0});
@@ -652,13 +795,88 @@ struct StreamArchive : DatabaseInterface
 	struct Entry
 	{
 		uint64_t offset;
-		uint32_t size;
+		PayloadHeader header;
 	};
+
+	bool decode_payload_uncompressed(void *blob, size_t blob_size, const Entry &entry)
+	{
+		if (entry.header.uncompressed_size != blob_size || entry.header.payload_size != blob_size)
+			return false;
+
+		if (fseek(file, entry.offset, SEEK_SET) < 0)
+			return false;
+
+		size_t read_size = entry.header.payload_size;
+		if (fread(blob, 1, read_size, file) != read_size)
+			return false;
+
+		if (entry.header.crc != 0) // Verify checksum.
+		{
+			auto disk_crc = uint32_t(mz_crc32(MZ_CRC32_INIT, static_cast<unsigned char *>(blob), blob_size));
+			if (disk_crc != entry.header.crc)
+			{
+				LOGE("CRC mismatch!\n");
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	bool decode_payload_deflate(void *blob, size_t blob_size, const Entry &entry)
+	{
+		if (entry.header.uncompressed_size != blob_size)
+			return false;
+
+		if (zlib_buffer_size < entry.header.payload_size)
+		{
+			auto *new_zlib_buffer = static_cast<uint8_t *>(realloc(zlib_buffer, entry.header.payload_size));
+			if (new_zlib_buffer)
+			{
+				zlib_buffer = new_zlib_buffer;
+				zlib_buffer_size = entry.header.payload_size;
+			}
+			else
+			{
+				free(zlib_buffer);
+				zlib_buffer = nullptr;
+				zlib_buffer_size = 0;
+			}
+		}
+
+		if (!zlib_buffer)
+			return false;
+
+		if (fseek(file, entry.offset, SEEK_SET) < 0)
+			return false;
+		if (fread(zlib_buffer, 1, entry.header.payload_size, file) != entry.header.payload_size)
+			return false;
+
+		mz_ulong zsize = blob_size;
+		if (mz_uncompress(static_cast<unsigned char *>(blob), &zsize, zlib_buffer, entry.header.payload_size) != MZ_OK)
+			return false;
+		if (zsize != blob_size)
+			return false;
+
+		return true;
+	}
+
+	bool decode_payload(void *blob, size_t blob_size, const Entry &entry)
+	{
+		if (entry.header.format == FOSSILIZE_COMPRESSION_NONE)
+			return decode_payload_uncompressed(blob, blob_size, entry);
+		else if (entry.header.format == FOSSILIZE_COMPRESSION_DEFLATE)
+			return decode_payload_deflate(blob, blob_size, entry);
+		else
+			return false;
+	}
 
 	FILE *file = nullptr;
 	string path;
 	unordered_map<Hash, Entry> seen_blobs[RESOURCE_COUNT];
 	DatabaseMode mode;
+	uint8_t *zlib_buffer = nullptr;
+	size_t zlib_buffer_size = 0;
 	bool alive = false;
 };
 

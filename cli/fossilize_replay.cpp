@@ -713,7 +713,7 @@ int main(int argc, char *argv[])
 		for (auto &hash : resource_hashes)
 		{
 			size_t state_json_size = 0;
-			if (!resolver->read_entry(tag, hash, &state_json_size, nullptr))
+			if (!resolver->read_entry(tag, hash, &state_json_size, nullptr, 0))
 			{
 				LOGE("Failed to load blob from cache.\n");
 				return EXIT_FAILURE;
@@ -721,7 +721,7 @@ int main(int argc, char *argv[])
 
 			state_json.resize(state_json_size);
 
-			if (!resolver->read_entry(tag, hash, &state_json_size, state_json.data()))
+			if (!resolver->read_entry(tag, hash, &state_json_size, state_json.data(), 0))
 			{
 				LOGE("Failed to load blob from cache.\n");
 				return EXIT_FAILURE;

@@ -52,12 +52,6 @@ using namespace std;
 namespace Fossilize
 {
 #define FOSSILIZE_THROW(x) throw ::Fossilize::Exception(x)
-
-enum
-{
-	FOSSILIZE_FORMAT_VERSION = 3
-};
-
 class Hasher
 {
 public:
@@ -273,6 +267,9 @@ struct StateRecorder::Impl
 	std::condition_variable record_cv;
 	std::queue<WorkItem> record_queue;
 	std::thread worker_thread;
+
+	bool compression = false;
+	bool checksum = false;
 
 	void record_task(StateRecorder *recorder, bool looping);
 
@@ -1415,11 +1412,19 @@ void StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, D
 		if (pipeline_iter == replayed_compute_pipelines.end())
 		{
 			size_t external_state_size = 0;
-			if (!resolver || !resolver->read_entry(RESOURCE_COMPUTE_PIPELINE, pipeline, &external_state_size, nullptr))
+			if (!resolver || !resolver->read_entry(RESOURCE_COMPUTE_PIPELINE, pipeline, &external_state_size, nullptr,
+			                                       PAYLOAD_READ_NO_FLAGS))
+			{
 				FOSSILIZE_THROW("Failed to find referenced compute pipeline");
+			}
+
 			vector<uint8_t> external_state(external_state_size);
-			if (!resolver->read_entry(RESOURCE_COMPUTE_PIPELINE, pipeline, &external_state_size, external_state.data()))
+
+			if (!resolver->read_entry(RESOURCE_COMPUTE_PIPELINE, pipeline, &external_state_size, external_state.data(),
+			                          PAYLOAD_READ_NO_FLAGS))
+			{
 				FOSSILIZE_THROW("Failed to find referenced compute pipeline");
+			}
 
 			this->parse(iface, resolver, external_state.data(), external_state.size());
 			iface.sync_threads();
@@ -1446,11 +1451,19 @@ void StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, D
 		if (module_iter == replayed_shader_modules.end())
 		{
 			size_t external_state_size = 0;
-			if (!resolver || !resolver->read_entry(RESOURCE_SHADER_MODULE, pipeline, &external_state_size, nullptr))
+			if (!resolver || !resolver->read_entry(RESOURCE_SHADER_MODULE, pipeline, &external_state_size, nullptr,
+			                                       PAYLOAD_READ_NO_FLAGS))
+			{
 				FOSSILIZE_THROW("Failed to find referenced shader");
+			}
+
 			vector<uint8_t> external_state(external_state_size);
-			if (!resolver->read_entry(RESOURCE_SHADER_MODULE, pipeline, &external_state_size, external_state.data()))
+
+			if (!resolver->read_entry(RESOURCE_SHADER_MODULE, pipeline, &external_state_size, external_state.data(),
+			                          PAYLOAD_READ_NO_FLAGS))
+			{
 				FOSSILIZE_THROW("Failed to find referenced shader");
+			}
 
 			this->parse(iface, resolver, external_state.data(), external_state.size());
 			iface.sync_shader_modules();
@@ -1754,11 +1767,19 @@ VkPipelineShaderStageCreateInfo *StateReplayer::Impl::parse_stages(StateCreatorI
 			if (module_iter == replayed_shader_modules.end())
 			{
 				size_t external_state_size = 0;
-				if (!resolver || !resolver->read_entry(RESOURCE_SHADER_MODULE, module, &external_state_size, nullptr))
+				if (!resolver || !resolver->read_entry(RESOURCE_SHADER_MODULE, module, &external_state_size, nullptr,
+				                                       PAYLOAD_READ_NO_FLAGS))
+				{
 					FOSSILIZE_THROW("Failed to find referenced shader");
+				}
+
 				vector<uint8_t> external_state(external_state_size);
-				if (!resolver->read_entry(RESOURCE_SHADER_MODULE, module, &external_state_size, external_state.data()))
+
+				if (!resolver->read_entry(RESOURCE_SHADER_MODULE, module, &external_state_size, external_state.data(),
+				                          PAYLOAD_READ_NO_FLAGS))
+				{
 					FOSSILIZE_THROW("Failed to find referenced shader");
+				}
 
 				this->parse(iface, resolver, external_state.data(), external_state.size());
 				iface.sync_shader_modules();
@@ -1808,11 +1829,19 @@ void StateReplayer::Impl::parse_graphics_pipeline(StateCreatorInterface &iface, 
 		if (pipeline_iter == replayed_graphics_pipelines.end())
 		{
 			size_t external_state_size = 0;
-			if (!resolver || !resolver->read_entry(RESOURCE_GRAPHICS_PIPELINE, pipeline, &external_state_size, nullptr))
+			if (!resolver || !resolver->read_entry(RESOURCE_GRAPHICS_PIPELINE, pipeline, &external_state_size, nullptr,
+			                                       PAYLOAD_READ_NO_FLAGS))
+			{
 				FOSSILIZE_THROW("Failed to find referenced graphics pipeline");
+			}
+
 			vector<uint8_t> external_state(external_state_size);
-			if (!resolver->read_entry(RESOURCE_GRAPHICS_PIPELINE, pipeline, &external_state_size, external_state.data()))
+
+			if (!resolver->read_entry(RESOURCE_GRAPHICS_PIPELINE, pipeline, &external_state_size, external_state.data(),
+			                          PAYLOAD_READ_NO_FLAGS))
+			{
 				FOSSILIZE_THROW("Failed to find referenced graphics pipeline");
+			}
 
 			this->parse(iface, resolver, external_state.data(), external_state.size());
 			iface.sync_threads();
@@ -2041,6 +2070,16 @@ void ScratchAllocator::reset()
 ScratchAllocator &StateRecorder::get_allocator()
 {
 	return impl->allocator;
+}
+
+void StateRecorder::set_database_enable_checksum(bool enable)
+{
+	impl->checksum = enable;
+}
+
+void StateRecorder::set_database_enable_compression(bool enable)
+{
+	impl->compression = enable;
 }
 
 void StateRecorder::record_application_info(const VkApplicationInfo &info)
@@ -2586,6 +2625,12 @@ void StateRecorder::Impl::remap_render_pass_ci(VkRenderPassCreateInfo *)
 
 void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 {
+	PayloadWriteFlags payload_flags = 0;
+	if (compression)
+		payload_flags |= PAYLOAD_WRITE_COMPRESS_BIT;
+	if (checksum)
+		payload_flags |= PAYLOAD_WRITE_COMPUTE_CHECKSUM_BIT;
+
 	// Start by preparing in the thread since we need to parse an archive potentially, and that might block a little bit.
 	if (database_iface)
 	{
@@ -2607,12 +2652,12 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 		Hasher h;
 		Hashing::hash_application_feature_info(h, application_feature_hash);
 		serialize_application_info(blob);
-		database_iface->write_entry(RESOURCE_APPLICATION_INFO, h.get(), blob.data(), blob.size());
+		database_iface->write_entry(RESOURCE_APPLICATION_INFO, h.get(), blob.data(), blob.size(), payload_flags);
 	}
 
 	for (;;)
 	{
-		WorkItem record_item;
+		WorkItem record_item = {};
 		{
 			std::unique_lock<std::mutex> lock(record_lock);
 			if (record_queue.empty())
@@ -2646,7 +2691,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 					if (!database_iface->has_entry(RESOURCE_SAMPLER, hash))
 					{
 						serialize_sampler(hash, *create_info, blob);
-						database_iface->write_entry(RESOURCE_SAMPLER, hash, blob.data(), blob.size());
+						database_iface->write_entry(RESOURCE_SAMPLER, hash, blob.data(), blob.size(), payload_flags);
 					}
 				}
 				else
@@ -2672,7 +2717,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 					if (!database_iface->has_entry(RESOURCE_RENDER_PASS, hash))
 					{
 						serialize_render_pass(hash, *create_info, blob);
-						database_iface->write_entry(RESOURCE_RENDER_PASS, hash, blob.data(), blob.size());
+						database_iface->write_entry(RESOURCE_RENDER_PASS, hash, blob.data(), blob.size(), payload_flags);
 					}
 				}
 				else
@@ -2698,7 +2743,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 					if (!database_iface->has_entry(RESOURCE_SHADER_MODULE, hash))
 					{
 						serialize_shader_module(hash, *create_info, blob, allocator);
-						database_iface->write_entry(RESOURCE_SHADER_MODULE, hash, blob.data(), blob.size());
+						database_iface->write_entry(RESOURCE_SHADER_MODULE, hash, blob.data(), blob.size(), payload_flags);
 						allocator.reset();
 					}
 				}
@@ -2728,7 +2773,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 					if (!database_iface->has_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, hash))
 					{
 						serialize_descriptor_set_layout(hash, *create_info_copy, blob);
-						database_iface->write_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, hash, blob.data(), blob.size());
+						database_iface->write_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, hash, blob.data(), blob.size(), payload_flags);
 					}
 
 					// Don't need to keep copied data around, reset the allocator.
@@ -2757,7 +2802,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 					if (!database_iface->has_entry(RESOURCE_PIPELINE_LAYOUT, hash))
 					{
 						serialize_pipeline_layout(hash, *create_info_copy, blob);
-						database_iface->write_entry(RESOURCE_PIPELINE_LAYOUT, hash, blob.data(), blob.size());
+						database_iface->write_entry(RESOURCE_PIPELINE_LAYOUT, hash, blob.data(), blob.size(), payload_flags);
 					}
 
 					// Don't need to keep copied data around, reset the allocator.
@@ -2786,7 +2831,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 					if (!database_iface->has_entry(RESOURCE_GRAPHICS_PIPELINE, hash))
 					{
 						serialize_graphics_pipeline(hash, *create_info_copy, blob);
-						database_iface->write_entry(RESOURCE_GRAPHICS_PIPELINE, hash, blob.data(), blob.size());
+						database_iface->write_entry(RESOURCE_GRAPHICS_PIPELINE, hash, blob.data(), blob.size(), payload_flags);
 					}
 
 					// Don't need to keep copied data around, reset the allocator.
@@ -2815,7 +2860,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 					if (!database_iface->has_entry(RESOURCE_COMPUTE_PIPELINE, hash))
 					{
 						serialize_compute_pipeline(hash, *create_info_copy, blob);
-						database_iface->write_entry(RESOURCE_COMPUTE_PIPELINE, hash, blob.data(), blob.size());
+						database_iface->write_entry(RESOURCE_COMPUTE_PIPELINE, hash, blob.data(), blob.size(), payload_flags);
 					}
 
 					// Don't need to keep copied data around, reset the allocator.

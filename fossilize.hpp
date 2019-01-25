@@ -35,6 +35,11 @@
 
 namespace Fossilize
 {
+enum
+{
+	FOSSILIZE_FORMAT_VERSION = 4
+};
+
 class DatabaseInterface;
 
 // TODO: Do we want to get rid of this?
@@ -170,6 +175,10 @@ public:
 	StateRecorder();
 	~StateRecorder();
 	ScratchAllocator &get_allocator();
+
+	// Call before init_recording_thread.
+	void set_database_enable_compression(bool enable);
+	void set_database_enable_checksum(bool enable);
 
 	// These methods should only be called at the very beginning of the application lifetime.
 	// It will affect the hash of all create info structures.
