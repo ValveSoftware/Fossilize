@@ -228,7 +228,7 @@ struct ZipDatabase : DatabaseInterface
 	{
 		while (*str)
 		{
-			if (!isxdigit(*str))
+			if (!isxdigit(uint8_t(*str)))
 				return false;
 			str++;
 		}
@@ -704,8 +704,18 @@ struct StreamArchive : DatabaseInterface
 
 			if (zlib_buffer_size < compressed_bound)
 			{
-				zlib_buffer = static_cast<uint8_t *>(realloc(zlib_buffer, compressed_bound));
-				zlib_buffer_size = compressed_bound;
+				auto *new_zlib_buffer = static_cast<uint8_t *>(realloc(zlib_buffer, compressed_bound));
+				if (new_zlib_buffer)
+				{
+					zlib_buffer = new_zlib_buffer;
+					zlib_buffer_size = compressed_bound;
+				}
+				else
+				{
+					free(zlib_buffer);
+					zlib_buffer = nullptr;
+					zlib_buffer_size = 0;
+				}
 			}
 
 			if (!zlib_buffer)
@@ -820,8 +830,18 @@ struct StreamArchive : DatabaseInterface
 
 		if (zlib_buffer_size < entry.header.payload_size)
 		{
-			zlib_buffer = static_cast<uint8_t *>(realloc(zlib_buffer, entry.header.payload_size));
-			zlib_buffer_size = entry.header.payload_size;
+			auto *new_zlib_buffer = static_cast<uint8_t *>(realloc(zlib_buffer, entry.header.payload_size));
+			if (new_zlib_buffer)
+			{
+				zlib_buffer = new_zlib_buffer;
+				zlib_buffer_size = entry.header.payload_size;
+			}
+			else
+			{
+				free(zlib_buffer);
+				zlib_buffer = nullptr;
+				zlib_buffer_size = 0;
+			}
 		}
 
 		if (!zlib_buffer)
