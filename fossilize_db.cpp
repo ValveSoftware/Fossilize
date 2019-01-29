@@ -501,7 +501,7 @@ struct StreamArchive : DatabaseInterface
 		{
 #ifdef _WIN32
 			file = nullptr;
-			int fd = _open(path.c_str(), _O_WRONLY | _O_CREAT | _O_EXCL | _O_TRUNC | _O_SEQUENTIAL, _S_IWRITE | _S_IREAD);
+			int fd = _open(path.c_str(), _O_BINARY | _O_WRONLY | _O_CREAT | _O_EXCL | _O_TRUNC | _O_SEQUENTIAL, _S_IWRITE | _S_IREAD);
 			if (fd >= 0)
 				file = _fdopen(fd, "wb");
 #else
@@ -876,6 +876,16 @@ struct StreamArchive : DatabaseInterface
 			return false;
 		if (fread(zlib_buffer, 1, entry.header.payload_size, file) != entry.header.payload_size)
 			return false;
+
+		if (entry.header.crc != 0) // Verify checksum.
+		{
+			auto disk_crc = uint32_t(mz_crc32(MZ_CRC32_INIT, zlib_buffer, entry.header.payload_size));
+			if (disk_crc != entry.header.crc)
+			{
+				LOGE("CRC mismatch!\n");
+				return false;
+			}
+		}
 
 		mz_ulong zsize = blob_size;
 		if (mz_uncompress(static_cast<unsigned char *>(blob), &zsize, zlib_buffer, entry.header.payload_size) != MZ_OK)
