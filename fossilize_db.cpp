@@ -28,6 +28,7 @@
 #include <unordered_set>
 #include <algorithm>
 #include <memory>
+#include <mutex>
 #include <dirent.h>
 
 using namespace std;
@@ -39,6 +40,8 @@ struct DumbDirectoryDatabase : DatabaseInterface
 	DumbDirectoryDatabase(const string &base, DatabaseMode mode_)
 		: base_directory(base), mode(mode_)
 	{
+		if (mode == DatabaseMode::ExclusiveOverWrite)
+			mode = DatabaseMode::OverWrite;
 	}
 
 	bool prepare() override
@@ -206,6 +209,8 @@ struct ZipDatabase : DatabaseInterface
 	ZipDatabase(const string &path_, DatabaseMode mode_)
 		: path(path_), mode(mode_)
 	{
+		if (mode == DatabaseMode::ExclusiveOverWrite)
+			mode = DatabaseMode::OverWrite;
 		mz_zip_zero_struct(&mz);
 	}
 
@@ -484,12 +489,16 @@ struct StreamArchive : DatabaseInterface
 		case DatabaseMode::OverWrite:
 			file = fopen(path.c_str(), "wb");
 			break;
+
+		case DatabaseMode::ExclusiveOverWrite:
+			file = fopen(path.c_str(), "wbx");
+			break;
 		}
 
 		if (!file)
 			return false;
 
-		if (mode != DatabaseMode::OverWrite)
+		if (mode != DatabaseMode::OverWrite && mode != DatabaseMode::ExclusiveOverWrite)
 		{
 			// Scan through the archive and get the list of files.
 			fseek(file, 0, SEEK_END);
@@ -895,6 +904,153 @@ DatabaseInterface *create_database(const char *path, DatabaseMode mode)
 		return create_zip_archive_database(path, mode);
 	else
 		return create_dumb_folder_database(path, mode);
+}
+
+struct ConcurrentDatabase : DatabaseInterface
+{
+	explicit ConcurrentDatabase(const char *base_path_)
+		: base_path(base_path_)
+	{
+		std::string readonly_path = base_path + ".foz";
+		readonly_interface = create_stream_archive_database(readonly_path.c_str(), DatabaseMode::ReadOnly);
+	}
+
+	~ConcurrentDatabase()
+	{
+		delete readonly_interface;
+		delete writeonly_interface;
+	}
+
+	bool prepare() override
+	{
+		std::lock_guard<std::mutex> holder(lock);
+		if (!has_prepared_readonly)
+		{
+			// It's okay if the database doesn't exist.
+			if (readonly_interface && !readonly_interface->prepare())
+			{
+				delete readonly_interface;
+				readonly_interface = nullptr;
+			}
+		}
+
+		has_prepared_readonly = true;
+		return true;
+	}
+
+	bool read_entry(ResourceTag, Hash, size_t *, void *, PayloadReadFlags) override
+	{
+		// This method is kind of meaningless for this database. We're always in a "write" mode.
+		return false;
+	}
+
+	bool write_entry(ResourceTag tag, Hash hash, const void *blob, size_t blob_size, PayloadWriteFlags flags) override
+	{
+		// All threads must have called prepare and synchronized readonly_interface from that,
+		// and from here on out readonly_interface is purely read-only, no need to lock just to check.
+		if (readonly_interface && readonly_interface->has_entry(tag, hash))
+			return true;
+
+		std::lock_guard<std::mutex> holder(lock);
+
+		if (writeonly_interface && writeonly_interface->has_entry(tag, hash))
+			return true;
+
+		if (need_writeonly_database)
+		{
+			// Lazily create a new database. Open the database file exclusively to work concurrently with other processes.
+			// Don't try forever.
+			for (unsigned index = 1; index < 256 && !writeonly_interface; index++)
+			{
+				std::string write_path = base_path + "." + std::to_string(index) + ".foz";
+				writeonly_interface = create_stream_archive_database(write_path.c_str(), DatabaseMode::ExclusiveOverWrite);
+				if (!writeonly_interface->prepare())
+				{
+					delete writeonly_interface;
+					writeonly_interface = nullptr;
+				}
+			}
+
+			need_writeonly_database = false;
+		}
+
+		if (writeonly_interface)
+			return writeonly_interface->write_entry(tag, hash, blob, blob_size, flags);
+		else
+			return false;
+	}
+
+	// Checks if entry already exists in database, i.e. no need to serialize.
+	bool has_entry(ResourceTag tag, Hash hash) override
+	{
+		// All threads must have called prepare and synchronized readonly_interface from that,
+		// and from here on out readonly_interface is purely read-only, no need to lock just to check.
+		if (readonly_interface && readonly_interface->has_entry(tag, hash))
+			return true;
+
+		std::lock_guard<std::mutex> holder(lock);
+		return writeonly_interface && writeonly_interface->has_entry(tag, hash);
+	}
+
+	bool get_hash_list_for_resource_tag(ResourceTag, size_t *, Hash *) override
+	{
+		// This method is kind of meaningless for this database. We're always in a "write" mode.
+		return false;
+	}
+
+	std::string base_path;
+	std::mutex lock;
+	DatabaseInterface *readonly_interface = nullptr;
+	DatabaseInterface *writeonly_interface = nullptr;
+	bool has_prepared_readonly = false;
+	bool need_writeonly_database = true;
+};
+
+DatabaseInterface *create_concurrent_database(const char *base_path)
+{
+	return new ConcurrentDatabase(base_path);
+}
+
+bool merge_concurrent_databases(const char *append_archive, const char * const *source_paths, size_t num_source_paths)
+{
+	auto append_db = std::unique_ptr<DatabaseInterface>(create_stream_archive_database(append_archive, DatabaseMode::Append));
+	if (!append_db->prepare())
+		return false;
+
+	for (size_t source = 0; source < num_source_paths; source++)
+	{
+		const char *path = source_paths[source];
+		auto source_db = std::unique_ptr<DatabaseInterface>(create_stream_archive_database(path, DatabaseMode::ReadOnly));
+		if (!source_db->prepare())
+			return false;
+
+		for (unsigned i = 0; i < RESOURCE_COUNT; i++)
+		{
+			auto tag = static_cast<ResourceTag>(i);
+
+			size_t hash_count = 0;
+			if (!source_db->get_hash_list_for_resource_tag(tag, &hash_count, nullptr))
+				return false;
+			std::vector<Hash> hashes(hash_count);
+			if (!source_db->get_hash_list_for_resource_tag(tag, &hash_count, hashes.data()))
+				return false;
+
+			for (auto &hash : hashes)
+			{
+				size_t blob_size = 0;
+				if (!source_db->read_entry(tag, hash, &blob_size, nullptr, PAYLOAD_READ_RAW_FOSSILIZE_DB_BIT))
+					return false;
+				std::vector<uint8_t> blob(blob_size);
+				if (!source_db->read_entry(tag, hash, &blob_size, blob.data(), PAYLOAD_READ_RAW_FOSSILIZE_DB_BIT))
+					return false;
+
+				if (!append_db->write_entry(tag, hash, blob.data(), blob.size(), PAYLOAD_WRITE_RAW_FOSSILIZE_DB_BIT))
+					return false;
+			}
+		}
+	}
+
+	return true;
 }
 
 }

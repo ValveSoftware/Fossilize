@@ -21,6 +21,9 @@
  */
 
 #include "instance.hpp"
+#include <mutex>
+#include <unordered_map>
+#include <memory>
 
 namespace Fossilize
 {
@@ -52,6 +55,49 @@ void Instance::init(VkInstance instance_, const VkApplicationInfo *pApp, VkLayer
 			pAppInfo->pEngineName = pEngineName;
 		}
 	}
+}
+
+// Make this global to the process so we can share pipeline recording across VkInstances as well in-case an application is using external memory sharing techniques, (VR?).
+// We only access this data structure on device creation, so performance is not a real concern.
+static std::mutex recorderLock;
+
+struct Recorder
+{
+	std::unique_ptr<DatabaseInterface> interface;
+	std::unique_ptr<StateRecorder> recorder;
+};
+static std::unordered_map<Hash, Recorder> globalRecorders;
+
+StateRecorder *Instance::getStateRecorderForDevice(const char *basePath, const VkApplicationInfo *appInfo, const VkPhysicalDeviceFeatures2 *features)
+{
+	auto appInfoFeatureHash = Hashing::compute_application_feature_hash(appInfo, features);
+	auto hash = Hashing::compute_combined_application_feature_hash(appInfoFeatureHash);
+
+	std::lock_guard<std::mutex> lock(recorderLock);
+	auto itr = globalRecorders.find(hash);
+	if (itr != end(globalRecorders))
+		return itr->second.recorder.get();
+
+	auto &entry = globalRecorders[hash];
+
+	std::string path = basePath;
+	char hashString[17];
+	sprintf(hashString, "%016llx", static_cast<unsigned long long>(hash));
+	if (!path.empty())
+		path += ".";
+	path += hashString;
+	entry.interface.reset(create_concurrent_database(path.c_str()));
+
+	auto *recorder = new StateRecorder;
+	entry.recorder.reset(recorder);
+	recorder->set_database_enable_compression(true);
+	recorder->set_database_enable_checksum(true);
+	if (appInfo)
+		recorder->record_application_info(*appInfo);
+	if (features)
+		recorder->record_physical_device_features(*features);
+	recorder->init_recording_thread(entry.interface.get());
+	return recorder;
 }
 
 }

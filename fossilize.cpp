@@ -332,6 +332,13 @@ static void hash_application_feature_info(Hasher &hasher, const StateRecorderApp
 	hasher.u64(base_hash.physical_device_features_hash);
 }
 
+Hash compute_combined_application_feature_hash(const StateRecorderApplicationFeatureHash &base_hash)
+{
+	Hasher h;
+	hash_application_feature_info(h, base_hash);
+	return h.get();
+}
+
 Hash compute_hash_sampler(const StateRecorderApplicationFeatureHash &base_hash, const VkSamplerCreateInfo &sampler)
 {
 	Hasher h;
@@ -1975,17 +1982,11 @@ void StateReplayer::Impl::parse(StateCreatorInterface &iface, DatabaseInterface 
 }
 
 template <typename T>
-T *StateReplayer::Impl::copy(const T *src, size_t count)
-{
-	auto *new_data = allocator.allocate_n<T>(count);
-	if (new_data)
-		std::copy(src, src + count, new_data);
-	return new_data;
-}
-
-template <typename T>
 T *StateRecorder::Impl::copy(const T *src, size_t count, ScratchAllocator &alloc)
 {
+	if (!count)
+		return nullptr;
+
 	auto *new_data = alloc.allocate_n<T>(count);
 	if (new_data)
 		std::copy(src, src + count, new_data);
@@ -2463,6 +2464,15 @@ VkGraphicsPipelineCreateInfo *StateRecorder::Impl::copy_graphics_pipeline(const 
 		auto &vs = const_cast<VkPipelineVertexInputStateCreateInfo &>(*info->pVertexInputState);
 		vs.pVertexAttributeDescriptions = copy(vs.pVertexAttributeDescriptions, vs.vertexAttributeDescriptionCount, alloc);
 		vs.pVertexBindingDescriptions = copy(vs.pVertexBindingDescriptions, vs.vertexBindingDescriptionCount, alloc);
+	}
+
+	if (info->pViewportState)
+	{
+		auto &vp = const_cast<VkPipelineViewportStateCreateInfo &>(*info->pViewportState);
+		if (vp.pViewports)
+			vp.pViewports = copy(vp.pViewports, vp.viewportCount, alloc);
+		if (vp.pScissors)
+			vp.pScissors = copy(vp.pScissors, vp.scissorCount, alloc);
 	}
 
 	if (info->pMultisampleState)

@@ -621,8 +621,96 @@ static bool test_database()
 	return true;
 }
 
+static bool file_exists(const char *path)
+{
+	FILE *file = fopen(path, "rb");
+	if (file)
+	{
+		fclose(file);
+		return true;
+	}
+	else
+		return false;
+}
+
+static bool test_concurrent_database()
+{
+	// Test a normal flow. First time we don't have the read-only database.
+	// Next time we have one.
+	for (unsigned iter = 0; iter < 2; iter++)
+	{
+		if (iter == 0)
+			remove(".__test_concurrent.foz");
+		remove(".__test_concurrent.1.foz");
+		remove(".__test_concurrent.2.foz");
+		remove(".__test_concurrent.3.foz");
+
+		static const uint8_t blob[] = {1, 2, 3};
+
+		{
+			{
+				auto db0 = std::unique_ptr<DatabaseInterface>(create_concurrent_database(".__test_concurrent"));
+				if (!db0->prepare())
+					return false;
+
+				if (!db0->write_entry(RESOURCE_SAMPLER, 2, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
+					return false;
+				if (!db0->write_entry(RESOURCE_SAMPLER, 3, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
+					return false;
+			}
+
+			{
+				auto db1 = std::unique_ptr<DatabaseInterface>(create_concurrent_database(".__test_concurrent"));
+				if (!db1->prepare())
+					return false;
+
+				if (!db1->write_entry(RESOURCE_SAMPLER, 3, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
+					return false;
+				if (!db1->write_entry(RESOURCE_SAMPLER, 4, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
+					return false;
+			}
+
+			{
+				auto db2 = std::unique_ptr<DatabaseInterface>(create_concurrent_database(".__test_concurrent"));
+				if (!db2->prepare())
+					return false;
+
+				if (!db2->write_entry(RESOURCE_SAMPLER, 1, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
+					return false;
+				if (!db2->write_entry(RESOURCE_SAMPLER, 1, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
+					return false;
+			}
+		}
+
+		bool expected_exist = iter == 0;
+
+		if (expected_exist != file_exists(".__test_concurrent.1.foz"))
+			return false;
+		if (expected_exist != file_exists(".__test_concurrent.2.foz"))
+			return false;
+		if (expected_exist != file_exists(".__test_concurrent.3.foz"))
+			return false;
+
+		static const char *append_paths[] = {
+			".__test_concurrent.1.foz",
+			".__test_concurrent.2.foz",
+			".__test_concurrent.3.foz",
+		};
+
+		if (iter == 0)
+		{
+			if (!merge_concurrent_databases(".__test_concurrent.foz", append_paths, 3))
+				return false;
+		}
+	}
+
+	return true;
+}
+
 int main()
 {
+	if (!test_concurrent_database())
+		return EXIT_FAILURE;
 	if (!test_database())
 		return EXIT_FAILURE;
 

@@ -243,6 +243,8 @@ namespace Hashing
 StateRecorderApplicationFeatureHash compute_application_feature_hash(const VkApplicationInfo *application_info,
                                                                      const VkPhysicalDeviceFeatures2 *physical_device_features);
 
+Hash compute_combined_application_feature_hash(const StateRecorderApplicationFeatureHash &base_hash);
+
 // Shader modules, samplers and render passes are standalone modules, so they can be hashed in isolation.
 Hash compute_hash_shader_module(const StateRecorderApplicationFeatureHash &base_hash, const VkShaderModuleCreateInfo &create_info);
 Hash compute_hash_sampler(const StateRecorderApplicationFeatureHash &base_hash, const VkSamplerCreateInfo &create_info);
