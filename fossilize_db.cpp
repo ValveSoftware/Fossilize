@@ -922,14 +922,16 @@ struct ConcurrentDatabase : DatabaseInterface
 		std::lock_guard<std::mutex> holder(lock);
 		if (!has_prepared_readonly)
 		{
-			if (readonly_interface)
-				readonly_prepare_status = readonly_interface->prepare();
-			else
-				readonly_prepare_status = true; // It's okay if the read-only database does not exist.
+			// It's okay if the database doesn't exist.
+			if (readonly_interface && !readonly_interface->prepare())
+			{
+				delete readonly_interface;
+				readonly_interface = nullptr;
+			}
 		}
 
 		has_prepared_readonly = true;
-		return readonly_prepare_status;
+		return true;
 	}
 
 	bool read_entry(ResourceTag, Hash, size_t *, void *, PayloadReadFlags) override
@@ -948,7 +950,7 @@ struct ConcurrentDatabase : DatabaseInterface
 		std::lock_guard<std::mutex> holder(lock);
 
 		if (writeonly_interface && writeonly_interface->has_entry(tag, hash))
-			return false;
+			return true;
 
 		if (need_writeonly_database)
 		{
@@ -997,13 +999,54 @@ struct ConcurrentDatabase : DatabaseInterface
 	DatabaseInterface *readonly_interface = nullptr;
 	DatabaseInterface *writeonly_interface = nullptr;
 	bool has_prepared_readonly = false;
-	bool readonly_prepare_status = false;
 	bool need_writeonly_database = true;
 };
 
 DatabaseInterface *create_concurrent_database(const char *base_path)
 {
 	return new ConcurrentDatabase(base_path);
+}
+
+bool merge_concurrent_databases(const char *append_archive, const char * const *source_paths, size_t num_source_paths)
+{
+	auto append_db = std::unique_ptr<DatabaseInterface>(create_stream_archive_database(append_archive, DatabaseMode::Append));
+	if (!append_db->prepare())
+		return false;
+
+	for (size_t source = 0; source < num_source_paths; source++)
+	{
+		const char *path = source_paths[source];
+		auto source_db = std::unique_ptr<DatabaseInterface>(create_stream_archive_database(path, DatabaseMode::ReadOnly));
+		if (!source_db->prepare())
+			return false;
+
+		for (unsigned i = 0; i < RESOURCE_COUNT; i++)
+		{
+			auto tag = static_cast<ResourceTag>(i);
+
+			size_t hash_count = 0;
+			if (!source_db->get_hash_list_for_resource_tag(tag, &hash_count, nullptr))
+				return false;
+			std::vector<Hash> hashes(hash_count);
+			if (!source_db->get_hash_list_for_resource_tag(tag, &hash_count, hashes.data()))
+				return false;
+
+			for (auto &hash : hashes)
+			{
+				size_t blob_size = 0;
+				if (!source_db->read_entry(tag, hash, &blob_size, nullptr, PAYLOAD_READ_RAW_FOSSILIZE_DB_BIT))
+					return false;
+				std::vector<uint8_t> blob(blob_size);
+				if (!source_db->read_entry(tag, hash, &blob_size, blob.data(), PAYLOAD_READ_RAW_FOSSILIZE_DB_BIT))
+					return false;
+
+				if (!append_db->write_entry(tag, hash, blob.data(), blob.size(), PAYLOAD_WRITE_RAW_FOSSILIZE_DB_BIT))
+					return false;
+			}
+		}
+	}
+
+	return true;
 }
 
 }

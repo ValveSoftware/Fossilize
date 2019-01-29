@@ -124,4 +124,7 @@ DatabaseInterface *create_database(const char *path, DatabaseMode mode);
 // database will be created at base_path.%d.foz, where %d is a unique index. Exclusive file open mechanisms are used
 // to ensure correctness.
 DatabaseInterface *create_concurrent_database(const char *base_path);
+
+// Merges stream archives found in source_paths into append_database_path.
+bool merge_concurrent_databases(const char *append_database_path, const char * const *source_paths, size_t num_source_paths);
 }
