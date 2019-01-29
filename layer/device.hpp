@@ -23,13 +23,12 @@
 #pragma once
 
 #include "dispatch_helper.hpp"
-#include "fossilize.hpp"
-#include "fossilize_db.hpp"
 #include <string>
 
 namespace Fossilize
 {
 class Instance;
+class StateRecorder;
 class Device
 {
 public:
@@ -45,7 +44,7 @@ public:
 
 	StateRecorder &getRecorder()
 	{
-		return recorder;
+		return *recorder;
 	}
 
 	VkDevice getDevice() const
@@ -59,8 +58,7 @@ private:
 	VkLayerInstanceDispatchTable *pInstanceTable = nullptr;
 	VkLayerDispatchTable *pTable = nullptr;
 
-	std::unique_ptr<DatabaseInterface> iface;
-	StateRecorder recorder;
+	StateRecorder *recorder = nullptr;
 
 #ifdef ANDROID
 	std::string serializationPath = "/sdcard/";

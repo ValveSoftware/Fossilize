@@ -25,6 +25,7 @@
 #include "vulkan.h"
 #include "dispatch_helper.hpp"
 #include "fossilize.hpp"
+#include "fossilize_db.hpp"
 
 namespace Fossilize
 {
@@ -51,6 +52,8 @@ public:
 	{
 		return pAppInfo;
 	}
+
+	static StateRecorder *getStateRecorderForDevice(const char *basePath, const VkApplicationInfo *appInfo, const VkPhysicalDeviceFeatures2 *features);
 
 private:
 	ScratchAllocator alloc;

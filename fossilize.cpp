@@ -332,6 +332,13 @@ static void hash_application_feature_info(Hasher &hasher, const StateRecorderApp
 	hasher.u64(base_hash.physical_device_features_hash);
 }
 
+Hash compute_combined_application_feature_hash(const StateRecorderApplicationFeatureHash &base_hash)
+{
+	Hasher h;
+	hash_application_feature_info(h, base_hash);
+	return h.get();
+}
+
 Hash compute_hash_sampler(const StateRecorderApplicationFeatureHash &base_hash, const VkSamplerCreateInfo &sampler)
 {
 	Hasher h;
