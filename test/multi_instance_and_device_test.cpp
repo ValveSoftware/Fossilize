@@ -23,6 +23,12 @@
 #include "device.hpp"
 #include <thread>
 
+#ifdef __linux__
+#include <sys/types.h>
+#include <unistd.h>
+#include <signal.h>
+#endif
+
 using namespace Fossilize;
 
 void test_thread(const VkApplicationInfo *info, const VkPhysicalDeviceFeatures2 *features)
@@ -51,6 +57,16 @@ void test_thread(const VkApplicationInfo *info, const VkPhysicalDeviceFeatures2 
 
 int main()
 {
+#ifdef __linux__
+	signal(SIGCHLD, SIG_IGN);
+	// Stress multi-process.
+	for (unsigned i = 0; i < 3; i++)
+	{
+		if (fork() <= 0)
+			break;
+	}
+#endif
+
 	// A simple test which creates multiple devices and instances. We should verify that this works as expected.
 	std::thread threads[64];
 	VkPhysicalDeviceFeatures2 features = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
