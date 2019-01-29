@@ -20,6 +20,13 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <io.h>
+#include <fcntl.h>
+#endif
+
 #include "fossilize_db.hpp"
 #include "path.hpp"
 #include "layer/utils.hpp"
@@ -491,8 +498,17 @@ struct StreamArchive : DatabaseInterface
 			break;
 
 		case DatabaseMode::ExclusiveOverWrite:
+		{
+#ifdef _WIN32
+			file = nullptr;
+			int fd = _open(path.c_str(), _O_WRONLY | _O_CREAT | _O_EXCL | _O_TRUNC | _O_SEQUENTIAL, _S_IWRITE | _S_IREAD);
+			if (fd >= 0)
+				file = _fdopen(fd, "wb");
+#else
 			file = fopen(path.c_str(), "wbx");
+#endif
 			break;
+		}
 		}
 
 		if (!file)
