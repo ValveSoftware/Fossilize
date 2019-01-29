@@ -40,6 +40,8 @@ struct DumbDirectoryDatabase : DatabaseInterface
 	DumbDirectoryDatabase(const string &base, DatabaseMode mode_)
 		: base_directory(base), mode(mode_)
 	{
+		if (mode == DatabaseMode::ExclusiveOverWrite)
+			mode = DatabaseMode::OverWrite;
 	}
 
 	bool prepare() override
@@ -207,6 +209,8 @@ struct ZipDatabase : DatabaseInterface
 	ZipDatabase(const string &path_, DatabaseMode mode_)
 		: path(path_), mode(mode_)
 	{
+		if (mode == DatabaseMode::ExclusiveOverWrite)
+			mode = DatabaseMode::OverWrite;
 		mz_zip_zero_struct(&mz);
 	}
 
@@ -494,7 +498,7 @@ struct StreamArchive : DatabaseInterface
 		if (!file)
 			return false;
 
-		if (mode != DatabaseMode::OverWrite)
+		if (mode != DatabaseMode::OverWrite && mode != DatabaseMode::ExclusiveOverWrite)
 		{
 			// Scan through the archive and get the list of files.
 			fseek(file, 0, SEEK_END);

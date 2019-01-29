@@ -109,6 +109,8 @@ enum class DatabaseMode
 	Append,
 	ReadOnly,
 	OverWrite,
+	// In the stream database backend, this will ensure that the database is exclusively created.
+	// For other backends, this is an alias for OverWrite
 	ExclusiveOverWrite
 };
 
