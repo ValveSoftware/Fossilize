@@ -621,8 +621,82 @@ static bool test_database()
 	return true;
 }
 
+static bool file_exists(const char *path)
+{
+	FILE *file = fopen(path, "rb");
+	if (file)
+	{
+		fclose(file);
+		return true;
+	}
+	else
+		return false;
+}
+
+static bool test_concurrent_database()
+{
+	remove(".__test_concurrent.foz");
+	remove(".__test_concurrent.1.foz");
+	remove(".__test_concurrent.2.foz");
+	remove(".__test_concurrent.3.foz");
+
+	static const uint8_t blob[] = { 1, 2, 3 };
+
+	{
+		auto db = std::unique_ptr<DatabaseInterface>(create_stream_archive_database(".__test_concurrent.foz", DatabaseMode::OverWrite));
+		if (!db->prepare())
+			return false;
+
+		if (!db->write_entry(RESOURCE_SAMPLER, 1, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
+			return false;
+	}
+
+	{
+		auto db0 = std::unique_ptr<DatabaseInterface>(create_concurrent_database(".__test_concurrent"));
+		if (!db0->prepare())
+			return false;
+
+		// This should create a new file.
+		if (!db0->write_entry(RESOURCE_SAMPLER, 2, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
+			return false;
+		if (!db0->write_entry(RESOURCE_SAMPLER, 3, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
+			return false;
+
+		auto db1 = std::unique_ptr<DatabaseInterface>(create_concurrent_database(".__test_concurrent"));
+		if (!db1->prepare())
+			return false;
+
+		// This should also create a new file.
+		if (!db1->write_entry(RESOURCE_SAMPLER, 3, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
+			return false;
+		if (!db1->write_entry(RESOURCE_SAMPLER, 4, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
+			return false;
+
+		auto db2 = std::unique_ptr<DatabaseInterface>(create_concurrent_database(".__test_concurrent"));
+		if (!db2->prepare())
+			return false;
+
+		// This should not create a new file since we've seen it in the read-only DB.
+		if (!db2->write_entry(RESOURCE_SAMPLER, 1, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
+			return false;
+		if (!db2->write_entry(RESOURCE_SAMPLER, 1, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
+			return false;
+	}
+
+	if (!file_exists(".__test_concurrent.1.foz"))
+		return false;
+	if (!file_exists(".__test_concurrent.2.foz"))
+		return false;
+	if (file_exists(".__test_concurrent.3.foz"))
+		return false;
+
+	return true;
+}
+
 int main()
 {
+	if (!test_concurrent_database())
+		return EXIT_FAILURE;
 	if (!test_database())
 		return EXIT_FAILURE;
 

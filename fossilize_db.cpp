@@ -28,6 +28,7 @@
 #include <unordered_set>
 #include <algorithm>
 #include <memory>
+#include <mutex>
 #include <dirent.h>
 
 using namespace std;
@@ -484,6 +485,10 @@ struct StreamArchive : DatabaseInterface
 		case DatabaseMode::OverWrite:
 			file = fopen(path.c_str(), "wb");
 			break;
+
+		case DatabaseMode::ExclusiveOverWrite:
+			file = fopen(path.c_str(), "wbx");
+			break;
 		}
 
 		if (!file)
@@ -895,6 +900,110 @@ DatabaseInterface *create_database(const char *path, DatabaseMode mode)
 		return create_zip_archive_database(path, mode);
 	else
 		return create_dumb_folder_database(path, mode);
+}
+
+struct ConcurrentDatabase : DatabaseInterface
+{
+	explicit ConcurrentDatabase(const char *base_path_)
+		: base_path(base_path_)
+	{
+		std::string readonly_path = base_path + ".foz";
+		readonly_interface = create_stream_archive_database(readonly_path.c_str(), DatabaseMode::ReadOnly);
+	}
+
+	~ConcurrentDatabase()
+	{
+		delete readonly_interface;
+		delete writeonly_interface;
+	}
+
+	bool prepare() override
+	{
+		std::lock_guard<std::mutex> holder(lock);
+		if (!has_prepared_readonly)
+		{
+			if (readonly_interface)
+				readonly_prepare_status = readonly_interface->prepare();
+			else
+				readonly_prepare_status = true; // It's okay if the read-only database does not exist.
+		}
+
+		has_prepared_readonly = true;
+		return readonly_prepare_status;
+	}
+
+	bool read_entry(ResourceTag, Hash, size_t *, void *, PayloadReadFlags) override
+	{
+		// This method is kind of meaningless for this database. We're always in a "write" mode.
+		return false;
+	}
+
+	bool write_entry(ResourceTag tag, Hash hash, const void *blob, size_t blob_size, PayloadWriteFlags flags) override
+	{
+		// All threads must have called prepare and synchronized readonly_interface from that,
+		// and from here on out readonly_interface is purely read-only, no need to lock just to check.
+		if (readonly_interface && readonly_interface->has_entry(tag, hash))
+			return true;
+
+		std::lock_guard<std::mutex> holder(lock);
+
+		if (writeonly_interface && writeonly_interface->has_entry(tag, hash))
+			return false;
+
+		if (need_writeonly_database)
+		{
+			// Lazily create a new database. Open the database file exclusively to work concurrently with other processes.
+			// Don't try forever.
+			for (unsigned index = 1; index < 256 && !writeonly_interface; index++)
+			{
+				std::string write_path = base_path + "." + std::to_string(index) + ".foz";
+				writeonly_interface = create_stream_archive_database(write_path.c_str(), DatabaseMode::ExclusiveOverWrite);
+				if (!writeonly_interface->prepare())
+				{
+					delete writeonly_interface;
+					writeonly_interface = nullptr;
+				}
+			}
+
+			need_writeonly_database = false;
+		}
+
+		if (writeonly_interface)
+			return writeonly_interface->write_entry(tag, hash, blob, blob_size, flags);
+		else
+			return false;
+	}
+
+	// Checks if entry already exists in database, i.e. no need to serialize.
+	bool has_entry(ResourceTag tag, Hash hash) override
+	{
+		// All threads must have called prepare and synchronized readonly_interface from that,
+		// and from here on out readonly_interface is purely read-only, no need to lock just to check.
+		if (readonly_interface && readonly_interface->has_entry(tag, hash))
+			return true;
+
+		std::lock_guard<std::mutex> holder(lock);
+		return writeonly_interface && writeonly_interface->has_entry(tag, hash);
+	}
+
+	bool get_hash_list_for_resource_tag(ResourceTag, size_t *, Hash *) override
+	{
+		// This method is kind of meaningless for this database. We're always in a "write" mode.
+		return false;
+	}
+
+	std::string base_path;
+	std::mutex lock;
+	DatabaseInterface *readonly_interface = nullptr;
+	DatabaseInterface *writeonly_interface = nullptr;
+	bool has_prepared_readonly = false;
+	bool readonly_prepare_status = false;
+	bool need_writeonly_database = true;
+};
+
+DatabaseInterface *create_concurrent_database(const char *base_path)
+{
+	return new ConcurrentDatabase(base_path);
 }
 
 }

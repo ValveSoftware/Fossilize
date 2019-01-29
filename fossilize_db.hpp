@@ -108,11 +108,20 @@ enum class DatabaseMode
 {
 	Append,
 	ReadOnly,
-	OverWrite
+	OverWrite,
+	ExclusiveOverWrite
 };
 
 DatabaseInterface *create_dumb_folder_database(const char *directory_path, DatabaseMode mode);
 DatabaseInterface *create_zip_archive_database(const char *path, DatabaseMode mode);
 DatabaseInterface *create_stream_archive_database(const char *path, DatabaseMode mode);
 DatabaseInterface *create_database(const char *path, DatabaseMode mode);
+
+// This is a special kind of database which can be used from multiple threads and splits out the database
+// into a read-only part and a write-only part, which is unique for each instance of this database.
+// base_path.foz is the read-only database. If it does not exist, it will not be written to either.
+// If there are any writes to the database which do not already exist in the read-only database, a new
+// database will be created at base_path.%d.foz, where %d is a unique index. Exclusive file open mechanisms are used
+// to ensure correctness.
+DatabaseInterface *create_concurrent_database(const char *base_path);
 }
