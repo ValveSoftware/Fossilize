@@ -83,7 +83,8 @@ StateRecorder *Instance::getStateRecorderForDevice(const char *basePath, const V
 	std::string path = basePath;
 	char hashString[17];
 	sprintf(hashString, "%016llx", static_cast<unsigned long long>(hash));
-	path += ".";
+	if (!path.empty())
+		path += ".";
 	path += hashString;
 	entry.interface.reset(create_concurrent_database(path.c_str()));
 
