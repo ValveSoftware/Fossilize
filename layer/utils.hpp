@@ -28,23 +28,6 @@
 #include <android/log.h>
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "Fossilize", __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "Fossilize", __VA_ARGS__)
-#elif _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#define LOGI(...) do { \
-	fprintf(stderr, "Fossilize INFO: " __VA_ARGS__); \
-	fflush(stderr); \
-	char debugString[1024]; \
-	sprintf(debugString, "Fossilize INFO: " __VA_ARGS__); \
-	OutputDebugStringA(debugString); \
-} while(0)
-#define LOGE(...) do { \
-	fprintf(stderr, "Fossilize ERROR: " __VA_ARGS__); \
-	fflush(stderr); \
-	char debugString[1024]; \
-	sprintf(debugString, "Fossilize ERROR: " __VA_ARGS__); \
-	OutputDebugStringA(debugString); \
-} while(0)
 #else
 #include <stdio.h>
 #define LOGI(...) fprintf(stderr, "Fossilize INFO: " __VA_ARGS__)

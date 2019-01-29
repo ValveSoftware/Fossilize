@@ -648,32 +648,38 @@ static bool test_concurrent_database()
 		static const uint8_t blob[] = {1, 2, 3};
 
 		{
-			auto db0 = std::unique_ptr<DatabaseInterface>(create_concurrent_database(".__test_concurrent"));
-			if (!db0->prepare())
-				return false;
+			{
+				auto db0 = std::unique_ptr<DatabaseInterface>(create_concurrent_database(".__test_concurrent"));
+				if (!db0->prepare())
+					return false;
 
-			if (!db0->write_entry(RESOURCE_SAMPLER, 2, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
-				return false;
-			if (!db0->write_entry(RESOURCE_SAMPLER, 3, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
-				return false;
+				if (!db0->write_entry(RESOURCE_SAMPLER, 2, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
+					return false;
+				if (!db0->write_entry(RESOURCE_SAMPLER, 3, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
+					return false;
+			}
 
-			auto db1 = std::unique_ptr<DatabaseInterface>(create_concurrent_database(".__test_concurrent"));
-			if (!db1->prepare())
-				return false;
+			{
+				auto db1 = std::unique_ptr<DatabaseInterface>(create_concurrent_database(".__test_concurrent"));
+				if (!db1->prepare())
+					return false;
 
-			if (!db1->write_entry(RESOURCE_SAMPLER, 3, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
-				return false;
-			if (!db1->write_entry(RESOURCE_SAMPLER, 4, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
-				return false;
+				if (!db1->write_entry(RESOURCE_SAMPLER, 3, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
+					return false;
+				if (!db1->write_entry(RESOURCE_SAMPLER, 4, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
+					return false;
+			}
 
-			auto db2 = std::unique_ptr<DatabaseInterface>(create_concurrent_database(".__test_concurrent"));
-			if (!db2->prepare())
-				return false;
+			{
+				auto db2 = std::unique_ptr<DatabaseInterface>(create_concurrent_database(".__test_concurrent"));
+				if (!db2->prepare())
+					return false;
 
-			if (!db2->write_entry(RESOURCE_SAMPLER, 1, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
-				return false;
-			if (!db2->write_entry(RESOURCE_SAMPLER, 1, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
-				return false;
+				if (!db2->write_entry(RESOURCE_SAMPLER, 1, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
+					return false;
+				if (!db2->write_entry(RESOURCE_SAMPLER, 1, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
+					return false;
+			}
 		}
 
 		bool expected_exist = iter == 0;
