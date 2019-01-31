@@ -42,10 +42,13 @@
 #include <atomic>
 #include <fstream>
 #include <atomic>
+#include <algorithm>
 
 #ifdef __linux__
 #include <signal.h>
 #include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #endif
 #include <errno.h>
 
@@ -150,7 +153,7 @@ struct ThreadedReplayer : StateCreatorInterface
 						shader_module_count++;
 						*work_item.hash_map_entry.shader_module = *work_item.output.shader_module;
 
-						if (expect_failure)
+						if (robustness)
 							shader_module_to_hash[*work_item.output.shader_module] = work_item.hash;
 					}
 					else
@@ -164,7 +167,7 @@ struct ThreadedReplayer : StateCreatorInterface
 
 			case RESOURCE_GRAPHICS_PIPELINE:
 			{
-				if (expect_failure)
+				if (robustness)
 				{
 					num_failed_module_hashes = work_item.create_info.graphics_create_info->stageCount;
 					for (unsigned i = 0; i < work_item.create_info.graphics_create_info->stageCount; i++)
@@ -211,7 +214,7 @@ struct ThreadedReplayer : StateCreatorInterface
 
 			case RESOURCE_COMPUTE_PIPELINE:
 			{
-				if (expect_failure)
+				if (robustness)
 				{
 					num_failed_module_hashes = 1;
 					VkShaderModule module = work_item.create_info.compute_create_info->stage.module;
@@ -697,7 +700,7 @@ struct ThreadedReplayer : StateCreatorInterface
 	unsigned num_failed_module_hashes = 0;
 	unsigned thread_current_graphics_index = 0;
 	unsigned thread_current_compute_index = 0;
-	bool expect_failure = false;
+	bool robustness = false;
 };
 
 static void print_help()
@@ -719,8 +722,142 @@ static void print_help()
 	     "\t<Database>\n");
 }
 
-static int run_master_process(const string &db_path)
+#ifdef __linux__
+static bool write_all(int fd, const char *str)
 {
+	// write is async-signal safe, but not stdio.
+	size_t len = strlen(str);
+	while (len)
+	{
+		ssize_t wrote = write(fd, str, len);
+		if (wrote <= 0)
+			return false;
+
+		str += wrote;
+		len -= wrote;
+	}
+
+	return true;
+}
+#endif
+
+static int run_slave_process(const VulkanDevice::Options &opts,
+                             const ThreadedReplayer::Options &replayer_opts,
+                             const string &db_path);
+
+static int run_master_process(const VulkanDevice::Options &opts,
+                              const ThreadedReplayer::Options &replayer_opts_,
+                              const string &db_path)
+{
+	auto replayer_opts = replayer_opts_;
+	unsigned processes = replayer_opts.num_threads;
+	replayer_opts.num_threads = 1;
+
+
+	size_t num_graphics_pipelines;
+	size_t num_compute_pipelines;
+	{
+		auto db = unique_ptr<DatabaseInterface>(create_database(db_path.c_str(), DatabaseMode::ReadOnly));
+		if (!db->prepare())
+			return EXIT_FAILURE;
+		if (!db->get_hash_list_for_resource_tag(RESOURCE_GRAPHICS_PIPELINE, &num_graphics_pipelines, nullptr))
+			return EXIT_FAILURE;
+		if (!db->get_hash_list_for_resource_tag(RESOURCE_COMPUTE_PIPELINE, &num_compute_pipelines, nullptr))
+			return EXIT_FAILURE;
+	}
+
+	unordered_set<Hash> faulty_spirv_modules;
+
+#ifdef __linux__
+	struct ProcessProgress
+	{
+		unsigned end_graphics_index = ~0u;
+		unsigned end_compute_index = ~0u;
+		pid_t pid = -1;
+		int crash_fd = -1;
+	};
+
+	const auto send_faulty_modules_and_close = [&](int fd)
+	{
+		for (auto &m : faulty_spirv_modules)
+		{
+			char buffer[18];
+			sprintf(buffer, "%llx\n", static_cast<unsigned long long>(m));
+			write_all(fd, buffer);
+		}
+
+		close(fd);
+	};
+
+	// We will wait for child processes explicitly.
+	signal(SIGCHLD, SIG_IGN);
+
+	// fork() and pipe() strategy.
+	vector<ProcessProgress> child_processes;
+	unsigned active_processes = 0;
+	for (unsigned i = 0; i < processes; i++)
+	{
+		replayer_opts.start_graphics_index = (i * unsigned(num_graphics_pipelines)) / processes;
+		replayer_opts.end_graphics_index = ((i + 1) * unsigned(num_graphics_pipelines)) / processes;
+		replayer_opts.start_compute_index = (i * unsigned(num_compute_pipelines)) / processes;
+		replayer_opts.end_compute_index = ((i + 1) * unsigned(num_compute_pipelines)) / processes;
+
+		int crash_fds[2];
+		int input_fds[2];
+		if (pipe(crash_fds) < 0)
+			return EXIT_FAILURE;
+		if (pipe(input_fds) < 0)
+			return EXIT_FAILURE;
+
+		pid_t pid = fork(); // Fork off a child.
+		if (pid)
+		{
+			// We're the parent, keep track of the process.
+			ProcessProgress progress;
+			progress.crash_fd = crash_fds[0];
+			send_faulty_modules_and_close(input_fds[1]);
+			close(crash_fds[1]);
+			close(input_fds[0]);
+			progress.end_graphics_index = replayer_opts.end_graphics_index;
+			progress.end_compute_index = replayer_opts.end_compute_index;
+			child_processes.push_back(progress);
+			active_processes++;
+		}
+		else
+		{
+			// We're the child process.
+			close(crash_fds[0]);
+			close(input_fds[1]);
+			if (dup2(crash_fds[1], STDOUT_FILENO) < 0)
+				return EXIT_FAILURE;
+			if (dup2(input_fds[0], STDIN_FILENO) < 0)
+				return EXIT_FAILURE;
+			return run_slave_process(opts, replayer_opts, db_path);
+		}
+	}
+
+	while (active_processes)
+	{
+		int wstatus;
+		pid_t pid = wait(&wstatus);
+		if (pid < 0)
+			return EXIT_FAILURE;
+
+		auto itr = std::find_if(begin(child_processes), end(child_processes), [&](const ProcessProgress &progress) -> bool {
+			return progress.pid == pid;
+		});
+
+		if (itr == end(child_processes))
+		{
+			// Can this happen? Just ignore ...
+			continue;
+		}
+
+		active_processes--;
+		handle_end_of_process(*itr);
+	}
+#endif
+
 	return EXIT_FAILURE;
 }
 
@@ -848,22 +985,6 @@ static int run_normal_process(ThreadedReplayer &replayer, const string &db_path)
 }
 
 #ifdef __linux__
-static bool write_all(int fd, const char *str)
-{
-	// write is async-signal safe, but not stdio.
-	size_t len = strlen(str);
-	while (len)
-	{
-		ssize_t wrote = write(fd, str, len);
-		if (wrote <= 0)
-			return false;
-
-		str += wrote;
-		len -= wrote;
-	}
-
-	return true;
-}
 
 static ThreadedReplayer *global_replayer = nullptr;
 static int crash_fd;
@@ -920,7 +1041,7 @@ static int run_slave_process(const VulkanDevice::Options &opts,
                              const string &db_path)
 {
 	ThreadedReplayer replayer(opts, replayer_opts);
-	replayer.expect_failure = true;
+	replayer.robustness = true;
 
 	// In slave mode, we can receive a list of shader module hashes we should ignore.
 	// This is to avoid trying to replay the same faulty shader modules again and again.
@@ -1053,13 +1174,9 @@ int main(int argc, char *argv[])
 
 	int ret;
 	if (master_process)
-	{
-		ret = run_master_process(db_path);
-	}
+		ret = run_master_process(opts, replayer_opts, db_path);
 	else if (slave_process)
-	{
 		ret = run_slave_process(opts, replayer_opts, db_path);
-	}
 	else
 	{
 		ThreadedReplayer replayer(opts, replayer_opts);
