@@ -43,6 +43,12 @@
 #include <fstream>
 #include <atomic>
 
+#ifdef __linux__
+#include <signal.h>
+#include <unistd.h>
+#endif
+#include <errno.h>
+
 using namespace Fossilize;
 using namespace std;
 
@@ -58,13 +64,18 @@ struct ThreadedReplayer : StateCreatorInterface
 
 		// VALVE: --loop option for testing performance
 		unsigned loop_count = 1;
+
+		// Carve out a range of which pipelines to replay.
+		// Used for multi-process replays where each process gets its own slice to churn through.
+		unsigned start_graphics_index = 0;
+		unsigned end_graphics_index = ~0u;
+		unsigned start_compute_index = 0;
+		unsigned end_compute_index = ~0u;
 	};
 
-	ThreadedReplayer(const VulkanDevice::Options &device_opts_, const Options &opts_,
-	             const unordered_set<Hash> &graphics,
-	             const unordered_set<Hash> &compute)
-		: opts(opts_), filter_graphics(graphics), filter_compute(compute),
-		  num_worker_threads(opts.num_threads ), loop_count(opts.loop_count),
+	ThreadedReplayer(const VulkanDevice::Options &device_opts_, const Options &opts_)
+		: opts(opts_),
+		  num_worker_threads(opts.num_threads), loop_count(opts.loop_count),
 		  device_opts(device_opts_)
 	{
 		// Cannot use initializers for atomics.
@@ -74,6 +85,9 @@ struct ThreadedReplayer : StateCreatorInterface
 		graphics_pipeline_count.store(0);
 		compute_pipeline_count.store(0);
 		shader_module_count.store(0);
+
+		thread_current_graphics_index = opts.start_graphics_index;
+		thread_current_compute_index = opts.start_compute_index;
 
 		// Create a thread pool with the # of specified worker threads (defaults to thread::hardware_concurrency()).
 		for (unsigned i = 0; i < num_worker_threads; i++)
@@ -123,11 +137,11 @@ struct ThreadedReplayer : StateCreatorInterface
 				{
 					// Avoid leak.
 					if (*work_item.hash_map_entry.shader_module != VK_NULL_HANDLE)
-						vkDestroyShaderModule(device.get_device(), *work_item.hash_map_entry.shader_module, nullptr);
+						vkDestroyShaderModule(device->get_device(), *work_item.hash_map_entry.shader_module, nullptr);
 					*work_item.hash_map_entry.shader_module = VK_NULL_HANDLE;
 
 					auto start_time = chrono::steady_clock::now();
-					if (vkCreateShaderModule(device.get_device(), work_item.create_info.shader_module_create_info,
+					if (vkCreateShaderModule(device->get_device(), work_item.create_info.shader_module_create_info,
 					                         nullptr, work_item.output.shader_module) == VK_SUCCESS)
 					{
 						auto end_time = chrono::steady_clock::now();
@@ -135,6 +149,9 @@ struct ThreadedReplayer : StateCreatorInterface
 						shader_module_ns += duration_ns;
 						shader_module_count++;
 						*work_item.hash_map_entry.shader_module = *work_item.output.shader_module;
+
+						if (expect_failure)
+							shader_module_to_hash[*work_item.output.shader_module] = work_item.hash;
 					}
 					else
 					{
@@ -147,15 +164,32 @@ struct ThreadedReplayer : StateCreatorInterface
 
 			case RESOURCE_GRAPHICS_PIPELINE:
 			{
+				if (expect_failure)
+				{
+					num_failed_module_hashes = work_item.create_info.graphics_create_info->stageCount;
+					for (unsigned i = 0; i < work_item.create_info.graphics_create_info->stageCount; i++)
+					{
+						VkShaderModule module = work_item.create_info.graphics_create_info->pStages[i].module;
+						failed_module_hashes[i] = shader_module_to_hash[module];
+					}
+				}
+
 				for (unsigned i = 0; i < loop_count; i++)
 				{
 					// Avoid leak.
 					if (*work_item.hash_map_entry.pipeline != VK_NULL_HANDLE)
-						vkDestroyPipeline(device.get_device(), *work_item.hash_map_entry.pipeline, nullptr);
+						vkDestroyPipeline(device->get_device(), *work_item.hash_map_entry.pipeline, nullptr);
 					*work_item.hash_map_entry.pipeline = VK_NULL_HANDLE;
 
 					auto start_time = chrono::steady_clock::now();
-					if (vkCreateGraphicsPipelines(device.get_device(), pipeline_cache, 1, work_item.create_info.graphics_create_info,
+
+#if 1
+					// Robustness checking.
+					if ((thread_current_graphics_index & 7) == 7)
+						pthread_kill(pthread_self(), SIGSEGV);
+#endif
+
+					if (vkCreateGraphicsPipelines(device->get_device(), pipeline_cache, 1, work_item.create_info.graphics_create_info,
 					                              nullptr, work_item.output.pipeline) == VK_SUCCESS)
 					{
 						auto end_time = chrono::steady_clock::now();
@@ -170,20 +204,36 @@ struct ThreadedReplayer : StateCreatorInterface
 						     static_cast<unsigned long long>(work_item.hash));
 					}
 				}
+
+				thread_current_graphics_index++;
 				break;
 			}
 
 			case RESOURCE_COMPUTE_PIPELINE:
 			{
+				if (expect_failure)
+				{
+					num_failed_module_hashes = 1;
+					VkShaderModule module = work_item.create_info.compute_create_info->stage.module;
+					failed_module_hashes[0] = shader_module_to_hash[module];
+				}
+
 				for (unsigned i = 0; i < loop_count; i++)
 				{
 					// Avoid leak.
 					if (*work_item.hash_map_entry.pipeline != VK_NULL_HANDLE)
-						vkDestroyPipeline(device.get_device(), *work_item.hash_map_entry.pipeline, nullptr);
+						vkDestroyPipeline(device->get_device(), *work_item.hash_map_entry.pipeline, nullptr);
 					*work_item.hash_map_entry.pipeline = VK_NULL_HANDLE;
 
 					auto start_time = chrono::steady_clock::now();
-					if (vkCreateComputePipelines(device.get_device(), pipeline_cache, 1,
+
+#if 1
+					// Robustness checking.
+					if ((thread_current_compute_index & 7) == 7)
+						pthread_kill(pthread_self(), SIGSEGV);
+#endif
+
+					if (vkCreateComputePipelines(device->get_device(), pipeline_cache, 1,
 					                             work_item.create_info.compute_create_info,
 					                             nullptr, work_item.output.pipeline) == VK_SUCCESS)
 					{
@@ -199,6 +249,8 @@ struct ThreadedReplayer : StateCreatorInterface
 						     static_cast<unsigned long long>(work_item.hash));
 					}
 				}
+
+				thread_current_compute_index++;
 				break;
 			}
 
@@ -240,10 +292,10 @@ struct ThreadedReplayer : StateCreatorInterface
 			if (!opts.on_disk_pipeline_cache_path.empty())
 			{
 				size_t pipeline_cache_size = 0;
-				if (vkGetPipelineCacheData(device.get_device(), pipeline_cache, &pipeline_cache_size, nullptr) == VK_SUCCESS)
+				if (vkGetPipelineCacheData(device->get_device(), pipeline_cache, &pipeline_cache_size, nullptr) == VK_SUCCESS)
 				{
 					vector<uint8_t> pipeline_buffer(pipeline_cache_size);
-					if (vkGetPipelineCacheData(device.get_device(), pipeline_cache, &pipeline_cache_size, pipeline_buffer.data()) == VK_SUCCESS)
+					if (vkGetPipelineCacheData(device->get_device(), pipeline_cache, &pipeline_cache_size, pipeline_buffer.data()) == VK_SUCCESS)
 					{
 						FILE *file = fopen(opts.on_disk_pipeline_cache_path.c_str(), "wb");
 						if (!file || fwrite(pipeline_buffer.data(), 1, pipeline_buffer.size(), file) != pipeline_buffer.size())
@@ -253,30 +305,30 @@ struct ThreadedReplayer : StateCreatorInterface
 					}
 				}
 			}
-			vkDestroyPipelineCache(device.get_device(), pipeline_cache, nullptr);
+			vkDestroyPipelineCache(device->get_device(), pipeline_cache, nullptr);
 		}
 
 		for (auto &sampler : samplers)
 			if (sampler.second)
-				vkDestroySampler(device.get_device(), sampler.second, nullptr);
+				vkDestroySampler(device->get_device(), sampler.second, nullptr);
 		for (auto &layout : layouts)
 			if (layout.second)
-				vkDestroyDescriptorSetLayout(device.get_device(), layout.second, nullptr);
+				vkDestroyDescriptorSetLayout(device->get_device(), layout.second, nullptr);
 		for (auto &pipeline_layout : pipeline_layouts)
 			if (pipeline_layout.second)
-				vkDestroyPipelineLayout(device.get_device(), pipeline_layout.second, nullptr);
+				vkDestroyPipelineLayout(device->get_device(), pipeline_layout.second, nullptr);
 		for (auto &shader_module : shader_modules)
 			if (shader_module.second)
-				vkDestroyShaderModule(device.get_device(), shader_module.second, nullptr);
+				vkDestroyShaderModule(device->get_device(), shader_module.second, nullptr);
 		for (auto &render_pass : render_passes)
 			if (render_pass.second)
-				vkDestroyRenderPass(device.get_device(), render_pass.second, nullptr);
+				vkDestroyRenderPass(device->get_device(), render_pass.second, nullptr);
 		for (auto &pipeline : compute_pipelines)
 			if (pipeline.second)
-				vkDestroyPipeline(device.get_device(), pipeline.second, nullptr);
+				vkDestroyPipeline(device->get_device(), pipeline.second, nullptr);
 		for (auto &pipeline : graphics_pipelines)
 			if (pipeline.second)
-				vkDestroyPipeline(device.get_device(), pipeline.second, nullptr);
+				vkDestroyPipeline(device->get_device(), pipeline.second, nullptr);
 	}
 
 	bool validate_pipeline_cache_header(const vector<uint8_t> &blob)
@@ -309,7 +361,7 @@ struct ThreadedReplayer : StateCreatorInterface
 		}
 
 		VkPhysicalDeviceProperties props = {};
-		vkGetPhysicalDeviceProperties(device.get_gpu(), &props);
+		vkGetPhysicalDeviceProperties(device->get_gpu(), &props);
 		if (props.vendorID != read_le(8))
 		{
 			LOGI("Mismatch of vendorID and cache vendorID.\n");
@@ -339,11 +391,12 @@ struct ThreadedReplayer : StateCreatorInterface
 		{
 			// Now we can init the device with correct app info.
 			device_was_init = true;
+			device.reset(new VulkanDevice);
 			device_opts.application_info = app;
 			device_opts.features = features;
 			device_opts.need_disasm = false;
 			auto start_device = chrono::steady_clock::now();
-			if (!device.init_device(device_opts))
+			if (!device->init_device(device_opts))
 			{
 				LOGE("Failed to create Vulkan device, bailing ...\n");
 				exit(EXIT_FAILURE);
@@ -381,12 +434,12 @@ struct ThreadedReplayer : StateCreatorInterface
 					}
 				}
 
-				if (vkCreatePipelineCache(device.get_device(), &info, nullptr, &pipeline_cache) != VK_SUCCESS)
+				if (vkCreatePipelineCache(device->get_device(), &info, nullptr, &pipeline_cache) != VK_SUCCESS)
 				{
 					LOGE("Failed to create pipeline cache, trying to create a blank one.\n");
 					info.initialDataSize = 0;
 					info.pInitialData = nullptr;
-					if (vkCreatePipelineCache(device.get_device(), &info, nullptr, &pipeline_cache) != VK_SUCCESS)
+					if (vkCreatePipelineCache(device->get_device(), &info, nullptr, &pipeline_cache) != VK_SUCCESS)
 					{
 						LOGE("Failed to create pipeline cache.\n");
 						pipeline_cache = VK_NULL_HANDLE;
@@ -418,7 +471,7 @@ struct ThreadedReplayer : StateCreatorInterface
 	bool enqueue_create_sampler(Hash index, const VkSamplerCreateInfo *create_info, VkSampler *sampler) override
 	{
 		// Playback in-order.
-		if (vkCreateSampler(device.get_device(), create_info, nullptr, sampler) != VK_SUCCESS)
+		if (vkCreateSampler(device->get_device(), create_info, nullptr, sampler) != VK_SUCCESS)
 		{
 			LOGE("Creating sampler %0" PRIX64 " Failed!\n", index);
 			return false;
@@ -430,7 +483,7 @@ struct ThreadedReplayer : StateCreatorInterface
 	bool enqueue_create_descriptor_set_layout(Hash index, const VkDescriptorSetLayoutCreateInfo *create_info, VkDescriptorSetLayout *layout) override
 	{
 		// Playback in-order.
-		if (vkCreateDescriptorSetLayout(device.get_device(), create_info, nullptr, layout) != VK_SUCCESS)
+		if (vkCreateDescriptorSetLayout(device->get_device(), create_info, nullptr, layout) != VK_SUCCESS)
 		{
 			LOGE("Creating descriptor set layout %0" PRIX64 " Failed!\n", index);
 			return false;
@@ -442,7 +495,7 @@ struct ThreadedReplayer : StateCreatorInterface
 	bool enqueue_create_pipeline_layout(Hash index, const VkPipelineLayoutCreateInfo *create_info, VkPipelineLayout *layout) override
 	{
 		// Playback in-order.
-		if (vkCreatePipelineLayout(device.get_device(), create_info, nullptr, layout) != VK_SUCCESS)
+		if (vkCreatePipelineLayout(device->get_device(), create_info, nullptr, layout) != VK_SUCCESS)
 		{
 			LOGE("Creating pipeline layout %0" PRIX64 " Failed!\n", index);
 			return false;
@@ -454,7 +507,7 @@ struct ThreadedReplayer : StateCreatorInterface
 	bool enqueue_create_render_pass(Hash index, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass) override
 	{
 		// Playback in-order.
-		if (vkCreateRenderPass(device.get_device(), create_info, nullptr, render_pass) != VK_SUCCESS)
+		if (vkCreateRenderPass(device->get_device(), create_info, nullptr, render_pass) != VK_SUCCESS)
 		{
 			LOGE("Creating render pass %0" PRIX64 " Failed!\n", index);
 			return false;
@@ -465,6 +518,12 @@ struct ThreadedReplayer : StateCreatorInterface
 
 	bool enqueue_create_shader_module(Hash hash, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module) override
 	{
+		if (masked_shader_modules.count(hash))
+		{
+			*module = VK_NULL_HANDLE;
+			return true;
+		}
+
 		PipelineWorkItem work_item;
 		work_item.hash = hash;
 		work_item.tag = RESOURCE_SHADER_MODULE;
@@ -486,7 +545,9 @@ struct ThreadedReplayer : StateCreatorInterface
 
 	bool enqueue_create_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
-		if ((filter_compute.empty() && filter_graphics.empty()) || filter_compute.count(hash))
+		if (create_info->stage.module != VK_NULL_HANDLE &&
+		    compute_pipeline_index >= opts.start_compute_index &&
+		    compute_pipeline_index < opts.end_compute_index)
 		{
 			PipelineWorkItem work_item;
 			work_item.hash = hash;
@@ -507,12 +568,20 @@ struct ThreadedReplayer : StateCreatorInterface
 		else
 			*pipeline = VK_NULL_HANDLE;
 
+		compute_pipeline_index++;
 		return true;
 	}
 
 	bool enqueue_create_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
-		if ((filter_graphics.empty() && filter_compute.empty()) || filter_graphics.count(hash))
+		bool valid_handles = true;
+		for (uint32_t i = 0; i < create_info->stageCount; i++)
+			if (create_info->pStages[i].module == VK_NULL_HANDLE)
+				valid_handles = false;
+
+		if (valid_handles &&
+		    graphics_pipeline_index >= opts.start_graphics_index &&
+		    graphics_pipeline_index < opts.end_graphics_index)
 		{
 			PipelineWorkItem work_item;
 			work_item.hash = hash;
@@ -533,6 +602,7 @@ struct ThreadedReplayer : StateCreatorInterface
 		else
 			*pipeline = VK_NULL_HANDLE;
 
+		graphics_pipeline_index++;
 		return true;
 	}
 
@@ -541,9 +611,25 @@ struct ThreadedReplayer : StateCreatorInterface
 		sync_worker_threads();
 	}
 
+	// Support ignoring shader module which are known to cause crashes.
+	void mask_shader_module(Hash hash)
+	{
+		masked_shader_modules.insert(hash);
+	}
+
+	const vector<thread> &get_threads() const
+	{
+		return thread_pool;
+	}
+
+	void emergency_teardown()
+	{
+		device.reset();
+	}
+
 	Options opts;
-	const unordered_set<Hash> &filter_graphics;
-	const unordered_set<Hash> &filter_compute;
+	unsigned graphics_pipeline_index = 0;
+	unsigned compute_pipeline_index = 0;
 
 	std::unordered_map<Hash, VkSampler> samplers;
 	std::unordered_map<Hash, VkDescriptorSetLayout> layouts;
@@ -552,6 +638,8 @@ struct ThreadedReplayer : StateCreatorInterface
 	std::unordered_map<Hash, VkRenderPass> render_passes;
 	std::unordered_map<Hash, VkPipeline> compute_pipelines;
 	std::unordered_map<Hash, VkPipeline> graphics_pipelines;
+	std::unordered_set<Hash> masked_shader_modules;
+	std::unordered_map<VkShaderModule, Hash> shader_module_to_hash;
 	VkPipelineCache pipeline_cache = VK_NULL_HANDLE;
 
 	// VALVE: multi-threaded work queue for replayer
@@ -600,9 +688,16 @@ struct ThreadedReplayer : StateCreatorInterface
 
 	bool shutting_down = false;
 
-	VulkanDevice device;
+	unique_ptr<VulkanDevice> device;
 	bool device_was_init = false;
 	VulkanDevice::Options device_opts;
+
+	// Crash recovery.
+	Hash failed_module_hashes[6];
+	unsigned num_failed_module_hashes = 0;
+	unsigned thread_current_graphics_index = 0;
+	unsigned thread_current_compute_index = 0;
+	bool expect_failure = false;
 };
 
 static void print_help()
@@ -617,56 +712,23 @@ static void print_help()
 	     "\t[--num-threads <count>]\n"
 	     "\t[--loop <count>]\n"
 	     "\t[--on-disk-pipeline-cache <path>]\n"
+	     "\t[--graphics-pipeline-range <start> <end>]\n"
+	     "\t[--compute-pipeline-range <start> <end>]\n"
+	     "\t[--slave-process]\n"
+	     "\t[--master-process]\n"
 	     "\t<Database>\n");
 }
 
-int main(int argc, char *argv[])
+static int run_master_process(const string &db_path)
 {
-	string json_path;
-	VulkanDevice::Options opts;
-	ThreadedReplayer::Options replayer_opts;
+	return EXIT_FAILURE;
+}
 
-	// TODO: Make this useable again.
-	unordered_set<Hash> filter_graphics;
-	unordered_set<Hash> filter_compute;
-
-	CLICallbacks cbs;
-	cbs.default_handler = [&](const char *arg) { json_path = arg; };
-	cbs.add("--help", [](CLIParser &parser) { print_help(); parser.end(); });
-	cbs.add("--device-index", [&](CLIParser &parser) { opts.device_index = parser.next_uint(); });
-	cbs.add("--enable-validation", [&](CLIParser &) { opts.enable_validation = true; });
-	cbs.add("--pipeline-cache", [&](CLIParser &) { replayer_opts.pipeline_cache = true; });
-	cbs.add("--on-disk-pipeline-cache", [&](CLIParser &parser) { replayer_opts.on_disk_pipeline_cache_path = parser.next_string(); });
-	cbs.add("--filter-compute", [&](CLIParser &parser) { filter_compute.insert(parser.next_uint()); });
-	cbs.add("--filter-graphics", [&](CLIParser &parser) { filter_graphics.insert(parser.next_uint()); });
-	cbs.add("--num-threads", [&](CLIParser &parser) { replayer_opts.num_threads = parser.next_uint(); });
-	cbs.add("--loop", [&](CLIParser &parser) { replayer_opts.loop_count = parser.next_uint(); });
-	cbs.error_handler = [] { print_help(); };
-
-	CLIParser parser(move(cbs), argc - 1, argv + 1);
-	if (!parser.parse())
-		return EXIT_FAILURE;
-	if (parser.is_ended_state())
-		return EXIT_SUCCESS;
-
-	if (json_path.empty())
-	{
-		LOGE("No path to serialized state provided.\n");
-		print_help();
-		return EXIT_FAILURE;
-	}
-
-	if (replayer_opts.num_threads < 1)
-		replayer_opts.num_threads = 1;
-
-	if (!replayer_opts.on_disk_pipeline_cache_path.empty())
-		replayer_opts.pipeline_cache = true;
-
+static int run_normal_process(ThreadedReplayer &replayer, const string &db_path)
+{
 	auto start_time = chrono::steady_clock::now();
-	ThreadedReplayer replayer(opts, replayer_opts, filter_graphics, filter_compute);
-
 	auto start_create_archive = chrono::steady_clock::now();
-	auto resolver = unique_ptr<DatabaseInterface>(create_database(json_path.c_str(), DatabaseMode::ReadOnly));
+	auto resolver = unique_ptr<DatabaseInterface>(create_database(db_path.c_str(), DatabaseMode::ReadOnly));
 	auto end_create_archive = chrono::steady_clock::now();
 
 	auto start_prepare = chrono::steady_clock::now();
@@ -783,4 +845,225 @@ int main(int argc, char *argv[])
 	LOGI("  graphics pipelines:    %7lu\n", (unsigned long)replayer.graphics_pipelines.size());
 
 	return EXIT_SUCCESS;
+}
+
+#ifdef __linux__
+static bool write_all(int fd, const char *str)
+{
+	// write is async-signal safe, but not stdio.
+	size_t len = strlen(str);
+	while (len)
+	{
+		ssize_t wrote = write(fd, str, len);
+		if (wrote <= 0)
+			return false;
+
+		str += wrote;
+		len -= wrote;
+	}
+
+	return true;
+}
+
+static ThreadedReplayer *global_replayer = nullptr;
+static int crash_fd;
+
+static void crash_handler(int)
+{
+	// stderr is reserved for generic logging.
+	// stdout/stdin is for IPC with master process.
+
+	if (!write_all(crash_fd, "CRASH\n"))
+		_exit(2);
+
+	// This might hang indefinitely if we are exceptionally unlucky,
+	// the parent will have a timeout after receiving the crash message.
+	// If that fails, it can SIGKILL us.
+	// We want to make sure any database writing threads in the driver gets a chance to complete its work
+	// before we die.
+
+	if (global_replayer)
+	{
+		char buffer[64];
+
+		// Report to parent process which VkShaderModule's might have contributed to our untimely death.
+		// This allows a new process to ignore these modules.
+		for (unsigned i = 0; i < global_replayer->num_failed_module_hashes; i++)
+		{
+			sprintf(buffer, "MODULE %llx\n",
+					static_cast<unsigned long long>(global_replayer->failed_module_hashes[i]));
+			if (!write_all(crash_fd, buffer))
+				_exit(2);
+		}
+
+		// Report where we stopped, so we can continue.
+		sprintf(buffer, "GRAPHICS %d\n", global_replayer->thread_current_graphics_index);
+		if (!write_all(crash_fd, buffer))
+			_exit(2);
+
+		sprintf(buffer, "COMPUTE %d\n", global_replayer->thread_current_compute_index);
+		if (!write_all(crash_fd, buffer))
+			_exit(2);
+
+		global_replayer->emergency_teardown();
+	}
+
+	// Clean exit instead of reporting the segfault.
+	// _exit is async-signal safe, but not exit().
+	// Use exit code 2 to mark a segfaulted child.
+	_exit(2);
+}
+#endif
+
+static int run_slave_process(const VulkanDevice::Options &opts,
+                             const ThreadedReplayer::Options &replayer_opts,
+                             const string &db_path)
+{
+	ThreadedReplayer replayer(opts, replayer_opts);
+	replayer.expect_failure = true;
+
+	// In slave mode, we can receive a list of shader module hashes we should ignore.
+	// This is to avoid trying to replay the same faulty shader modules again and again.
+	char ignored_shader_module_hash[16 + 2];
+	while (fgets(ignored_shader_module_hash, sizeof(ignored_shader_module_hash), stdin))
+	{
+		errno = 0;
+		auto hash = strtoull(ignored_shader_module_hash, nullptr, 16);
+		if (hash == 0)
+			break;
+		if (errno == 0)
+		{
+			LOGE("Ignoring module %llx\n", hash);
+			replayer.mask_shader_module(Hash(hash));
+		}
+	}
+
+#ifdef __linux__
+	// Make sure that the driver cannot mess up the master process.
+	// Just stdout.
+	crash_fd = dup(STDOUT_FILENO);
+	close(STDOUT_FILENO);
+
+	global_replayer = &replayer;
+
+	// Just in case the driver crashed due to stack overflow,
+	// provide an alternate stack where we can clean up "safely".
+	stack_t ss;
+	ss.ss_sp = malloc(1024 * 1024);
+	ss.ss_size = 1024 * 1024;
+	ss.ss_flags = 0;
+	if (sigaltstack(&ss, nullptr) < 0)
+		return EXIT_FAILURE;
+
+	struct sigaction act;
+	memset(&act, 0, sizeof(act));
+	sigemptyset(&act.sa_mask);
+	act.sa_handler = crash_handler;
+	act.sa_flags = SA_RESETHAND | SA_ONSTACK;
+
+	if (sigaction(SIGSEGV, &act, nullptr) < 0)
+		return EXIT_FAILURE;
+	if (sigaction(SIGFPE, &act, nullptr) < 0)
+		return EXIT_FAILURE;
+	if (sigaction(SIGILL, &act, nullptr) < 0)
+		return EXIT_FAILURE;
+	if (sigaction(SIGBUS, &act, nullptr) < 0)
+		return EXIT_FAILURE;
+
+#if 0
+	// Don't let main thread handle the signals.
+	// Must be handled by the threads themselves.
+	// I think SIGSEGV should always be handled on the offending thread,
+	// but need this for testing at least.
+	sigset_t set;
+	sigemptyset(&set);
+	sigaddset(&set, SIGSEGV);
+	sigaddset(&set, SIGFPE);
+	sigaddset(&set, SIGILL);
+	sigaddset(&set, SIGBUS);
+	if (pthread_sigmask(SIG_BLOCK, &set, nullptr) < 0)
+		return EXIT_FAILURE;
+#endif
+
+	return run_normal_process(replayer, db_path);
+#else
+	ThreadedReplayer replayer(opts, replayer_opts);
+	return run_normal_process(replayer, db_path);
+#endif
+}
+
+int main(int argc, char *argv[])
+{
+	string db_path;
+	VulkanDevice::Options opts;
+	ThreadedReplayer::Options replayer_opts;
+	bool master_process = false;
+	bool slave_process = false;
+
+	CLICallbacks cbs;
+	cbs.default_handler = [&](const char *arg) { db_path = arg; };
+	cbs.add("--help", [](CLIParser &parser) { print_help(); parser.end(); });
+	cbs.add("--device-index", [&](CLIParser &parser) { opts.device_index = parser.next_uint(); });
+	cbs.add("--enable-validation", [&](CLIParser &) { opts.enable_validation = true; });
+	cbs.add("--pipeline-cache", [&](CLIParser &) { replayer_opts.pipeline_cache = true; });
+	cbs.add("--on-disk-pipeline-cache", [&](CLIParser &parser) { replayer_opts.on_disk_pipeline_cache_path = parser.next_string(); });
+	cbs.add("--num-threads", [&](CLIParser &parser) { replayer_opts.num_threads = parser.next_uint(); });
+	cbs.add("--master-process", [&](CLIParser &) { master_process = true; });
+	cbs.add("--slave-process", [&](CLIParser &) { slave_process = true; });
+	cbs.add("--loop", [&](CLIParser &parser) { replayer_opts.loop_count = parser.next_uint(); });
+
+	cbs.add("--graphics-pipeline-range", [&](CLIParser &parser) {
+		replayer_opts.start_graphics_index = parser.next_uint();
+		replayer_opts.end_graphics_index = parser.next_uint();
+	});
+
+	cbs.add("--compute-pipeline-range", [&](CLIParser &parser) {
+		replayer_opts.start_compute_index = parser.next_uint();
+		replayer_opts.end_compute_index = parser.next_uint();
+	});
+
+	cbs.error_handler = [] { print_help(); };
+
+	CLIParser parser(move(cbs), argc - 1, argv + 1);
+	if (!parser.parse())
+		return EXIT_FAILURE;
+	if (parser.is_ended_state())
+		return EXIT_SUCCESS;
+
+	if (db_path.empty())
+	{
+		LOGE("No path to serialized state provided.\n");
+		print_help();
+		return EXIT_FAILURE;
+	}
+
+	// We cannot safely deal with multiple threads here, force one thread.
+	if (slave_process)
+	{
+		if (replayer_opts.num_threads > 1)
+			LOGE("Cannot use more than one thread per slave process. Forcing 1 thread.\n");
+		replayer_opts.num_threads = 1;
+	}
+
+	if (replayer_opts.num_threads < 1)
+		replayer_opts.num_threads = 1;
+
+	if (!replayer_opts.on_disk_pipeline_cache_path.empty())
+		replayer_opts.pipeline_cache = true;
+
+	int ret;
+	if (master_process)
+	{
+		ret = run_master_process(db_path);
+	}
+	else if (slave_process)
+	{
+		ret = run_slave_process(opts, replayer_opts, db_path);
+	}
+	else
+	{
+		ThreadedReplayer replayer(opts, replayer_opts);
+		ret = run_normal_process(replayer, db_path);
+	}
+	return ret;
 }
