@@ -49,6 +49,8 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <sys/epoll.h>
+#include <sys/signalfd.h>
 #endif
 #include <errno.h>
 
@@ -739,6 +741,18 @@ static bool write_all(int fd, const char *str)
 
 	return true;
 }
+
+struct ProcessProgress
+{
+	unsigned start_graphics_index = 0u;
+	unsigned start_compute_index = 0u;
+	unsigned end_graphics_index = ~0u;
+	unsigned end_compute_index = ~0u;
+	bool child_dead = false;
+	pid_t pid = -1;
+	FILE *crash_file = nullptr;
+	int timer_fd = -1;
+};
 #endif
 
 static int run_slave_process(const VulkanDevice::Options &opts,
@@ -752,7 +766,6 @@ static int run_master_process(const VulkanDevice::Options &opts,
 	auto replayer_opts = replayer_opts_;
 	unsigned processes = replayer_opts.num_threads;
 	replayer_opts.num_threads = 1;
-
 
 	size_t num_graphics_pipelines;
 	size_t num_compute_pipelines;
@@ -769,13 +782,20 @@ static int run_master_process(const VulkanDevice::Options &opts,
 	unordered_set<Hash> faulty_spirv_modules;
 
 #ifdef __linux__
-	struct ProcessProgress
-	{
-		unsigned end_graphics_index = ~0u;
-		unsigned end_compute_index = ~0u;
-		pid_t pid = -1;
-		int crash_fd = -1;
-	};
+	unsigned active_processes = 0;
+
+	// We will wait for child processes explicitly with signalfd.
+	// Block delivery of signals in the normal way.
+	sigset_t mask;
+	sigset_t old_mask;
+	sigemptyset(&mask);
+	sigaddset(&mask, SIGCHLD);
+	if (sigprocmask(SIGCHLD, &mask, &old_mask) < 0)
+		return EXIT_FAILURE;
+
+	int signal_fd = signalfd(-1, &mask, 0);
+	if (signal_fd < 0)
+		return EXIT_FAILURE;
 
 	const auto send_faulty_modules_and_close = [&](int fd)
 	{
@@ -789,72 +809,183 @@ static int run_master_process(const VulkanDevice::Options &opts,
 		close(fd);
 	};
 
-	// We will wait for child processes explicitly.
-	signal(SIGCHLD, SIG_IGN);
-
-	// fork() and pipe() strategy.
-	vector<ProcessProgress> child_processes;
-	unsigned active_processes = 0;
-	for (unsigned i = 0; i < processes; i++)
+	const auto process_once = [&](ProcessProgress &progress)
 	{
-		replayer_opts.start_graphics_index = (i * unsigned(num_graphics_pipelines)) / processes;
-		replayer_opts.end_graphics_index = ((i + 1) * unsigned(num_graphics_pipelines)) / processes;
-		replayer_opts.start_compute_index = (i * unsigned(num_compute_pipelines)) / processes;
-		replayer_opts.end_compute_index = ((i + 1) * unsigned(num_compute_pipelines)) / processes;
+		if (!progress.crash_file)
+			return;
 
+		char buffer[64];
+		if (fgets(buffer, sizeof(buffer), progress.crash_file))
+			LOGI("Got message from child: %s\n", buffer);
+	};
+
+	const auto process_shutdown = [&](ProcessProgress &progress) -> bool
+	{
+		if (!progress.crash_file)
+			return false;
+
+		char buffer[64];
+		while (fgets(buffer, sizeof(buffer), progress.crash_file))
+		{
+			LOGI("Got message from child: %s\n", buffer);
+		}
+
+		fclose(progress.crash_file);
+		progress.crash_file = nullptr;
+
+		int wstatus = 0;
+		waitpid(progress.pid, &wstatus, 0);
+		progress.pid = -1;
+		active_processes--;
+
+		if (progress.timer_fd >= 0)
+		{
+			close(progress.timer_fd);
+			progress.timer_fd = -1;
+		}
+		return false;
+	};
+
+	const auto kick_process = [&](ProcessProgress &progress) -> bool
+	{
 		int crash_fds[2];
 		int input_fds[2];
 		if (pipe(crash_fds) < 0)
-			return EXIT_FAILURE;
+			return false;
 		if (pipe(input_fds) < 0)
-			return EXIT_FAILURE;
+			return false;
 
 		pid_t pid = fork(); // Fork off a child.
-		if (pid)
+		if (pid > 0)
 		{
-			// We're the parent, keep track of the process.
-			ProcessProgress progress;
-			progress.crash_fd = crash_fds[0];
+			// We're the parent, keep track of the process in a thread to avoid a lot of complex multiplexing code.
+			progress.crash_file = fdopen(crash_fds[0], "r");
+			if (!progress.crash_file)
+				close(crash_fds[0]);
+			progress.pid = pid;
+
 			send_faulty_modules_and_close(input_fds[1]);
 			close(crash_fds[1]);
 			close(input_fds[0]);
-			progress.end_graphics_index = replayer_opts.end_graphics_index;
-			progress.end_compute_index = replayer_opts.end_compute_index;
-			child_processes.push_back(progress);
 			active_processes++;
+			return true;
 		}
-		else
+		else if (pid == 0)
 		{
 			// We're the child process.
+			sigprocmask(SIG_SETMASK, &old_mask, nullptr);
+			close(signal_fd);
 			close(crash_fds[0]);
 			close(input_fds[1]);
+
 			if (dup2(crash_fds[1], STDOUT_FILENO) < 0)
 				return EXIT_FAILURE;
 			if (dup2(input_fds[0], STDIN_FILENO) < 0)
 				return EXIT_FAILURE;
-			return run_slave_process(opts, replayer_opts, db_path);
+
+			auto copy_opts = replayer_opts;
+			copy_opts.start_graphics_index = replayer_opts.start_graphics_index;
+			copy_opts.end_graphics_index = replayer_opts.end_graphics_index;
+			copy_opts.start_compute_index = replayer_opts.start_compute_index;
+			copy_opts.end_compute_index = replayer_opts.end_compute_index;
+			return run_slave_process(opts, copy_opts, db_path) == EXIT_SUCCESS;
 		}
+		else
+			return false;
+	};
+
+	vector<ProcessProgress> child_processes(processes);
+
+	// fork() and pipe() strategy.
+	for (unsigned i = 0; i < processes; i++)
+	{
+		auto &progress = child_processes[i];
+		progress.start_graphics_index = (i * unsigned(num_graphics_pipelines)) / processes;
+		progress.start_compute_index = ((i + 1) * unsigned(num_graphics_pipelines)) / processes;
+		progress.end_graphics_index = (i * unsigned(num_compute_pipelines)) / processes;
+		progress.end_compute_index = ((i + 1) * unsigned(num_compute_pipelines)) / processes;
 	}
 
-	while (active_processes)
+	int epoll_fd = epoll_create(int(processes) + 1);
+	if (epoll_fd < 0)
+		return EXIT_FAILURE;
+
+	for (auto &child : child_processes)
 	{
-		int wstatus;
-		pid_t pid = wait(&wstatus);
-		if (pid < 0)
+		epoll_event event = {};
+		event.data.u32 = uint32_t(&child - child_processes.data());
+		event.events = EPOLLIN;
+		if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fileno(child.crash_file), &event) < 0)
+			return EXIT_FAILURE;
+	}
+
+	{
+		epoll_event event = {};
+		event.events = EPOLLIN;
+		event.data.u32 = UINT32_MAX;
+		if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, signal_fd, &event) < 0)
+			return EXIT_FAILURE;
+	}
+
+	while (active_processes != 0)
+	{
+		epoll_event events[64];
+		int ret = epoll_wait(epoll_fd, events, 64, -1);
+		if (ret < 0)
 			return EXIT_FAILURE;
 
-		auto itr = std::find_if(begin(child_processes), end(child_processes), [&](const ProcessProgress &progress) -> bool {
-			return progress.pid == pid;
-		});
-
-		if (itr == end(child_processes))
+		for (int i = 0; i < ret; i++)
 		{
-			// Can this happen? Just ignore ...
-			continue;
-		}
+			auto &e = events[i];
+			if (e.events & EPOLLIN)
+			{
+				if (e.data.u32 != UINT32_MAX)
+				{
+					auto &proc = child_processes[e.data.u32 & 0x7fffffffu];
 
-		active_processes--;
-		handle_end_of_process(*itr);
+					if (e.data.u32 & 0x80000000u)
+					{
+						// Timeout triggered. kill the process and reap it.
+						// SIGCHLD handler should rearm the process as necessary.
+						if (proc.timer_fd >= 0)
+						{
+							kill(proc.pid, SIGKILL);
+							close(proc.timer_fd);
+							proc.timer_fd = -1;
+						}
+					}
+					else
+						process_once(proc);
+				}
+				else
+				{
+					signalfd_siginfo info = {};
+					if (read(signal_fd, &info, sizeof(info)) < ssize_t(sizeof(info)))
+						return EXIT_FAILURE;
+					pid_t pid = info.ssi_pid;
+
+					auto itr = find_if(begin(child_processes), end(child_processes), [&](const ProcessProgress &progress) {
+						return progress.pid == pid;
+					});
+
+					if (itr != end(child_processes))
+					{
+						if (process_shutdown(*itr))
+							if (!kick_process(*itr))
+								return EXIT_FAILURE;
+					}
+				}
+			}
+			else if (e.events & (EPOLLHUP | EPOLLERR))
+			{
+				// Child process has probably shut down.
+				// This is okay, we'll see a SIGCHLD eventually and flush the crash report file.
+				// For now, just remove the fd from epoll.
+				auto *ptr = static_cast<ProcessProgress *>(e.data.ptr);
+				if (ptr)
+					epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fileno(ptr->crash_file), nullptr);
+			}
+		}
 	}
 #endif
 
