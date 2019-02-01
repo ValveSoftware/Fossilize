@@ -79,7 +79,7 @@ struct ProcessProgress
 	int compute_progress = -1;
 	int graphics_progress = -1;
 
-	void process_once();
+	bool process_once();
 	bool process_shutdown(int wstatus);
 	bool start_child_process();
 	void parse(const char *cmd);
@@ -124,28 +124,27 @@ void ProcessProgress::parse(const char *cmd)
 		LOGE("Got unexpected message from child: %s\n", cmd);
 }
 
-void ProcessProgress::process_once()
+bool ProcessProgress::process_once()
 {
 	if (!crash_file)
-		return;
+		return false;
 
 	char buffer[64];
 	if (fgets(buffer, sizeof(buffer), crash_file))
+	{
 		parse(buffer);
+		return true;
+	}
+	else
+		return false;
 }
 
 bool ProcessProgress::process_shutdown(int wstatus)
 {
 	// Flush out all messages we got.
-	if (!crash_file)
-		return false;
-
-	char buffer[64];
-	while (fgets(buffer, sizeof(buffer), crash_file))
-		parse(buffer);
-
-	// Close file handles associated with the process.
-	fclose(crash_file);
+	while (process_once());
+	if (crash_file)
+		fclose(crash_file);
 	crash_file = nullptr;
 
 	if (timer_fd >= 0)
@@ -241,7 +240,7 @@ bool ProcessProgress::start_child_process()
 
 		epoll_event event = {};
 		event.data.u32 = index;
-		event.events = EPOLLIN;
+		event.events = EPOLLIN | EPOLLRDHUP;
 		if (epoll_ctl(Global::epoll_fd, EPOLL_CTL_ADD, fileno(crash_file), &event) < 0)
 		{
 			LOGE("Failed to add file to epoll.\n");
@@ -256,6 +255,7 @@ bool ProcessProgress::start_child_process()
 		if (pthread_sigmask(SIG_SETMASK, &Global::old_mask, nullptr) < 0)
 			return EXIT_FAILURE;
 		close(Global::signal_fd);
+		close(Global::epoll_fd);
 		close(crash_fds[0]);
 		close(input_fds[1]);
 
@@ -385,7 +385,7 @@ static int run_master_process(const VulkanDevice::Options &opts,
 		for (int i = 0; i < ret; i++)
 		{
 			auto &e = events[i];
-			if (e.events & EPOLLIN)
+			if (e.events & (EPOLLIN | EPOLLRDHUP))
 			{
 				if (e.data.u32 != UINT32_MAX)
 				{
@@ -402,8 +402,14 @@ static int run_master_process(const VulkanDevice::Options &opts,
 							proc.timer_fd = -1;
 						}
 					}
-					else
-						proc.process_once();
+					else if (proc.crash_file)
+					{
+						if (!proc.process_once())
+						{
+							fclose(proc.crash_file);
+							proc.crash_file = nullptr;
+						}
+					}
 				}
 				else
 				{
@@ -445,16 +451,16 @@ static int run_master_process(const VulkanDevice::Options &opts,
 					}
 				}
 			}
-			else if (e.events & (EPOLLHUP | EPOLLERR))
+			else if (e.events & EPOLLERR)
 			{
-				// Child process has probably shut down.
-				// This is okay, we'll see a SIGCHLD eventually and flush the crash report file.
-				// For now, just remove the fd from epoll.
 				if (e.data.u32 < 0x80000000u)
 				{
 					auto &proc = child_processes[e.data.u32 & 0x7fffffffu];
-					if (proc.crash_file && epoll_ctl(Global::epoll_fd, EPOLL_CTL_DEL, fileno(proc.crash_file), nullptr) < 0)
-						LOGE("Failed to delete terminated FD from epoll.\n");
+					if (proc.crash_file)
+					{
+						fclose(proc.crash_file);
+						proc.crash_file = nullptr;
+					}
 				}
 			}
 		}
