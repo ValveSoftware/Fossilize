@@ -47,7 +47,7 @@
 using namespace Fossilize;
 using namespace std;
 
-#define SIMULATE_UNSTABLE_DRIVER
+//#define SIMULATE_UNSTABLE_DRIVER
 
 #ifdef SIMULATE_UNSTABLE_DRIVER
 #include <random>

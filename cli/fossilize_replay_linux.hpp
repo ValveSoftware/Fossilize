@@ -80,7 +80,7 @@ struct ProcessProgress
 	int graphics_progress = -1;
 
 	void process_once();
-	bool process_shutdown();
+	bool process_shutdown(int wstatus);
 	bool start_child_process();
 	void parse(const char *cmd);
 
@@ -134,7 +134,7 @@ void ProcessProgress::process_once()
 		parse(buffer);
 }
 
-bool ProcessProgress::process_shutdown()
+bool ProcessProgress::process_shutdown(int wstatus)
 {
 	// Flush out all messages we got.
 	if (!crash_file)
@@ -155,16 +155,9 @@ bool ProcessProgress::process_shutdown()
 	}
 
 	// Reap child process.
-	int wstatus = 0;
 	Global::active_processes--;
-	pid_t wait_pid = pid;
+	auto wait_pid = pid;
 	pid = -1;
-	if (waitpid(wait_pid, &wstatus, 0) < 0)
-	{
-		LOGE("Failed to wait for process index %u (PID: %d).\n",
-		     index, wait_pid);
-		return false;
-	}
 
 	// If application exited in normal manner, we are done.
 	if (WIFEXITED(wstatus) && WEXITSTATUS(wstatus) == 0)
@@ -349,7 +342,7 @@ static int run_master_process(const VulkanDevice::Options &opts,
 
 	vector<ProcessProgress> child_processes(processes);
 
-	Global::epoll_fd = epoll_create(int(processes) + 1);
+	Global::epoll_fd = epoll_create(2 * int(processes) + 1);
 	if (Global::epoll_fd < 0)
 	{
 		LOGE("Failed to create epollfd. Too old Linux kernel?\n");
@@ -414,24 +407,40 @@ static int run_master_process(const VulkanDevice::Options &opts,
 				}
 				else
 				{
+					// Read from signalfd to clear the pending flag.
 					signalfd_siginfo info = {};
-					if (read(Global::signal_fd, &info, sizeof(info)) < ssize_t(sizeof(info)))
+					if (read(Global::signal_fd, &info, sizeof(info)) <= 0)
 					{
 						LOGE("Reading from signalfd failed.\n");
 						return EXIT_FAILURE;
 					}
-					pid_t pid = info.ssi_pid;
 
-					auto itr = find_if(begin(child_processes), end(child_processes), [&](const ProcessProgress &progress) {
-						return progress.pid == pid;
-					});
-
-					if (itr != end(child_processes))
+					if (info.ssi_signo == SIGCHLD)
 					{
-						if (itr->process_shutdown() && !itr->start_child_process())
+						// We'll only receive one SIGCHLD signal, even if multiple processes
+						// completed at the same time.
+						// Use the typical waitpid loop to reap every process.
+						pid_t pid = 0;
+						int wstatus = 0;
+
+						while ((pid = waitpid(-1, &wstatus, WNOHANG)) > 0)
 						{
-							LOGE("Failed to start child process.\n");
-							return EXIT_FAILURE;
+							auto itr = find_if(begin(child_processes), end(child_processes),
+							                   [&](const ProcessProgress &progress)
+							                   {
+								                   return progress.pid == pid;
+							                   });
+
+							if (itr != end(child_processes))
+							{
+								if (itr->process_shutdown(wstatus) && !itr->start_child_process())
+								{
+									LOGE("Failed to start child process.\n");
+									return EXIT_FAILURE;
+								}
+							}
+							else
+								LOGE("Got SIGCHLD from unknown process PID %d.\n", pid);
 						}
 					}
 				}
@@ -444,7 +453,7 @@ static int run_master_process(const VulkanDevice::Options &opts,
 				if (e.data.u32 < 0x80000000u)
 				{
 					auto &proc = child_processes[e.data.u32 & 0x7fffffffu];
-					if (epoll_ctl(Global::epoll_fd, EPOLL_CTL_DEL, fileno(proc.crash_file), nullptr) < 0)
+					if (proc.crash_file && epoll_ctl(Global::epoll_fd, EPOLL_CTL_DEL, fileno(proc.crash_file), nullptr) < 0)
 						LOGE("Failed to delete terminated FD from epoll.\n");
 				}
 			}
