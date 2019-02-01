@@ -44,18 +44,14 @@
 #include <atomic>
 #include <algorithm>
 
-#ifdef __linux__
-#include <signal.h>
-#include <unistd.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <sys/epoll.h>
-#include <sys/signalfd.h>
-#endif
-#include <errno.h>
-
 using namespace Fossilize;
 using namespace std;
+
+__attribute__((noinline))
+void simulate_crash(int *v)
+{
+	*v = 0;
+}
 
 struct ThreadedReplayer : StateCreatorInterface
 {
@@ -179,6 +175,8 @@ struct ThreadedReplayer : StateCreatorInterface
 					}
 				}
 
+				thread_current_graphics_index++;
+
 				for (unsigned i = 0; i < loop_count; i++)
 				{
 					// Avoid leak.
@@ -191,7 +189,7 @@ struct ThreadedReplayer : StateCreatorInterface
 #if 1
 					// Robustness checking.
 					if ((thread_current_graphics_index & 7) == 7)
-						pthread_kill(pthread_self(), SIGSEGV);
+						simulate_crash(nullptr);
 #endif
 
 					if (vkCreateGraphicsPipelines(device->get_device(), pipeline_cache, 1, work_item.create_info.graphics_create_info,
@@ -209,8 +207,6 @@ struct ThreadedReplayer : StateCreatorInterface
 						     static_cast<unsigned long long>(work_item.hash));
 					}
 				}
-
-				thread_current_graphics_index++;
 				break;
 			}
 
@@ -223,6 +219,7 @@ struct ThreadedReplayer : StateCreatorInterface
 					failed_module_hashes[0] = shader_module_to_hash[module];
 				}
 
+				thread_current_compute_index++;
 				for (unsigned i = 0; i < loop_count; i++)
 				{
 					// Avoid leak.
@@ -235,7 +232,7 @@ struct ThreadedReplayer : StateCreatorInterface
 #if 1
 					// Robustness checking.
 					if ((thread_current_compute_index & 7) == 7)
-						pthread_kill(pthread_self(), SIGSEGV);
+						simulate_crash(nullptr);
 #endif
 
 					if (vkCreateComputePipelines(device->get_device(), pipeline_cache, 1,
@@ -254,8 +251,6 @@ struct ThreadedReplayer : StateCreatorInterface
 						     static_cast<unsigned long long>(work_item.hash));
 					}
 				}
-
-				thread_current_compute_index++;
 				break;
 			}
 
@@ -705,6 +700,7 @@ struct ThreadedReplayer : StateCreatorInterface
 	bool robustness = false;
 };
 
+
 static void print_help()
 {
 	LOGI("fossilize-replay\n"
@@ -722,274 +718,6 @@ static void print_help()
 	     "\t[--slave-process]\n"
 	     "\t[--master-process]\n"
 	     "\t<Database>\n");
-}
-
-#ifdef __linux__
-static bool write_all(int fd, const char *str)
-{
-	// write is async-signal safe, but not stdio.
-	size_t len = strlen(str);
-	while (len)
-	{
-		ssize_t wrote = write(fd, str, len);
-		if (wrote <= 0)
-			return false;
-
-		str += wrote;
-		len -= wrote;
-	}
-
-	return true;
-}
-
-struct ProcessProgress
-{
-	unsigned start_graphics_index = 0u;
-	unsigned start_compute_index = 0u;
-	unsigned end_graphics_index = ~0u;
-	unsigned end_compute_index = ~0u;
-	bool child_dead = false;
-	pid_t pid = -1;
-	FILE *crash_file = nullptr;
-	int timer_fd = -1;
-};
-#endif
-
-static int run_slave_process(const VulkanDevice::Options &opts,
-                             const ThreadedReplayer::Options &replayer_opts,
-                             const string &db_path);
-
-static int run_master_process(const VulkanDevice::Options &opts,
-                              const ThreadedReplayer::Options &replayer_opts_,
-                              const string &db_path)
-{
-	auto replayer_opts = replayer_opts_;
-	unsigned processes = replayer_opts.num_threads;
-	replayer_opts.num_threads = 1;
-
-	size_t num_graphics_pipelines;
-	size_t num_compute_pipelines;
-	{
-		auto db = unique_ptr<DatabaseInterface>(create_database(db_path.c_str(), DatabaseMode::ReadOnly));
-		if (!db->prepare())
-			return EXIT_FAILURE;
-		if (!db->get_hash_list_for_resource_tag(RESOURCE_GRAPHICS_PIPELINE, &num_graphics_pipelines, nullptr))
-			return EXIT_FAILURE;
-		if (!db->get_hash_list_for_resource_tag(RESOURCE_COMPUTE_PIPELINE, &num_compute_pipelines, nullptr))
-			return EXIT_FAILURE;
-	}
-
-	unordered_set<Hash> faulty_spirv_modules;
-
-#ifdef __linux__
-	unsigned active_processes = 0;
-
-	// We will wait for child processes explicitly with signalfd.
-	// Block delivery of signals in the normal way.
-	sigset_t mask;
-	sigset_t old_mask;
-	sigemptyset(&mask);
-	sigaddset(&mask, SIGCHLD);
-	if (sigprocmask(SIGCHLD, &mask, &old_mask) < 0)
-		return EXIT_FAILURE;
-
-	int signal_fd = signalfd(-1, &mask, 0);
-	if (signal_fd < 0)
-		return EXIT_FAILURE;
-
-	const auto send_faulty_modules_and_close = [&](int fd)
-	{
-		for (auto &m : faulty_spirv_modules)
-		{
-			char buffer[18];
-			sprintf(buffer, "%llx\n", static_cast<unsigned long long>(m));
-			write_all(fd, buffer);
-		}
-
-		close(fd);
-	};
-
-	const auto process_once = [&](ProcessProgress &progress)
-	{
-		if (!progress.crash_file)
-			return;
-
-		char buffer[64];
-		if (fgets(buffer, sizeof(buffer), progress.crash_file))
-			LOGI("Got message from child: %s\n", buffer);
-	};
-
-	const auto process_shutdown = [&](ProcessProgress &progress) -> bool
-	{
-		if (!progress.crash_file)
-			return false;
-
-		char buffer[64];
-		while (fgets(buffer, sizeof(buffer), progress.crash_file))
-		{
-			LOGI("Got message from child: %s\n", buffer);
-		}
-
-		fclose(progress.crash_file);
-		progress.crash_file = nullptr;
-
-		int wstatus = 0;
-		waitpid(progress.pid, &wstatus, 0);
-		progress.pid = -1;
-		active_processes--;
-
-		if (progress.timer_fd >= 0)
-		{
-			close(progress.timer_fd);
-			progress.timer_fd = -1;
-		}
-		return false;
-	};
-
-	const auto kick_process = [&](ProcessProgress &progress) -> bool
-	{
-		int crash_fds[2];
-		int input_fds[2];
-		if (pipe(crash_fds) < 0)
-			return false;
-		if (pipe(input_fds) < 0)
-			return false;
-
-		pid_t pid = fork(); // Fork off a child.
-		if (pid > 0)
-		{
-			// We're the parent, keep track of the process in a thread to avoid a lot of complex multiplexing code.
-			progress.crash_file = fdopen(crash_fds[0], "r");
-			if (!progress.crash_file)
-				close(crash_fds[0]);
-			progress.pid = pid;
-
-			send_faulty_modules_and_close(input_fds[1]);
-			close(crash_fds[1]);
-			close(input_fds[0]);
-			active_processes++;
-			return true;
-		}
-		else if (pid == 0)
-		{
-			// We're the child process.
-			sigprocmask(SIG_SETMASK, &old_mask, nullptr);
-			close(signal_fd);
-			close(crash_fds[0]);
-			close(input_fds[1]);
-
-			if (dup2(crash_fds[1], STDOUT_FILENO) < 0)
-				return EXIT_FAILURE;
-			if (dup2(input_fds[0], STDIN_FILENO) < 0)
-				return EXIT_FAILURE;
-
-			auto copy_opts = replayer_opts;
-			copy_opts.start_graphics_index = replayer_opts.start_graphics_index;
-			copy_opts.end_graphics_index = replayer_opts.end_graphics_index;
-			copy_opts.start_compute_index = replayer_opts.start_compute_index;
-			copy_opts.end_compute_index = replayer_opts.end_compute_index;
-			return run_slave_process(opts, copy_opts, db_path) == EXIT_SUCCESS;
-		}
-		else
-			return false;
-	};
-
-	vector<ProcessProgress> child_processes(processes);
-
-	// fork() and pipe() strategy.
-	for (unsigned i = 0; i < processes; i++)
-	{
-		auto &progress = child_processes[i];
-		progress.start_graphics_index = (i * unsigned(num_graphics_pipelines)) / processes;
-		progress.start_compute_index = ((i + 1) * unsigned(num_graphics_pipelines)) / processes;
-		progress.end_graphics_index = (i * unsigned(num_compute_pipelines)) / processes;
-		progress.end_compute_index = ((i + 1) * unsigned(num_compute_pipelines)) / processes;
-	}
-
-	int epoll_fd = epoll_create(int(processes) + 1);
-	if (epoll_fd < 0)
-		return EXIT_FAILURE;
-
-	for (auto &child : child_processes)
-	{
-		epoll_event event = {};
-		event.data.u32 = uint32_t(&child - child_processes.data());
-		event.events = EPOLLIN;
-		if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fileno(child.crash_file), &event) < 0)
-			return EXIT_FAILURE;
-	}
-
-	{
-		epoll_event event = {};
-		event.events = EPOLLIN;
-		event.data.u32 = UINT32_MAX;
-		if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, signal_fd, &event) < 0)
-			return EXIT_FAILURE;
-	}
-
-	while (active_processes != 0)
-	{
-		epoll_event events[64];
-		int ret = epoll_wait(epoll_fd, events, 64, -1);
-		if (ret < 0)
-			return EXIT_FAILURE;
-
-		for (int i = 0; i < ret; i++)
-		{
-			auto &e = events[i];
-			if (e.events & EPOLLIN)
-			{
-				if (e.data.u32 != UINT32_MAX)
-				{
-					auto &proc = child_processes[e.data.u32 & 0x7fffffffu];
-
-					if (e.data.u32 & 0x80000000u)
-					{
-						// Timeout triggered. kill the process and reap it.
-						// SIGCHLD handler should rearm the process as necessary.
-						if (proc.timer_fd >= 0)
-						{
-							kill(proc.pid, SIGKILL);
-							close(proc.timer_fd);
-							proc.timer_fd = -1;
-						}
-					}
-					else
-						process_once(proc);
-				}
-				else
-				{
-					signalfd_siginfo info = {};
-					if (read(signal_fd, &info, sizeof(info)) < ssize_t(sizeof(info)))
-						return EXIT_FAILURE;
-					pid_t pid = info.ssi_pid;
-
-					auto itr = find_if(begin(child_processes), end(child_processes), [&](const ProcessProgress &progress) {
-						return progress.pid == pid;
-					});
-
-					if (itr != end(child_processes))
-					{
-						if (process_shutdown(*itr))
-							if (!kick_process(*itr))
-								return EXIT_FAILURE;
-					}
-				}
-			}
-			else if (e.events & (EPOLLHUP | EPOLLERR))
-			{
-				// Child process has probably shut down.
-				// This is okay, we'll see a SIGCHLD eventually and flush the crash report file.
-				// For now, just remove the fd from epoll.
-				auto *ptr = static_cast<ProcessProgress *>(e.data.ptr);
-				if (ptr)
-					epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fileno(ptr->crash_file), nullptr);
-			}
-		}
-	}
-#endif
-
-	return EXIT_FAILURE;
 }
 
 static int run_normal_process(ThreadedReplayer &replayer, const string &db_path)
@@ -1115,134 +843,13 @@ static int run_normal_process(ThreadedReplayer &replayer, const string &db_path)
 	return EXIT_SUCCESS;
 }
 
+// The implementations are drastically different.
+// To simplify build system, just include implementation inline here.
 #ifdef __linux__
-
-static ThreadedReplayer *global_replayer = nullptr;
-static int crash_fd;
-
-static void crash_handler(int)
-{
-	// stderr is reserved for generic logging.
-	// stdout/stdin is for IPC with master process.
-
-	if (!write_all(crash_fd, "CRASH\n"))
-		_exit(2);
-
-	// This might hang indefinitely if we are exceptionally unlucky,
-	// the parent will have a timeout after receiving the crash message.
-	// If that fails, it can SIGKILL us.
-	// We want to make sure any database writing threads in the driver gets a chance to complete its work
-	// before we die.
-
-	if (global_replayer)
-	{
-		char buffer[64];
-
-		// Report to parent process which VkShaderModule's might have contributed to our untimely death.
-		// This allows a new process to ignore these modules.
-		for (unsigned i = 0; i < global_replayer->num_failed_module_hashes; i++)
-		{
-			sprintf(buffer, "MODULE %llx\n",
-					static_cast<unsigned long long>(global_replayer->failed_module_hashes[i]));
-			if (!write_all(crash_fd, buffer))
-				_exit(2);
-		}
-
-		// Report where we stopped, so we can continue.
-		sprintf(buffer, "GRAPHICS %d\n", global_replayer->thread_current_graphics_index);
-		if (!write_all(crash_fd, buffer))
-			_exit(2);
-
-		sprintf(buffer, "COMPUTE %d\n", global_replayer->thread_current_compute_index);
-		if (!write_all(crash_fd, buffer))
-			_exit(2);
-
-		global_replayer->emergency_teardown();
-	}
-
-	// Clean exit instead of reporting the segfault.
-	// _exit is async-signal safe, but not exit().
-	// Use exit code 2 to mark a segfaulted child.
-	_exit(2);
-}
-#endif
-
-static int run_slave_process(const VulkanDevice::Options &opts,
-                             const ThreadedReplayer::Options &replayer_opts,
-                             const string &db_path)
-{
-	ThreadedReplayer replayer(opts, replayer_opts);
-	replayer.robustness = true;
-
-	// In slave mode, we can receive a list of shader module hashes we should ignore.
-	// This is to avoid trying to replay the same faulty shader modules again and again.
-	char ignored_shader_module_hash[16 + 2];
-	while (fgets(ignored_shader_module_hash, sizeof(ignored_shader_module_hash), stdin))
-	{
-		errno = 0;
-		auto hash = strtoull(ignored_shader_module_hash, nullptr, 16);
-		if (hash == 0)
-			break;
-		if (errno == 0)
-		{
-			LOGE("Ignoring module %llx\n", hash);
-			replayer.mask_shader_module(Hash(hash));
-		}
-	}
-
-#ifdef __linux__
-	// Make sure that the driver cannot mess up the master process.
-	// Just stdout.
-	crash_fd = dup(STDOUT_FILENO);
-	close(STDOUT_FILENO);
-
-	global_replayer = &replayer;
-
-	// Just in case the driver crashed due to stack overflow,
-	// provide an alternate stack where we can clean up "safely".
-	stack_t ss;
-	ss.ss_sp = malloc(1024 * 1024);
-	ss.ss_size = 1024 * 1024;
-	ss.ss_flags = 0;
-	if (sigaltstack(&ss, nullptr) < 0)
-		return EXIT_FAILURE;
-
-	struct sigaction act;
-	memset(&act, 0, sizeof(act));
-	sigemptyset(&act.sa_mask);
-	act.sa_handler = crash_handler;
-	act.sa_flags = SA_RESETHAND | SA_ONSTACK;
-
-	if (sigaction(SIGSEGV, &act, nullptr) < 0)
-		return EXIT_FAILURE;
-	if (sigaction(SIGFPE, &act, nullptr) < 0)
-		return EXIT_FAILURE;
-	if (sigaction(SIGILL, &act, nullptr) < 0)
-		return EXIT_FAILURE;
-	if (sigaction(SIGBUS, &act, nullptr) < 0)
-		return EXIT_FAILURE;
-
-#if 0
-	// Don't let main thread handle the signals.
-	// Must be handled by the threads themselves.
-	// I think SIGSEGV should always be handled on the offending thread,
-	// but need this for testing at least.
-	sigset_t set;
-	sigemptyset(&set);
-	sigaddset(&set, SIGSEGV);
-	sigaddset(&set, SIGFPE);
-	sigaddset(&set, SIGILL);
-	sigaddset(&set, SIGBUS);
-	if (pthread_sigmask(SIG_BLOCK, &set, nullptr) < 0)
-		return EXIT_FAILURE;
-#endif
-
-	return run_normal_process(replayer, db_path);
+#include "fossilize_replay_linux.hpp"
 #else
-	ThreadedReplayer replayer(opts, replayer_opts);
-	return run_normal_process(replayer, db_path);
+#include "fossilize_replay_windows.hpp"
 #endif
-}
 
 int main(int argc, char *argv[])
 {
