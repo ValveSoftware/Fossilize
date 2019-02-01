@@ -57,19 +57,38 @@ static void simulate_crash(int *v)
 	*v = 0;
 }
 
-static std::mt19937 rnd(1234);
-static std::uniform_int_distribution<int> dist(0, 15);
-
 void spurious_crash()
 {
+	std::uniform_int_distribution<int> dist(0, 15);
+	auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+			std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+	std::mt19937 rnd(ns);
+
+	// Simulate fatal things like segfaults and aborts.
 	if (dist(rnd) < 2)
+	{
+		LOGE("Simulating a crash ...\n");
 		simulate_crash(nullptr);
+	}
+	else if (dist(rnd) < 2)
+	{
+		LOGE("Simulating an abort ...\n");
+		abort();
+	}
 }
 
 void spurious_deadlock()
 {
-	if (dist(rnd) < 1)
-		std::this_thread::sleep_for(std::chrono::seconds(1000));
+	std::uniform_int_distribution<int> dist(0, 15);
+	auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+			std::chrono::high_resolution_clock::now().time_since_epoch()).count();
+	std::mt19937 rnd(ns);
+
+	if (dist(rnd) < 2)
+	{
+		LOGE("Simulating a deadlock ...\n");
+		std::this_thread::sleep_for(std::chrono::seconds(100));
+	}
 }
 #endif
 

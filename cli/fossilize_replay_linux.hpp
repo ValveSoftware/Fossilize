@@ -99,12 +99,14 @@ void ProcessProgress::parse(const char *cmd)
 		{
 			struct itimerspec spec = {};
 			spec.it_value.tv_sec = 1;
-			timerfd_settime(timer_fd, 0, &spec, nullptr);
+			if (timerfd_settime(timer_fd, 0, &spec, nullptr) < 0)
+				LOGE("Failed to set time with timerfd_settime.\n");
 
 			struct epoll_event event = {};
 			event.data.u32 = 0x80000000u | index;
 			event.events = EPOLLIN;
-			epoll_ctl(Global::epoll_fd, EPOLL_CTL_ADD, timer_fd, &event);
+			if (epoll_ctl(Global::epoll_fd, EPOLL_CTL_ADD, timer_fd, &event))
+				LOGE("Failed adding timer_fd to epoll_ctl().\n");
 		}
 		else
 			LOGE("Failed to creater timerfd. Cannot support timeout for process.\n");
@@ -164,24 +166,24 @@ bool ProcessProgress::process_shutdown()
 		return false;
 	}
 
-	// If the child did not exit in a normal manner, we failed to catch any crashing signal.
-	// Do not try any further.
-	if (!WIFEXITED(wstatus))
-	{
-		LOGE("Process index %u (PID: %d) failed to terminate in a clean fashion. We cannot continue replaying.\n",
-		     index, wait_pid);
-		return false;
-	}
-
 	// If application exited in normal manner, we are done.
 	if (WIFEXITED(wstatus) && WEXITSTATUS(wstatus) == 0)
 		return false;
 
-	if (WIFEXITED(wstatus) && WTERMSIG(wstatus) == SIGKILL)
+	if (WIFSIGNALED(wstatus) && WTERMSIG(wstatus) == SIGKILL)
 	{
 		// We had to kill the process early. Log this for debugging.
 		LOGE("Process index %u (PID: %d) failed and it had to be killed in timeout with SIGKILL.\n",
 		     index, wait_pid);
+	}
+
+	// If the child did not exit in a normal manner, we failed to catch any crashing signal.
+	// Do not try any further.
+	if (!WIFEXITED(wstatus) && WIFSIGNALED(wstatus) && WTERMSIG(wstatus) != SIGKILL)
+	{
+		LOGE("Process index %u (PID: %d) failed to terminate in a clean fashion. We cannot continue replaying.\n",
+		     index, wait_pid);
+		return false;
 	}
 
 	// We might have crashed, but we never saw any progress marker.
@@ -243,6 +245,16 @@ bool ProcessProgress::start_child_process()
 		close(crash_fds[1]);
 		close(input_fds[0]);
 		Global::active_processes++;
+
+		epoll_event event = {};
+		event.data.u32 = index;
+		event.events = EPOLLIN;
+		if (epoll_ctl(Global::epoll_fd, EPOLL_CTL_ADD, fileno(crash_file), &event) < 0)
+		{
+			LOGE("Failed to add file to epoll.\n");
+			return false;
+		}
+
 		return true;
 	}
 	else if (new_pid == 0)
@@ -337,35 +349,11 @@ static int run_master_process(const VulkanDevice::Options &opts,
 
 	vector<ProcessProgress> child_processes(processes);
 
-	// fork() and pipe() strategy.
-	for (unsigned i = 0; i < processes; i++)
-	{
-		auto &progress = child_processes[i];
-		progress.start_graphics_index = (i * unsigned(num_graphics_pipelines)) / processes;
-		progress.end_graphics_index = ((i + 1) * unsigned(num_graphics_pipelines)) / processes;
-		progress.start_compute_index = (i * unsigned(num_compute_pipelines)) / processes;
-		progress.end_compute_index = ((i + 1) * unsigned(num_compute_pipelines)) / processes;
-		progress.index = i;
-		progress.start_child_process();
-	}
-
 	Global::epoll_fd = epoll_create(int(processes) + 1);
 	if (Global::epoll_fd < 0)
 	{
 		LOGE("Failed to create epollfd. Too old Linux kernel?\n");
 		return EXIT_FAILURE;
-	}
-
-	for (auto &child : child_processes)
-	{
-		epoll_event event = {};
-		event.data.u32 = child.index;
-		event.events = EPOLLIN;
-		if (epoll_ctl(Global::epoll_fd, EPOLL_CTL_ADD, fileno(child.crash_file), &event) < 0)
-		{
-			LOGE("Failed to add file to epoll.\n");
-			return EXIT_FAILURE;
-		}
 	}
 
 	{
@@ -377,6 +365,18 @@ static int run_master_process(const VulkanDevice::Options &opts,
 			LOGE("Failed to add signalfd to epoll.\n");
 			return EXIT_FAILURE;
 		}
+	}
+
+	// fork() and pipe() strategy.
+	for (unsigned i = 0; i < processes; i++)
+	{
+		auto &progress = child_processes[i];
+		progress.start_graphics_index = (i * unsigned(num_graphics_pipelines)) / processes;
+		progress.end_graphics_index = ((i + 1) * unsigned(num_graphics_pipelines)) / processes;
+		progress.start_compute_index = (i * unsigned(num_compute_pipelines)) / processes;
+		progress.end_compute_index = ((i + 1) * unsigned(num_compute_pipelines)) / processes;
+		progress.index = i;
+		progress.start_child_process();
 	}
 
 	while (Global::active_processes != 0)
@@ -444,7 +444,8 @@ static int run_master_process(const VulkanDevice::Options &opts,
 				if (e.data.u32 < 0x80000000u)
 				{
 					auto &proc = child_processes[e.data.u32 & 0x7fffffffu];
-					epoll_ctl(Global::epoll_fd, EPOLL_CTL_DEL, fileno(proc.crash_file), nullptr);
+					if (epoll_ctl(Global::epoll_fd, EPOLL_CTL_DEL, fileno(proc.crash_file), nullptr) < 0)
+						LOGE("Failed to delete terminated FD from epoll.\n");
 				}
 			}
 		}
