@@ -29,6 +29,7 @@
 #include <sys/epoll.h>
 #include <sys/signalfd.h>
 #include <sys/timerfd.h>
+#include <fcntl.h>
 #include <errno.h>
 
 static bool write_all(int fd, const char *str)
@@ -62,6 +63,7 @@ static sigset_t old_mask;
 static int signal_fd;
 static int epoll_fd;
 static VulkanDevice::Options device_options;
+static bool quiet_slave;
 }
 
 struct ProcessProgress
@@ -116,6 +118,8 @@ void ProcessProgress::parse(const char *cmd)
 		auto hash = strtoull(cmd + 6, nullptr, 16);
 		Global::faulty_spirv_modules.insert(hash);
 	}
+	else
+		LOGE("Got unexpected message from child: %s\n", cmd);
 }
 
 void ProcessProgress::process_once()
@@ -125,10 +129,7 @@ void ProcessProgress::process_once()
 
 	char buffer[64];
 	if (fgets(buffer, sizeof(buffer), crash_file))
-	{
-		LOGI("Got message from child: %s\n", buffer);
 		parse(buffer);
-	}
 }
 
 bool ProcessProgress::process_shutdown()
@@ -139,10 +140,7 @@ bool ProcessProgress::process_shutdown()
 
 	char buffer[64];
 	while (fgets(buffer, sizeof(buffer), crash_file))
-	{
-		LOGI("Got message from child: %s\n", buffer);
 		parse(buffer);
-	}
 
 	// Close file handles associated with the process.
 	fclose(crash_file);
@@ -202,6 +200,8 @@ bool ProcessProgress::process_shutdown()
 	else
 	{
 		LOGE("Process index %u (PID: %d) crashed, but will retry.\n", index, wait_pid);
+		LOGE("  New graphics range (%u, %u)\n", start_graphics_index, end_graphics_index);
+		LOGE("  New compute range (%u, %u)\n", start_compute_index, end_compute_index);
 		return true;
 	}
 }
@@ -259,6 +259,16 @@ bool ProcessProgress::start_child_process()
 		if (dup2(input_fds[0], STDIN_FILENO) < 0)
 			return EXIT_FAILURE;
 
+		if (Global::quiet_slave)
+		{
+			int fd_dev_null = open("/dev/null", O_WRONLY);
+			if (fd_dev_null >= 0)
+			{
+				dup2(fd_dev_null, STDERR_FILENO);
+				close(fd_dev_null);
+			}
+		}
+
 		auto copy_opts = Global::base_replayer_options;
 		copy_opts.start_graphics_index = start_graphics_index;
 		copy_opts.end_graphics_index = end_graphics_index;
@@ -272,8 +282,10 @@ bool ProcessProgress::start_child_process()
 
 static int run_master_process(const VulkanDevice::Options &opts,
                               const ThreadedReplayer::Options &replayer_opts,
-                              const string &db_path)
+                              const string &db_path,
+                              bool quiet_slave)
 {
+	Global::quiet_slave = quiet_slave;
 	Global::device_options = opts;
 	Global::base_replayer_options = replayer_opts;
 	Global::db_path = db_path;
@@ -513,8 +525,7 @@ static int run_slave_process(const VulkanDevice::Options &opts,
 		}
 	}
 
-	// Make sure that the driver cannot mess up the master process.
-	// Just stdout.
+	// Make sure that the driver cannot mess up the master process by writing random data to stdout.
 	crash_fd = dup(STDOUT_FILENO);
 	close(STDOUT_FILENO);
 
@@ -542,6 +553,15 @@ static int run_slave_process(const VulkanDevice::Options &opts,
 	if (sigaction(SIGILL, &act, nullptr) < 0)
 		return EXIT_FAILURE;
 	if (sigaction(SIGBUS, &act, nullptr) < 0)
+		return EXIT_FAILURE;
+	if (sigaction(SIGABRT, &act, nullptr) < 0)
+		return EXIT_FAILURE;
+
+	// Don't allow the main thread to handle abort signals.
+	sigset_t mask;
+	sigemptyset(&mask);
+	sigaddset(&mask, SIGABRT);
+	if (pthread_sigmask(SIG_BLOCK, &mask, nullptr) < 0)
 		return EXIT_FAILURE;
 
 	return run_normal_process(replayer, db_path);

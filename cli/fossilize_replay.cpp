@@ -47,11 +47,31 @@
 using namespace Fossilize;
 using namespace std;
 
+#define SIMULATE_UNSTABLE_DRIVER
+
+#ifdef SIMULATE_UNSTABLE_DRIVER
+#include <random>
 __attribute__((noinline))
-void simulate_crash(int *v)
+static void simulate_crash(int *v)
 {
 	*v = 0;
 }
+
+static std::mt19937 rnd(1234);
+static std::uniform_int_distribution<int> dist(0, 15);
+
+void spurious_crash()
+{
+	if (dist(rnd) < 2)
+		simulate_crash(nullptr);
+}
+
+void spurious_deadlock()
+{
+	if (dist(rnd) < 1)
+		std::this_thread::sleep_for(std::chrono::seconds(1000));
+}
+#endif
 
 struct ThreadedReplayer : StateCreatorInterface
 {
@@ -165,6 +185,13 @@ struct ThreadedReplayer : StateCreatorInterface
 
 			case RESOURCE_GRAPHICS_PIPELINE:
 			{
+				thread_current_graphics_index++;
+
+				// Make sure to iterate the index so main thread and worker threads
+				// have a coherent idea of replayer state.
+				if (!work_item.create_info.graphics_create_info)
+					break;
+
 				if (robustness)
 				{
 					num_failed_module_hashes = work_item.create_info.graphics_create_info->stageCount;
@@ -175,7 +202,6 @@ struct ThreadedReplayer : StateCreatorInterface
 					}
 				}
 
-				thread_current_graphics_index++;
 
 				for (unsigned i = 0; i < loop_count; i++)
 				{
@@ -186,10 +212,8 @@ struct ThreadedReplayer : StateCreatorInterface
 
 					auto start_time = chrono::steady_clock::now();
 
-#if 1
-					// Robustness checking.
-					if ((thread_current_graphics_index & 7) == 7)
-						simulate_crash(nullptr);
+#ifdef SIMULATE_UNSTABLE_DRIVER
+					spurious_crash();
 #endif
 
 					if (vkCreateGraphicsPipelines(device->get_device(), pipeline_cache, 1, work_item.create_info.graphics_create_info,
@@ -212,6 +236,13 @@ struct ThreadedReplayer : StateCreatorInterface
 
 			case RESOURCE_COMPUTE_PIPELINE:
 			{
+				thread_current_compute_index++;
+
+				// Make sure to iterate the index so main thread and worker threads
+				// have a coherent idea of replayer state.
+				if (!work_item.create_info.compute_create_info)
+					break;
+
 				if (robustness)
 				{
 					num_failed_module_hashes = 1;
@@ -219,7 +250,6 @@ struct ThreadedReplayer : StateCreatorInterface
 					failed_module_hashes[0] = shader_module_to_hash[module];
 				}
 
-				thread_current_compute_index++;
 				for (unsigned i = 0; i < loop_count; i++)
 				{
 					// Avoid leak.
@@ -229,10 +259,8 @@ struct ThreadedReplayer : StateCreatorInterface
 
 					auto start_time = chrono::steady_clock::now();
 
-#if 1
-					// Robustness checking.
-					if ((thread_current_compute_index & 7) == 7)
-						simulate_crash(nullptr);
+#ifdef SIMULATE_UNSTABLE_DRIVER
+					spurious_crash();
 #endif
 
 					if (vkCreateComputePipelines(device->get_device(), pipeline_cache, 1,
@@ -545,17 +573,22 @@ struct ThreadedReplayer : StateCreatorInterface
 
 	bool enqueue_create_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
-		if (create_info->stage.module != VK_NULL_HANDLE &&
-		    compute_pipeline_index >= opts.start_compute_index &&
+		if (compute_pipeline_index >= opts.start_compute_index &&
 		    compute_pipeline_index < opts.end_compute_index)
 		{
-			PipelineWorkItem work_item;
+			PipelineWorkItem work_item = {};
 			work_item.hash = hash;
 			work_item.tag = RESOURCE_COMPUTE_PIPELINE;
 			work_item.output.pipeline = pipeline;
-			// Pointer to value in std::unordered_map remains fixed per spec (node-based).
-			work_item.hash_map_entry.pipeline = &compute_pipelines[hash];
-			work_item.create_info.compute_create_info = create_info;
+
+			if (create_info->stage.module != VK_NULL_HANDLE)
+			{
+				// Pointer to value in std::unordered_map remains fixed per spec (node-based).
+				work_item.hash_map_entry.pipeline = &compute_pipelines[hash];
+				work_item.create_info.compute_create_info = create_info;
+			}
+			else
+				LOGE("Skipping replay of compute pipeline index %u.\n", compute_pipeline_index);
 
 			{
 				// Pipeline parsing with pipeline creation.
@@ -574,22 +607,27 @@ struct ThreadedReplayer : StateCreatorInterface
 
 	bool enqueue_create_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
-		bool valid_handles = true;
-		for (uint32_t i = 0; i < create_info->stageCount; i++)
-			if (create_info->pStages[i].module == VK_NULL_HANDLE)
-				valid_handles = false;
-
-		if (valid_handles &&
-		    graphics_pipeline_index >= opts.start_graphics_index &&
+		if (graphics_pipeline_index >= opts.start_graphics_index &&
 		    graphics_pipeline_index < opts.end_graphics_index)
 		{
-			PipelineWorkItem work_item;
+			bool valid_handles = true;
+			for (uint32_t i = 0; i < create_info->stageCount; i++)
+				if (create_info->pStages[i].module == VK_NULL_HANDLE)
+					valid_handles = false;
+
+			PipelineWorkItem work_item = {};
 			work_item.hash = hash;
 			work_item.tag = RESOURCE_GRAPHICS_PIPELINE;
 			work_item.output.pipeline = pipeline;
-			// Pointer to value in std::unordered_map remains fixed per spec (node-based).
-			work_item.hash_map_entry.pipeline = &graphics_pipelines[hash];
-			work_item.create_info.graphics_create_info = create_info;
+
+			if (valid_handles)
+			{
+				// Pointer to value in std::unordered_map remains fixed per spec (node-based).
+				work_item.hash_map_entry.pipeline = &graphics_pipelines[hash];
+				work_item.create_info.graphics_create_info = create_info;
+			}
+			else
+				LOGE("Skipping replay of graphics pipeline index %u.\n", graphics_pipeline_index);
 
 			{
 				// Pipeline parsing with pipeline creation.
@@ -624,6 +662,9 @@ struct ThreadedReplayer : StateCreatorInterface
 
 	void emergency_teardown()
 	{
+#ifdef SIMULATE_UNSTABLE_DRIVER
+		spurious_deadlock();
+#endif
 		device.reset();
 	}
 
@@ -717,6 +758,7 @@ static void print_help()
 	     "\t[--compute-pipeline-range <start> <end>]\n"
 	     "\t[--slave-process]\n"
 	     "\t[--master-process]\n"
+	     "\t[--quiet-slave]\n"
 	     "\t<Database>\n");
 }
 
@@ -858,6 +900,7 @@ int main(int argc, char *argv[])
 	ThreadedReplayer::Options replayer_opts;
 	bool master_process = false;
 	bool slave_process = false;
+	bool quiet_slave = false;
 
 	CLICallbacks cbs;
 	cbs.default_handler = [&](const char *arg) { db_path = arg; };
@@ -869,6 +912,7 @@ int main(int argc, char *argv[])
 	cbs.add("--num-threads", [&](CLIParser &parser) { replayer_opts.num_threads = parser.next_uint(); });
 	cbs.add("--master-process", [&](CLIParser &) { master_process = true; });
 	cbs.add("--slave-process", [&](CLIParser &) { slave_process = true; });
+	cbs.add("--quiet-slave", [&](CLIParser &) { quiet_slave = true; });
 	cbs.add("--loop", [&](CLIParser &parser) { replayer_opts.loop_count = parser.next_uint(); });
 
 	cbs.add("--graphics-pipeline-range", [&](CLIParser &parser) {
@@ -912,7 +956,7 @@ int main(int argc, char *argv[])
 
 	int ret;
 	if (master_process)
-		ret = run_master_process(opts, replayer_opts, db_path);
+		ret = run_master_process(opts, replayer_opts, db_path, quiet_slave);
 	else if (slave_process)
 		ret = run_slave_process(opts, replayer_opts, db_path);
 	else
