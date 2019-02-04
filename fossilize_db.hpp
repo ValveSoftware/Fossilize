@@ -102,6 +102,9 @@ public:
 
 	// Arguments are similar to Vulkan, call the query function twice.
 	virtual bool get_hash_list_for_resource_tag(ResourceTag tag, size_t *num_hashes, Hash *hash) = 0;
+
+	// Ensures all file writes are flushed, ala fflush(). Might be noop depending on the implementation.
+	virtual void flush() = 0;
 };
 
 enum class DatabaseMode

@@ -2665,6 +2665,8 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 		database_iface->write_entry(RESOURCE_APPLICATION_INFO, h.get(), blob.data(), blob.size(), payload_flags);
 	}
 
+	bool need_flush = false;
+
 	for (;;)
 	{
 		WorkItem record_item = {};
@@ -2678,9 +2680,38 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 			if (!looping && record_queue.empty())
 				break;
 
-			record_cv.wait(lock, [&] { return !record_queue.empty(); });
-			record_item = record_queue.front();
-			record_queue.pop();
+			// If we have written something to the database, wake up to flush whatever files are
+			// necessary. Do not flush after every single write, as that might bog down the file system.
+			// Once no new writes have occured for a second, we flush, and go to deep sleep.
+			bool has_data;
+			if (need_flush)
+			{
+				has_data = record_cv.wait_for(lock, std::chrono::seconds(1),
+				                              [&]()
+				                              {
+					                              return !record_queue.empty();
+				                              });
+			}
+			else
+			{
+				record_cv.wait(lock, [&]()
+				{
+					return !record_queue.empty();
+				});
+				has_data = true;
+			}
+
+			if (database_iface && !has_data && need_flush)
+			{
+				database_iface->flush();
+				need_flush = false;
+				continue;
+			}
+			else
+			{
+				record_item = record_queue.front();
+				record_queue.pop();
+			}
 		}
 
 		if (!record_item.create_info)
@@ -2702,6 +2733,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 					{
 						serialize_sampler(hash, *create_info, blob);
 						database_iface->write_entry(RESOURCE_SAMPLER, hash, blob.data(), blob.size(), payload_flags);
+						need_flush = true;
 					}
 				}
 				else
@@ -2728,6 +2760,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 					{
 						serialize_render_pass(hash, *create_info, blob);
 						database_iface->write_entry(RESOURCE_RENDER_PASS, hash, blob.data(), blob.size(), payload_flags);
+						need_flush = true;
 					}
 				}
 				else
@@ -2754,6 +2787,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 					{
 						serialize_shader_module(hash, *create_info, blob, allocator);
 						database_iface->write_entry(RESOURCE_SHADER_MODULE, hash, blob.data(), blob.size(), payload_flags);
+						need_flush = true;
 						allocator.reset();
 					}
 				}
@@ -2784,6 +2818,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 					{
 						serialize_descriptor_set_layout(hash, *create_info_copy, blob);
 						database_iface->write_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, hash, blob.data(), blob.size(), payload_flags);
+						need_flush = true;
 					}
 
 					// Don't need to keep copied data around, reset the allocator.
@@ -2813,6 +2848,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 					{
 						serialize_pipeline_layout(hash, *create_info_copy, blob);
 						database_iface->write_entry(RESOURCE_PIPELINE_LAYOUT, hash, blob.data(), blob.size(), payload_flags);
+						need_flush = true;
 					}
 
 					// Don't need to keep copied data around, reset the allocator.
@@ -2842,6 +2878,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 					{
 						serialize_graphics_pipeline(hash, *create_info_copy, blob);
 						database_iface->write_entry(RESOURCE_GRAPHICS_PIPELINE, hash, blob.data(), blob.size(), payload_flags);
+						need_flush = true;
 					}
 
 					// Don't need to keep copied data around, reset the allocator.
@@ -2871,6 +2908,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 					{
 						serialize_compute_pipeline(hash, *create_info_copy, blob);
 						database_iface->write_entry(RESOURCE_COMPUTE_PIPELINE, hash, blob.data(), blob.size(), payload_flags);
+						need_flush = true;
 					}
 
 					// Don't need to keep copied data around, reset the allocator.
