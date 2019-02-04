@@ -51,6 +51,10 @@ struct DumbDirectoryDatabase : DatabaseInterface
 			mode = DatabaseMode::OverWrite;
 	}
 
+	void flush() override
+	{
+	}
+
 	bool prepare() override
 	{
 		if (mode == DatabaseMode::OverWrite)
@@ -234,6 +238,10 @@ struct ZipDatabase : DatabaseInterface
 			if (!mz_zip_end(&mz))
 				LOGE("mz_zip_end failed!\n");
 		}
+	}
+
+	void flush() override
+	{
 	}
 
 	static bool string_is_hex(const char *str)
@@ -478,6 +486,12 @@ struct StreamArchive : DatabaseInterface
 			fclose(file);
 	}
 
+	void flush() override
+	{
+		if (file && mode != DatabaseMode::ReadOnly)
+			fflush(file);
+	}
+
 	bool prepare() override
 	{
 		switch (mode)
@@ -543,7 +557,10 @@ struct StreamArchive : DatabaseInterface
 
 					// Corrupt entry. Our process might have been killed before we could write all data.
 					if (offset + sizeof(blob_name) + sizeof(header_raw) > len)
+					{
+						LOGE("Detected sliced file. Dropping entries from here.\n");
 						break;
+					}
 
 					// NAME
 					if (fread(blob_name, 1, sizeof(blob_name), file) != sizeof(blob_name))
@@ -559,7 +576,10 @@ struct StreamArchive : DatabaseInterface
 
 					// Corrupt entry. Our process might have been killed before we could write all data.
 					if (offset + header.payload_size > len)
+					{
+						LOGE("Detected sliced file. Dropping entries from here.\n");
 						break;
+					}
 
 					char tag_str[16 + 1] = {};
 					char value_str[16 + 1] = {};
@@ -945,6 +965,12 @@ struct ConcurrentDatabase : DatabaseInterface
 	{
 		delete readonly_interface;
 		delete writeonly_interface;
+	}
+
+	void flush() override
+	{
+		if (writeonly_interface)
+			writeonly_interface->flush();
 	}
 
 	bool prepare() override
