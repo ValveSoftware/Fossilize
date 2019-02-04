@@ -51,6 +51,10 @@ struct DumbDirectoryDatabase : DatabaseInterface
 			mode = DatabaseMode::OverWrite;
 	}
 
+	void flush() override
+	{
+	}
+
 	bool prepare() override
 	{
 		if (mode == DatabaseMode::OverWrite)
@@ -234,6 +238,10 @@ struct ZipDatabase : DatabaseInterface
 			if (!mz_zip_end(&mz))
 				LOGE("mz_zip_end failed!\n");
 		}
+	}
+
+	void flush() override
+	{
 	}
 
 	static bool string_is_hex(const char *str)
@@ -476,6 +484,12 @@ struct StreamArchive : DatabaseInterface
 		free(zlib_buffer);
 		if (file)
 			fclose(file);
+	}
+
+	void flush() override
+	{
+		if (file && mode != DatabaseMode::ReadOnly)
+			fflush(file);
 	}
 
 	bool prepare() override
@@ -951,6 +965,12 @@ struct ConcurrentDatabase : DatabaseInterface
 	{
 		delete readonly_interface;
 		delete writeonly_interface;
+	}
+
+	void flush() override
+	{
+		if (writeonly_interface)
+			writeonly_interface->flush();
 	}
 
 	bool prepare() override
