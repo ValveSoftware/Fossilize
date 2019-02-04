@@ -550,25 +550,22 @@ struct StreamArchive : DatabaseInterface
 
 					// NAME
 					if (fread(blob_name, 1, sizeof(blob_name), file) != sizeof(blob_name))
-					{
-						LOGE("Detected sliced file. Dropping entries from here.\n");
 						return false;
-					}
 					offset += sizeof(blob_name);
 
 					// HEADER
 					if (fread(&header_raw, 1, sizeof(header_raw), file) != sizeof(header_raw))
-					{
-						LOGE("Detected sliced file. Dropping entries from here.\n");
 						return false;
-					}
 					offset += sizeof(header_raw);
 
 					convert_from_le(header, header_raw);
 
 					// Corrupt entry. Our process might have been killed before we could write all data.
 					if (offset + header.payload_size > len)
+					{
+						LOGE("Detected sliced file. Dropping entries from here.\n");
 						break;
+					}
 
 					char tag_str[16 + 1] = {};
 					char value_str[16 + 1] = {};
@@ -586,10 +583,7 @@ struct StreamArchive : DatabaseInterface
 					}
 
 					if (fseek(file, header.payload_size, SEEK_CUR) < 0)
-					{
-						LOGE("Detected sliced file. Dropping entries from here.\n");
 						return false;
-					}
 
 					offset += header.payload_size;
 				}
