@@ -28,6 +28,12 @@ function(add_fossilize_cli NAME)
 endfunction()
 
 add_fossilize_cli(fossilize-replay fossilize_replay.cpp)
+if (WIN32)
+	target_sources(fossilize-replay PRIVATE fossilize_replay_windows.hpp)
+else()
+	target_sources(fossilize-replay PRIVATE fossilize_replay_linux.hpp)
+endif()
+
 add_fossilize_cli(fossilize-bench fossilize_bench.cpp)
 add_fossilize_cli(fossilize-convert-db fossilize_convert_db.cpp)
 add_fossilize_cli(fossilize-merge-db fossilize_merge_db.cpp)

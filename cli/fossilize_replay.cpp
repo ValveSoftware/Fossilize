@@ -908,8 +908,10 @@ static int run_normal_process(ThreadedReplayer &replayer, const string &db_path)
 // To simplify build system, just include implementation inline here.
 #ifdef __linux__
 #include "fossilize_replay_linux.hpp"
-#else
+#elif defined(_WIN32)
 #include "fossilize_replay_windows.hpp"
+#else
+#error "Unsupported platform."
 #endif
 
 int main(int argc, char *argv[])
