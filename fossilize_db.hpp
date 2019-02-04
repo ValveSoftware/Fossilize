@@ -119,12 +119,13 @@ DatabaseInterface *create_zip_archive_database(const char *path, DatabaseMode mo
 DatabaseInterface *create_stream_archive_database(const char *path, DatabaseMode mode);
 DatabaseInterface *create_database(const char *path, DatabaseMode mode);
 
-// This is a special kind of database which can be used from multiple threads and splits out the database
+// This is a special kind of database which can be used from multiple independent processes and splits out the database
 // into a read-only part and a write-only part, which is unique for each instance of this database.
 // base_path.foz is the read-only database. If it does not exist, it will not be written to either.
 // If there are any writes to the database which do not already exist in the read-only database, a new
-// database will be created at base_path.%d.foz, where %d is a unique index. Exclusive file open mechanisms are used
-// to ensure correctness.
+// database will be created at base_path.%d.foz, where %d is a unique index.
+// Exclusive file open mechanisms are used to ensure correctness.
+// The Fossilize layer will make sure access to a single instance of DatabaseInterface is serialized to one thread.
 DatabaseInterface *create_concurrent_database(const char *base_path);
 
 // Merges stream archives found in source_paths into append_database_path.

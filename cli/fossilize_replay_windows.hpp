@@ -630,9 +630,16 @@ static int run_slave_process(const VulkanDevice::Options &opts,
 
 	SetErrorMode(SEM_NOGPFAULTERRORBOX | SEM_FAILCRITICALERRORS);
 	SetUnhandledExceptionFilter(crash_handler);
-
 	signal(SIGABRT, abort_handler);
 
 	global_replayer = &replayer;
-	ExitProcess(run_normal_process(replayer, db_path));
+	int code = run_normal_process(replayer, db_path);
+
+	// Do not try to catch errors in teardown. Crashes here should never happen, and if they do,
+	// it's very sketchy to attempt to catch them, since the crash handler will likely try to refer to
+	// data which does not exist anymore.
+	signal(SIGABRT, SIG_DFL);
+	SetErrorMode(0);
+	SetUnhandledExceptionFilter(nullptr);
+	ExitProcess(code);
 }
