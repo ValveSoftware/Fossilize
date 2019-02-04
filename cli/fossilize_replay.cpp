@@ -51,7 +51,11 @@ using namespace std;
 
 #ifdef SIMULATE_UNSTABLE_DRIVER
 #include <random>
+#ifdef _WIN32
+__declspec(noinline)
+#else
 __attribute__((noinline))
+#endif
 static void simulate_crash(int *v)
 {
 	*v = 0;
@@ -759,7 +763,6 @@ struct ThreadedReplayer : StateCreatorInterface
 	unsigned thread_current_compute_index = 0;
 	bool robustness = false;
 };
-
 
 static void print_help()
 {

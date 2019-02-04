@@ -26,6 +26,22 @@
 #include <windows.h>
 #include <io.h>
 #include <fcntl.h>
+#include <signal.h>
+
+static bool write_all_padded(HANDLE file, const char *str)
+{
+	char padded_buffer[32] = {};
+	strcpy(padded_buffer, str);
+	DWORD wrote;
+	if (!WriteFile(file, padded_buffer, sizeof(padded_buffer), &wrote, nullptr))
+		return false;
+	if (!FlushFileBuffers(file))
+		return false;
+	if (wrote != sizeof(padded_buffer))
+		return false;
+
+	return true;
+}
 
 static bool write_all(HANDLE file, const char *str)
 {
@@ -34,6 +50,8 @@ static bool write_all(HANDLE file, const char *str)
 	{
 		DWORD wrote;
 		if (!WriteFile(file, str, len, &wrote, nullptr))
+			return false;
+		if (!FlushFileBuffers(file))
 			return false;
 		if (wrote <= 0)
 			return false;
@@ -66,8 +84,12 @@ struct ProcessProgress
 	unsigned end_graphics_index = ~0u;
 	unsigned end_compute_index = ~0u;
 	HANDLE process = INVALID_HANDLE_VALUE;
-	FILE *crash_file = nullptr;
 	HANDLE crash_file_handle = INVALID_HANDLE_VALUE;
+	HANDLE timer_handle = INVALID_HANDLE_VALUE;
+	HANDLE pipe_event = INVALID_HANDLE_VALUE;
+
+	OVERLAPPED overlapped_pipe;
+	char async_pipe_buffer[32];
 
 	int compute_progress = -1;
 	int graphics_progress = -1;
@@ -76,15 +98,45 @@ struct ProcessProgress
 	bool process_shutdown();
 	bool start_child_process();
 	void parse(const char *cmd);
+	bool kick_overlapped_io();
 
 	uint32_t index = 0;
 };
+
+bool ProcessProgress::kick_overlapped_io()
+{
+	memset(&overlapped_pipe, 0, sizeof(overlapped_pipe));
+	overlapped_pipe.hEvent = pipe_event;
+	if (!ReadFile(crash_file_handle, async_pipe_buffer, sizeof(async_pipe_buffer), nullptr, &overlapped_pipe) &&
+	    GetLastError() != ERROR_IO_PENDING)
+	{
+		return false;
+	}
+
+	return true;
+}
 
 void ProcessProgress::parse(const char *cmd)
 {
 	if (strncmp(cmd, "CRASH", 5) == 0)
 	{
 		// We crashed ... Set up a timeout in case the process hangs while trying to recover.
+		if (timer_handle != INVALID_HANDLE_VALUE)
+		{
+			CloseHandle(timer_handle);
+			timer_handle = INVALID_HANDLE_VALUE;
+		}
+
+		timer_handle = CreateWaitableTimer(nullptr, TRUE, nullptr);
+		if (timer_handle != INVALID_HANDLE_VALUE)
+		{
+			LARGE_INTEGER due_time;
+			due_time.QuadPart = -10000000ll;
+			if (!SetWaitableTimer(timer_handle, &due_time, 0, nullptr, nullptr, 0))
+				LOGE("Failed to set waitable timer.\n");
+		}
+		else
+			LOGE("Failed to create waitable timer.\n");
 	}
 	else if (strncmp(cmd, "GRAPHICS", 8) == 0)
 		graphics_progress = int(strtol(cmd + 8, nullptr, 0));
@@ -101,13 +153,23 @@ void ProcessProgress::parse(const char *cmd)
 
 bool ProcessProgress::process_once()
 {
-	if (!crash_file)
+	if (crash_file_handle == INVALID_HANDLE_VALUE)
 		return false;
 
-	char buffer[64];
-	if (fgets(buffer, sizeof(buffer), crash_file))
+	DWORD did_read = 0;
+	if (!GetOverlappedResult(crash_file_handle, &overlapped_pipe, &did_read, TRUE))
+		return false;
+
+	if (did_read == sizeof(async_pipe_buffer))
 	{
-		parse(buffer);
+		async_pipe_buffer[sizeof(async_pipe_buffer) - 1] = '\0';
+		parse(async_pipe_buffer);
+		LOGE("Parsed: %s\n", async_pipe_buffer);
+		if (!kick_overlapped_io())
+		{
+			LOGE("Failed to kick overlapped IO.\n");
+			return false;
+		}
 		return true;
 	}
 	else
@@ -118,46 +180,42 @@ bool ProcessProgress::process_shutdown()
 {
 	// Flush out all messages we got.
 	while (process_once());
-	if (crash_file)
-		fclose(crash_file);
-	crash_file = nullptr;
+	if (crash_file_handle != INVALID_HANDLE_VALUE)
+		CloseHandle(crash_file_handle);
 	crash_file_handle = INVALID_HANDLE_VALUE;
 
+	if (timer_handle != INVALID_HANDLE_VALUE)
+	{
+		CloseHandle(timer_handle);
+		timer_handle = INVALID_HANDLE_VALUE;
+	}
+
+	if (pipe_event != INVALID_HANDLE_VALUE)
+	{
+		CloseHandle(pipe_event);
+		pipe_event = INVALID_HANDLE_VALUE;
+	}
+
 	// Reap child process.
-	Global::active_processes--;
+	DWORD code = 0;
 	if (process != INVALID_HANDLE_VALUE)
 	{
 		if (WaitForSingleObject(process, INFINITE) != WAIT_OBJECT_0)
 			return false;
-
-		DWORD code = 0;
 		if (!GetExitCodeProcess(process, &code))
 			LOGE("Failed to get exit code of process.\n");
 		CloseHandle(process);
 		process = INVALID_HANDLE_VALUE;
+		Global::active_processes--;
 	}
 
-#if 0
 	// If application exited in normal manner, we are done.
-	if (WIFEXITED(wstatus) && WEXITSTATUS(wstatus) == 0)
+	if (code == 0)
 		return false;
-
-	if (WIFSIGNALED(wstatus) && WTERMSIG(wstatus) == SIGKILL)
+	else
 	{
-		// We had to kill the process early. Log this for debugging.
-		LOGE("Process index %u (PID: %d) failed and it had to be killed in timeout with SIGKILL.\n",
-		     index, wait_pid);
+		LOGE("Process index %u exited with code: %d\n", index, code);
 	}
-
-	// If the child did not exit in a normal manner, we failed to catch any crashing signal.
-	// Do not try any further.
-	if (!WIFEXITED(wstatus) && WIFSIGNALED(wstatus) && WTERMSIG(wstatus) != SIGKILL)
-	{
-		LOGE("Process index %u (PID: %d) failed to terminate in a clean fashion. We cannot continue replaying.\n",
-		     index, wait_pid);
-		return false;
-	}
-#endif
 
 	// We might have crashed, but we never saw any progress marker.
 	// We do not know what to do from here, so we just terminate.
@@ -190,6 +248,27 @@ static void send_faulty_modules_and_close(HANDLE file)
 	}
 
 	CloseHandle(file);
+}
+
+static bool CreateCustomPipe(HANDLE *read_pipe, HANDLE *write_pipe, LPSECURITY_ATTRIBUTES attrs, bool overlapped_read)
+{
+	static unsigned pipe_serial;
+	char pipe_name_buffer[MAX_PATH];
+	sprintf(pipe_name_buffer, "\\\\.\\Pipe\\Fossilize.%08x.%08x", GetCurrentProcessId(), pipe_serial++);
+	*read_pipe = CreateNamedPipeA(pipe_name_buffer, PIPE_ACCESS_INBOUND | (overlapped_read ? FILE_FLAG_OVERLAPPED : 0),
+		PIPE_TYPE_MESSAGE | PIPE_WAIT | PIPE_READMODE_MESSAGE, 1, 4096, 4096, 10000, attrs);
+
+	if (*read_pipe == INVALID_HANDLE_VALUE)
+		return false;
+
+	*write_pipe = CreateFileA(pipe_name_buffer, GENERIC_WRITE, 0, attrs, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+	if (*write_pipe == INVALID_HANDLE_VALUE)
+	{
+		CloseHandle(*read_pipe);
+		return false;
+	}
+
+	return true;
 }
 
 bool ProcessProgress::start_child_process()
@@ -232,13 +311,13 @@ bool ProcessProgress::start_child_process()
 	HANDLE master_stdout_read = INVALID_HANDLE_VALUE;
 	HANDLE master_stdout_write = INVALID_HANDLE_VALUE;
 
-	if (!CreatePipe(&slave_stdout_read, &master_stdout_write, &attrs, 0))
+	if (!CreateCustomPipe(&slave_stdout_read, &master_stdout_write, &attrs, false))
 	{
 		LOGE("Failed to create pipe.\n");
 		return false;
 	}
 
-	if (!CreatePipe(&master_stdout_read, &slave_stdout_write, &attrs, 0))
+	if (!CreateCustomPipe(&master_stdout_read, &slave_stdout_write, &attrs, true))
 	{
 		LOGE("Failed to create pipe.\n");
 		return false;
@@ -266,7 +345,7 @@ bool ProcessProgress::start_child_process()
 
 	if (Global::quiet_slave)
 	{
-		nul = CreateFile("NUL", GENERIC_WRITE, 0, nullptr, 0, 0, nullptr);
+		nul = CreateFileA("NUL", GENERIC_WRITE, 0, &attrs, OPEN_EXISTING, 0, nullptr);
 		if (nul == INVALID_HANDLE_VALUE)
 		{
 			LOGE("Failed to open NUL file for writing.\n");
@@ -287,7 +366,7 @@ bool ProcessProgress::start_child_process()
 
 	char *duped_string = _strdup(cmdline.c_str());
 
-	if (!CreateProcessA(nullptr, duped_string, &attrs, &attrs, TRUE, 0, nullptr, nullptr, &si, &pi))
+	if (!CreateProcessA(nullptr, duped_string, nullptr, nullptr, TRUE, 0, nullptr, nullptr, &si, &pi))
 	{
 		LOGE("Failed to create child process.\n");
 		free(duped_string);
@@ -306,22 +385,30 @@ bool ProcessProgress::start_child_process()
 	send_faulty_modules_and_close(master_stdout_write);
 
 	crash_file_handle = master_stdout_read;
-	int fd = _open_osfhandle(intptr_t(master_stdout_read), _O_RDONLY | _O_TEXT);
-	if (fd < 0)
-	{
-		LOGE("Failed to open PIPE handle as FD.\n");
-		return false;
-	}
-
-	crash_file = _fdopen(fd, "r");
-	if (!crash_file)
-	{
-		LOGE("Failed to open pipe as FILE.\n");
-		return false;
-	}
-
 	Global::active_processes++;
+
+	pipe_event = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+
+	if (!kick_overlapped_io())
+	{
+		LOGE("Failed to start overlapped I/O.\n");
+	}
+
 	return true;
+}
+
+static void log_and_die()
+{
+	DWORD dw = GetLastError();
+	char *lpMsgBuf = nullptr;
+	FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+		nullptr,
+		dw,
+		MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+		reinterpret_cast<LPSTR>(&lpMsgBuf), 0, nullptr);
+
+	LOGE("Error: %s\n", lpMsgBuf);
+	ExitProcess(1);
 }
 
 static int run_master_process(const VulkanDevice::Options &opts,
@@ -384,43 +471,68 @@ static int run_master_process(const VulkanDevice::Options &opts,
 		{
 			if (process.process != INVALID_HANDLE_VALUE)
 				wait_handles.push_back(process.process);
-			if (process.crash_file_handle != INVALID_HANDLE_VALUE)
-				wait_handles.push_back(process.crash_file_handle);
+			if (process.pipe_event != INVALID_HANDLE_VALUE)
+				wait_handles.push_back(process.pipe_event);
+			if (process.timer_handle != INVALID_HANDLE_VALUE)
+				wait_handles.push_back(process.timer_handle);
+		}
 
-			DWORD ret = WaitForMultipleObjects(wait_handles.size(), wait_handles.data(), FALSE, INFINITE);
-			if (ret == WAIT_FAILED)
+		DWORD ret = WaitForMultipleObjects(wait_handles.size(), wait_handles.data(), FALSE, INFINITE);
+		if (ret == WAIT_FAILED)
+		{
+			LOGE("WaitForMultipleObjects failed.\n");
+			log_and_die();
+			return EXIT_FAILURE;
+		}
+		else if (ret == WAIT_TIMEOUT)
+			continue;
+		else if (ret >= WAIT_ABANDONED_0)
+			continue;
+		else if (ret >= WAIT_OBJECT_0 && ret < WAIT_OBJECT_0 + wait_handles.size())
+		{
+			HANDLE handle = wait_handles[ret - WAIT_OBJECT_0];
+			auto process_itr = find_if(begin(child_processes), end(child_processes), [&](const ProcessProgress &prog) {
+				return prog.process == handle;
+			});
+
+			auto event_itr = find_if(begin(child_processes), end(child_processes), [&](const ProcessProgress &prog) {
+				return prog.pipe_event == handle;
+			});
+
+			auto timer_itr = find_if(begin(child_processes), end(child_processes), [&](const ProcessProgress &prog) {
+				return prog.timer_handle == handle;
+			});
+
+			if (process_itr != end(child_processes))
 			{
-				LOGE("WaitForMultipleObjects failed.\n");
-				return EXIT_FAILURE;
-			}
-			else if (ret == WAIT_TIMEOUT)
-				continue;
-			else if (ret >= WAIT_ABANDONED_0)
-				continue;
-			else if (ret >= WAIT_OBJECT_0 && ret < WAIT_OBJECT_0 + wait_handles.size())
-			{
-				HANDLE handle = wait_handles[ret - WAIT_OBJECT_0];
-				auto process_itr = find_if(begin(child_processes), end(child_processes), [&](const ProcessProgress &prog) {
-					return prog.process == handle;
-				});
-
-				auto file_itr = find_if(begin(child_processes), end(child_processes), [&](const ProcessProgress &prog) {
-					return prog.crash_file_handle == handle;
-				});
-
-				if (process_itr != end(child_processes))
+				// The process finished.
+				if (process_itr->process_shutdown() && !process_itr->start_child_process())
 				{
-					// The process finished.
-					process_itr->process_shutdown();
+					LOGE("Failed to start child process.\n");
+					return EXIT_FAILURE;
 				}
-				else if (file_itr != end(child_processes))
+			}
+			else if (event_itr != end(child_processes))
+			{
+				// Read a command.
+				event_itr->process_once();
+			}
+			else if (timer_itr != end(child_processes))
+			{
+				LOGE("Terminating process due to timeout ...\n");
+				if (!TerminateProcess(timer_itr->process, 3))
 				{
-					// Read a command.
-					file_itr->process_once();
+					LOGE("Failed to terminate child process.\n");
+					return EXIT_FAILURE;
+				}
+
+				if (timer_itr->process_shutdown() && !timer_itr->start_child_process())
+				{
+					LOGE("Failed to start child process.\n");
+					return EXIT_FAILURE;
 				}
 			}
 		}
-
 	}
 
 	return EXIT_SUCCESS;
@@ -428,17 +540,14 @@ static int run_master_process(const VulkanDevice::Options &opts,
 
 static ThreadedReplayer *global_replayer = nullptr;
 static HANDLE crash_handle;
-#if 0
-static ThreadedReplayer *global_replayer = nullptr;
-static int crash_fd;
 
-static void crash_handler(int)
+static LONG WINAPI crash_handler(_EXCEPTION_POINTERS *)
 {
 	// stderr is reserved for generic logging.
 	// stdout/stdin is for IPC with master process.
 
-	if (!write_all(crash_fd, "CRASH\n"))
-		_exit(2);
+	if (!write_all_padded(crash_handle, "CRASH\n"))
+		ExitProcess(2);
 
 	// This might hang indefinitely if we are exceptionally unlucky,
 	// the parent will have a timeout after receiving the crash message.
@@ -448,7 +557,7 @@ static void crash_handler(int)
 
 	if (global_replayer)
 	{
-		char buffer[64];
+		char buffer[32];
 
 		// Report to parent process which VkShaderModule's might have contributed to our untimely death.
 		// This allows a new process to ignore these modules.
@@ -456,18 +565,18 @@ static void crash_handler(int)
 		{
 			sprintf(buffer, "MODULE %llx\n",
 					static_cast<unsigned long long>(global_replayer->failed_module_hashes[i]));
-			if (!write_all(crash_fd, buffer))
-				_exit(2);
+			if (!write_all_padded(crash_handle, buffer))
+				ExitProcess(2);
 		}
 
 		// Report where we stopped, so we can continue.
 		sprintf(buffer, "GRAPHICS %d\n", global_replayer->thread_current_graphics_index);
-		if (!write_all(crash_fd, buffer))
-			_exit(2);
+		if (!write_all_padded(crash_handle, buffer))
+			ExitProcess(2);
 
 		sprintf(buffer, "COMPUTE %d\n", global_replayer->thread_current_compute_index);
-		if (!write_all(crash_fd, buffer))
-			_exit(2);
+		if (!write_all_padded(crash_handle, buffer))
+			ExitProcess(2);
 
 		global_replayer->emergency_teardown();
 	}
@@ -475,22 +584,13 @@ static void crash_handler(int)
 	// Clean exit instead of reporting the segfault.
 	// _exit is async-signal safe, but not exit().
 	// Use exit code 2 to mark a segfaulted child.
-	_exit(2);
+	ExitProcess(2);
+	return EXCEPTION_EXECUTE_HANDLER;
 }
-#endif
 
-static void log_and_die()
+static void abort_handler(int)
 {
-	DWORD dw = GetLastError();
-	char *lpMsgBuf = nullptr;
-	FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-	               nullptr,
-	               dw,
-	               MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-	               reinterpret_cast<LPSTR>(&lpMsgBuf), 0, nullptr);
-
-	LOGE("Error: %s\n", lpMsgBuf);
-	ExitProcess(1);
+	crash_handler(nullptr);
 }
 
 static int run_slave_process(const VulkanDevice::Options &opts,
@@ -528,6 +628,11 @@ static int run_slave_process(const VulkanDevice::Options &opts,
 		log_and_die();
 	}
 
+	SetErrorMode(SEM_NOGPFAULTERRORBOX | SEM_FAILCRITICALERRORS);
+	SetUnhandledExceptionFilter(crash_handler);
+
+	signal(SIGABRT, abort_handler);
+
 	global_replayer = &replayer;
-	return run_normal_process(replayer, db_path);
+	ExitProcess(run_normal_process(replayer, db_path));
 }
