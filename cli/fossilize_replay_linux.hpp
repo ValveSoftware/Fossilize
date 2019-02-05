@@ -504,6 +504,7 @@ static int run_master_process(const VulkanDevice::Options &opts,
 
 static ThreadedReplayer *global_replayer = nullptr;
 static int crash_fd;
+static stack_t alt_stack;
 
 static void crash_handler(int)
 {
@@ -551,11 +552,36 @@ static void crash_handler(int)
 	_exit(2);
 }
 
+static void thread_callback(void *)
+{
+	// Alternate signal stacks set by sigaltstack are per-thread.
+	// Need to install the alternate stack on all threads.
+	if (sigaltstack(&alt_stack, nullptr) < 0)
+		LOGE("Failed to install alternate stack.\n");
+
+	// Don't block any signals in the worker threads.
+	sigset_t mask;
+	sigemptyset(&mask);
+	if (pthread_sigmask(SIG_SETMASK, &mask, nullptr) < 0)
+		LOGE("Failed to set signal mask.\n");
+}
+
 static int run_slave_process(const VulkanDevice::Options &opts,
                              const ThreadedReplayer::Options &replayer_opts,
                              const string &db_path)
 {
-	ThreadedReplayer replayer(opts, replayer_opts);
+	// Just in case the driver crashed due to stack overflow,
+	// provide an alternate stack where we can clean up "safely".
+	alt_stack = {};
+	alt_stack.ss_sp = malloc(1024 * 1024);
+	alt_stack.ss_size = 1024 * 1024;
+	alt_stack.ss_flags = 0;
+	if (sigaltstack(&alt_stack, nullptr) < 0)
+		return EXIT_FAILURE;
+
+	auto tmp_opts = replayer_opts;
+	tmp_opts.on_thread_callback = thread_callback;
+	ThreadedReplayer replayer(opts, tmp_opts);
 	replayer.robustness = true;
 
 	// In slave mode, we can receive a list of shader module hashes we should ignore.
@@ -579,15 +605,6 @@ static int run_slave_process(const VulkanDevice::Options &opts,
 	close(STDOUT_FILENO);
 
 	global_replayer = &replayer;
-
-	// Just in case the driver crashed due to stack overflow,
-	// provide an alternate stack where we can clean up "safely".
-	stack_t ss;
-	ss.ss_sp = malloc(1024 * 1024);
-	ss.ss_size = 1024 * 1024;
-	ss.ss_flags = 0;
-	if (sigaltstack(&ss, nullptr) < 0)
-		return EXIT_FAILURE;
 
 	// Install the signal handlers.
 	// It's very important that this runs in a single thread,
@@ -628,5 +645,6 @@ static int run_slave_process(const VulkanDevice::Options &opts,
 	signal(SIGABRT, SIG_DFL);
 	pthread_sigmask(SIG_SETMASK, &old_mask, nullptr);
 
+	free(alt_stack.ss_sp);
 	return ret;
 }

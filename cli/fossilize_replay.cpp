@@ -72,6 +72,14 @@ static int simulate_divide_by_zero(int a, int b)
 	return a / b;
 }
 
+static int simulate_stack_overflow()
+{
+	volatile char buffer[16 * 1024 * 1024];
+	for (auto &b : buffer)
+		b++;
+	return buffer[6124];
+}
+
 void spurious_crash()
 {
 	std::uniform_int_distribution<int> dist(0, 15);
@@ -86,19 +94,28 @@ void spurious_crash()
 	{
 		LOGE("Simulating a crash ...\n");
 		simulate_crash(nullptr);
+		LOGE("Should not reach here ...\n");
 	}
 
 	if (r < 2)
 	{
 		LOGE("Simulating an abort ...\n");
 		abort();
+		LOGE("Should not reach here ...\n");
 	}
 
 	if (r < 3)
 	{
 		LOGE("Simulating divide by zero ...\n");
 		r = simulate_divide_by_zero(1, 0);
-		LOGE("Boop: %d\n", r);
+		LOGE("Should not reach here ... Boop: %d\n", r);
+	}
+
+	if (r < 4)
+	{
+		LOGE("Creating a stack overflow ...\n");
+		r = simulate_stack_overflow();
+		LOGE("Should not reach here ... Boop: %d\n", r);
 	}
 }
 
@@ -138,6 +155,9 @@ struct ThreadedReplayer : StateCreatorInterface
 		unsigned end_graphics_index = ~0u;
 		unsigned start_compute_index = 0;
 		unsigned end_compute_index = ~0u;
+
+		void (*on_thread_callback)(void *userdata) = nullptr;
+		void *on_thread_callback_userdata = nullptr;
 	};
 
 	ThreadedReplayer(const VulkanDevice::Options &device_opts_, const Options &opts_)
@@ -171,6 +191,9 @@ struct ThreadedReplayer : StateCreatorInterface
 
 	void worker_thread()
 	{
+		if (opts.on_thread_callback)
+			opts.on_thread_callback(opts.on_thread_callback_userdata);
+
 		uint64_t graphics_ns = 0;
 		unsigned graphics_count = 0;
 
