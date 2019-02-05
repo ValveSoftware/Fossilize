@@ -296,6 +296,12 @@ bool ProcessProgress::start_child_process()
 		copy_opts.end_graphics_index = end_graphics_index;
 		copy_opts.start_compute_index = start_compute_index;
 		copy_opts.end_compute_index = end_compute_index;
+		if (!copy_opts.on_disk_pipeline_cache_path.empty() && index != 0)
+		{
+			copy_opts.on_disk_pipeline_cache_path += ".";
+			copy_opts.on_disk_pipeline_cache_path += std::to_string(index);
+		}
+
 		exit(run_slave_process(Global::device_options, copy_opts, Global::db_path));
 	}
 	else

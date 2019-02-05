@@ -371,6 +371,32 @@ struct ThreadedReplayer : StateCreatorInterface
 		shader_module_ns.fetch_add(shader_ns, std::memory_order_relaxed);
 	}
 
+	void flush_pipeline_cache()
+	{
+		if (device && pipeline_cache)
+		{
+			if (!opts.on_disk_pipeline_cache_path.empty())
+			{
+				size_t pipeline_cache_size = 0;
+				if (vkGetPipelineCacheData(device->get_device(), pipeline_cache, &pipeline_cache_size, nullptr) == VK_SUCCESS)
+				{
+					vector<uint8_t> pipeline_buffer(pipeline_cache_size);
+					if (vkGetPipelineCacheData(device->get_device(), pipeline_cache, &pipeline_cache_size, pipeline_buffer.data()) == VK_SUCCESS)
+					{
+						// This isn't safe to do in a signal handler, but it's unlikely to be a problem in practice.
+						FILE *file = fopen(opts.on_disk_pipeline_cache_path.c_str(), "wb");
+						if (!file || fwrite(pipeline_buffer.data(), 1, pipeline_buffer.size(), file) != pipeline_buffer.size())
+							LOGE("Failed to write pipeline cache data to disk.\n");
+						if (file)
+							fclose(file);
+					}
+				}
+			}
+			vkDestroyPipelineCache(device->get_device(), pipeline_cache, nullptr);
+			pipeline_cache = VK_NULL_HANDLE;
+		}
+	}
+
 	~ThreadedReplayer()
 	{
 		// Signal that it's time for threads to die.
@@ -384,26 +410,7 @@ struct ThreadedReplayer : StateCreatorInterface
 			if (thread.joinable())
 				thread.join();
 
-		if (pipeline_cache)
-		{
-			if (!opts.on_disk_pipeline_cache_path.empty())
-			{
-				size_t pipeline_cache_size = 0;
-				if (vkGetPipelineCacheData(device->get_device(), pipeline_cache, &pipeline_cache_size, nullptr) == VK_SUCCESS)
-				{
-					vector<uint8_t> pipeline_buffer(pipeline_cache_size);
-					if (vkGetPipelineCacheData(device->get_device(), pipeline_cache, &pipeline_cache_size, pipeline_buffer.data()) == VK_SUCCESS)
-					{
-						FILE *file = fopen(opts.on_disk_pipeline_cache_path.c_str(), "wb");
-						if (!file || fwrite(pipeline_buffer.data(), 1, pipeline_buffer.size(), file) != pipeline_buffer.size())
-							LOGE("Failed to write pipeline cache data to disk.\n");
-						if (file)
-							fclose(file);
-					}
-				}
-			}
-			vkDestroyPipelineCache(device->get_device(), pipeline_cache, nullptr);
-		}
+		flush_pipeline_cache();
 
 		for (auto &sampler : samplers)
 			if (sampler.second)
@@ -734,6 +741,7 @@ struct ThreadedReplayer : StateCreatorInterface
 #ifdef SIMULATE_UNSTABLE_DRIVER
 		spurious_deadlock();
 #endif
+		flush_pipeline_cache();
 		device.reset();
 	}
 
