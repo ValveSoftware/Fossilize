@@ -48,6 +48,7 @@ using namespace Fossilize;
 using namespace std;
 
 //#define SIMULATE_UNSTABLE_DRIVER
+//#define SIMULATE_SPURIOUS_DEADLOCK
 
 #ifdef SIMULATE_UNSTABLE_DRIVER
 #include <random>
@@ -61,6 +62,16 @@ static void simulate_crash(int *v)
 	*v = 0;
 }
 
+#ifdef _WIN32
+__declspec(noinline)
+#else
+__attribute__((noinline))
+#endif
+static int simulate_divide_by_zero(int a, int b)
+{
+	return a / b;
+}
+
 void spurious_crash()
 {
 	std::uniform_int_distribution<int> dist(0, 15);
@@ -69,30 +80,42 @@ void spurious_crash()
 	std::mt19937 rnd(ns);
 
 	// Simulate fatal things like segfaults and aborts.
-	if (dist(rnd) < 2)
+	int r = dist(rnd);
+
+	if (r < 1)
 	{
 		LOGE("Simulating a crash ...\n");
 		simulate_crash(nullptr);
 	}
-	else if (dist(rnd) < 2)
+
+	if (r < 2)
 	{
 		LOGE("Simulating an abort ...\n");
 		abort();
+	}
+
+	if (r < 3)
+	{
+		LOGE("Simulating divide by zero ...\n");
+		r = simulate_divide_by_zero(1, 0);
+		LOGE("Boop: %d\n", r);
 	}
 }
 
 void spurious_deadlock()
 {
+#ifdef SIMULATE_SPURIOUS_DEADLOCK
 	std::uniform_int_distribution<int> dist(0, 15);
 	auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
 			std::chrono::high_resolution_clock::now().time_since_epoch()).count();
 	std::mt19937 rnd(ns);
 
-	if (dist(rnd) < 2)
+	if (dist(rnd) < 4)
 	{
 		LOGE("Simulating a deadlock ...\n");
 		std::this_thread::sleep_for(std::chrono::seconds(100));
 	}
+#endif
 }
 #endif
 
@@ -610,8 +633,8 @@ struct ThreadedReplayer : StateCreatorInterface
 				work_item.hash_map_entry.pipeline = &compute_pipelines[hash];
 				work_item.create_info.compute_create_info = create_info;
 			}
-			else
-				LOGE("Skipping replay of compute pipeline index %u.\n", compute_pipeline_index);
+			//else
+			//	LOGE("Skipping replay of compute pipeline index %u.\n", compute_pipeline_index);
 
 			{
 				// Pipeline parsing with pipeline creation.
@@ -649,8 +672,8 @@ struct ThreadedReplayer : StateCreatorInterface
 				work_item.hash_map_entry.pipeline = &graphics_pipelines[hash];
 				work_item.create_info.graphics_create_info = create_info;
 			}
-			else
-				LOGE("Skipping replay of graphics pipeline index %u.\n", graphics_pipeline_index);
+			//else
+			//	LOGE("Skipping replay of graphics pipeline index %u.\n", graphics_pipeline_index);
 
 			{
 				// Pipeline parsing with pipeline creation.

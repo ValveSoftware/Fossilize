@@ -611,7 +611,7 @@ static int run_slave_process(const VulkanDevice::Options &opts,
 			break;
 		if (errno == 0)
 		{
-			LOGE("Ignoring module %llx\n", hash);
+			//LOGE("Ignoring module %llx\n", hash);
 			replayer.mask_shader_module(Hash(hash));
 		}
 	}
