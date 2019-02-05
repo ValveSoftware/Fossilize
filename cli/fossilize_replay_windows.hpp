@@ -276,6 +276,13 @@ bool ProcessProgress::start_child_process()
 	graphics_progress = -1;
 	compute_progress = -1;
 
+	if (start_graphics_index >= end_graphics_index &&
+	    start_compute_index >= end_compute_index)
+	{
+		// Nothing to do.
+		return true;
+	}
+
 	char filename[_MAX_PATH];
 	if (FAILED(GetModuleFileNameA(nullptr, filename, sizeof(filename))))
 		return false;
@@ -634,6 +641,7 @@ static int run_slave_process(const VulkanDevice::Options &opts,
 
 	global_replayer = &replayer;
 	int code = run_normal_process(replayer, db_path);
+	global_replayer = nullptr;
 
 	// Do not try to catch errors in teardown. Crashes here should never happen, and if they do,
 	// it's very sketchy to attempt to catch them, since the crash handler will likely try to refer to

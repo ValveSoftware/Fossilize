@@ -147,6 +147,7 @@ bool ProcessProgress::process_shutdown(int wstatus)
 		fclose(crash_file);
 	crash_file = nullptr;
 
+	// Close the timerfd.
 	if (timer_fd >= 0)
 	{
 		close(timer_fd);
@@ -217,6 +218,13 @@ bool ProcessProgress::start_child_process()
 	graphics_progress = -1;
 	compute_progress = -1;
 
+	if (start_graphics_index >= end_graphics_index &&
+	    start_compute_index >= end_compute_index)
+	{
+		// Nothing to do.
+		return true;
+	}
+
 	int crash_fds[2];
 	int input_fds[2];
 	if (pipe(crash_fds) < 0)
@@ -252,18 +260,26 @@ bool ProcessProgress::start_child_process()
 	else if (new_pid == 0)
 	{
 		// We're the child process.
+		// Unblock the signal mask.
 		if (pthread_sigmask(SIG_SETMASK, &Global::old_mask, nullptr) < 0)
 			return EXIT_FAILURE;
+
+		// Close various FDs we won't use.
 		close(Global::signal_fd);
 		close(Global::epoll_fd);
 		close(crash_fds[0]);
 		close(input_fds[1]);
 
+		// Override stdin/stdout.
 		if (dup2(crash_fds[1], STDOUT_FILENO) < 0)
 			return EXIT_FAILURE;
 		if (dup2(input_fds[0], STDIN_FILENO) < 0)
 			return EXIT_FAILURE;
 
+		close(crash_fds[1]);
+		close(input_fds[0]);
+
+		// Redirect stderr to /dev/null if the child process is supposed to be quiet.
 		if (Global::quiet_slave)
 		{
 			int fd_dev_null = open("/dev/null", O_WRONLY);
@@ -274,6 +290,7 @@ bool ProcessProgress::start_child_process()
 			}
 		}
 
+		// Run the slave process.
 		auto copy_opts = Global::base_replayer_options;
 		copy_opts.start_graphics_index = start_graphics_index;
 		copy_opts.end_graphics_index = end_graphics_index;
@@ -324,6 +341,8 @@ static int run_master_process(const VulkanDevice::Options &opts,
 
 	// We will wait for child processes explicitly with signalfd.
 	// Block delivery of signals in the normal way.
+	// For this to work, there cannot be any other threads in the process
+	// which may capture SIGCHLD anyways.
 	sigset_t mask;
 	sigemptyset(&mask);
 	sigaddset(&mask, SIGCHLD);
@@ -333,6 +352,9 @@ static int run_master_process(const VulkanDevice::Options &opts,
 		return EXIT_FAILURE;
 	}
 
+	// signalfd allows us to poll for signals rather than rely on
+	// painful async signal handling.
+	// epoll_pwait might work, but I'd rather not debug it.
 	Global::signal_fd = signalfd(-1, &mask, 0);
 	if (Global::signal_fd < 0)
 	{
@@ -342,6 +364,8 @@ static int run_master_process(const VulkanDevice::Options &opts,
 
 	vector<ProcessProgress> child_processes(processes);
 
+	// Create an epoll instance and add the signal fd to it.
+	// The signalfd will signal when SIGCHLD is pending.
 	Global::epoll_fd = epoll_create(2 * int(processes) + 1);
 	if (Global::epoll_fd < 0)
 	{
@@ -369,7 +393,11 @@ static int run_master_process(const VulkanDevice::Options &opts,
 		progress.start_compute_index = (i * unsigned(num_compute_pipelines)) / processes;
 		progress.end_compute_index = ((i + 1) * unsigned(num_compute_pipelines)) / processes;
 		progress.index = i;
-		progress.start_child_process();
+		if (!progress.start_child_process())
+		{
+			LOGE("Failed to start child process.\n");
+			return EXIT_FAILURE;
+		}
 	}
 
 	while (Global::active_processes != 0)
@@ -382,6 +410,11 @@ static int run_master_process(const VulkanDevice::Options &opts,
 			return EXIT_FAILURE;
 		}
 
+		// Check for three cases in the epoll.
+		// - Child process wrote something to stdout, we need to parse it.
+		// - SIGCHLD happened, we need to reap child processes.
+		// - TimerFD fired, we reached a timeout and we should SIGKILL the child process
+		//   responsible.
 		for (int i = 0; i < ret; i++)
 		{
 			auto &e = events[i];
@@ -556,6 +589,9 @@ static int run_slave_process(const VulkanDevice::Options &opts,
 	if (sigaltstack(&ss, nullptr) < 0)
 		return EXIT_FAILURE;
 
+	// Install the signal handlers.
+	// It's very important that this runs in a single thread,
+	// so we cannot have some rogue thread overriding these handlers.
 	struct sigaction act;
 	memset(&act, 0, sizeof(act));
 	sigemptyset(&act.sa_mask);
@@ -577,8 +613,20 @@ static int run_slave_process(const VulkanDevice::Options &opts,
 	sigset_t mask;
 	sigemptyset(&mask);
 	sigaddset(&mask, SIGABRT);
-	if (pthread_sigmask(SIG_BLOCK, &mask, nullptr) < 0)
+	sigset_t old_mask;
+	if (pthread_sigmask(SIG_BLOCK, &mask, &old_mask) < 0)
 		return EXIT_FAILURE;
 
-	return run_normal_process(replayer, db_path);
+	int ret = run_normal_process(replayer, db_path);
+	global_replayer = nullptr;
+
+	// Cannot reliably handle these signals if they occur during teardown of the process.
+	signal(SIGSEGV, SIG_DFL);
+	signal(SIGFPE, SIG_DFL);
+	signal(SIGILL, SIG_DFL);
+	signal(SIGBUS, SIG_DFL);
+	signal(SIGABRT, SIG_DFL);
+	pthread_sigmask(SIG_SETMASK, &old_mask, nullptr);
+
+	return ret;
 }
