@@ -975,7 +975,6 @@ struct ConcurrentDatabase : DatabaseInterface
 
 	bool prepare() override
 	{
-		std::lock_guard<std::mutex> holder(lock);
 		if (!has_prepared_readonly)
 		{
 			// It's okay if the database doesn't exist.
@@ -1002,8 +1001,6 @@ struct ConcurrentDatabase : DatabaseInterface
 		// and from here on out readonly_interface is purely read-only, no need to lock just to check.
 		if (readonly_interface && readonly_interface->has_entry(tag, hash))
 			return true;
-
-		std::lock_guard<std::mutex> holder(lock);
 
 		if (writeonly_interface && writeonly_interface->has_entry(tag, hash))
 			return true;
@@ -1040,7 +1037,6 @@ struct ConcurrentDatabase : DatabaseInterface
 		if (readonly_interface && readonly_interface->has_entry(tag, hash))
 			return true;
 
-		std::lock_guard<std::mutex> holder(lock);
 		return writeonly_interface && writeonly_interface->has_entry(tag, hash);
 	}
 
@@ -1051,7 +1047,6 @@ struct ConcurrentDatabase : DatabaseInterface
 	}
 
 	std::string base_path;
-	std::mutex lock;
 	DatabaseInterface *readonly_interface = nullptr;
 	DatabaseInterface *writeonly_interface = nullptr;
 	bool has_prepared_readonly = false;
