@@ -22,6 +22,7 @@
 
 #include "fossilize.hpp"
 #include "fossilize_db.hpp"
+#include "fossilize_external_replayer.hpp"
 #include <string.h>
 #include <stdexcept>
 #include <memory>
@@ -814,6 +815,13 @@ int main()
 		return EXIT_FAILURE;
 	if (!test_database())
 		return EXIT_FAILURE;
+
+	ExternalReplayer ext;
+	ExternalReplayer::Options opts = {};
+	opts.database = "/tmp/granite.foz";
+	opts.external_replayer_path = "/home/maister/git/Fossilize-private/cmake-build-debug/cli/fossilize-replay";
+	ext.start(opts);
+	ext.wait();
 
 	try
 	{

@@ -1,4 +1,4 @@
-/* Copyright (c) 2018 Hans-Kristian Arntzen
+/* Copyright (c) 2019 Hans-Kristian Arntzen
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -29,6 +29,8 @@
 #include <sys/epoll.h>
 #include <sys/signalfd.h>
 #include <sys/timerfd.h>
+#include <sys/stat.h>
+#include <sys/mman.h>
 #include <fcntl.h>
 #include <errno.h>
 
@@ -64,6 +66,8 @@ static int signal_fd;
 static int epoll_fd;
 static VulkanDevice::Options device_options;
 static bool quiet_slave;
+
+static SharedControlBlock *control_block;
 }
 
 struct ProcessProgress
@@ -296,6 +300,7 @@ bool ProcessProgress::start_child_process()
 		copy_opts.end_graphics_index = end_graphics_index;
 		copy_opts.start_compute_index = start_compute_index;
 		copy_opts.end_compute_index = end_compute_index;
+		copy_opts.control_block = Global::control_block;
 		if (!copy_opts.on_disk_pipeline_cache_path.empty() && index != 0)
 		{
 			copy_opts.on_disk_pipeline_cache_path += ".";
@@ -311,7 +316,7 @@ bool ProcessProgress::start_child_process()
 static int run_master_process(const VulkanDevice::Options &opts,
                               const ThreadedReplayer::Options &replayer_opts,
                               const string &db_path,
-                              bool quiet_slave)
+                              bool quiet_slave, int shmem_fd)
 {
 	Global::quiet_slave = quiet_slave;
 	Global::device_options = opts;
@@ -319,6 +324,36 @@ static int run_master_process(const VulkanDevice::Options &opts,
 	Global::db_path = db_path;
 	unsigned processes = replayer_opts.num_threads;
 	Global::base_replayer_options.num_threads = 1;
+
+	// Try to map the shared control block.
+	if (shmem_fd >= 0)
+	{
+		LOGI("Attempting to map shmem block.\n");
+		struct stat s = {};
+		if (fstat(shmem_fd, &s) >= 0)
+		{
+			void *mapped = mmap(nullptr, s.st_size, PROT_READ | PROT_WRITE,
+			                    MAP_SHARED, shmem_fd, 0);
+
+			if (mapped != MAP_FAILED)
+			{
+				const auto is_pot = [](size_t size) { return (size & (size - 1)) == 0; };
+				// Detect some obvious shenanigans.
+				Global::control_block = static_cast<SharedControlBlock *>(mapped);
+				if (Global::control_block->ring_buffer_offset < sizeof(SharedControlBlock) ||
+				    Global::control_block->ring_buffer_size == 0 ||
+				    !is_pot(Global::control_block->ring_buffer_size) ||
+				    Global::control_block->ring_buffer_offset + Global::control_block->ring_buffer_size > size_t(s.st_size))
+				{
+					LOGE("Control block is corrupt.\n");
+					munmap(mapped, s.st_size);
+					Global::control_block = nullptr;
+				}
+			}
+		}
+
+		close(shmem_fd);
+	}
 
 	size_t num_graphics_pipelines;
 	size_t num_compute_pipelines;

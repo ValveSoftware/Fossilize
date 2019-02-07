@@ -1,0 +1,152 @@
+/* Copyright (c) 2019 Hans-Kristian Arntzen
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining
+ * a copy of this software and associated documentation files (the
+ * "Software"), to deal in the Software without restriction, including
+ * without limitation the rights to use, copy, modify, merge, publish,
+ * distribute, sublicense, and/or sell copies of the Software, and to
+ * permit persons to whom the Software is furnished to do so, subject to
+ * the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be
+ * included in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+ * IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+ * CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+ * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+ * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ */
+
+#pragma once
+
+#include <string.h>
+#ifdef _WIN32
+#else
+#include <pthread.h>
+#endif
+
+// A simple cross-process FIFO-like mechanism.
+// We're not going to bother too much if messages are dropped, since they are mostly informative.
+
+namespace Fossilize
+{
+#ifdef _WIN32
+#else
+struct SharedControlBlock
+{
+	pthread_mutex_t lock;
+	uint64_t write_count;
+	uint64_t read_count;
+
+	size_t read_offset;
+	size_t write_offset;
+	size_t ring_buffer_offset;
+	size_t ring_buffer_size;
+};
+
+#define SHARED_CONTROL_BLOCK_LOCK(block) pthread_mutex_lock(&(block)->lock)
+#define SHARED_CONTROL_BLOCK_UNLOCK(block) pthread_mutex_unlock(&(block)->lock)
+#endif
+
+static inline size_t shared_control_block_read_avail(SharedControlBlock *control_block)
+{
+	size_t ret = 0;
+	SHARED_CONTROL_BLOCK_LOCK(control_block);
+	{
+		ret = control_block->write_count - control_block->read_count;
+	}
+	SHARED_CONTROL_BLOCK_UNLOCK(control_block);
+	return ret;
+}
+
+static inline size_t shared_control_block_write_avail(SharedControlBlock *control_block)
+{
+	size_t ret = 0;
+	SHARED_CONTROL_BLOCK_LOCK(control_block);
+	{
+		size_t max_capacity_write_count = control_block->read_count + control_block->ring_buffer_size;
+		if (control_block->write_count >= max_capacity_write_count)
+			ret = 0;
+		else
+			ret = max_capacity_write_count - control_block->write_count;
+	}
+	SHARED_CONTROL_BLOCK_UNLOCK(control_block);
+	return ret;
+}
+
+static inline bool shared_control_block_read(SharedControlBlock *control_block,
+                                             void *data_, size_t size)
+{
+	auto *data = static_cast<uint8_t *>(data_);
+	const uint8_t *ring = reinterpret_cast<const uint8_t *>(control_block) + control_block->ring_buffer_offset;
+
+	if (size > control_block->ring_buffer_size)
+		return false;
+
+	// Cross-process mutex :D
+	SHARED_CONTROL_BLOCK_LOCK(control_block);
+	{
+		if (size > (control_block->write_count - control_block->read_count))
+			goto unlock_fail;
+
+		size_t read_first = control_block->ring_buffer_size - control_block->read_offset;
+		size_t read_second = 0;
+		if (read_first > size)
+			read_first = size;
+		read_second = size - read_first;
+
+		memcpy(data, ring + control_block->read_offset, read_first);
+		if (read_second)
+			memcpy(data + read_first, ring, read_second);
+
+		control_block->read_offset = (control_block->read_offset + size) & (control_block->ring_buffer_size - 1);
+		control_block->read_count += size;
+	}
+	SHARED_CONTROL_BLOCK_UNLOCK(control_block);
+	return true;
+
+unlock_fail:
+	SHARED_CONTROL_BLOCK_UNLOCK(control_block);
+	return false;
+}
+
+static inline bool shared_control_block_write(SharedControlBlock *control_block,
+                                              const void *data_, size_t size)
+{
+	auto *data = static_cast<const uint8_t *>(data_);
+	uint8_t *ring = reinterpret_cast<uint8_t *>(control_block) + control_block->ring_buffer_offset;
+
+	if (size > control_block->ring_buffer_size)
+		return false;
+
+	// Cross-process mutex :D
+	SHARED_CONTROL_BLOCK_LOCK(control_block);
+	{
+		size_t max_capacity_write_count = control_block->read_count + control_block->ring_buffer_size;
+		if (control_block->write_count + size > max_capacity_write_count)
+			goto unlock_fail;
+
+		size_t write_first = control_block->ring_buffer_size - control_block->write_offset;
+		size_t write_second = 0;
+		if (write_first > size)
+			write_first = size;
+		write_second = size - write_first;
+
+		memcpy(ring + control_block->write_offset, data, write_first);
+		if (write_second)
+			memcpy(ring, data + write_first, write_second);
+
+		control_block->write_offset = (control_block->write_offset + size) & (control_block->ring_buffer_size - 1);
+		control_block->write_count += size;
+	}
+	SHARED_CONTROL_BLOCK_UNLOCK(control_block);
+	return true;
+
+unlock_fail:
+	SHARED_CONTROL_BLOCK_UNLOCK(control_block);
+	return false;
+}
+}

@@ -28,6 +28,7 @@
 #include "file.hpp"
 #include "path.hpp"
 #include "fossilize_db.hpp"
+#include "fossilize_external_replayer_control_block.hpp"
 
 #include <cinttypes>
 #include <string>
@@ -156,6 +157,8 @@ struct ThreadedReplayer : StateCreatorInterface
 		unsigned start_compute_index = 0;
 		unsigned end_compute_index = ~0u;
 
+		SharedControlBlock *control_block = nullptr;
+
 		void (*on_thread_callback)(void *userdata) = nullptr;
 		void *on_thread_callback_userdata = nullptr;
 	};
@@ -179,6 +182,9 @@ struct ThreadedReplayer : StateCreatorInterface
 		// Create a thread pool with the # of specified worker threads (defaults to thread::hardware_concurrency()).
 		for (unsigned i = 0; i < num_worker_threads; i++)
 			thread_pool.push_back(std::thread(&ThreadedReplayer::worker_thread, this));
+
+		if (opts.control_block)
+			shared_control_block_write(opts.control_block, ":D\n", 3);
 	}
 
 	void sync_worker_threads()
@@ -835,6 +841,10 @@ static void print_help()
 	     "\t[--slave-process]\n"
 	     "\t[--master-process]\n"
 	     "\t[--quiet-slave]\n"
+#ifdef _WIN32
+#else
+	     "\t[--shmem-fd <fd>]\n"
+#endif
 	     "\t<Database>\n");
 }
 
@@ -980,6 +990,11 @@ int main(int argc, char *argv[])
 	bool slave_process = false;
 	bool quiet_slave = false;
 
+#ifdef _WIN32
+#else
+	int shmem_fd = -1;
+#endif
+
 	CLICallbacks cbs;
 	cbs.default_handler = [&](const char *arg) { db_path = arg; };
 	cbs.add("--help", [](CLIParser &parser) { print_help(); parser.end(); });
@@ -1002,6 +1017,11 @@ int main(int argc, char *argv[])
 		replayer_opts.start_compute_index = parser.next_uint();
 		replayer_opts.end_compute_index = parser.next_uint();
 	});
+
+#ifdef _WIN32
+#else
+	cbs.add("--shmem-fd", [&](CLIParser &parser) { shmem_fd = parser.next_uint(); });
+#endif
 
 	cbs.error_handler = [] { print_help(); };
 
@@ -1034,7 +1054,13 @@ int main(int argc, char *argv[])
 
 	int ret;
 	if (master_process)
+	{
+#ifdef _WIN32
 		ret = run_master_process(opts, replayer_opts, db_path, quiet_slave);
+#else
+		ret = run_master_process(opts, replayer_opts, db_path, quiet_slave, shmem_fd);
+#endif
+	}
 	else if (slave_process)
 		ret = run_slave_process(opts, replayer_opts, db_path);
 	else
