@@ -719,6 +719,13 @@ static bool test_concurrent_database_extra_paths()
 	if (file_exists(".__test_concurrent.4.foz"))
 		return false;
 
+	if (!append_db->write_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, 4, blob, sizeof(blob), 0))
+		return false;
+
+	// .. but now it should exist.
+	if (!file_exists(".__test_concurrent.4.foz"))
+		return false;
+
 	return true;
 }
 
