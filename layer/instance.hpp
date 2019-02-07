@@ -53,7 +53,7 @@ public:
 		return pAppInfo;
 	}
 
-	static StateRecorder *getStateRecorderForDevice(const char *basePath, const VkApplicationInfo *appInfo, const VkPhysicalDeviceFeatures2 *features);
+	static StateRecorder *getStateRecorderForDevice(const VkApplicationInfo *appInfo, const VkPhysicalDeviceFeatures2 *features);
 
 private:
 	ScratchAllocator alloc;

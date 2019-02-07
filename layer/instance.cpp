@@ -21,6 +21,7 @@
  */
 
 #include "instance.hpp"
+#include "utils.hpp"
 #include <mutex>
 #include <unordered_map>
 #include <memory>
@@ -68,7 +69,34 @@ struct Recorder
 };
 static std::unordered_map<Hash, Recorder> globalRecorders;
 
-StateRecorder *Instance::getStateRecorderForDevice(const char *basePath, const VkApplicationInfo *appInfo, const VkPhysicalDeviceFeatures2 *features)
+#ifdef ANDROID
+static std::string getSystemProperty(const char *key)
+{
+	// Environment variables are not easy to set on Android.
+	// Make use of the system properties instead.
+	char value[256];
+	char command[256];
+	snprintf(command, sizeof(command), "getprop %s", key);
+
+	// __system_get_property is apparently removed in recent NDK, so just use popen.
+	size_t len = 0;
+	FILE *file = popen(command, "rb");
+	if (file)
+	{
+		len = fread(value, 1, sizeof(value) - 1, file);
+		// Last character is a newline, so remove that.
+		if (len > 1)
+			value[len - 1] = '\0';
+		else
+			len = 0;
+		fclose(file);
+	}
+
+	return len ? value : "";
+}
+#endif
+
+StateRecorder *Instance::getStateRecorderForDevice(const VkApplicationInfo *appInfo, const VkPhysicalDeviceFeatures2 *features)
 {
 	auto appInfoFeatureHash = Hashing::compute_application_feature_hash(appInfo, features);
 	auto hash = Hashing::compute_combined_application_feature_hash(appInfoFeatureHash);
@@ -80,13 +108,34 @@ StateRecorder *Instance::getStateRecorderForDevice(const char *basePath, const V
 
 	auto &entry = globalRecorders[hash];
 
-	std::string path = basePath;
+	std::string serializationPath;
+	const char *extraPaths = nullptr;
+#ifdef ANDROID
+	serializationPath = "/sdcard/";
+	auto logPath = getSystemProperty("debug.fossilize.dump_path");
+	if (!logPath.empty())
+	{
+		serializationPath = logPath;
+		LOGI("Overriding serialization path: \"%s\".\n", logPath.c_str());
+	}
+#else
+	const char *path = getenv("STEAM_FOSSILIZE_DUMP_PATH");
+	if (path)
+	{
+		serializationPath = path;
+		LOGI("Overriding serialization path: \"%s\".\n", path);
+	}
+	extraPaths = getenv("STEAM_FOSSILIZE_DUMP_PATH_READ_ONLY");
+#endif
+
 	char hashString[17];
 	sprintf(hashString, "%016llx", static_cast<unsigned long long>(hash));
-	if (!path.empty())
-		path += ".";
-	path += hashString;
-	entry.interface.reset(create_concurrent_database(path.c_str()));
+	if (!serializationPath.empty())
+		serializationPath += ".";
+	serializationPath += hashString;
+	entry.interface.reset(create_concurrent_database_with_encoded_extra_paths(serializationPath.c_str(),
+	                                                                          DatabaseMode::Append,
+	                                                                          extraPaths));
 
 	auto *recorder = new StateRecorder;
 	entry.recorder.reset(recorder);

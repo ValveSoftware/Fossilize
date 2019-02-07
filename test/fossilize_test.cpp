@@ -633,6 +633,95 @@ static bool file_exists(const char *path)
 		return false;
 }
 
+static bool test_concurrent_database_extra_paths()
+{
+	// Test a normal flow. First time we don't have the read-only database.
+	// Next time we have one.
+	remove(".__test_concurrent.foz");
+	remove(".__test_concurrent.1.foz");
+	remove(".__test_concurrent.2.foz");
+	remove(".__test_concurrent.3.foz");
+	remove(".__test_concurrent.4.foz");
+
+	static const char *extra_paths = ".__test_concurrent.1.foz;.__test_concurrent.2.foz;.__test_concurrent.3.foz";
+	static const uint8_t blob[] = {1, 2, 3};
+
+	{
+		auto db0 = std::unique_ptr<DatabaseInterface>(create_concurrent_database(".__test_concurrent",
+		                                                                         DatabaseMode::Append, nullptr, 0));
+		if (!db0->prepare())
+			return false;
+
+		if (!db0->write_entry(RESOURCE_SAMPLER, 2, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
+			return false;
+		if (!db0->write_entry(RESOURCE_SAMPLER, 3, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
+			return false;
+
+		auto db1 = std::unique_ptr<DatabaseInterface>(create_concurrent_database(".__test_concurrent",
+		                                                                         DatabaseMode::Append, nullptr, 0));
+		if (!db1->prepare())
+			return false;
+
+		if (!db1->write_entry(RESOURCE_SAMPLER, 3, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
+			return false;
+		if (!db1->write_entry(RESOURCE_SAMPLER, 4, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
+			return false;
+
+		auto db2 = std::unique_ptr<DatabaseInterface>(create_concurrent_database(".__test_concurrent",
+		                                                                         DatabaseMode::Append, nullptr, 0));
+		if (!db2->prepare())
+			return false;
+
+		if (!db2->write_entry(RESOURCE_SAMPLER, 1, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
+			return false;
+		if (!db2->write_entry(RESOURCE_SAMPLER, 1, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
+			return false;
+	}
+
+	if (!file_exists(".__test_concurrent.1.foz"))
+		return false;
+	if (!file_exists(".__test_concurrent.2.foz"))
+		return false;
+	if (!file_exists(".__test_concurrent.3.foz"))
+		return false;
+
+	auto db = std::unique_ptr<DatabaseInterface>(
+			create_concurrent_database_with_encoded_extra_paths(".__test_concurrent",
+			                                                    DatabaseMode::ReadOnly, extra_paths));
+
+	auto append_db = std::unique_ptr<DatabaseInterface>(
+			create_concurrent_database_with_encoded_extra_paths(".__test_concurrent",
+			                                                    DatabaseMode::Append, extra_paths));
+	if (!db->prepare())
+		return false;
+	if (!append_db->prepare())
+		return false;
+
+	size_t num_samplers;
+	if (!db->get_hash_list_for_resource_tag(RESOURCE_SAMPLER, &num_samplers, nullptr))
+		return false;
+	if (num_samplers != 4)
+		return false;
+
+	for (Hash i = 1; i <= 4; i++)
+	{
+		size_t blob_size;
+		if (!db->read_entry(RESOURCE_SAMPLER, i, &blob_size, nullptr, 0))
+			return false;
+		if (blob_size != sizeof(blob))
+			return false;
+	}
+
+	if (!append_db->write_entry(RESOURCE_SAMPLER, 4, blob, sizeof(blob), 0))
+		return false;
+
+	// This should not be written.
+	if (file_exists(".__test_concurrent.4.foz"))
+		return false;
+
+	return true;
+}
+
 static bool test_concurrent_database()
 {
 	// Test a normal flow. First time we don't have the read-only database.
@@ -649,7 +738,8 @@ static bool test_concurrent_database()
 
 		{
 			{
-				auto db0 = std::unique_ptr<DatabaseInterface>(create_concurrent_database(".__test_concurrent"));
+				auto db0 = std::unique_ptr<DatabaseInterface>(create_concurrent_database(".__test_concurrent",
+				                                                                         DatabaseMode::Append, nullptr, 0));
 				if (!db0->prepare())
 					return false;
 
@@ -660,7 +750,8 @@ static bool test_concurrent_database()
 			}
 
 			{
-				auto db1 = std::unique_ptr<DatabaseInterface>(create_concurrent_database(".__test_concurrent"));
+				auto db1 = std::unique_ptr<DatabaseInterface>(create_concurrent_database(".__test_concurrent",
+				                                                                         DatabaseMode::Append, nullptr, 0));
 				if (!db1->prepare())
 					return false;
 
@@ -671,7 +762,8 @@ static bool test_concurrent_database()
 			}
 
 			{
-				auto db2 = std::unique_ptr<DatabaseInterface>(create_concurrent_database(".__test_concurrent"));
+				auto db2 = std::unique_ptr<DatabaseInterface>(create_concurrent_database(".__test_concurrent",
+				                                                                         DatabaseMode::Append, nullptr, 0));
 				if (!db2->prepare())
 					return false;
 
@@ -709,6 +801,8 @@ static bool test_concurrent_database()
 
 int main()
 {
+	if (!test_concurrent_database_extra_paths())
+		return EXIT_FAILURE;
 	if (!test_concurrent_database())
 		return EXIT_FAILURE;
 	if (!test_database())
