@@ -33,6 +33,9 @@ public:
 	{
 		const char *external_replayer_path;
 		const char *database;
+		const char *on_disk_pipeline_cache;
+		unsigned num_threads;
+		bool pipeline_cache;
 		bool quiet;
 	};
 
@@ -50,6 +53,7 @@ public:
 	uintptr_t get_process_handle() const;
 
 	// Blocking waits for the process to complete and closes the process handle.
+	// Returns true if child process was waited for correctly and exited cleanly, i.e. exit(0), otherwise false.
 	bool wait();
 
 	// Queries if the process is dead, but does *not* reap the child process, even if it is dead.
@@ -62,15 +66,15 @@ public:
 
 	enum class PollResult : unsigned
 	{
-		OK,
-		NotReady,
+		Running,
+		Complete,
+		ResultNotReady,
 		Error
 	};
 
 	struct TypeProgress
 	{
 		uint32_t completed;
-		uint32_t crashed;
 		uint32_t skipped;
 		uint32_t total;
 	};
@@ -79,6 +83,12 @@ public:
 	{
 		TypeProgress compute;
 		TypeProgress graphics;
+
+		uint32_t total_modules;
+		uint32_t banned_modules;
+
+		uint32_t clean_crashes;
+		uint32_t dirty_crashes;
 	};
 
 	PollResult poll_progress(Progress &progress);

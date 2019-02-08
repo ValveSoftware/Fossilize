@@ -221,7 +221,10 @@ bool ProcessProgress::process_shutdown()
 	start_graphics_index = uint32_t(graphics_progress);
 	start_compute_index = uint32_t(compute_progress);
 	if (start_graphics_index >= end_graphics_index && start_compute_index >= end_compute_index)
+	{
+		LOGE("Process index %u crashed, but there is nothing more to replay.\n", index);
 		return false;
+	}
 	else
 	{
 		LOGE("Process index %u crashed, but will retry.\n", index);

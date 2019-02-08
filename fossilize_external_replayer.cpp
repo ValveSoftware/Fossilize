@@ -38,6 +38,7 @@
 #include <vector>
 #include <string>
 #include <pthread.h>
+#include <signal.h>
 
 namespace Fossilize
 {
@@ -57,12 +58,14 @@ struct ExternalReplayer::Impl
 	uintptr_t get_process_handle() const;
 	bool wait();
 	bool is_process_complete();
+	bool kill();
 };
 
 ExternalReplayer::Impl::~Impl()
 {
 	if (fd >= 0)
 		close(fd);
+
 	if (shm_block)
 	{
 		pthread_mutex_destroy(&shm_block->lock);
@@ -77,21 +80,40 @@ uintptr_t ExternalReplayer::Impl::get_process_handle() const
 
 ExternalReplayer::PollResult ExternalReplayer::Impl::poll_progress(ExternalReplayer::Progress &progress)
 {
+	if (pid < 0)
+		return ExternalReplayer::PollResult::Error;
+
+	bool complete = shm_block->progress_complete.load(std::memory_order_acquire);
+
+	if (!shm_block->progress_started.load(std::memory_order_acquire))
+		return ExternalReplayer::PollResult::ResultNotReady;
+
+	progress.compute.total = shm_block->total_compute.load(std::memory_order_relaxed);
+	progress.compute.skipped = shm_block->skipped_compute.load(std::memory_order_relaxed);
+	progress.compute.completed = shm_block->successful_compute.load(std::memory_order_relaxed);
+	progress.graphics.total = shm_block->total_graphics.load(std::memory_order_relaxed);
+	progress.graphics.skipped = shm_block->skipped_graphics.load(std::memory_order_relaxed);
+	progress.graphics.completed = shm_block->successful_graphics.load(std::memory_order_relaxed);
+	progress.total_modules = shm_block->total_modules.load(std::memory_order_relaxed);
+	progress.banned_modules = shm_block->banned_modules.load(std::memory_order_relaxed);
+	progress.clean_crashes = shm_block->clean_process_deaths.load(std::memory_order_relaxed);
+	progress.dirty_crashes = shm_block->dirty_process_deaths.load(std::memory_order_relaxed);
+
 	size_t read_avail = shared_control_block_read_avail(shm_block);
-	for (size_t i = 0; i < read_avail; i += 3)
+	for (size_t i = ControlBlockMessageSize; i <= read_avail; i += ControlBlockMessageSize)
 	{
-		char buf[4] = {};
-		shared_control_block_read(shm_block, buf, 3);
+		char buf[ControlBlockMessageSize] = {};
+		shared_control_block_read(shm_block, buf, sizeof(buf));
 		LOGI("From FIFO: %s\n", buf);
-	};
-	return ExternalReplayer::PollResult::NotReady;
+	}
+	return complete ? ExternalReplayer::PollResult::Complete : ExternalReplayer::PollResult::Running;
 }
 
 bool ExternalReplayer::Impl::is_process_complete()
 {
 	if (pid == -1)
 		return true;
-	return ::kill(pid, 0) == 0;
+	return ::killpg(pid, 0) < 0;
 }
 
 bool ExternalReplayer::Impl::wait()
@@ -110,9 +132,15 @@ bool ExternalReplayer::Impl::wait()
 	// Pump the fifo through.
 	poll_progress(progress);
 
-	LOGI("Wait: %d\n", wstatus);
 	pid = -1;
-	return true;
+	return WIFEXITED(wstatus) && WEXITSTATUS(wstatus) == 0;
+}
+
+bool ExternalReplayer::Impl::kill()
+{
+	if (pid < 0)
+		return false;
+	return killpg(pid, SIGTERM) == 0;
 }
 
 bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
@@ -140,6 +168,9 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 		LOGE("Failed to mmap shared block.\n");
 		return false;
 	}
+
+	// I believe zero-filled pages are guaranteed, but don't take any chances.
+	memset(static_cast<void *>(shm_block), 0, shm_block_size);
 
 	shm_block->ring_buffer_size = 64 * 1024;
 	shm_block->ring_buffer_offset = 4 * 1024;
@@ -174,14 +205,26 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 		return false;
 	}
 
+	// vfork blocks until the child has called exec().
 	pid_t new_pid = vfork();
 	if (new_pid > 0)
 	{
+		close(fd);
+		fd = -1;
 		pid = new_pid;
 	}
 	else if (new_pid == 0)
 	{
-		std::string fd_name = std::to_string(fd);
+		// Set the process group ID so we can kill all the child processes as needed.
+		if (setpgid(0, 0) < 0)
+		{
+			LOGE("Failed to set PGID in child.\n");
+			exit(1);
+		}
+
+		char fd_name[16];
+		sprintf(fd_name, "%d", fd);
+		char num_thread_holder[16];
 
 		std::vector<const char *> argv;
 		argv.push_back(options.external_replayer_path);
@@ -189,7 +232,24 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 		argv.push_back("--master-process");
 		argv.push_back("--quiet-slave");
 		argv.push_back("--shmem-fd");
-		argv.push_back(fd_name.c_str());
+		argv.push_back(fd_name);
+
+		if (options.pipeline_cache)
+			argv.push_back("--pipeline-cache");
+
+		if (options.num_threads)
+		{
+			argv.push_back("--num-threads");
+			sprintf(num_thread_holder, "%u", options.num_threads);
+			argv.push_back(num_thread_holder);
+		}
+
+		if (options.on_disk_pipeline_cache)
+		{
+			argv.push_back("--on-disk-pipeline-cache");
+			argv.push_back(options.on_disk_pipeline_cache);
+		}
+
 		argv.push_back(nullptr);
 
 		if (options.quiet)
@@ -233,6 +293,11 @@ ExternalReplayer::~ExternalReplayer()
 bool ExternalReplayer::wait()
 {
 	return impl->wait();
+}
+
+bool ExternalReplayer::kill()
+{
+	return impl->kill();
 }
 
 uintptr_t ExternalReplayer::get_process_handle() const

@@ -32,7 +32,9 @@
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <errno.h>
+#include "fossilize_external_replayer.hpp"
 
 static bool write_all(int fd, const char *str)
 {
@@ -123,6 +125,14 @@ void ProcessProgress::parse(const char *cmd)
 	{
 		auto hash = strtoull(cmd + 6, nullptr, 16);
 		Global::faulty_spirv_modules.insert(hash);
+
+		if (Global::control_block)
+		{
+			Global::control_block->banned_modules.fetch_add(1, std::memory_order_relaxed);
+			char buffer[ControlBlockMessageSize] = {};
+			strcpy(buffer, cmd);
+			shared_control_block_write(Global::control_block, buffer, sizeof(buffer));
+		}
 	}
 	else
 		LOGE("Got unexpected message from child: %s\n", cmd);
@@ -180,6 +190,9 @@ bool ProcessProgress::process_shutdown(int wstatus)
 	{
 		LOGE("Process index %u (PID: %d) failed to terminate in a clean fashion. We cannot continue replaying.\n",
 		     index, wait_pid);
+
+		if (Global::control_block)
+			Global::control_block->dirty_process_deaths.fetch_add(1, std::memory_order_relaxed);
 		return false;
 	}
 
@@ -189,13 +202,21 @@ bool ProcessProgress::process_shutdown(int wstatus)
 	{
 		LOGE("Child process %d terminated before we could receive progress. Cannot continue.\n",
 		     wait_pid);
+		if (Global::control_block)
+			Global::control_block->dirty_process_deaths.fetch_add(1, std::memory_order_relaxed);
 		return false;
 	}
+
+	if (Global::control_block)
+		Global::control_block->clean_process_deaths.fetch_add(1, std::memory_order_relaxed);
 
 	start_graphics_index = uint32_t(graphics_progress);
 	start_compute_index = uint32_t(compute_progress);
 	if (start_graphics_index >= end_graphics_index && start_compute_index >= end_compute_index)
+	{
+		LOGE("Process index %u (PID: %d) crashed, but there is nothing more to replay.\n", index, wait_pid);
 		return false;
+	}
 	else
 	{
 		LOGE("Process index %u (PID: %d) crashed, but will retry.\n", index, wait_pid);
@@ -313,6 +334,64 @@ bool ProcessProgress::start_child_process()
 		return false;
 }
 
+static int run_progress_process(const VulkanDevice::Options &,
+                                const ThreadedReplayer::Options &replayer_opts,
+                                const string &db_path)
+{
+	ExternalReplayer::Options opts = {};
+	opts.on_disk_pipeline_cache = replayer_opts.on_disk_pipeline_cache_path.empty() ?
+	                              nullptr : replayer_opts.on_disk_pipeline_cache_path.c_str();
+	opts.pipeline_cache = replayer_opts.pipeline_cache;
+	opts.num_threads = replayer_opts.num_threads;
+	opts.quiet = true;
+	opts.database = db_path.c_str();
+
+	char replayer_path[PATH_MAX];
+	if (readlink("/proc/self/exe", replayer_path, sizeof(replayer_path)) < 0)
+		return EXIT_FAILURE;
+
+	opts.external_replayer_path = replayer_path;
+
+	ExternalReplayer replayer;
+	if (!replayer.start(opts))
+	{
+		LOGE("Failed to start external replayer.\n");
+		return EXIT_FAILURE;
+	}
+
+	for (;;)
+	{
+		std::this_thread::sleep_for(std::chrono::milliseconds(500));
+		ExternalReplayer::Progress progress = {};
+		auto result = replayer.poll_progress(progress);
+
+		switch (result)
+		{
+		case ExternalReplayer::PollResult::Error:
+			return EXIT_FAILURE;
+
+		case ExternalReplayer::PollResult::ResultNotReady:
+			break;
+
+		case ExternalReplayer::PollResult::Complete:
+		case ExternalReplayer::PollResult::Running:
+			LOGI("=================\n");
+			LOGI(" Progress report:\n");
+			LOGI("   Graphics %u / %u, skipped %u\n", progress.graphics.completed, progress.graphics.total, progress.graphics.skipped);
+			LOGI("   Compute %u / %u, skipped %u\n", progress.compute.completed, progress.compute.total, progress.compute.skipped);
+			LOGI("   Modules %u, skipped %u\n", progress.total_modules, progress.banned_modules);
+			LOGI("   Clean crashes %u\n", progress.clean_crashes);
+			LOGI("   Dirty crashes %u\n", progress.dirty_crashes);
+			LOGI("=================\n");
+			if (result == ExternalReplayer::PollResult::Complete)
+				return replayer.wait() ? EXIT_SUCCESS : EXIT_FAILURE;
+			else if (replayer.is_process_complete())
+				return replayer.wait() ? EXIT_SUCCESS : EXIT_FAILURE;
+			break;
+		}
+	}
+}
+
 static int run_master_process(const VulkanDevice::Options &opts,
                               const ThreadedReplayer::Options &replayer_opts,
                               const string &db_path,
@@ -357,6 +436,7 @@ static int run_master_process(const VulkanDevice::Options &opts,
 
 	size_t num_graphics_pipelines;
 	size_t num_compute_pipelines;
+	size_t num_modules;
 	{
 		auto db = unique_ptr<DatabaseInterface>(create_database(db_path.c_str(), DatabaseMode::ReadOnly));
 		if (!db->prepare())
@@ -376,6 +456,20 @@ static int run_master_process(const VulkanDevice::Options &opts,
 			LOGE("Failed to parse database %s.\n", db_path.c_str());
 			return EXIT_FAILURE;
 		}
+
+		if (!db->get_hash_list_for_resource_tag(RESOURCE_SHADER_MODULE, &num_modules, nullptr))
+		{
+			LOGE("Failed to parse database %s.\n", db_path.c_str());
+			return EXIT_FAILURE;
+		}
+	}
+
+	if (Global::control_block)
+	{
+		Global::control_block->total_graphics.store(num_graphics_pipelines, std::memory_order_relaxed);
+		Global::control_block->total_compute.store(num_compute_pipelines, std::memory_order_relaxed);
+		Global::control_block->total_modules.store(num_modules, std::memory_order_relaxed);
+		Global::control_block->progress_started.store(true, std::memory_order_release);
 	}
 
 	Global::active_processes = 0;
@@ -539,6 +633,9 @@ static int run_master_process(const VulkanDevice::Options &opts,
 			}
 		}
 	}
+
+	if (Global::control_block)
+		Global::control_block->progress_complete.store(true, std::memory_order_release);
 
 	return EXIT_SUCCESS;
 }

@@ -28,16 +28,36 @@
 #include <pthread.h>
 #endif
 
+#include <atomic>
+static_assert(sizeof(std::atomic<uint32_t>) == sizeof(uint32_t), "Atomic size mismatch. This type likely requires a lock to work.");
+
 // A simple cross-process FIFO-like mechanism.
 // We're not going to bother too much if messages are dropped, since they are mostly informative.
 
 namespace Fossilize
 {
+enum { ControlBlockMessageSize = 32 };
 #ifdef _WIN32
 #else
 struct SharedControlBlock
 {
 	pthread_mutex_t lock;
+
+	// Progress. Just need atomics to implements this.
+	std::atomic<uint32_t> successful_graphics;
+	std::atomic<uint32_t> successful_compute;
+	std::atomic<uint32_t> skipped_graphics;
+	std::atomic<uint32_t> skipped_compute;
+	std::atomic<uint32_t> clean_process_deaths;
+	std::atomic<uint32_t> dirty_process_deaths;
+	std::atomic<uint32_t> total_graphics;
+	std::atomic<uint32_t> total_compute;
+	std::atomic<uint32_t> total_modules;
+	std::atomic<uint32_t> banned_modules;
+	std::atomic<bool> progress_started;
+	std::atomic<bool> progress_complete;
+
+	// Ring buffer. Needs lock.
 	uint64_t write_count;
 	uint64_t read_count;
 
@@ -50,6 +70,16 @@ struct SharedControlBlock
 #define SHARED_CONTROL_BLOCK_LOCK(block) pthread_mutex_lock(&(block)->lock)
 #define SHARED_CONTROL_BLOCK_UNLOCK(block) pthread_mutex_unlock(&(block)->lock)
 #endif
+
+static inline void shared_control_block_lock(SharedControlBlock *control_block)
+{
+	SHARED_CONTROL_BLOCK_LOCK(control_block);
+}
+
+static inline void shared_control_block_unlock(SharedControlBlock *control_block)
+{
+	SHARED_CONTROL_BLOCK_UNLOCK(control_block);
+}
 
 static inline size_t shared_control_block_read_avail(SharedControlBlock *control_block)
 {
