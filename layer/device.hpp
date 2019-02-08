@@ -23,7 +23,6 @@
 #pragma once
 
 #include "dispatch_helper.hpp"
-#include <string>
 
 namespace Fossilize
 {
@@ -57,13 +56,6 @@ private:
 	VkDevice device = VK_NULL_HANDLE;
 	VkLayerInstanceDispatchTable *pInstanceTable = nullptr;
 	VkLayerDispatchTable *pTable = nullptr;
-
 	StateRecorder *recorder = nullptr;
-
-#ifdef ANDROID
-	std::string serializationPath = "/sdcard/";
-#else
-	std::string serializationPath = "";
-#endif
 };
 }

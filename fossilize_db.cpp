@@ -954,17 +954,14 @@ DatabaseInterface *create_database(const char *path, DatabaseMode mode)
 
 struct ConcurrentDatabase : DatabaseInterface
 {
-	explicit ConcurrentDatabase(const char *base_path_)
-		: base_path(base_path_)
+	explicit ConcurrentDatabase(const char *base_path_, DatabaseMode mode_,
+	                            const char * const *extra_paths, size_t num_extra_paths)
+		: base_path(base_path_), mode(mode_)
 	{
 		std::string readonly_path = base_path + ".foz";
-		readonly_interface = create_stream_archive_database(readonly_path.c_str(), DatabaseMode::ReadOnly);
-	}
-
-	~ConcurrentDatabase()
-	{
-		delete readonly_interface;
-		delete writeonly_interface;
+		readonly_interface.reset(create_stream_archive_database(readonly_path.c_str(), DatabaseMode::ReadOnly));
+		for (size_t i = 0; i < num_extra_paths; i++)
+			extra_readonly.emplace_back(create_stream_archive_database(extra_paths[i], DatabaseMode::ReadOnly));
 	}
 
 	void flush() override
@@ -973,15 +970,50 @@ struct ConcurrentDatabase : DatabaseInterface
 			writeonly_interface->flush();
 	}
 
+	void prime_read_only_hashes(DatabaseInterface &interface)
+	{
+		for (unsigned i = 0; i < RESOURCE_COUNT; i++)
+		{
+			auto tag = static_cast<ResourceTag>(i);
+			size_t num_hashes;
+			if (!interface.get_hash_list_for_resource_tag(tag, &num_hashes, nullptr))
+				return;
+			std::vector<Hash> hashes(num_hashes);
+			if (!interface.get_hash_list_for_resource_tag(tag, &num_hashes, hashes.data()))
+				return;
+
+			for (auto &hash : hashes)
+				primed_hashes[i].insert(hash);
+		}
+	}
+
 	bool prepare() override
 	{
+		if (mode != DatabaseMode::Append && mode != DatabaseMode::ReadOnly)
+			return false;
+
 		if (!has_prepared_readonly)
 		{
 			// It's okay if the database doesn't exist.
-			if (readonly_interface && !readonly_interface->prepare())
+			if (readonly_interface && readonly_interface->prepare())
+				prime_read_only_hashes(*readonly_interface);
+
+			if (mode != DatabaseMode::ReadOnly)
 			{
-				delete readonly_interface;
-				readonly_interface = nullptr;
+				// We only need the database for priming purposes.
+				readonly_interface.reset();
+			}
+
+			for (auto &extra : extra_readonly)
+			{
+				if (extra && extra->prepare())
+					prime_read_only_hashes(*extra);
+			}
+
+			if (mode != DatabaseMode::ReadOnly)
+			{
+				// We only need the database for priming purposes.
+				extra_readonly.clear();
 			}
 		}
 
@@ -989,14 +1021,31 @@ struct ConcurrentDatabase : DatabaseInterface
 		return true;
 	}
 
-	bool read_entry(ResourceTag, Hash, size_t *, void *, PayloadReadFlags) override
+	bool read_entry(ResourceTag tag, Hash hash, size_t *blob_size, void *blob, PayloadReadFlags flags) override
 	{
-		// This method is kind of meaningless for this database. We're always in a "write" mode.
+		if (mode != DatabaseMode::ReadOnly)
+			return false;
+
+		if (readonly_interface && readonly_interface->read_entry(tag, hash, blob_size, blob, flags))
+			return true;
+
+		// There shouldn't be that many read-only databases to the point where we need to use hashmaps
+		// to map hash/tag to the readonly database.
+		for (auto &extra : extra_readonly)
+			if (extra && extra->read_entry(tag, hash, blob_size, blob, flags))
+				return true;
+
 		return false;
 	}
 
 	bool write_entry(ResourceTag tag, Hash hash, const void *blob, size_t blob_size, PayloadWriteFlags flags) override
 	{
+		if (mode != DatabaseMode::Append)
+			return false;
+
+		if (primed_hashes[tag].count(hash))
+			return true;
+
 		// All threads must have called prepare and synchronized readonly_interface from that,
 		// and from here on out readonly_interface is purely read-only, no need to lock just to check.
 		if (readonly_interface && readonly_interface->has_entry(tag, hash))
@@ -1012,12 +1061,9 @@ struct ConcurrentDatabase : DatabaseInterface
 			for (unsigned index = 1; index < 256 && !writeonly_interface; index++)
 			{
 				std::string write_path = base_path + "." + std::to_string(index) + ".foz";
-				writeonly_interface = create_stream_archive_database(write_path.c_str(), DatabaseMode::ExclusiveOverWrite);
+				writeonly_interface.reset(create_stream_archive_database(write_path.c_str(), DatabaseMode::ExclusiveOverWrite));
 				if (!writeonly_interface->prepare())
-				{
-					delete writeonly_interface;
-					writeonly_interface = nullptr;
-				}
+					writeonly_interface.reset();
 			}
 
 			need_writeonly_database = false;
@@ -1032,6 +1078,9 @@ struct ConcurrentDatabase : DatabaseInterface
 	// Checks if entry already exists in database, i.e. no need to serialize.
 	bool has_entry(ResourceTag tag, Hash hash) override
 	{
+		if (primed_hashes[tag].count(hash))
+			return true;
+
 		// All threads must have called prepare and synchronized readonly_interface from that,
 		// and from here on out readonly_interface is purely read-only, no need to lock just to check.
 		if (readonly_interface && readonly_interface->has_entry(tag, hash))
@@ -1040,22 +1089,74 @@ struct ConcurrentDatabase : DatabaseInterface
 		return writeonly_interface && writeonly_interface->has_entry(tag, hash);
 	}
 
-	bool get_hash_list_for_resource_tag(ResourceTag, size_t *, Hash *) override
+	bool get_hash_list_for_resource_tag(ResourceTag tag, size_t *num_hashes, Hash *hashes) override
 	{
-		// This method is kind of meaningless for this database. We're always in a "write" mode.
-		return false;
+		size_t readonly_size = primed_hashes[tag].size();
+		size_t writeonly_size = 0;
+		if (!writeonly_interface || !writeonly_interface->get_hash_list_for_resource_tag(tag, &writeonly_size, nullptr))
+			writeonly_size = 0;
+
+		size_t total_size = readonly_size + writeonly_size;
+
+		if (hashes)
+		{
+			if (total_size != *num_hashes)
+				return false;
+		}
+		else
+			*num_hashes = total_size;
+
+		if (hashes)
+		{
+			Hash *iter = hashes;
+			for (auto &blob : primed_hashes[tag])
+				*iter++ = blob;
+
+			if (writeonly_size != 0 && !writeonly_interface->get_hash_list_for_resource_tag(tag, &writeonly_size, iter))
+				return false;
+
+			// Make replay more deterministic.
+			sort(hashes, hashes + total_size);
+		}
+
+		return true;
 	}
 
 	std::string base_path;
-	DatabaseInterface *readonly_interface = nullptr;
-	DatabaseInterface *writeonly_interface = nullptr;
+	DatabaseMode mode;
+	std::unique_ptr<DatabaseInterface> readonly_interface;
+	std::unique_ptr<DatabaseInterface> writeonly_interface;
+	std::vector<std::unique_ptr<DatabaseInterface>> extra_readonly;
+	std::unordered_set<Hash> primed_hashes[RESOURCE_COUNT];
 	bool has_prepared_readonly = false;
 	bool need_writeonly_database = true;
 };
 
-DatabaseInterface *create_concurrent_database(const char *base_path)
+DatabaseInterface *create_concurrent_database(const char *base_path, DatabaseMode mode,
+                                              const char * const *extra_read_only_database_paths,
+                                              size_t num_extra_read_only_database_paths)
 {
-	return new ConcurrentDatabase(base_path);
+	return new ConcurrentDatabase(base_path, mode, extra_read_only_database_paths, num_extra_read_only_database_paths);
+}
+
+DatabaseInterface *create_concurrent_database_with_encoded_extra_paths(const char *base_path, DatabaseMode mode,
+                                                                       const char *encoded_extra_paths)
+{
+	if (!encoded_extra_paths)
+		return create_concurrent_database(base_path, mode, nullptr, 0);
+
+#ifdef _WIN32
+	auto paths = Path::split_no_empty(encoded_extra_paths, ";");
+#else
+	auto paths = Path::split_no_empty(encoded_extra_paths, ";:");
+#endif
+
+	std::vector<const char *> char_paths;
+	char_paths.reserve(paths.size());
+	for (auto &path : paths)
+		char_paths.push_back(path.c_str());
+
+	return create_concurrent_database(base_path, mode, char_paths.data(), char_paths.size());
 }
 
 bool merge_concurrent_databases(const char *append_archive, const char * const *source_paths, size_t num_source_paths)
