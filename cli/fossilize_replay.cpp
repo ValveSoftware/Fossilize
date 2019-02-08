@@ -28,6 +28,14 @@
 #include "file.hpp"
 #include "path.hpp"
 #include "fossilize_db.hpp"
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#define EXTERNAL_SHARED_MUTEX replayer_shared_mutex
+extern HANDLE replayer_shared_mutex;
+#endif
+
 #include "fossilize_external_replayer_control_block.hpp"
 
 #include <cinttypes>
@@ -837,6 +845,11 @@ struct ThreadedReplayer : StateCreatorInterface
 
 static void print_help()
 {
+#ifdef _WIN32
+#define EXTRA_OPTIONS "\t[--shm-name <name>]\n\t[--shm-mutex-name <name>]\n"
+#else
+#define EXTRA_OPTIONS "\t[--shm-fd <fd>]\n"
+#endif
 	LOGI("fossilize-replay\n"
 	     "\t[--help]\n"
 	     "\t[--device-index <index>]\n"
@@ -851,10 +864,7 @@ static void print_help()
 	     "\t[--master-process]\n"
 	     "\t[--progress]\n"
 	     "\t[--quiet-slave]\n"
-#ifdef _WIN32
-#else
-	     "\t[--shmem-fd <fd>]\n"
-#endif
+	     EXTRA_OPTIONS
 	     "\t<Database>\n");
 }
 
@@ -1002,6 +1012,8 @@ int main(int argc, char *argv[])
 	bool progress = false;
 
 #ifdef _WIN32
+	const char *shm_name = nullptr;
+	const char *shm_mutex_name = nullptr;
 #else
 	int shmem_fd = -1;
 #endif
@@ -1031,6 +1043,8 @@ int main(int argc, char *argv[])
 	});
 
 #ifdef _WIN32
+	cbs.add("--shm-name", [&](CLIParser &parser) { shm_name = parser.next_string(); });
+	cbs.add("--shm-mutex-name", [&](CLIParser &parser) { shm_mutex_name = parser.next_string(); });
 #else
 	cbs.add("--shmem-fd", [&](CLIParser &parser) { shmem_fd = parser.next_uint(); });
 #endif
@@ -1072,13 +1086,19 @@ int main(int argc, char *argv[])
 	else if (master_process)
 	{
 #ifdef _WIN32
-		ret = run_master_process(opts, replayer_opts, db_path, quiet_slave);
+		ret = run_master_process(opts, replayer_opts, db_path, quiet_slave, shm_name, shm_mutex_name);
 #else
 		ret = run_master_process(opts, replayer_opts, db_path, quiet_slave, shmem_fd);
 #endif
 	}
 	else if (slave_process)
+	{
+#ifdef _WIN32
+		ret = run_slave_process(opts, replayer_opts, db_path, shm_name, shm_mutex_name);
+#else
 		ret = run_slave_process(opts, replayer_opts, db_path);
+#endif
+	}
 	else
 	{
 		ThreadedReplayer replayer(opts, replayer_opts);

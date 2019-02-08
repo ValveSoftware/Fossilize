@@ -97,6 +97,7 @@ ExternalReplayer::PollResult ExternalReplayer::Impl::poll_progress(ExternalRepla
 	progress.clean_crashes = shm_block->clean_process_deaths.load(std::memory_order_relaxed);
 	progress.dirty_crashes = shm_block->dirty_process_deaths.load(std::memory_order_relaxed);
 
+	SHARED_CONTROL_BLOCK_UNLOCK(shm_block);
 	size_t read_avail = shared_control_block_read_avail(shm_block);
 	for (size_t i = ControlBlockMessageSize; i <= read_avail; i += ControlBlockMessageSize)
 	{
@@ -104,6 +105,7 @@ ExternalReplayer::PollResult ExternalReplayer::Impl::poll_progress(ExternalRepla
 		shared_control_block_read(shm_block, buf, sizeof(buf));
 		LOGI("From FIFO: %s\n", buf);
 	}
+	SHARED_CONTROL_BLOCK_UNLOCK(shm_block);
 	return complete ? ExternalReplayer::PollResult::Complete : ExternalReplayer::PollResult::Running;
 }
 

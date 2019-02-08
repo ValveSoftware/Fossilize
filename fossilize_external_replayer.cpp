@@ -21,7 +21,6 @@
  */
 
 #include "fossilize_external_replayer.hpp"
-#include "fossilize_external_replayer_control_block.hpp"
 
 #if defined(_WIN32)
 #include "fossilize_external_replayer_windows.hpp"

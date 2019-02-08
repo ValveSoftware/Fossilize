@@ -131,7 +131,9 @@ void ProcessProgress::parse(const char *cmd)
 			Global::control_block->banned_modules.fetch_add(1, std::memory_order_relaxed);
 			char buffer[ControlBlockMessageSize] = {};
 			strcpy(buffer, cmd);
+			SHARED_CONTROL_BLOCK_LOCK(Global::control_block);
 			shared_control_block_write(Global::control_block, buffer, sizeof(buffer));
+			SHARED_CONTROL_BLOCK_UNLOCK(Global::control_block);
 		}
 	}
 	else

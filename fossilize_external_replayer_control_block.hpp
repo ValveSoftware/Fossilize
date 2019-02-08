@@ -41,7 +41,9 @@ namespace Fossilize
 enum { ControlBlockMessageSize = 32 };
 enum { ControlBlockMagic = 0x19bcde12 };
 #ifdef _WIN32
-static HANDLE shared_mutex;
+#ifndef EXTERNAL_SHARED_MUTEX
+#error "Default EXTERNAL_SHARED_MUTEX to refer to some mutex HANDLE."
+#endif
 struct SharedControlBlock
 {
 	uint32_t version_cookie;
@@ -69,6 +71,8 @@ struct SharedControlBlock
 	size_t ring_buffer_offset;
 	size_t ring_buffer_size;
 };
+#define SHARED_CONTROL_BLOCK_LOCK(block) WaitForSingleObject(EXTERNAL_SHARED_MUTEX, INFINITE)
+#define SHARED_CONTROL_BLOCK_UNLOCK(block) ReleaseMutex(EXTERNAL_SHARED_MUTEX)
 #else
 struct SharedControlBlock
 {
@@ -103,39 +107,20 @@ struct SharedControlBlock
 #define SHARED_CONTROL_BLOCK_UNLOCK(block) pthread_mutex_unlock(&(block)->lock)
 #endif
 
-static inline void shared_control_block_lock(SharedControlBlock *control_block)
-{
-	SHARED_CONTROL_BLOCK_LOCK(control_block);
-}
-
-static inline void shared_control_block_unlock(SharedControlBlock *control_block)
-{
-	SHARED_CONTROL_BLOCK_UNLOCK(control_block);
-}
-
 static inline size_t shared_control_block_read_avail(SharedControlBlock *control_block)
 {
-	size_t ret = 0;
-	SHARED_CONTROL_BLOCK_LOCK(control_block);
-	{
-		ret = control_block->write_count - control_block->read_count;
-	}
-	SHARED_CONTROL_BLOCK_UNLOCK(control_block);
+	size_t ret = control_block->write_count - control_block->read_count;
 	return ret;
 }
 
 static inline size_t shared_control_block_write_avail(SharedControlBlock *control_block)
 {
 	size_t ret = 0;
-	SHARED_CONTROL_BLOCK_LOCK(control_block);
-	{
-		size_t max_capacity_write_count = control_block->read_count + control_block->ring_buffer_size;
-		if (control_block->write_count >= max_capacity_write_count)
-			ret = 0;
-		else
-			ret = max_capacity_write_count - control_block->write_count;
-	}
-	SHARED_CONTROL_BLOCK_UNLOCK(control_block);
+	size_t max_capacity_write_count = control_block->read_count + control_block->ring_buffer_size;
+	if (control_block->write_count >= max_capacity_write_count)
+		ret = 0;
+	else
+		ret = max_capacity_write_count - control_block->write_count;
 	return ret;
 }
 
@@ -148,31 +133,22 @@ static inline bool shared_control_block_read(SharedControlBlock *control_block,
 	if (size > control_block->ring_buffer_size)
 		return false;
 
-	// Cross-process mutex :D
-	SHARED_CONTROL_BLOCK_LOCK(control_block);
-	{
-		if (size > (control_block->write_count - control_block->read_count))
-			goto unlock_fail;
+	if (size > (control_block->write_count - control_block->read_count))
+		return false;
 
-		size_t read_first = control_block->ring_buffer_size - control_block->read_offset;
-		size_t read_second = 0;
-		if (read_first > size)
-			read_first = size;
-		read_second = size - read_first;
+	size_t read_first = control_block->ring_buffer_size - control_block->read_offset;
+	size_t read_second = 0;
+	if (read_first > size)
+		read_first = size;
+	read_second = size - read_first;
 
-		memcpy(data, ring + control_block->read_offset, read_first);
-		if (read_second)
-			memcpy(data + read_first, ring, read_second);
+	memcpy(data, ring + control_block->read_offset, read_first);
+	if (read_second)
+		memcpy(data + read_first, ring, read_second);
 
-		control_block->read_offset = (control_block->read_offset + size) & (control_block->ring_buffer_size - 1);
-		control_block->read_count += size;
-	}
-	SHARED_CONTROL_BLOCK_UNLOCK(control_block);
+	control_block->read_offset = (control_block->read_offset + size) & (control_block->ring_buffer_size - 1);
+	control_block->read_count += size;
 	return true;
-
-unlock_fail:
-	SHARED_CONTROL_BLOCK_UNLOCK(control_block);
-	return false;
 }
 
 static inline bool shared_control_block_write(SharedControlBlock *control_block,
@@ -184,31 +160,23 @@ static inline bool shared_control_block_write(SharedControlBlock *control_block,
 	if (size > control_block->ring_buffer_size)
 		return false;
 
-	// Cross-process mutex :D
-	SHARED_CONTROL_BLOCK_LOCK(control_block);
-	{
-		size_t max_capacity_write_count = control_block->read_count + control_block->ring_buffer_size;
-		if (control_block->write_count + size > max_capacity_write_count)
-			goto unlock_fail;
+	size_t max_capacity_write_count = control_block->read_count + control_block->ring_buffer_size;
+	if (control_block->write_count + size > max_capacity_write_count)
+		return false;
 
-		size_t write_first = control_block->ring_buffer_size - control_block->write_offset;
-		size_t write_second = 0;
-		if (write_first > size)
-			write_first = size;
-		write_second = size - write_first;
+	size_t write_first = control_block->ring_buffer_size - control_block->write_offset;
+	size_t write_second = 0;
+	if (write_first > size)
+		write_first = size;
+	write_second = size - write_first;
 
-		memcpy(ring + control_block->write_offset, data, write_first);
-		if (write_second)
-			memcpy(ring, data + write_first, write_second);
+	memcpy(ring + control_block->write_offset, data, write_first);
+	if (write_second)
+		memcpy(ring, data + write_first, write_second);
 
-		control_block->write_offset = (control_block->write_offset + size) & (control_block->ring_buffer_size - 1);
-		control_block->write_count += size;
-	}
-	SHARED_CONTROL_BLOCK_UNLOCK(control_block);
+	control_block->write_offset = (control_block->write_offset + size) & (control_block->ring_buffer_size - 1);
+	control_block->write_count += size;
+
 	return true;
-
-unlock_fail:
-	SHARED_CONTROL_BLOCK_UNLOCK(control_block);
-	return false;
 }
 }

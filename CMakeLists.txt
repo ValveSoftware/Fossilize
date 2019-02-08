@@ -53,7 +53,7 @@ endif()
 
 target_include_directories(fossilize PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_options(fossilize PUBLIC ${FOSSILIZE_CXX_FLAGS})
-if (NOT MSVC)
+if (NOT WIN32)
     target_link_libraries(fossilize -pthread rt)
 endif()
 target_link_libraries(fossilize miniz)
