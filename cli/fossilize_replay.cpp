@@ -28,14 +28,7 @@
 #include "file.hpp"
 #include "path.hpp"
 #include "fossilize_db.hpp"
-
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#define EXTERNAL_SHARED_MUTEX replayer_shared_mutex
-extern HANDLE replayer_shared_mutex;
-#endif
-
+#include "fossilize_external_replayer.hpp"
 #include "fossilize_external_replayer_control_block.hpp"
 
 #include <cinttypes>
@@ -866,6 +859,69 @@ static void print_help()
 	     "\t[--quiet-slave]\n"
 	     EXTRA_OPTIONS
 	     "\t<Database>\n");
+}
+
+static void log_progress(const ExternalReplayer::Progress &progress)
+{
+	LOGI("=================\n");
+	LOGI(" Progress report:\n");
+	LOGI("   Graphics %u / %u, skipped %u\n", progress.graphics.completed, progress.graphics.total, progress.graphics.skipped);
+	LOGI("   Compute %u / %u, skipped %u\n", progress.compute.completed, progress.compute.total, progress.compute.skipped);
+	LOGI("   Modules %u, skipped %u\n", progress.total_modules, progress.banned_modules);
+	LOGI("   Clean crashes %u\n", progress.clean_crashes);
+	LOGI("   Dirty crashes %u\n", progress.dirty_crashes);
+	LOGI("=================\n");
+}
+
+static int run_progress_process(const VulkanDevice::Options &,
+                                const ThreadedReplayer::Options &replayer_opts,
+                                const string &db_path)
+{
+	ExternalReplayer::Options opts = {};
+	opts.on_disk_pipeline_cache = replayer_opts.on_disk_pipeline_cache_path.empty() ?
+		nullptr : replayer_opts.on_disk_pipeline_cache_path.c_str();
+	opts.pipeline_cache = replayer_opts.pipeline_cache;
+	opts.num_threads = replayer_opts.num_threads;
+	opts.quiet = true;
+	opts.database = db_path.c_str();
+	opts.external_replayer_path = nullptr;
+
+	ExternalReplayer replayer;
+	if (!replayer.start(opts))
+	{
+		LOGE("Failed to start external replayer.\n");
+		return EXIT_FAILURE;
+	}
+
+	for (;;)
+	{
+		std::this_thread::sleep_for(std::chrono::milliseconds(500));
+		ExternalReplayer::Progress progress = {};
+		auto result = replayer.poll_progress(progress);
+
+		if (replayer.is_process_complete())
+		{
+			if (result != ExternalReplayer::PollResult::ResultNotReady)
+				log_progress(progress);
+			return replayer.wait() ? EXIT_SUCCESS : EXIT_FAILURE;
+		}
+
+		switch (result)
+		{
+		case ExternalReplayer::PollResult::Error:
+			return EXIT_FAILURE;
+
+		case ExternalReplayer::PollResult::ResultNotReady:
+			break;
+
+		case ExternalReplayer::PollResult::Complete:
+		case ExternalReplayer::PollResult::Running:
+			log_progress(progress);
+			if (result == ExternalReplayer::PollResult::Complete)
+				return replayer.wait() ? EXIT_SUCCESS : EXIT_FAILURE;
+			break;
+		}
+	}
 }
 
 static int run_normal_process(ThreadedReplayer &replayer, const string &db_path)

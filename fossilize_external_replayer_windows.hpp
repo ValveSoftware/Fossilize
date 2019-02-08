@@ -27,8 +27,6 @@
 #include "layer/utils.hpp"
 #include <string>
 #include <atomic>
-
-#define EXTERNAL_SHARED_MUTEX mutex
 #include "fossilize_external_replayer_control_block.hpp"
 
 namespace Fossilize
@@ -91,15 +89,17 @@ ExternalReplayer::PollResult ExternalReplayer::Impl::poll_progress(ExternalRepla
 	progress.clean_crashes = shm_block->clean_process_deaths.load(std::memory_order_relaxed);
 	progress.dirty_crashes = shm_block->dirty_process_deaths.load(std::memory_order_relaxed);
 
-	SHARED_CONTROL_BLOCK_LOCK(shm_block);
-	size_t read_avail = shared_control_block_read_avail(shm_block);
-	for (size_t i = ControlBlockMessageSize; i <= read_avail; i += ControlBlockMessageSize)
+	if (WaitForSingleObject(mutex, INFINITE) == WAIT_OBJECT_0)
 	{
-		char buf[ControlBlockMessageSize] = {};
-		shared_control_block_read(shm_block, buf, sizeof(buf));
-		LOGI("From FIFO: %s\n", buf);
+		size_t read_avail = shared_control_block_read_avail(shm_block);
+		for (size_t i = ControlBlockMessageSize; i <= read_avail; i += ControlBlockMessageSize)
+		{
+			char buf[ControlBlockMessageSize] = {};
+			shared_control_block_read(shm_block, buf, sizeof(buf));
+			LOGI("From FIFO: %s\n", buf);
+		}
+		ReleaseMutex(mutex);
 	}
-	SHARED_CONTROL_BLOCK_UNLOCK(shm_block);
 	return complete ? ExternalReplayer::PollResult::Complete : ExternalReplayer::PollResult::Running;
 }
 
@@ -180,9 +180,16 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 	}
 
 	std::string cmdline;
-
 	cmdline += "\"";
-	cmdline += options.external_replayer_path;
+	if (options.external_replayer_path)
+		cmdline += options.external_replayer_path;
+	else
+	{
+		char replayer_path[MAX_PATH];
+		if (FAILED(GetModuleFileNameA(nullptr, replayer_path, sizeof(replayer_path))))
+			return EXIT_FAILURE;
+		cmdline += replayer_path;
+	}
 	cmdline += "\" ";
 	cmdline += "\"";
 	cmdline += options.database;

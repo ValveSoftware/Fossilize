@@ -60,6 +60,7 @@ static bool quiet_slave;
 static SharedControlBlock *control_block;
 static const char *shm_name;
 static const char *shm_mutex_name;
+static HANDLE shared_mutex;
 }
 
 struct ProcessProgress
@@ -141,9 +142,11 @@ void ProcessProgress::parse(const char *cmd)
 			char buffer[ControlBlockMessageSize] = {};
 			strcpy(buffer, cmd);
 
-			SHARED_CONTROL_BLOCK_LOCK(Global::control_block);
-			shared_control_block_write(Global::control_block, buffer, sizeof(buffer));
-			SHARED_CONTROL_BLOCK_UNLOCK(Global::control_block);
+			if (WaitForSingleObject(Global::shared_mutex, INFINITE) == WAIT_OBJECT_0)
+			{
+				shared_control_block_write(Global::control_block, buffer, sizeof(buffer));
+				ReleaseMutex(Global::shared_mutex);
+			}
 		}
 	}
 	else
@@ -471,7 +474,6 @@ static void log_and_die()
 	ExitProcess(1);
 }
 
-HANDLE replayer_shared_mutex;
 static bool open_shm(const char *shm_path, const char *shm_mutex_path)
 {
 	HANDLE mapping = OpenFileMapping(FILE_MAP_READ | FILE_MAP_WRITE, FALSE, shm_path);
@@ -503,79 +505,11 @@ static bool open_shm(const char *shm_path, const char *shm_mutex_path)
 		Global::control_block = nullptr;
 	}
 
-	replayer_shared_mutex = OpenMutexA(MUTEX_ALL_ACCESS, FALSE, shm_mutex_path);
-	if (replayer_shared_mutex == INVALID_HANDLE_VALUE)
+	Global::shared_mutex = OpenMutexA(MUTEX_ALL_ACCESS, FALSE, shm_mutex_path);
+	if (Global::shared_mutex == INVALID_HANDLE_VALUE)
 		return false;
 
 	return true;
-}
-
-static void log_progress(const ExternalReplayer::Progress &progress)
-{
-	LOGI("=================\n");
-	LOGI(" Progress report:\n");
-	LOGI("   Graphics %u / %u, skipped %u\n", progress.graphics.completed, progress.graphics.total, progress.graphics.skipped);
-	LOGI("   Compute %u / %u, skipped %u\n", progress.compute.completed, progress.compute.total, progress.compute.skipped);
-	LOGI("   Modules %u, skipped %u\n", progress.total_modules, progress.banned_modules);
-	LOGI("   Clean crashes %u\n", progress.clean_crashes);
-	LOGI("   Dirty crashes %u\n", progress.dirty_crashes);
-	LOGI("=================\n");
-}
-
-static int run_progress_process(const VulkanDevice::Options &,
-                                const ThreadedReplayer::Options &replayer_opts,
-                                const string &db_path)
-{
-	ExternalReplayer::Options opts = {};
-	opts.on_disk_pipeline_cache = replayer_opts.on_disk_pipeline_cache_path.empty() ?
-		nullptr : replayer_opts.on_disk_pipeline_cache_path.c_str();
-	opts.pipeline_cache = replayer_opts.pipeline_cache;
-	opts.num_threads = replayer_opts.num_threads;
-	opts.quiet = true;
-	opts.database = db_path.c_str();
-
-	char replayer_path[MAX_PATH];
-	if (FAILED(GetModuleFileNameA(nullptr, replayer_path, sizeof(replayer_path))))
-		return EXIT_FAILURE;
-
-	opts.external_replayer_path = replayer_path;
-
-	ExternalReplayer replayer;
-	if (!replayer.start(opts))
-	{
-		LOGE("Failed to start external replayer.\n");
-		return EXIT_FAILURE;
-	}
-
-	for (;;)
-	{
-		std::this_thread::sleep_for(std::chrono::milliseconds(500));
-		ExternalReplayer::Progress progress = {};
-		auto result = replayer.poll_progress(progress);
-
-		if (replayer.is_process_complete())
-		{
-			if (result != ExternalReplayer::PollResult::ResultNotReady)
-				log_progress(progress);
-			return replayer.wait() ? EXIT_SUCCESS : EXIT_FAILURE;
-		}
-
-		switch (result)
-		{
-		case ExternalReplayer::PollResult::Error:
-			return EXIT_FAILURE;
-
-		case ExternalReplayer::PollResult::ResultNotReady:
-			break;
-
-		case ExternalReplayer::PollResult::Complete:
-		case ExternalReplayer::PollResult::Running:
-			log_progress(progress);
-			if (result == ExternalReplayer::PollResult::Complete)
-				return replayer.wait() ? EXIT_SUCCESS : EXIT_FAILURE;
-			break;
-		}
-	}
 }
 
 static int run_master_process(const VulkanDevice::Options &opts,
@@ -859,5 +793,19 @@ static int run_slave_process(const VulkanDevice::Options &opts,
 	signal(SIGABRT, SIG_DFL);
 	SetErrorMode(0);
 	SetUnhandledExceptionFilter(nullptr);
+
+#if 0
+	if (Global::control_block)
+	{
+		if (WaitForSingleObject(Global::shared_mutex, INFINITE) == WAIT_OBJECT_0)
+		{
+			char msg[ControlBlockMessageSize] = {};
+			sprintf(msg, "SLAVE_FINISHED\n");
+			shared_control_block_write(Global::control_block, msg, sizeof(msg));
+			ReleaseMutex(Global::shared_mutex);
+		}
+	}
+#endif
+
 	ExitProcess(code);
 }

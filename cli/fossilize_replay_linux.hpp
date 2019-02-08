@@ -336,64 +336,6 @@ bool ProcessProgress::start_child_process()
 		return false;
 }
 
-static int run_progress_process(const VulkanDevice::Options &,
-                                const ThreadedReplayer::Options &replayer_opts,
-                                const string &db_path)
-{
-	ExternalReplayer::Options opts = {};
-	opts.on_disk_pipeline_cache = replayer_opts.on_disk_pipeline_cache_path.empty() ?
-	                              nullptr : replayer_opts.on_disk_pipeline_cache_path.c_str();
-	opts.pipeline_cache = replayer_opts.pipeline_cache;
-	opts.num_threads = replayer_opts.num_threads;
-	opts.quiet = true;
-	opts.database = db_path.c_str();
-
-	char replayer_path[PATH_MAX];
-	if (readlink("/proc/self/exe", replayer_path, sizeof(replayer_path)) < 0)
-		return EXIT_FAILURE;
-
-	opts.external_replayer_path = replayer_path;
-
-	ExternalReplayer replayer;
-	if (!replayer.start(opts))
-	{
-		LOGE("Failed to start external replayer.\n");
-		return EXIT_FAILURE;
-	}
-
-	for (;;)
-	{
-		std::this_thread::sleep_for(std::chrono::milliseconds(500));
-		ExternalReplayer::Progress progress = {};
-		auto result = replayer.poll_progress(progress);
-
-		switch (result)
-		{
-		case ExternalReplayer::PollResult::Error:
-			return EXIT_FAILURE;
-
-		case ExternalReplayer::PollResult::ResultNotReady:
-			break;
-
-		case ExternalReplayer::PollResult::Complete:
-		case ExternalReplayer::PollResult::Running:
-			LOGI("=================\n");
-			LOGI(" Progress report:\n");
-			LOGI("   Graphics %u / %u, skipped %u\n", progress.graphics.completed, progress.graphics.total, progress.graphics.skipped);
-			LOGI("   Compute %u / %u, skipped %u\n", progress.compute.completed, progress.compute.total, progress.compute.skipped);
-			LOGI("   Modules %u, skipped %u\n", progress.total_modules, progress.banned_modules);
-			LOGI("   Clean crashes %u\n", progress.clean_crashes);
-			LOGI("   Dirty crashes %u\n", progress.dirty_crashes);
-			LOGI("=================\n");
-			if (result == ExternalReplayer::PollResult::Complete)
-				return replayer.wait() ? EXIT_SUCCESS : EXIT_FAILURE;
-			else if (replayer.is_process_complete())
-				return replayer.wait() ? EXIT_SUCCESS : EXIT_FAILURE;
-			break;
-		}
-	}
-}
-
 static int run_master_process(const VulkanDevice::Options &opts,
                               const ThreadedReplayer::Options &replayer_opts,
                               const string &db_path,

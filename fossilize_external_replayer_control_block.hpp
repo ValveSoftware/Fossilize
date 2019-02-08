@@ -41,9 +41,6 @@ namespace Fossilize
 enum { ControlBlockMessageSize = 32 };
 enum { ControlBlockMagic = 0x19bcde12 };
 #ifdef _WIN32
-#ifndef EXTERNAL_SHARED_MUTEX
-#error "Default EXTERNAL_SHARED_MUTEX to refer to some mutex HANDLE."
-#endif
 struct SharedControlBlock
 {
 	uint32_t version_cookie;
@@ -71,8 +68,6 @@ struct SharedControlBlock
 	size_t ring_buffer_offset;
 	size_t ring_buffer_size;
 };
-#define SHARED_CONTROL_BLOCK_LOCK(block) WaitForSingleObject(EXTERNAL_SHARED_MUTEX, INFINITE)
-#define SHARED_CONTROL_BLOCK_UNLOCK(block) ReleaseMutex(EXTERNAL_SHARED_MUTEX)
 #else
 struct SharedControlBlock
 {
@@ -102,11 +97,9 @@ struct SharedControlBlock
 	size_t ring_buffer_offset;
 	size_t ring_buffer_size;
 };
-
-#define SHARED_CONTROL_BLOCK_LOCK(block) pthread_mutex_lock(&(block)->lock)
-#define SHARED_CONTROL_BLOCK_UNLOCK(block) pthread_mutex_unlock(&(block)->lock)
 #endif
 
+// These are not thread-safe. Need to lock them by external means.
 static inline size_t shared_control_block_read_avail(SharedControlBlock *control_block)
 {
 	size_t ret = control_block->write_count - control_block->read_count;
