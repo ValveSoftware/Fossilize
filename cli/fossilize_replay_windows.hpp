@@ -460,6 +460,39 @@ static int run_master_process(const VulkanDevice::Options &opts,
 	unsigned processes = replayer_opts.num_threads;
 	Global::base_replayer_options.num_threads = 1;
 
+#if 0
+	// Try to map the shared control block.
+	if (shmem_fd >= 0)
+	{
+		LOGI("Attempting to map shmem block.\n");
+		struct stat s = {};
+		if (fstat(shmem_fd, &s) >= 0)
+		{
+			void *mapped = mmap(nullptr, s.st_size, PROT_READ | PROT_WRITE,
+			                    MAP_SHARED, shmem_fd, 0);
+
+			if (mapped != MAP_FAILED)
+			{
+				const auto is_pot = [](size_t size) { return (size & (size - 1)) == 0; };
+				// Detect some obvious shenanigans.
+				Global::control_block = static_cast<SharedControlBlock *>(mapped);
+				if (Global::control_block->version_cookie != ControlBlockMagic ||
+				    Global::control_block->ring_buffer_offset < sizeof(SharedControlBlock) ||
+				    Global::control_block->ring_buffer_size == 0 ||
+				    !is_pot(Global::control_block->ring_buffer_size) ||
+				    Global::control_block->ring_buffer_offset + Global::control_block->ring_buffer_size > size_t(s.st_size))
+				{
+					LOGE("Control block is corrupt.\n");
+					munmap(mapped, s.st_size);
+					Global::control_block = nullptr;
+				}
+			}
+		}
+
+		close(shmem_fd);
+	}
+#endif
+
 	size_t num_graphics_pipelines;
 	size_t num_compute_pipelines;
 	{
@@ -481,6 +514,14 @@ static int run_master_process(const VulkanDevice::Options &opts,
 			LOGE("Failed to parse database %s.\n", db_path.c_str());
 			return EXIT_FAILURE;
 		}
+	}
+
+	if (Global::control_block)
+	{
+		Global::control_block->total_graphics.store(num_graphics_pipelines, std::memory_order_relaxed);
+		Global::control_block->total_compute.store(num_compute_pipelines, std::memory_order_relaxed);
+		Global::control_block->total_modules.store(num_modules, std::memory_order_relaxed);
+		Global::control_block->progress_started.store(true, std::memory_order_release);
 	}
 
 	Global::active_processes = 0;

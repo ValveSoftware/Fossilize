@@ -44,6 +44,13 @@ add_library(fossilize STATIC
         fossilize_db.cpp fossilize_db.hpp
         fossilize_external_replayer.cpp fossilize_external_replayer.hpp
         path.hpp path.cpp)
+
+if (WIN32)
+    target_sources(fossilize PRIVATE fossilize_external_replayer_windows.hpp)
+else()
+    target_sources(fossilize PRIVATE fossilize_external_replayer_linux.hpp)
+endif()
+
 target_include_directories(fossilize PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_options(fossilize PUBLIC ${FOSSILIZE_CXX_FLAGS})
 if (NOT MSVC)

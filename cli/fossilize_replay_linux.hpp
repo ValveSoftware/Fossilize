@@ -419,7 +419,8 @@ static int run_master_process(const VulkanDevice::Options &opts,
 				const auto is_pot = [](size_t size) { return (size & (size - 1)) == 0; };
 				// Detect some obvious shenanigans.
 				Global::control_block = static_cast<SharedControlBlock *>(mapped);
-				if (Global::control_block->ring_buffer_offset < sizeof(SharedControlBlock) ||
+				if (Global::control_block->version_cookie != ControlBlockMagic ||
+				    Global::control_block->ring_buffer_offset < sizeof(SharedControlBlock) ||
 				    Global::control_block->ring_buffer_size == 0 ||
 				    !is_pot(Global::control_block->ring_buffer_size) ||
 				    Global::control_block->ring_buffer_offset + Global::control_block->ring_buffer_size > size_t(s.st_size))
