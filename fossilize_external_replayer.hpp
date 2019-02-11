@@ -23,6 +23,7 @@
 #pragma once
 
 #include <stdint.h>
+#include "fossilize.hpp"
 
 namespace Fossilize
 {
@@ -31,11 +32,23 @@ class ExternalReplayer
 public:
 	struct Options
 	{
+		// Path to the fossilize-replay executable.
+		// May be null, in which case the calling process must be fossilize-replay itself.
 		const char *external_replayer_path;
+
+		// Path to a Fossilize database to be replayed.
 		const char *database;
+
+		// Path to an on-disk pipeline cache. Maps to --on-disk-pipeline-cache.
 		const char *on_disk_pipeline_cache;
+
+		// Maps to --num-threads. If 0, no argument for --num-threads is passed.
 		unsigned num_threads;
+
+		// Maps to --pipeline-cache
 		bool pipeline_cache;
+
+		// Redirect stdout and stderr to /dev/null or NUL.
 		bool quiet;
 	};
 
@@ -44,6 +57,7 @@ public:
 	void operator=(const ExternalReplayer &) = delete;
 	ExternalReplayer(const ExternalReplayer &) = delete;
 
+	// This may only be called once.
 	bool start(const Options &options);
 
 	// On Unix, this can be cast to a pid_t, on Windows, a HANDLE.
@@ -52,17 +66,23 @@ public:
 	// process itself.
 	uintptr_t get_process_handle() const;
 
-	// Blocking waits for the process to complete and closes the process handle.
-	// Returns true if child process was waited for correctly and exited cleanly, i.e. exit(0), otherwise false.
-	bool wait();
+	// If the process is not complete, waits in a blocking fashion for the process to complete and closes the process handle.
+	// Returns the exit code for the process, or if a fatal signal killed the process, -SIGNAL is returned.
+	// If the process was already waited for, returns the cached exit code.
+	int wait();
 
-	// Queries if the process is dead, but does *not* reap the child process, even if it is dead.
-	// This is more useful if the calling process has a central system in place to reap child
-	// processes.
-	bool is_process_complete();
+	// Queries if the process is dead. If process is found to be dead, it also reaps the child.
+	// If child was reaped in this function call, true is returned,
+	// and the return status is returned in *return_status if argument is non-null.
+	// If process is already reaped, *return_status returns the cached return status ala wait().
+	bool is_process_complete(int *return_status);
 
 	// Requests that process (and its children) are killed.
 	bool kill();
+
+	// As the replayer is progressing, it might find SPIR-V modules which might have contributed to a crash.
+	// This allows the caller to later investigate what these modules are doing.
+	bool get_faulty_spirv_modules(size_t *num_hashes, Hash *hashes);
 
 	enum class PollResult : unsigned
 	{

@@ -873,6 +873,19 @@ static void log_progress(const ExternalReplayer::Progress &progress)
 	LOGI("=================\n");
 }
 
+static void log_faulty_modules(ExternalReplayer &replayer)
+{
+	size_t count;
+	if (!replayer.get_faulty_spirv_modules(&count, nullptr))
+		return;
+	vector<Hash> hashes(count);
+	if (!replayer.get_faulty_spirv_modules(&count, hashes.data()))
+		return;
+
+	for (auto &h : hashes)
+		LOGI("Detected faulty SPIR-V module: %llx\n", static_cast<unsigned long long>(h));
+}
+
 static int run_progress_process(const VulkanDevice::Options &,
                                 const ThreadedReplayer::Options &replayer_opts,
                                 const string &db_path)
@@ -899,11 +912,12 @@ static int run_progress_process(const VulkanDevice::Options &,
 		ExternalReplayer::Progress progress = {};
 		auto result = replayer.poll_progress(progress);
 
-		if (replayer.is_process_complete())
+		if (replayer.is_process_complete(nullptr))
 		{
 			if (result != ExternalReplayer::PollResult::ResultNotReady)
 				log_progress(progress);
-			return replayer.wait() ? EXIT_SUCCESS : EXIT_FAILURE;
+			log_faulty_modules(replayer);
+			return replayer.wait();
 		}
 
 		switch (result)
@@ -918,7 +932,10 @@ static int run_progress_process(const VulkanDevice::Options &,
 		case ExternalReplayer::PollResult::Running:
 			log_progress(progress);
 			if (result == ExternalReplayer::PollResult::Complete)
-				return replayer.wait() ? EXIT_SUCCESS : EXIT_FAILURE;
+			{
+				log_faulty_modules(replayer);
+				return replayer.wait();
+			}
 			break;
 		}
 	}

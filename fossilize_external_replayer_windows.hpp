@@ -27,7 +27,9 @@
 #include "layer/utils.hpp"
 #include <string>
 #include <atomic>
+#include <unordered_set>
 #include "fossilize_external_replayer_control_block.hpp"
+#include "path.hpp"
 
 namespace Fossilize
 {
@@ -42,13 +44,18 @@ struct ExternalReplayer::Impl
 	HANDLE mutex = INVALID_HANDLE_VALUE;
 	SharedControlBlock *shm_block = nullptr;
 	size_t shm_block_size = 0;
+	DWORD exit_code = 0;
+	std::unordered_set<Hash> faulty_spirv_modules;
 
 	bool start(const ExternalReplayer::Options &options);
 	ExternalReplayer::PollResult poll_progress(Progress &progress);
 	uintptr_t get_process_handle() const;
-	bool wait();
-	bool is_process_complete();
+	int wait();
+	bool is_process_complete(int *return_status);
 	bool kill();
+
+	void parse_message(const char *msg);
+	bool get_faulty_spirv_modules(size_t *count, Hash *hashes);
 };
 
 ExternalReplayer::Impl::~Impl()
@@ -96,40 +103,64 @@ ExternalReplayer::PollResult ExternalReplayer::Impl::poll_progress(ExternalRepla
 		{
 			char buf[ControlBlockMessageSize] = {};
 			shared_control_block_read(shm_block, buf, sizeof(buf));
-			LOGI("From FIFO: %s\n", buf);
+			parse_message(buf);
 		}
 		ReleaseMutex(mutex);
 	}
 	return complete ? ExternalReplayer::PollResult::Complete : ExternalReplayer::PollResult::Running;
 }
 
-bool ExternalReplayer::Impl::is_process_complete()
+void ExternalReplayer::Impl::parse_message(const char *msg)
 {
-	if (process == INVALID_HANDLE_VALUE)
-		return true;
-	return WaitForSingleObject(process, 0) == WAIT_OBJECT_0;
+	if (strncmp(msg, "MODULE", 6) == 0)
+	{
+		auto hash = strtoull(msg + 6, nullptr, 16);
+		faulty_spirv_modules.insert(hash);
+	}
 }
 
-bool ExternalReplayer::Impl::wait()
+bool ExternalReplayer::Impl::is_process_complete(int *return_status)
 {
 	if (process == INVALID_HANDLE_VALUE)
+		return exit_code;
+
+	if (WaitForSingleObject(process, 0) == WAIT_OBJECT_0)
+	{
+		GetExitCodeProcess(process, &exit_code);
+		CloseHandle(process);
+		process = INVALID_HANDLE_VALUE;
+
+		// Pump the fifo through.
+		ExternalReplayer::Progress progress = {};
+		poll_progress(progress);
+
+		if (return_status)
+			*return_status = exit_code;
+		return true;
+	}
+	else
 		return false;
+}
+
+int ExternalReplayer::Impl::wait()
+{
+	if (process == INVALID_HANDLE_VALUE)
+		return exit_code;
 
 	// Pump the fifo through.
 	ExternalReplayer::Progress progress = {};
 	poll_progress(progress);
 
 	if (WaitForSingleObject(process, INFINITE) != WAIT_OBJECT_0)
-		return false;
+		return -1;
 
 	// Pump the fifo through.
 	poll_progress(progress);
 
-	DWORD code = 0;
-	GetExitCodeProcess(process, &code);
+	GetExitCodeProcess(process, &exit_code);
 	CloseHandle(process);
 	process = INVALID_HANDLE_VALUE;
-	return code == 0;
+	return exit_code;
 }
 
 bool ExternalReplayer::Impl::kill()
@@ -137,6 +168,24 @@ bool ExternalReplayer::Impl::kill()
 	if (process == INVALID_HANDLE_VALUE)
 		return false;
 	return TerminateProcess(process, 1);
+}
+
+bool ExternalReplayer::Impl::get_faulty_spirv_modules(size_t *count, Hash *hashes)
+{
+	if (hashes)
+	{
+		if (*count != faulty_spirv_modules.size())
+			return false;
+
+		for (auto &mod : faulty_spirv_modules)
+			*hashes++ = mod;
+		return true;
+	}
+	else
+	{
+		*count = faulty_spirv_modules.size();
+		return true;
+	}
 }
 
 bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
@@ -184,12 +233,8 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 	if (options.external_replayer_path)
 		cmdline += options.external_replayer_path;
 	else
-	{
-		char replayer_path[MAX_PATH];
-		if (FAILED(GetModuleFileNameA(nullptr, replayer_path, sizeof(replayer_path))))
-			return EXIT_FAILURE;
-		cmdline += replayer_path;
-	}
+		cmdline += Path::get_executable_path();
+
 	cmdline += "\" ";
 	cmdline += "\"";
 	cmdline += options.database;

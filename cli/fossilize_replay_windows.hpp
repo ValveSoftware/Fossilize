@@ -229,8 +229,13 @@ bool ProcessProgress::process_shutdown()
 	if (graphics_progress < 0 || compute_progress < 0)
 	{
 		LOGE("Child process terminated before we could receive progress. Cannot continue.\n");
+		if (Global::control_block)
+			Global::control_block->dirty_process_deaths.fetch_add(1, std::memory_order_relaxed);
 		return false;
 	}
+
+	if (Global::control_block)
+		Global::control_block->clean_process_deaths.fetch_add(1, std::memory_order_relaxed);
 
 	start_graphics_index = uint32_t(graphics_progress);
 	start_compute_index = uint32_t(compute_progress);

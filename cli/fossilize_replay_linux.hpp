@@ -131,9 +131,10 @@ void ProcessProgress::parse(const char *cmd)
 			Global::control_block->banned_modules.fetch_add(1, std::memory_order_relaxed);
 			char buffer[ControlBlockMessageSize] = {};
 			strcpy(buffer, cmd);
-			SHARED_CONTROL_BLOCK_LOCK(Global::control_block);
+
+			pthread_mutex_lock(&Global::control_block->lock);
 			shared_control_block_write(Global::control_block, buffer, sizeof(buffer));
-			SHARED_CONTROL_BLOCK_UNLOCK(Global::control_block);
+			pthread_mutex_unlock(&Global::control_block->lock);
 		}
 	}
 	else
@@ -729,5 +730,17 @@ static int run_slave_process(const VulkanDevice::Options &opts,
 	pthread_sigmask(SIG_SETMASK, &old_mask, nullptr);
 
 	free(alt_stack.ss_sp);
+
+#if 0
+	if (Global::control_block)
+	{
+		pthread_mutex_lock(&Global::control_block->lock);
+		char msg[ControlBlockMessageSize] = {};
+		sprintf(msg, "SLAVE_FINISHED\n");
+		shared_control_block_write(Global::control_block, msg, sizeof(msg));
+		pthread_mutex_unlock(&Global::control_block->lock);
+	}
+#endif
+
 	return ret;
 }

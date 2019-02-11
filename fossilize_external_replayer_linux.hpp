@@ -34,9 +34,13 @@
 #include "layer/utils.hpp"
 #include <atomic>
 #include <vector>
+#include <unordered_set>
 #include <string>
 #include <pthread.h>
 #include <signal.h>
+#include <limits.h>
+#include "path.hpp"
+#include "fossilize_external_replayer_control_block.hpp"
 
 namespace Fossilize
 {
@@ -50,13 +54,18 @@ struct ExternalReplayer::Impl
 	int fd = -1;
 	SharedControlBlock *shm_block = nullptr;
 	size_t shm_block_size = 0;
+	int wstatus = 0;
+	std::unordered_set<Hash> faulty_spirv_modules;
 
 	bool start(const ExternalReplayer::Options &options);
 	ExternalReplayer::PollResult poll_progress(Progress &progress);
 	uintptr_t get_process_handle() const;
-	bool wait();
-	bool is_process_complete();
+	int wait();
+	bool is_process_complete(int *return_status);
 	bool kill();
+
+	void parse_message(const char *msg);
+	bool get_faulty_spirv_modules(size_t *count, Hash *hashes);
 };
 
 ExternalReplayer::Impl::~Impl()
@@ -97,43 +106,76 @@ ExternalReplayer::PollResult ExternalReplayer::Impl::poll_progress(ExternalRepla
 	progress.clean_crashes = shm_block->clean_process_deaths.load(std::memory_order_relaxed);
 	progress.dirty_crashes = shm_block->dirty_process_deaths.load(std::memory_order_relaxed);
 
-	SHARED_CONTROL_BLOCK_UNLOCK(shm_block);
+	pthread_mutex_lock(&shm_block->lock);
 	size_t read_avail = shared_control_block_read_avail(shm_block);
 	for (size_t i = ControlBlockMessageSize; i <= read_avail; i += ControlBlockMessageSize)
 	{
 		char buf[ControlBlockMessageSize] = {};
 		shared_control_block_read(shm_block, buf, sizeof(buf));
-		LOGI("From FIFO: %s\n", buf);
+		parse_message(buf);
 	}
-	SHARED_CONTROL_BLOCK_UNLOCK(shm_block);
+	pthread_mutex_unlock(&shm_block->lock);
 	return complete ? ExternalReplayer::PollResult::Complete : ExternalReplayer::PollResult::Running;
 }
 
-bool ExternalReplayer::Impl::is_process_complete()
+static int wstatus_to_return(int wstatus)
 {
-	if (pid == -1)
-		return true;
-	return ::killpg(pid, 0) < 0;
+	if (WIFEXITED(wstatus))
+		return WEXITSTATUS(wstatus);
+	else if (WIFSIGNALED(wstatus))
+		return -WTERMSIG(wstatus);
+	else
+		return 0;
 }
 
-bool ExternalReplayer::Impl::wait()
+void ExternalReplayer::Impl::parse_message(const char *msg)
+{
+	if (strncmp(msg, "MODULE", 6) == 0)
+	{
+		auto hash = strtoull(msg + 6, nullptr, 16);
+		faulty_spirv_modules.insert(hash);
+	}
+}
+
+bool ExternalReplayer::Impl::is_process_complete(int *return_status)
 {
 	if (pid == -1)
+	{
+		if (return_status)
+			*return_status = wstatus_to_return(wstatus);
+		return true;
+	}
+
+	if (waitpid(pid, &wstatus, WNOHANG) <= 0)
 		return false;
 
 	// Pump the fifo through.
 	ExternalReplayer::Progress progress = {};
 	poll_progress(progress);
 
-	int wstatus;
+	pid = -1;
+
+	if (return_status)
+		*return_status = wstatus_to_return(wstatus);
+	return true;
+}
+
+int ExternalReplayer::Impl::wait()
+{
+	if (pid == -1)
+		return wstatus_to_return(wstatus);
+
+	// Pump the fifo through.
+	ExternalReplayer::Progress progress = {};
+	poll_progress(progress);
+
 	if (waitpid(pid, &wstatus, 0) < 0)
-		return false;
+		return -1;
 
 	// Pump the fifo through.
 	poll_progress(progress);
-
 	pid = -1;
-	return WIFEXITED(wstatus) && WEXITSTATUS(wstatus) == 0;
+	return wstatus_to_return(wstatus);
 }
 
 bool ExternalReplayer::Impl::kill()
@@ -141,6 +183,24 @@ bool ExternalReplayer::Impl::kill()
 	if (pid < 0)
 		return false;
 	return killpg(pid, SIGTERM) == 0;
+}
+
+bool ExternalReplayer::Impl::get_faulty_spirv_modules(size_t *count, Hash *hashes)
+{
+	if (hashes)
+	{
+		if (*count != faulty_spirv_modules.size())
+			return false;
+
+		for (auto &mod : faulty_spirv_modules)
+			*hashes++ = mod;
+		return true;
+	}
+	else
+	{
+		*count = faulty_spirv_modules.size();
+		return true;
+	}
 }
 
 bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
@@ -228,8 +288,15 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 		sprintf(fd_name, "%d", fd);
 		char num_thread_holder[16];
 
+		std::string self_path;
+		if (!options.external_replayer_path)
+			self_path = Path::get_executable_path();
+
 		std::vector<const char *> argv;
-		argv.push_back(options.external_replayer_path);
+		if (options.external_replayer_path)
+			argv.push_back(options.external_replayer_path);
+		else
+			argv.push_back(self_path.c_str());
 		argv.push_back(options.database);
 		argv.push_back("--master-process");
 		argv.push_back("--quiet-slave");
@@ -265,10 +332,17 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 			}
 		}
 
-		if (execv(options.external_replayer_path, const_cast<char * const*>(argv.data())) < 0)
+		if (execv(options.external_replayer_path ? options.external_replayer_path : self_path.c_str(),
+		          const_cast<char * const*>(argv.data())) < 0)
+		{
+			LOGE("Failed to start external process %s with execv.\n", options.external_replayer_path);
 			exit(errno);
+		}
 		else
+		{
+			LOGE("Failed to start external process %s with execv.\n", options.external_replayer_path);
 			exit(1);
+		}
 	}
 	else
 	{

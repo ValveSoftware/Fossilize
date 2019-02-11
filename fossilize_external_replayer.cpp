@@ -42,7 +42,7 @@ ExternalReplayer::~ExternalReplayer()
 	delete impl;
 }
 
-bool ExternalReplayer::wait()
+int ExternalReplayer::wait()
 {
 	return impl->wait();
 }
@@ -67,8 +67,13 @@ ExternalReplayer::PollResult ExternalReplayer::poll_progress(Progress &progress)
 	return impl->poll_progress(progress);
 }
 
-bool ExternalReplayer::is_process_complete()
+bool ExternalReplayer::is_process_complete(int *return_status)
 {
-	return impl->is_process_complete();
+	return impl->is_process_complete(return_status);
+}
+
+bool ExternalReplayer::get_faulty_spirv_modules(size_t *num_hashes, Hash *hashes)
+{
+	return impl->get_faulty_spirv_modules(num_hashes, hashes);
 }
 }
