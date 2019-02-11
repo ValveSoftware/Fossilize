@@ -687,8 +687,7 @@ static bool test_concurrent_database_extra_paths()
 		return false;
 
 	auto db = std::unique_ptr<DatabaseInterface>(
-			create_concurrent_database_with_encoded_extra_paths(".__test_concurrent",
-			                                                    DatabaseMode::ReadOnly, extra_paths));
+			create_concurrent_database_with_encoded_extra_paths(nullptr, DatabaseMode::ReadOnly, extra_paths));
 
 	auto append_db = std::unique_ptr<DatabaseInterface>(
 			create_concurrent_database_with_encoded_extra_paths(".__test_concurrent",
