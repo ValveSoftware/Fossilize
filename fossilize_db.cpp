@@ -956,10 +956,14 @@ struct ConcurrentDatabase : DatabaseInterface
 {
 	explicit ConcurrentDatabase(const char *base_path_, DatabaseMode mode_,
 	                            const char * const *extra_paths, size_t num_extra_paths)
-		: base_path(base_path_), mode(mode_)
+		: base_path(base_path_ ? base_path_ : ""), mode(mode_)
 	{
-		std::string readonly_path = base_path + ".foz";
-		readonly_interface.reset(create_stream_archive_database(readonly_path.c_str(), DatabaseMode::ReadOnly));
+		if (!base_path.empty())
+		{
+			std::string readonly_path = base_path + ".foz";
+			readonly_interface.reset(create_stream_archive_database(readonly_path.c_str(), DatabaseMode::ReadOnly));
+		}
+
 		for (size_t i = 0; i < num_extra_paths; i++)
 			extra_readonly.emplace_back(create_stream_archive_database(extra_paths[i], DatabaseMode::ReadOnly));
 	}
@@ -1092,6 +1096,7 @@ struct ConcurrentDatabase : DatabaseInterface
 	bool get_hash_list_for_resource_tag(ResourceTag tag, size_t *num_hashes, Hash *hashes) override
 	{
 		size_t readonly_size = primed_hashes[tag].size();
+
 		size_t writeonly_size = 0;
 		if (!writeonly_interface || !writeonly_interface->get_hash_list_for_resource_tag(tag, &writeonly_size, nullptr))
 			writeonly_size = 0;

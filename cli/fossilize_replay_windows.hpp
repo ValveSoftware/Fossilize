@@ -1,4 +1,4 @@
-/* Copyright (c) 2018 Hans-Kristian Arntzen
+/* Copyright (c) 2019 Hans-Kristian Arntzen
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -27,6 +27,7 @@
 #include <io.h>
 #include <fcntl.h>
 #include <signal.h>
+#include "fossilize_external_replayer.hpp"
 
 static bool write_all(HANDLE file, const char *str)
 {
@@ -48,10 +49,6 @@ static bool write_all(HANDLE file, const char *str)
 	return true;
 }
 
-static int run_slave_process(const VulkanDevice::Options &opts,
-                             const ThreadedReplayer::Options &replayer_opts,
-                             const string &db_path);
-
 namespace Global
 {
 static unordered_set<Hash> faulty_spirv_modules;
@@ -60,6 +57,11 @@ static ThreadedReplayer::Options base_replayer_options;
 static string db_path;
 static VulkanDevice::Options device_options;
 static bool quiet_slave;
+static SharedControlBlock *control_block;
+static const char *shm_name;
+static const char *shm_mutex_name;
+static HANDLE shared_mutex;
+static HANDLE job_handle;
 }
 
 struct ProcessProgress
@@ -68,10 +70,10 @@ struct ProcessProgress
 	unsigned start_compute_index = 0u;
 	unsigned end_graphics_index = ~0u;
 	unsigned end_compute_index = ~0u;
-	HANDLE process = INVALID_HANDLE_VALUE;
+	HANDLE process = nullptr;
 	HANDLE crash_file_handle = INVALID_HANDLE_VALUE;
-	HANDLE timer_handle = INVALID_HANDLE_VALUE;
-	HANDLE pipe_event = INVALID_HANDLE_VALUE;
+	HANDLE timer_handle = nullptr;
+	HANDLE pipe_event = nullptr;
 
 	OVERLAPPED overlapped_pipe;
 	char async_pipe_buffer[1024];
@@ -109,14 +111,14 @@ void ProcessProgress::parse(const char *cmd)
 	if (strncmp(cmd, "CRASH", 5) == 0)
 	{
 		// We crashed ... Set up a timeout in case the process hangs while trying to recover.
-		if (timer_handle != INVALID_HANDLE_VALUE)
+		if (timer_handle)
 		{
 			CloseHandle(timer_handle);
-			timer_handle = INVALID_HANDLE_VALUE;
+			timer_handle = nullptr;
 		}
 
 		timer_handle = CreateWaitableTimer(nullptr, TRUE, nullptr);
-		if (timer_handle != INVALID_HANDLE_VALUE)
+		if (timer_handle)
 		{
 			LARGE_INTEGER due_time;
 			due_time.QuadPart = -10000000ll;
@@ -134,6 +136,19 @@ void ProcessProgress::parse(const char *cmd)
 	{
 		auto hash = strtoull(cmd + 6, nullptr, 16);
 		Global::faulty_spirv_modules.insert(hash);
+
+		if (Global::control_block)
+		{
+			Global::control_block->banned_modules.fetch_add(1, std::memory_order_relaxed);
+			char buffer[ControlBlockMessageSize] = {};
+			strcpy(buffer, cmd);
+
+			if (WaitForSingleObject(Global::shared_mutex, INFINITE) == WAIT_OBJECT_0)
+			{
+				shared_control_block_write(Global::control_block, buffer, sizeof(buffer));
+				ReleaseMutex(Global::shared_mutex);
+			}
+		}
 	}
 	else
 		LOGE("Got unexpected message from child: %s\n", cmd);
@@ -181,28 +196,28 @@ bool ProcessProgress::process_shutdown()
 	crash_file_handle = INVALID_HANDLE_VALUE;
 
 	// Close some handles.
-	if (timer_handle != INVALID_HANDLE_VALUE)
+	if (timer_handle)
 	{
 		CloseHandle(timer_handle);
-		timer_handle = INVALID_HANDLE_VALUE;
+		timer_handle = nullptr;
 	}
 
-	if (pipe_event != INVALID_HANDLE_VALUE)
+	if (pipe_event)
 	{
 		CloseHandle(pipe_event);
-		pipe_event = INVALID_HANDLE_VALUE;
+		pipe_event = nullptr;
 	}
 
 	// Reap child process.
 	DWORD code = 0;
-	if (process != INVALID_HANDLE_VALUE)
+	if (process)
 	{
 		if (WaitForSingleObject(process, INFINITE) != WAIT_OBJECT_0)
 			return false;
 		if (!GetExitCodeProcess(process, &code))
 			LOGE("Failed to get exit code of process.\n");
 		CloseHandle(process);
-		process = INVALID_HANDLE_VALUE;
+		process = nullptr;
 		Global::active_processes--;
 	}
 
@@ -215,13 +230,21 @@ bool ProcessProgress::process_shutdown()
 	if (graphics_progress < 0 || compute_progress < 0)
 	{
 		LOGE("Child process terminated before we could receive progress. Cannot continue.\n");
+		if (Global::control_block)
+			Global::control_block->dirty_process_deaths.fetch_add(1, std::memory_order_relaxed);
 		return false;
 	}
+
+	if (Global::control_block)
+		Global::control_block->clean_process_deaths.fetch_add(1, std::memory_order_relaxed);
 
 	start_graphics_index = uint32_t(graphics_progress);
 	start_compute_index = uint32_t(compute_progress);
 	if (start_graphics_index >= end_graphics_index && start_compute_index >= end_compute_index)
+	{
+		LOGE("Process index %u crashed, but there is nothing more to replay.\n", index);
 		return false;
+	}
 	else
 	{
 		LOGE("Process index %u crashed, but will retry.\n", index);
@@ -253,7 +276,7 @@ static bool CreateCustomPipe(HANDLE *read_pipe, HANDLE *write_pipe, LPSECURITY_A
 	// This is so that we can safely read one message at a time with ReadFile rather than rely on fgets to delimit each message for us.
 	static unsigned pipe_serial;
 	char pipe_name_buffer[MAX_PATH];
-	sprintf(pipe_name_buffer, "\\\\.\\Pipe\\Fossilize.%08x.%08x", GetCurrentProcessId(), pipe_serial++);
+	sprintf(pipe_name_buffer, "\\\\.\\Pipe\\Fossilize.%08lx.%08x", GetCurrentProcessId(), pipe_serial++);
 	*read_pipe = CreateNamedPipeA(pipe_name_buffer, PIPE_ACCESS_INBOUND | (overlapped_read ? FILE_FLAG_OVERLAPPED : 0),
 	                              PIPE_TYPE_MESSAGE | PIPE_WAIT | PIPE_READMODE_MESSAGE, 1, 4096, 4096, 10000, attrs);
 
@@ -304,6 +327,18 @@ bool ProcessProgress::start_child_process()
 	cmdline += to_string(start_compute_index);
 	cmdline += " ";
 	cmdline += to_string(end_compute_index);
+
+	if (Global::shm_name)
+	{
+		cmdline += " --shm-name ";
+		cmdline += Global::shm_name;
+	}
+
+	if (Global::shm_mutex_name)
+	{
+		cmdline += " --shm-mutex-name ";
+		cmdline += Global::shm_mutex_name;
+	}
 
 	if (Global::base_replayer_options.pipeline_cache)
 		cmdline += " --pipeline-cache";
@@ -389,13 +424,22 @@ bool ProcessProgress::start_child_process()
 
 	// For whatever reason, this string must be mutable. Dupe it.
 	char *duped_string = _strdup(cmdline.c_str());
-	if (!CreateProcessA(nullptr, duped_string, nullptr, nullptr, TRUE, 0, nullptr, nullptr, &si, &pi))
+	if (!CreateProcessA(nullptr, duped_string, nullptr, nullptr, TRUE, CREATE_NO_WINDOW | CREATE_SUSPENDED, nullptr, nullptr, &si, &pi))
 	{
 		LOGE("Failed to create child process.\n");
 		free(duped_string);
 		return false;
 	}
 	free(duped_string);
+
+	if (Global::job_handle && !AssignProcessToJobObject(Global::job_handle, pi.hProcess))
+	{
+		LOGE("Failed to assign process to job handle.\n");
+		// This isn't really fatal, just continue on.
+	}
+
+	// Now we can resume the main thread, after we've added the process to our job object.
+	ResumeThread(pi.hThread);
 
 	// Close file handles which are used by the child process only.
 	CloseHandle(slave_stdout_read);
@@ -414,7 +458,7 @@ bool ProcessProgress::start_child_process()
 	Global::active_processes++;
 
 	pipe_event = CreateEvent(nullptr, TRUE, FALSE, nullptr);
-	if (pipe_event == INVALID_HANDLE_VALUE)
+	if (!pipe_event)
 	{
 		LOGE("Failed to create event.\n");
 		return false;
@@ -445,10 +489,48 @@ static void log_and_die()
 	ExitProcess(1);
 }
 
+static bool open_shm(const char *shm_path, const char *shm_mutex_path)
+{
+	HANDLE mapping = OpenFileMapping(FILE_MAP_READ | FILE_MAP_WRITE, FALSE, shm_path);
+	if (!mapping)
+	{
+		LOGE("Failed to open file mapping in replayer.\n");
+		return false;
+	}
+
+	void *mapped = MapViewOfFile(mapping, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, 0);
+
+	if (!mapped)
+	{
+		LOGE("Failed to map view of file in replayer.\n");
+		return false;
+	}
+
+	const auto is_pot = [](size_t size) { return (size & (size - 1)) == 0; };
+	// Detect some obvious shenanigans.
+	Global::control_block = static_cast<SharedControlBlock *>(mapped);
+	if (Global::control_block->version_cookie != ControlBlockMagic ||
+	    Global::control_block->ring_buffer_offset < sizeof(SharedControlBlock) ||
+	    Global::control_block->ring_buffer_size == 0 ||
+	    !is_pot(Global::control_block->ring_buffer_size))
+	{
+		LOGE("Control block is corrupt.\n");
+		UnmapViewOfFile(mapped);
+		CloseHandle(mapping);
+		Global::control_block = nullptr;
+	}
+
+	Global::shared_mutex = OpenMutexA(MUTEX_ALL_ACCESS, FALSE, shm_mutex_path);
+	if (!Global::shared_mutex)
+		return false;
+
+	return true;
+}
+
 static int run_master_process(const VulkanDevice::Options &opts,
                               const ThreadedReplayer::Options &replayer_opts,
                               const string &db_path,
-                              bool quiet_slave)
+                              bool quiet_slave, const char *shm_name, const char *shm_mutex_name)
 {
 	Global::quiet_slave = quiet_slave;
 	Global::device_options = opts;
@@ -456,9 +538,37 @@ static int run_master_process(const VulkanDevice::Options &opts,
 	Global::db_path = db_path;
 	unsigned processes = replayer_opts.num_threads;
 	Global::base_replayer_options.num_threads = 1;
+	Global::shm_name = shm_name;
+	Global::shm_mutex_name = shm_mutex_name;
+
+	Global::job_handle = CreateJobObjectA(nullptr, nullptr);
+	if (!Global::job_handle)
+	{
+		LOGE("Failed to create job handle.\n");
+		// Not fatal, we just won't bother with this.
+	}
+
+	if (Global::job_handle)
+	{
+		// Kill all child processes if the parent dies.
+		JOBOBJECT_EXTENDED_LIMIT_INFORMATION jeli = {};
+		jeli.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+		if (!SetInformationJobObject(Global::job_handle, JobObjectExtendedLimitInformation, &jeli, sizeof(jeli)))
+		{
+			LOGE("Failed to set information for job object.\n");
+			// Again, not fatal.
+		}
+	}
+
+	if (shm_name && shm_mutex_name && !open_shm(shm_name, shm_mutex_name))
+	{
+		LOGE("Failed to map external memory resources.\n");
+		return EXIT_FAILURE;
+	}
 
 	size_t num_graphics_pipelines;
 	size_t num_compute_pipelines;
+	size_t num_modules;
 	{
 		auto db = unique_ptr<DatabaseInterface>(create_database(db_path.c_str(), DatabaseMode::ReadOnly));
 		if (!db->prepare())
@@ -478,6 +588,20 @@ static int run_master_process(const VulkanDevice::Options &opts,
 			LOGE("Failed to parse database %s.\n", db_path.c_str());
 			return EXIT_FAILURE;
 		}
+
+		if (!db->get_hash_list_for_resource_tag(RESOURCE_SHADER_MODULE, &num_modules, nullptr))
+		{
+			LOGE("Failed to parse database %s.\n", db_path.c_str());
+			return EXIT_FAILURE;
+		}
+	}
+
+	if (Global::control_block)
+	{
+		Global::control_block->total_graphics.store(num_graphics_pipelines, std::memory_order_relaxed);
+		Global::control_block->total_compute.store(num_compute_pipelines, std::memory_order_relaxed);
+		Global::control_block->total_modules.store(num_modules, std::memory_order_relaxed);
+		Global::control_block->progress_started.store(true, std::memory_order_release);
 	}
 
 	Global::active_processes = 0;
@@ -514,11 +638,11 @@ static int run_master_process(const VulkanDevice::Options &opts,
 		{
 			// Prioritize that any file I/O events are signalled before process end.
 			// WaitForMultipleObjects must return the first object which is signalled.
-			if (process.pipe_event != INVALID_HANDLE_VALUE)
+			if (process.pipe_event)
 				wait_handles.push_back(process.pipe_event);
-			if (process.process != INVALID_HANDLE_VALUE)
+			if (process.process)
 				wait_handles.push_back(process.process);
-			if (process.timer_handle != INVALID_HANDLE_VALUE)
+			if (process.timer_handle)
 				wait_handles.push_back(process.timer_handle);
 		}
 
@@ -583,6 +707,8 @@ static int run_master_process(const VulkanDevice::Options &opts,
 		}
 	}
 
+	if (Global::job_handle)
+		CloseHandle(Global::job_handle);
 	return EXIT_SUCCESS;
 }
 
@@ -618,11 +744,11 @@ static LONG WINAPI crash_handler(_EXCEPTION_POINTERS *)
 		}
 
 		// Report where we stopped, so we can continue.
-		sprintf(buffer, "GRAPHICS %d\n", global_replayer->thread_current_graphics_index);
+		sprintf(buffer, "GRAPHICS %u\n", global_replayer->thread_current_graphics_index);
 		if (!write_all(crash_handle, buffer))
 			ExitProcess(2);
 
-		sprintf(buffer, "COMPUTE %d\n", global_replayer->thread_current_compute_index);
+		sprintf(buffer, "COMPUTE %u\n", global_replayer->thread_current_compute_index);
 		if (!write_all(crash_handle, buffer))
 			ExitProcess(2);
 
@@ -642,9 +768,17 @@ static void abort_handler(int)
 
 static int run_slave_process(const VulkanDevice::Options &opts,
                              const ThreadedReplayer::Options &replayer_opts,
-                             const string &db_path)
+                             const string &db_path, const char *shm_name, const char *shm_mutex_name)
 {
-	ThreadedReplayer replayer(opts, replayer_opts);
+	if (shm_name && shm_mutex_name && !open_shm(shm_name, shm_mutex_name))
+	{
+		LOGE("Failed to map external memory resources.\n");
+		return EXIT_FAILURE;
+	}
+
+	auto tmp_opts = replayer_opts;
+	tmp_opts.control_block = Global::control_block;
+	ThreadedReplayer replayer(opts, tmp_opts);
 	replayer.robustness = true;
 
 	// In slave mode, we can receive a list of shader module hashes we should ignore.
@@ -695,5 +829,19 @@ static int run_slave_process(const VulkanDevice::Options &opts,
 	signal(SIGABRT, SIG_DFL);
 	SetErrorMode(0);
 	SetUnhandledExceptionFilter(nullptr);
-	ExitProcess(code);
+
+#if 0
+	if (Global::control_block)
+	{
+		if (WaitForSingleObject(Global::shared_mutex, INFINITE) == WAIT_OBJECT_0)
+		{
+			char msg[ControlBlockMessageSize] = {};
+			sprintf(msg, "SLAVE_FINISHED\n");
+			shared_control_block_write(Global::control_block, msg, sizeof(msg));
+			ReleaseMutex(Global::shared_mutex);
+		}
+	}
+#endif
+
+	return code;
 }

@@ -28,6 +28,8 @@
 #include "file.hpp"
 #include "path.hpp"
 #include "fossilize_db.hpp"
+#include "fossilize_external_replayer.hpp"
+#include "fossilize_external_replayer_control_block.hpp"
 
 #include <cinttypes>
 #include <string>
@@ -156,6 +158,8 @@ struct ThreadedReplayer : StateCreatorInterface
 		unsigned start_compute_index = 0;
 		unsigned end_compute_index = ~0u;
 
+		SharedControlBlock *control_block = nullptr;
+
 		void (*on_thread_callback)(void *userdata) = nullptr;
 		void *on_thread_callback_userdata = nullptr;
 	};
@@ -259,7 +263,11 @@ struct ThreadedReplayer : StateCreatorInterface
 				// Make sure to iterate the index so main thread and worker threads
 				// have a coherent idea of replayer state.
 				if (!work_item.create_info.graphics_create_info)
+				{
+					if (opts.control_block)
+						opts.control_block->skipped_graphics.fetch_add(1, std::memory_order_relaxed);
 					break;
+				}
 
 				if (robustness)
 				{
@@ -293,6 +301,9 @@ struct ThreadedReplayer : StateCreatorInterface
 						graphics_pipeline_ns += duration_ns;
 						graphics_pipeline_count++;
 						*work_item.hash_map_entry.pipeline = *work_item.output.pipeline;
+
+						if (opts.control_block && i == 0)
+							opts.control_block->successful_graphics.fetch_add(1, std::memory_order_relaxed);
 					}
 					else
 					{
@@ -310,7 +321,11 @@ struct ThreadedReplayer : StateCreatorInterface
 				// Make sure to iterate the index so main thread and worker threads
 				// have a coherent idea of replayer state.
 				if (!work_item.create_info.compute_create_info)
+				{
+					if (opts.control_block)
+						opts.control_block->skipped_compute.fetch_add(1, std::memory_order_relaxed);
 					break;
+				}
 
 				if (robustness)
 				{
@@ -341,6 +356,9 @@ struct ThreadedReplayer : StateCreatorInterface
 						compute_pipeline_ns += duration_ns;
 						compute_pipeline_count++;
 						*work_item.hash_map_entry.pipeline = *work_item.output.pipeline;
+
+						if (opts.control_block && i == 0)
+							opts.control_block->successful_compute.fetch_add(1, std::memory_order_relaxed);
 					}
 					else
 					{
@@ -820,13 +838,16 @@ struct ThreadedReplayer : StateCreatorInterface
 
 static void print_help()
 {
+#ifdef _WIN32
+#define EXTRA_OPTIONS "\t[--shm-name <name>]\n\t[--shm-mutex-name <name>]\n"
+#else
+#define EXTRA_OPTIONS "\t[--shm-fd <fd>]\n"
+#endif
 	LOGI("fossilize-replay\n"
 	     "\t[--help]\n"
 	     "\t[--device-index <index>]\n"
 	     "\t[--enable-validation]\n"
 	     "\t[--pipeline-cache]\n"
-	     "\t[--filter-compute <index>]\n"
-	     "\t[--filter-graphics <index>]\n"
 	     "\t[--num-threads <count>]\n"
 	     "\t[--loop <count>]\n"
 	     "\t[--on-disk-pipeline-cache <path>]\n"
@@ -834,8 +855,106 @@ static void print_help()
 	     "\t[--compute-pipeline-range <start> <end>]\n"
 	     "\t[--slave-process]\n"
 	     "\t[--master-process]\n"
+	     "\t[--timeout <seconds>]\n"
+	     "\t[--progress]\n"
 	     "\t[--quiet-slave]\n"
+	     EXTRA_OPTIONS
 	     "\t<Database>\n");
+}
+
+static void log_progress(const ExternalReplayer::Progress &progress)
+{
+	LOGI("=================\n");
+	LOGI(" Progress report:\n");
+	LOGI("   Graphics %u / %u, skipped %u\n", progress.graphics.completed, progress.graphics.total, progress.graphics.skipped);
+	LOGI("   Compute %u / %u, skipped %u\n", progress.compute.completed, progress.compute.total, progress.compute.skipped);
+	LOGI("   Modules %u, skipped %u\n", progress.total_modules, progress.banned_modules);
+	LOGI("   Clean crashes %u\n", progress.clean_crashes);
+	LOGI("   Dirty crashes %u\n", progress.dirty_crashes);
+	LOGI("=================\n");
+}
+
+static void log_faulty_modules(ExternalReplayer &replayer)
+{
+	size_t count;
+	if (!replayer.get_faulty_spirv_modules(&count, nullptr))
+		return;
+	vector<Hash> hashes(count);
+	if (!replayer.get_faulty_spirv_modules(&count, hashes.data()))
+		return;
+
+	for (auto &h : hashes)
+		LOGI("Detected faulty SPIR-V module: %llx\n", static_cast<unsigned long long>(h));
+}
+
+static int run_progress_process(const VulkanDevice::Options &,
+                                const ThreadedReplayer::Options &replayer_opts,
+                                const string &db_path, int timeout)
+{
+	ExternalReplayer::Options opts = {};
+	opts.on_disk_pipeline_cache = replayer_opts.on_disk_pipeline_cache_path.empty() ?
+		nullptr : replayer_opts.on_disk_pipeline_cache_path.c_str();
+	opts.pipeline_cache = replayer_opts.pipeline_cache;
+	opts.num_threads = replayer_opts.num_threads;
+	opts.quiet = true;
+	opts.database = db_path.c_str();
+	opts.external_replayer_path = nullptr;
+
+	ExternalReplayer replayer;
+	if (!replayer.start(opts))
+	{
+		LOGE("Failed to start external replayer.\n");
+		return EXIT_FAILURE;
+	}
+
+	bool has_killed = false;
+	auto start_time = std::chrono::steady_clock::now();
+
+	for (;;)
+	{
+		if (!has_killed && timeout > 0)
+		{
+			auto current_time = std::chrono::steady_clock::now();
+			auto delta = current_time - start_time;
+			if (std::chrono::duration_cast<std::chrono::seconds>(delta).count() >= timeout)
+			{
+				LOGE("Killing process due to timeout.\n");
+				replayer.kill();
+				has_killed = true;
+			}
+		}
+
+		std::this_thread::sleep_for(std::chrono::milliseconds(500));
+		ExternalReplayer::Progress progress = {};
+		auto result = replayer.poll_progress(progress);
+
+		if (replayer.is_process_complete(nullptr))
+		{
+			if (result != ExternalReplayer::PollResult::ResultNotReady)
+				log_progress(progress);
+			log_faulty_modules(replayer);
+			return replayer.wait();
+		}
+
+		switch (result)
+		{
+		case ExternalReplayer::PollResult::Error:
+			return EXIT_FAILURE;
+
+		case ExternalReplayer::PollResult::ResultNotReady:
+			break;
+
+		case ExternalReplayer::PollResult::Complete:
+		case ExternalReplayer::PollResult::Running:
+			log_progress(progress);
+			if (result == ExternalReplayer::PollResult::Complete)
+			{
+				log_faulty_modules(replayer);
+				return replayer.wait();
+			}
+			break;
+		}
+	}
 }
 
 static int run_normal_process(ThreadedReplayer &replayer, const string &db_path)
@@ -979,6 +1098,15 @@ int main(int argc, char *argv[])
 	bool master_process = false;
 	bool slave_process = false;
 	bool quiet_slave = false;
+	bool progress = false;
+	int timeout = -1;
+
+#ifdef _WIN32
+	const char *shm_name = nullptr;
+	const char *shm_mutex_name = nullptr;
+#else
+	int shmem_fd = -1;
+#endif
 
 	CLICallbacks cbs;
 	cbs.default_handler = [&](const char *arg) { db_path = arg; };
@@ -992,6 +1120,8 @@ int main(int argc, char *argv[])
 	cbs.add("--slave-process", [&](CLIParser &) { slave_process = true; });
 	cbs.add("--quiet-slave", [&](CLIParser &) { quiet_slave = true; });
 	cbs.add("--loop", [&](CLIParser &parser) { replayer_opts.loop_count = parser.next_uint(); });
+	cbs.add("--timeout", [&](CLIParser &parser) { timeout = parser.next_uint(); });
+	cbs.add("--progress", [&](CLIParser &) { progress = true; });
 
 	cbs.add("--graphics-pipeline-range", [&](CLIParser &parser) {
 		replayer_opts.start_graphics_index = parser.next_uint();
@@ -1002,6 +1132,13 @@ int main(int argc, char *argv[])
 		replayer_opts.start_compute_index = parser.next_uint();
 		replayer_opts.end_compute_index = parser.next_uint();
 	});
+
+#ifdef _WIN32
+	cbs.add("--shm-name", [&](CLIParser &parser) { shm_name = parser.next_string(); });
+	cbs.add("--shm-mutex-name", [&](CLIParser &parser) { shm_mutex_name = parser.next_string(); });
+#else
+	cbs.add("--shmem-fd", [&](CLIParser &parser) { shmem_fd = parser.next_uint(); });
+#endif
 
 	cbs.error_handler = [] { print_help(); };
 
@@ -1033,10 +1170,26 @@ int main(int argc, char *argv[])
 		replayer_opts.pipeline_cache = true;
 
 	int ret;
-	if (master_process)
-		ret = run_master_process(opts, replayer_opts, db_path, quiet_slave);
+	if (progress)
+	{
+		ret = run_progress_process(opts, replayer_opts, db_path, timeout);
+	}
+	else if (master_process)
+	{
+#ifdef _WIN32
+		ret = run_master_process(opts, replayer_opts, db_path, quiet_slave, shm_name, shm_mutex_name);
+#else
+		ret = run_master_process(opts, replayer_opts, db_path, quiet_slave, shmem_fd);
+#endif
+	}
 	else if (slave_process)
+	{
+#ifdef _WIN32
+		ret = run_slave_process(opts, replayer_opts, db_path, shm_name, shm_mutex_name);
+#else
 		ret = run_slave_process(opts, replayer_opts, db_path);
+#endif
+	}
 	else
 	{
 		ThreadedReplayer replayer(opts, replayer_opts);

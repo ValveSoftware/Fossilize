@@ -26,6 +26,7 @@
 #include <chrono>
 #include <memory>
 #include <random>
+#include <vector>
 
 using namespace Fossilize;
 
@@ -42,7 +43,7 @@ static void bench_recorder(const char *path, bool compressed, bool checksum)
 	std::uniform_int_distribution<int> dist(1, 500);
 
 	// Create 10000 random SPIR-V modules with reasonable ID distribution.
-	uint32_t dummy_spirv[4096];
+	std::vector<uint32_t> dummy_spirv(4096);
 	for (auto &d : dummy_spirv)
 		d = dist(rnd);
 
@@ -51,8 +52,8 @@ static void bench_recorder(const char *path, bool compressed, bool checksum)
 		dummy_spirv[0] = i;
 
 		VkShaderModuleCreateInfo info = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
-		info.codeSize = sizeof(dummy_spirv);
-		info.pCode = dummy_spirv;
+		info.codeSize = dummy_spirv.size() * sizeof(uint32_t);
+		info.pCode = dummy_spirv.data();
 		recorder.record_shader_module((VkShaderModule)uint64_t(i + 1), info);
 	}
 

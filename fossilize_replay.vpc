@@ -87,10 +87,12 @@ $Project "fossilize_replay"
 	{
 		$File ".\fossilize.cpp"
 		$File ".\fossilize_db.cpp"
+		$File ".\fossilize_external_replayer.cpp"
 		$File ".\path.cpp"
 		$File ".\varint.cpp"
 		$File ".\fossilize.hpp"
 		$File ".\fossilize_db.hpp"
+		$File ".\fossilize_external_replayer.hpp"
 		$File ".\path.hpp"
 		$File ".\varint.hpp"
 	}

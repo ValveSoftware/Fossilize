@@ -138,6 +138,7 @@ DatabaseInterface *create_database(const char *path, DatabaseMode mode);
 // and thus will not trigger creation of a new database.
 // Similarly, in append mode, the entries in the extra databases are assumed to be part of the base_path.foz database.
 // If any database in extra_read_only_database_paths does not ->prepare() correctly, it is simply ignored.
+// base_path may be nullptr if mode is ReadOnly. In this case, the read-only database from base_path.foz is ignored.
 DatabaseInterface *create_concurrent_database(const char *base_path, DatabaseMode mode,
                                               const char * const *extra_read_only_database_paths,
                                               size_t num_extra_read_only_database_paths);
@@ -146,6 +147,7 @@ DatabaseInterface *create_concurrent_database(const char *base_path, DatabaseMod
 // contains a list of paths delimited by ';'. E.g. "foo;bar;baz". Suitable to use directly with getenv().
 // encoded_read_only_database_paths may be nullptr, which is treated as no extra paths.
 // On non-Windows systems, ':' can also be used to delimit to match $PATH behavior.
+// base_path may be nullptr if mode is ReadOnly. In this case, the read-only database from base_path.foz is ignored.
 DatabaseInterface *create_concurrent_database_with_encoded_extra_paths(const char *base_path, DatabaseMode mode,
                                                                        const char *encoded_read_only_database_paths);
 
