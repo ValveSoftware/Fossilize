@@ -855,6 +855,7 @@ static void print_help()
 	     "\t[--compute-pipeline-range <start> <end>]\n"
 	     "\t[--slave-process]\n"
 	     "\t[--master-process]\n"
+	     "\t[--timeout <seconds>]\n"
 	     "\t[--progress]\n"
 	     "\t[--quiet-slave]\n"
 	     EXTRA_OPTIONS
@@ -888,7 +889,7 @@ static void log_faulty_modules(ExternalReplayer &replayer)
 
 static int run_progress_process(const VulkanDevice::Options &,
                                 const ThreadedReplayer::Options &replayer_opts,
-                                const string &db_path)
+                                const string &db_path, int timeout)
 {
 	ExternalReplayer::Options opts = {};
 	opts.on_disk_pipeline_cache = replayer_opts.on_disk_pipeline_cache_path.empty() ?
@@ -906,8 +907,23 @@ static int run_progress_process(const VulkanDevice::Options &,
 		return EXIT_FAILURE;
 	}
 
+	bool has_killed = false;
+	auto start_time = std::chrono::steady_clock::now();
+
 	for (;;)
 	{
+		if (!has_killed && timeout > 0)
+		{
+			auto current_time = std::chrono::steady_clock::now();
+			auto delta = current_time - start_time;
+			if (std::chrono::duration_cast<std::chrono::seconds>(delta).count() >= timeout)
+			{
+				LOGE("Killing process due to timeout.\n");
+				replayer.kill();
+				has_killed = true;
+			}
+		}
+
 		std::this_thread::sleep_for(std::chrono::milliseconds(500));
 		ExternalReplayer::Progress progress = {};
 		auto result = replayer.poll_progress(progress);
@@ -1083,6 +1099,7 @@ int main(int argc, char *argv[])
 	bool slave_process = false;
 	bool quiet_slave = false;
 	bool progress = false;
+	int timeout = -1;
 
 #ifdef _WIN32
 	const char *shm_name = nullptr;
@@ -1103,6 +1120,7 @@ int main(int argc, char *argv[])
 	cbs.add("--slave-process", [&](CLIParser &) { slave_process = true; });
 	cbs.add("--quiet-slave", [&](CLIParser &) { quiet_slave = true; });
 	cbs.add("--loop", [&](CLIParser &parser) { replayer_opts.loop_count = parser.next_uint(); });
+	cbs.add("--timeout", [&](CLIParser &parser) { timeout = parser.next_uint(); });
 	cbs.add("--progress", [&](CLIParser &) { progress = true; });
 
 	cbs.add("--graphics-pipeline-range", [&](CLIParser &parser) {
@@ -1154,7 +1172,7 @@ int main(int argc, char *argv[])
 	int ret;
 	if (progress)
 	{
-		ret = run_progress_process(opts, replayer_opts, db_path);
+		ret = run_progress_process(opts, replayer_opts, db_path, timeout);
 	}
 	else if (master_process)
 	{
