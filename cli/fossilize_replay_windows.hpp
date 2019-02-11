@@ -70,10 +70,10 @@ struct ProcessProgress
 	unsigned start_compute_index = 0u;
 	unsigned end_graphics_index = ~0u;
 	unsigned end_compute_index = ~0u;
-	HANDLE process = INVALID_HANDLE_VALUE;
+	HANDLE process = nullptr;
 	HANDLE crash_file_handle = INVALID_HANDLE_VALUE;
-	HANDLE timer_handle = INVALID_HANDLE_VALUE;
-	HANDLE pipe_event = INVALID_HANDLE_VALUE;
+	HANDLE timer_handle = nullptr;
+	HANDLE pipe_event = nullptr;
 
 	OVERLAPPED overlapped_pipe;
 	char async_pipe_buffer[1024];
@@ -111,14 +111,14 @@ void ProcessProgress::parse(const char *cmd)
 	if (strncmp(cmd, "CRASH", 5) == 0)
 	{
 		// We crashed ... Set up a timeout in case the process hangs while trying to recover.
-		if (timer_handle != INVALID_HANDLE_VALUE)
+		if (timer_handle)
 		{
 			CloseHandle(timer_handle);
-			timer_handle = INVALID_HANDLE_VALUE;
+			timer_handle = nullptr;
 		}
 
 		timer_handle = CreateWaitableTimer(nullptr, TRUE, nullptr);
-		if (timer_handle != INVALID_HANDLE_VALUE)
+		if (timer_handle)
 		{
 			LARGE_INTEGER due_time;
 			due_time.QuadPart = -10000000ll;
@@ -196,28 +196,28 @@ bool ProcessProgress::process_shutdown()
 	crash_file_handle = INVALID_HANDLE_VALUE;
 
 	// Close some handles.
-	if (timer_handle != INVALID_HANDLE_VALUE)
+	if (timer_handle)
 	{
 		CloseHandle(timer_handle);
-		timer_handle = INVALID_HANDLE_VALUE;
+		timer_handle = nullptr;
 	}
 
-	if (pipe_event != INVALID_HANDLE_VALUE)
+	if (pipe_event)
 	{
 		CloseHandle(pipe_event);
-		pipe_event = INVALID_HANDLE_VALUE;
+		pipe_event = nullptr;
 	}
 
 	// Reap child process.
 	DWORD code = 0;
-	if (process != INVALID_HANDLE_VALUE)
+	if (process)
 	{
 		if (WaitForSingleObject(process, INFINITE) != WAIT_OBJECT_0)
 			return false;
 		if (!GetExitCodeProcess(process, &code))
 			LOGE("Failed to get exit code of process.\n");
 		CloseHandle(process);
-		process = INVALID_HANDLE_VALUE;
+		process = nullptr;
 		Global::active_processes--;
 	}
 
@@ -432,7 +432,7 @@ bool ProcessProgress::start_child_process()
 	}
 	free(duped_string);
 
-	if (Global::job_handle != INVALID_HANDLE_VALUE && !AssignProcessToJobObject(Global::job_handle, process))
+	if (Global::job_handle && !AssignProcessToJobObject(Global::job_handle, pi.hProcess))
 	{
 		LOGE("Failed to assign process to job handle.\n");
 		// This isn't really fatal, just continue on.
@@ -458,7 +458,7 @@ bool ProcessProgress::start_child_process()
 	Global::active_processes++;
 
 	pipe_event = CreateEvent(nullptr, TRUE, FALSE, nullptr);
-	if (pipe_event == INVALID_HANDLE_VALUE)
+	if (!pipe_event)
 	{
 		LOGE("Failed to create event.\n");
 		return false;
@@ -492,7 +492,7 @@ static void log_and_die()
 static bool open_shm(const char *shm_path, const char *shm_mutex_path)
 {
 	HANDLE mapping = OpenFileMapping(FILE_MAP_READ | FILE_MAP_WRITE, FALSE, shm_path);
-	if (mapping == INVALID_HANDLE_VALUE)
+	if (!mapping)
 	{
 		LOGE("Failed to open file mapping in replayer.\n");
 		return false;
@@ -510,9 +510,9 @@ static bool open_shm(const char *shm_path, const char *shm_mutex_path)
 	// Detect some obvious shenanigans.
 	Global::control_block = static_cast<SharedControlBlock *>(mapped);
 	if (Global::control_block->version_cookie != ControlBlockMagic ||
-		Global::control_block->ring_buffer_offset < sizeof(SharedControlBlock) ||
-		Global::control_block->ring_buffer_size == 0 ||
-		!is_pot(Global::control_block->ring_buffer_size))
+	    Global::control_block->ring_buffer_offset < sizeof(SharedControlBlock) ||
+	    Global::control_block->ring_buffer_size == 0 ||
+	    !is_pot(Global::control_block->ring_buffer_size))
 	{
 		LOGE("Control block is corrupt.\n");
 		UnmapViewOfFile(mapped);
@@ -521,7 +521,7 @@ static bool open_shm(const char *shm_path, const char *shm_mutex_path)
 	}
 
 	Global::shared_mutex = OpenMutexA(MUTEX_ALL_ACCESS, FALSE, shm_mutex_path);
-	if (Global::shared_mutex == INVALID_HANDLE_VALUE)
+	if (!Global::shared_mutex)
 		return false;
 
 	return true;
@@ -542,13 +542,13 @@ static int run_master_process(const VulkanDevice::Options &opts,
 	Global::shm_mutex_name = shm_mutex_name;
 
 	Global::job_handle = CreateJobObjectA(nullptr, nullptr);
-	if (Global::job_handle == INVALID_HANDLE_VALUE)
+	if (!Global::job_handle)
 	{
 		LOGE("Failed to create job handle.\n");
 		// Not fatal, we just won't bother with this.
 	}
 
-	if (Global::job_handle != INVALID_HANDLE_VALUE)
+	if (Global::job_handle)
 	{
 		// Kill all child processes if the parent dies.
 		JOBOBJECT_EXTENDED_LIMIT_INFORMATION jeli = {};
@@ -638,11 +638,11 @@ static int run_master_process(const VulkanDevice::Options &opts,
 		{
 			// Prioritize that any file I/O events are signalled before process end.
 			// WaitForMultipleObjects must return the first object which is signalled.
-			if (process.pipe_event != INVALID_HANDLE_VALUE)
+			if (process.pipe_event)
 				wait_handles.push_back(process.pipe_event);
-			if (process.process != INVALID_HANDLE_VALUE)
+			if (process.process)
 				wait_handles.push_back(process.process);
-			if (process.timer_handle != INVALID_HANDLE_VALUE)
+			if (process.timer_handle)
 				wait_handles.push_back(process.timer_handle);
 		}
 
@@ -707,7 +707,7 @@ static int run_master_process(const VulkanDevice::Options &opts,
 		}
 	}
 
-	if (Global::job_handle != INVALID_HANDLE_VALUE)
+	if (Global::job_handle)
 		CloseHandle(Global::job_handle);
 	return EXIT_SUCCESS;
 }
@@ -843,5 +843,5 @@ static int run_slave_process(const VulkanDevice::Options &opts,
 	}
 #endif
 
-	ExitProcess(code);
+	return code;
 }

@@ -286,10 +286,13 @@ bool VulkanDevice::init_device(const Options &opts)
 	device_info.enabledExtensionCount = uint32_t(active_device_extensions.size());
 	device_info.ppEnabledExtensionNames = active_device_extensions.empty() ? nullptr : active_device_extensions.data();
 
-	for (uint32_t i = 0; i < device_info.enabledLayerCount; i++)
-		LOGI("Enabling device layer: %s\n", device_info.ppEnabledLayerNames[i]);
-	for (uint32_t i = 0; i < device_info.enabledExtensionCount; i++)
-		LOGI("Enabling device extension: %s\n", device_info.ppEnabledExtensionNames[i]);
+	if (device_info.ppEnabledLayerNames)
+		for (uint32_t i = 0; i < device_info.enabledLayerCount; i++)
+			LOGI("Enabling device layer: %s\n", device_info.ppEnabledLayerNames[i]);
+
+	if (device_info.ppEnabledExtensionNames)
+		for (uint32_t i = 0; i < device_info.enabledExtensionCount; i++)
+			LOGI("Enabling device extension: %s\n", device_info.ppEnabledExtensionNames[i]);
 
 	if (vkCreateDevice(gpu, &device_info, nullptr, &device) != VK_NULL_HANDLE)
 	{

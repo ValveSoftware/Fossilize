@@ -39,9 +39,9 @@ struct ExternalReplayer::Impl
 {
 	~Impl();
 
-	HANDLE process = INVALID_HANDLE_VALUE;
-	HANDLE mapping_handle = INVALID_HANDLE_VALUE;
-	HANDLE mutex = INVALID_HANDLE_VALUE;
+	HANDLE process = nullptr;
+	HANDLE mapping_handle = nullptr;
+	HANDLE mutex = nullptr;
 	SharedControlBlock *shm_block = nullptr;
 	size_t shm_block_size = 0;
 	DWORD exit_code = 0;
@@ -62,11 +62,11 @@ ExternalReplayer::Impl::~Impl()
 {
 	if (shm_block)
 		UnmapViewOfFile(shm_block);
-	if (mapping_handle != INVALID_HANDLE_VALUE)
+	if (mapping_handle)
 		CloseHandle(mapping_handle);
-	if (mutex != INVALID_HANDLE_VALUE)
+	if (mutex)
 		CloseHandle(mutex);
-	if (process != INVALID_HANDLE_VALUE)
+	if (process)
 		CloseHandle(process);
 }
 
@@ -77,7 +77,7 @@ uintptr_t ExternalReplayer::Impl::get_process_handle() const
 
 ExternalReplayer::PollResult ExternalReplayer::Impl::poll_progress(ExternalReplayer::Progress &progress)
 {
-	if (process == INVALID_HANDLE_VALUE)
+	if (!process)
 		return ExternalReplayer::PollResult::Error;
 
 	bool complete = shm_block->progress_complete.load(std::memory_order_acquire);
@@ -121,14 +121,14 @@ void ExternalReplayer::Impl::parse_message(const char *msg)
 
 bool ExternalReplayer::Impl::is_process_complete(int *return_status)
 {
-	if (process == INVALID_HANDLE_VALUE)
+	if (!process)
 		return exit_code;
 
 	if (WaitForSingleObject(process, 0) == WAIT_OBJECT_0)
 	{
 		GetExitCodeProcess(process, &exit_code);
 		CloseHandle(process);
-		process = INVALID_HANDLE_VALUE;
+		process = nullptr;
 
 		// Pump the fifo through.
 		ExternalReplayer::Progress progress = {};
@@ -144,7 +144,7 @@ bool ExternalReplayer::Impl::is_process_complete(int *return_status)
 
 int ExternalReplayer::Impl::wait()
 {
-	if (process == INVALID_HANDLE_VALUE)
+	if (!process)
 		return exit_code;
 
 	// Pump the fifo through.
@@ -159,13 +159,13 @@ int ExternalReplayer::Impl::wait()
 
 	GetExitCodeProcess(process, &exit_code);
 	CloseHandle(process);
-	process = INVALID_HANDLE_VALUE;
+	process = nullptr;
 	return exit_code;
 }
 
 bool ExternalReplayer::Impl::kill()
 {
-	if (process == INVALID_HANDLE_VALUE)
+	if (!process)
 		return false;
 	return TerminateProcess(process, 1);
 }
@@ -199,7 +199,7 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 	sprintf(shm_mutex_name, "fossilize-external-%lu-%d", GetCurrentProcessId(), shm_index.fetch_add(1, std::memory_order_relaxed));
 	mapping_handle = CreateFileMapping(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, shm_block_size, shm_name);
 
-	if (mapping_handle == INVALID_HANDLE_VALUE)
+	if (!mapping_handle)
 	{
 		LOGE("Failed to create file mapping.\n");
 		return false;
@@ -222,7 +222,7 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 	shm_block->ring_buffer_offset = 4 * 1024;
 
 	mutex = CreateMutexA(nullptr, FALSE, shm_mutex_name);
-	if (mutex == INVALID_HANDLE_VALUE)
+	if (!mutex)
 	{
 		LOGE("Failed to create named mutex.\n");
 		return false;

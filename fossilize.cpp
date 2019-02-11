@@ -937,9 +937,7 @@ static uint8_t *decode_base64(ScratchAllocator &allocator, const char *data, siz
 
 static uint64_t string_to_uint64(const char* str)
 {
-	unsigned long long value;
-	sscanf(str, "%llx", &value);
-	return value;
+	return strtoull(str, nullptr, 16);
 }
 
 const char *StateReplayer::Impl::duplicate_string(const char *str, size_t len)
