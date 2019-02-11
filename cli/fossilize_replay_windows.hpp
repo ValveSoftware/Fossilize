@@ -61,6 +61,7 @@ static SharedControlBlock *control_block;
 static const char *shm_name;
 static const char *shm_mutex_name;
 static HANDLE shared_mutex;
+static HANDLE job_handle;
 }
 
 struct ProcessProgress
@@ -423,13 +424,22 @@ bool ProcessProgress::start_child_process()
 
 	// For whatever reason, this string must be mutable. Dupe it.
 	char *duped_string = _strdup(cmdline.c_str());
-	if (!CreateProcessA(nullptr, duped_string, nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi))
+	if (!CreateProcessA(nullptr, duped_string, nullptr, nullptr, TRUE, CREATE_NO_WINDOW | CREATE_SUSPENDED, nullptr, nullptr, &si, &pi))
 	{
 		LOGE("Failed to create child process.\n");
 		free(duped_string);
 		return false;
 	}
 	free(duped_string);
+
+	if (Global::job_handle != INVALID_HANDLE_VALUE && !AssignProcessToJobObject(Global::job_handle, process))
+	{
+		LOGE("Failed to assign process to job handle.\n");
+		// This isn't really fatal, just continue on.
+	}
+
+	// Now we can resume the main thread, after we've added the process to our job object.
+	ResumeThread(pi.hThread);
 
 	// Close file handles which are used by the child process only.
 	CloseHandle(slave_stdout_read);
@@ -530,6 +540,25 @@ static int run_master_process(const VulkanDevice::Options &opts,
 	Global::base_replayer_options.num_threads = 1;
 	Global::shm_name = shm_name;
 	Global::shm_mutex_name = shm_mutex_name;
+
+	Global::job_handle = CreateJobObjectA(nullptr, nullptr);
+	if (Global::job_handle == INVALID_HANDLE_VALUE)
+	{
+		LOGE("Failed to create job handle.\n");
+		// Not fatal, we just won't bother with this.
+	}
+
+	if (Global::job_handle != INVALID_HANDLE_VALUE)
+	{
+		// Kill all child processes if the parent dies.
+		JOBOBJECT_EXTENDED_LIMIT_INFORMATION jeli = {};
+		jeli.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+		if (!SetInformationJobObject(Global::job_handle, JobObjectExtendedLimitInformation, &jeli, sizeof(jeli)))
+		{
+			LOGE("Failed to set information for job object.\n");
+			// Again, not fatal.
+		}
+	}
 
 	if (shm_name && shm_mutex_name && !open_shm(shm_name, shm_mutex_name))
 	{
@@ -678,6 +707,8 @@ static int run_master_process(const VulkanDevice::Options &opts,
 		}
 	}
 
+	if (Global::job_handle != INVALID_HANDLE_VALUE)
+		CloseHandle(Global::job_handle);
 	return EXIT_SUCCESS;
 }
 
