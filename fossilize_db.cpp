@@ -40,6 +40,13 @@
 
 using namespace std;
 
+// So we can use SHA-1 for hashing blobs.
+// Fossilize itself doesn't need this much.
+// It only uses 18 hex characters.
+// 2 for type and 16 for 64-bit Fossilize hash.
+#define FOSSILIZE_BLOB_HASH_LENGTH 40
+static_assert(FOSSILIZE_BLOB_HASH_LENGTH >= 32, "Blob hash length must be at least 32.");
+
 namespace Fossilize
 {
 struct DumbDirectoryDatabase : DatabaseInterface
@@ -270,7 +277,7 @@ struct ZipDatabase : DatabaseInterface
 
 				mz_zip_reader_get_filename(&mz, i, filename, sizeof(filename));
 				size_t len = strlen(filename);
-				if (len != 32)
+				if (len != FOSSILIZE_BLOB_HASH_LENGTH)
 					continue;
 
 				if (!string_is_hex(filename))
@@ -282,10 +289,10 @@ struct ZipDatabase : DatabaseInterface
 
 				char tag_str[16 + 1] = {};
 				char value_str[16 + 1] = {};
-				memcpy(tag_str, filename, 16);
-				memcpy(value_str, filename + 16, 16);
+				memcpy(tag_str, filename + FOSSILIZE_BLOB_HASH_LENGTH - 32, 16);
+				memcpy(value_str, filename + FOSSILIZE_BLOB_HASH_LENGTH - 16, 16);
 
-				unsigned tag = unsigned(strtoul(tag_str, nullptr, 16));
+				auto tag = unsigned(strtoul(tag_str, nullptr, 16));
 				if (tag >= RESOURCE_COUNT)
 					continue;
 				uint64_t value = strtoull(value_str, nullptr, 16);
@@ -366,9 +373,9 @@ struct ZipDatabase : DatabaseInterface
 		if (itr != end(seen_blobs[tag]))
 			return true;
 
-		char str[32 + 1]; // 32 digits + null
-		sprintf(str, "%016x", tag);
-		sprintf(str + 16, "%016llx", static_cast<unsigned long long>(hash));
+		char str[FOSSILIZE_BLOB_HASH_LENGTH + 1]; // 40 digits + null
+		sprintf(str, "%0*x", FOSSILIZE_BLOB_HASH_LENGTH - 16, tag);
+		sprintf(str + FOSSILIZE_BLOB_HASH_LENGTH - 16, "%016llx", static_cast<unsigned long long>(hash));
 
 		unsigned mz_flags;
 		if ((flags & PAYLOAD_WRITE_COMPRESS_BIT) != 0)
@@ -551,7 +558,7 @@ struct StreamArchive : DatabaseInterface
 				{
 					begin_append_offset = offset;
 
-					char blob_name[32];
+					char blob_name[FOSSILIZE_BLOB_HASH_LENGTH];
 					PayloadHeaderRaw header_raw = {};
 					PayloadHeader header = {};
 
@@ -583,8 +590,8 @@ struct StreamArchive : DatabaseInterface
 
 					char tag_str[16 + 1] = {};
 					char value_str[16 + 1] = {};
-					memcpy(tag_str, blob_name, 16);
-					memcpy(value_str, blob_name + 16, 16);
+					memcpy(tag_str, blob_name + FOSSILIZE_BLOB_HASH_LENGTH - 32, 16);
+					memcpy(value_str, blob_name + FOSSILIZE_BLOB_HASH_LENGTH - 16, 16);
 
 					auto tag = unsigned(strtoul(tag_str, nullptr, 16));
 					if (tag < RESOURCE_COUNT)
@@ -728,11 +735,11 @@ struct StreamArchive : DatabaseInterface
 		if (itr != end(seen_blobs[tag]))
 			return true;
 
-		char str[32 + 1]; // 32 digits + null
-		sprintf(str, "%016x", tag);
-		sprintf(str + 16, "%016llx", static_cast<unsigned long long>(hash));
+		char str[FOSSILIZE_BLOB_HASH_LENGTH + 1]; // 40 digits + null
+		sprintf(str, "%0*x", FOSSILIZE_BLOB_HASH_LENGTH - 16, tag);
+		sprintf(str + FOSSILIZE_BLOB_HASH_LENGTH - 16, "%016llx", static_cast<unsigned long long>(hash));
 
-		if (fwrite(str, 1, 32, file) != 32)
+		if (fwrite(str, 1, FOSSILIZE_BLOB_HASH_LENGTH, file) != FOSSILIZE_BLOB_HASH_LENGTH)
 			return false;
 
 		if ((flags & PAYLOAD_WRITE_RAW_FOSSILIZE_DB_BIT) != 0)

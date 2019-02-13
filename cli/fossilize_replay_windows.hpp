@@ -75,7 +75,7 @@ struct ProcessProgress
 	HANDLE timer_handle = nullptr;
 	HANDLE pipe_event = nullptr;
 
-	OVERLAPPED overlapped_pipe;
+	OVERLAPPED overlapped_pipe = {};
 	char async_pipe_buffer[1024];
 
 	int compute_progress = -1;

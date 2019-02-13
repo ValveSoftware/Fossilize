@@ -829,7 +829,7 @@ struct ThreadedReplayer : StateCreatorInterface
 	VulkanDevice::Options device_opts;
 
 	// Crash recovery.
-	Hash failed_module_hashes[6];
+	Hash failed_module_hashes[6] = {};
 	unsigned num_failed_module_hashes = 0;
 	unsigned thread_current_graphics_index = 0;
 	unsigned thread_current_compute_index = 0;
