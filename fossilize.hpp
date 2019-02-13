@@ -37,7 +37,7 @@ namespace Fossilize
 {
 enum
 {
-	FOSSILIZE_FORMAT_VERSION = 4
+	FOSSILIZE_FORMAT_VERSION = 5
 };
 
 class DatabaseInterface;
