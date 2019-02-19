@@ -1,0 +1,11 @@
+{
+    "file_format_version" : "1.0.0",
+    "layer" : {
+        "name": "VK_LAYER_steam_fossilize",
+        "type": "GLOBAL",
+        "library_path": "./libVkLayer_fossilize.dylib",
+        "api_version": "1.1.98",
+        "implementation_version": "1",
+        "description": "Fossilize capture layer"
+    }
+}

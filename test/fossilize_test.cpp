@@ -27,6 +27,7 @@
 #include <stdexcept>
 #include <memory>
 #include <vector>
+#include <string>
 #include "layer/utils.hpp"
 
 using namespace Fossilize;

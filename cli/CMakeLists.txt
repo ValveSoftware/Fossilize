@@ -34,6 +34,10 @@ else()
 	target_sources(fossilize-replay PRIVATE fossilize_replay_linux.hpp)
 endif()
 
+if (APPLE)
+	target_compile_definitions(fossilize-replay PRIVATE NO_ROBUST_REPLAYER=1)
+endif()
+
 add_fossilize_cli(fossilize-bench fossilize_bench.cpp)
 add_fossilize_cli(fossilize-convert-db fossilize_convert_db.cpp)
 add_fossilize_cli(fossilize-merge-db fossilize_merge_db.cpp)

@@ -3075,7 +3075,7 @@ static Value json_value(const VkShaderModuleCreateInfo& module, Allocator& alloc
 {
 	Value m(kObjectType);
 	m.AddMember("flags", module.flags, alloc);
-	m.AddMember("codeSize", module.codeSize, alloc);
+	m.AddMember("codeSize", uint64_t(module.codeSize), alloc);
 	m.AddMember("code", encode_base64(module.pCode, module.codeSize), alloc);
 	return m;
 }
@@ -3217,7 +3217,7 @@ static Value json_value(const VkComputePipelineCreateInfo& pipe, Allocator& allo
 	if (pipe.stage.pSpecializationInfo)
 	{
 		Value spec(kObjectType);
-		spec.AddMember("dataSize", pipe.stage.pSpecializationInfo->dataSize, alloc);
+		spec.AddMember("dataSize", uint64_t(pipe.stage.pSpecializationInfo->dataSize), alloc);
 		spec.AddMember("data",
 					   encode_base64(pipe.stage.pSpecializationInfo->pData,
 									 pipe.stage.pSpecializationInfo->dataSize), alloc);
@@ -3227,7 +3227,7 @@ static Value json_value(const VkComputePipelineCreateInfo& pipe, Allocator& allo
 			auto &e = pipe.stage.pSpecializationInfo->pMapEntries[i];
 			Value map_entry(kObjectType);
 			map_entry.AddMember("offset", e.offset, alloc);
-			map_entry.AddMember("size", e.size, alloc);
+			map_entry.AddMember("size", uint64_t(e.size), alloc);
 			map_entry.AddMember("constantID", e.constantID, alloc);
 			map_entries.PushBack(map_entry, alloc);
 		}
@@ -3461,7 +3461,7 @@ static Value json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& all
 		if (s.pSpecializationInfo)
 		{
 			Value spec(kObjectType);
-			spec.AddMember("dataSize", s.pSpecializationInfo->dataSize, alloc);
+			spec.AddMember("dataSize", uint64_t(s.pSpecializationInfo->dataSize), alloc);
 			spec.AddMember("data",
 						   encode_base64(s.pSpecializationInfo->pData,
 										 s.pSpecializationInfo->dataSize), alloc);
@@ -3471,7 +3471,7 @@ static Value json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& all
 				auto &e = s.pSpecializationInfo->pMapEntries[j];
 				Value map_entry(kObjectType);
 				map_entry.AddMember("offset", e.offset, alloc);
-				map_entry.AddMember("size", e.size, alloc);
+				map_entry.AddMember("size", uint64_t(e.size), alloc);
 				map_entry.AddMember("constantID", e.constantID, alloc);
 				map_entries.PushBack(map_entry, alloc);
 			}
@@ -3690,8 +3690,8 @@ void StateRecorder::Impl::serialize_shader_module(Hash hash, const VkShaderModul
 
 	Value varint(kObjectType);
 	varint.AddMember("varintOffset", 0, alloc);
-	varint.AddMember("varintSize", size, alloc);
-	varint.AddMember("codeSize", create_info.codeSize, alloc);
+	varint.AddMember("varintSize", uint64_t(size), alloc);
+	varint.AddMember("codeSize", uint64_t(create_info.codeSize), alloc);
 	varint.AddMember("flags", 0, alloc);
 
 	// Varint binary form, starts at offset 0 after the delim '\0' character.
