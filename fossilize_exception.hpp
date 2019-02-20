@@ -24,6 +24,7 @@
 
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 #if defined(_MSC_VER) && (_MSC_VER <= 1800)
 #define FOSSILIZE_NOEXCEPT
