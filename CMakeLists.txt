@@ -40,6 +40,7 @@ endif()
 
 add_library(fossilize STATIC
         fossilize.hpp fossilize.cpp
+        fossilize_exception.hpp
         varint.cpp varint.hpp
         fossilize_db.cpp fossilize_db.hpp
         fossilize_external_replayer.cpp fossilize_external_replayer.hpp
