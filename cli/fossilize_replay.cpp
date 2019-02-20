@@ -838,10 +838,26 @@ struct ThreadedReplayer : StateCreatorInterface
 
 static void print_help()
 {
+#ifndef NO_ROBUST_REPLAYER
 #ifdef _WIN32
-#define EXTRA_OPTIONS "\t[--shm-name <name>]\n\t[--shm-mutex-name <name>]\n"
+#define EXTRA_OPTIONS \
+	"\t[--slave-process]\n" \
+	"\t[--master-process]\n" \
+	"\t[--timeout <seconds>]\n" \
+	"\t[--progress]\n" \
+	"\t[--quiet-slave]\n" \
+	"\t[--shm-name <name>]\n\t[--shm-mutex-name <name>]\n"
 #else
-#define EXTRA_OPTIONS "\t[--shm-fd <fd>]\n"
+#define EXTRA_OPTIONS \
+	"\t[--slave-process]\n" \
+	"\t[--master-process]\n" \
+	"\t[--timeout <seconds>]\n" \
+	"\t[--progress]\n" \
+	"\t[--quiet-slave]\n" \
+	"\t[--shm-fd <fd>]\n"
+#endif
+#else
+#define EXTRA_OPTIONS ""
 #endif
 	LOGI("fossilize-replay\n"
 	     "\t[--help]\n"
@@ -853,14 +869,7 @@ static void print_help()
 	     "\t[--on-disk-pipeline-cache <path>]\n"
 	     "\t[--graphics-pipeline-range <start> <end>]\n"
 	     "\t[--compute-pipeline-range <start> <end>]\n"
-#ifndef NO_ROBUST_REPLAYER
-	     "\t[--slave-process]\n"
-	     "\t[--master-process]\n"
-	     "\t[--timeout <seconds>]\n"
-	     "\t[--progress]\n"
-	     "\t[--quiet-slave]\n"
 	     EXTRA_OPTIONS
-#endif
 	     "\t<Database>\n");
 }
 
