@@ -24,7 +24,7 @@
 
 #if defined(_WIN32)
 #include "fossilize_external_replayer_windows.hpp"
-#elif defined(__linux__)
+#elif defined(__linux__) || defined(__APPLE__)
 #include "fossilize_external_replayer_linux.hpp"
 #else
 #error "Unsupported platform."

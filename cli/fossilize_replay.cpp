@@ -838,10 +838,26 @@ struct ThreadedReplayer : StateCreatorInterface
 
 static void print_help()
 {
+#ifndef NO_ROBUST_REPLAYER
 #ifdef _WIN32
-#define EXTRA_OPTIONS "\t[--shm-name <name>]\n\t[--shm-mutex-name <name>]\n"
+#define EXTRA_OPTIONS \
+	"\t[--slave-process]\n" \
+	"\t[--master-process]\n" \
+	"\t[--timeout <seconds>]\n" \
+	"\t[--progress]\n" \
+	"\t[--quiet-slave]\n" \
+	"\t[--shm-name <name>]\n\t[--shm-mutex-name <name>]\n"
 #else
-#define EXTRA_OPTIONS "\t[--shm-fd <fd>]\n"
+#define EXTRA_OPTIONS \
+	"\t[--slave-process]\n" \
+	"\t[--master-process]\n" \
+	"\t[--timeout <seconds>]\n" \
+	"\t[--progress]\n" \
+	"\t[--quiet-slave]\n" \
+	"\t[--shm-fd <fd>]\n"
+#endif
+#else
+#define EXTRA_OPTIONS ""
 #endif
 	LOGI("fossilize-replay\n"
 	     "\t[--help]\n"
@@ -853,15 +869,11 @@ static void print_help()
 	     "\t[--on-disk-pipeline-cache <path>]\n"
 	     "\t[--graphics-pipeline-range <start> <end>]\n"
 	     "\t[--compute-pipeline-range <start> <end>]\n"
-	     "\t[--slave-process]\n"
-	     "\t[--master-process]\n"
-	     "\t[--timeout <seconds>]\n"
-	     "\t[--progress]\n"
-	     "\t[--quiet-slave]\n"
 	     EXTRA_OPTIONS
 	     "\t<Database>\n");
 }
 
+#ifndef NO_ROBUST_REPLAYER
 static void log_progress(const ExternalReplayer::Progress &progress)
 {
 	LOGI("=================\n");
@@ -956,6 +968,7 @@ static int run_progress_process(const VulkanDevice::Options &,
 		}
 	}
 }
+#endif
 
 static int run_normal_process(ThreadedReplayer &replayer, const string &db_path)
 {
@@ -1082,6 +1095,7 @@ static int run_normal_process(ThreadedReplayer &replayer, const string &db_path)
 
 // The implementations are drastically different.
 // To simplify build system, just include implementation inline here.
+#ifndef NO_ROBUST_REPLAYER
 #ifdef __linux__
 #include "fossilize_replay_linux.hpp"
 #elif defined(_WIN32)
@@ -1089,12 +1103,15 @@ static int run_normal_process(ThreadedReplayer &replayer, const string &db_path)
 #else
 #error "Unsupported platform."
 #endif
+#endif
 
 int main(int argc, char *argv[])
 {
 	string db_path;
 	VulkanDevice::Options opts;
 	ThreadedReplayer::Options replayer_opts;
+
+#ifndef NO_ROBUST_REPLAYER
 	bool master_process = false;
 	bool slave_process = false;
 	bool quiet_slave = false;
@@ -1107,6 +1124,7 @@ int main(int argc, char *argv[])
 #else
 	int shmem_fd = -1;
 #endif
+#endif
 
 	CLICallbacks cbs;
 	cbs.default_handler = [&](const char *arg) { db_path = arg; };
@@ -1116,28 +1134,29 @@ int main(int argc, char *argv[])
 	cbs.add("--pipeline-cache", [&](CLIParser &) { replayer_opts.pipeline_cache = true; });
 	cbs.add("--on-disk-pipeline-cache", [&](CLIParser &parser) { replayer_opts.on_disk_pipeline_cache_path = parser.next_string(); });
 	cbs.add("--num-threads", [&](CLIParser &parser) { replayer_opts.num_threads = parser.next_uint(); });
-	cbs.add("--master-process", [&](CLIParser &) { master_process = true; });
-	cbs.add("--slave-process", [&](CLIParser &) { slave_process = true; });
-	cbs.add("--quiet-slave", [&](CLIParser &) { quiet_slave = true; });
 	cbs.add("--loop", [&](CLIParser &parser) { replayer_opts.loop_count = parser.next_uint(); });
-	cbs.add("--timeout", [&](CLIParser &parser) { timeout = parser.next_uint(); });
-	cbs.add("--progress", [&](CLIParser &) { progress = true; });
-
 	cbs.add("--graphics-pipeline-range", [&](CLIParser &parser) {
 		replayer_opts.start_graphics_index = parser.next_uint();
 		replayer_opts.end_graphics_index = parser.next_uint();
 	});
-
 	cbs.add("--compute-pipeline-range", [&](CLIParser &parser) {
 		replayer_opts.start_compute_index = parser.next_uint();
 		replayer_opts.end_compute_index = parser.next_uint();
 	});
+
+#ifndef NO_ROBUST_REPLAYER
+	cbs.add("--quiet-slave", [&](CLIParser &) { quiet_slave = true; });
+	cbs.add("--master-process", [&](CLIParser &) { master_process = true; });
+	cbs.add("--slave-process", [&](CLIParser &) { slave_process = true; });
+	cbs.add("--timeout", [&](CLIParser &parser) { timeout = parser.next_uint(); });
+	cbs.add("--progress", [&](CLIParser &) { progress = true; });
 
 #ifdef _WIN32
 	cbs.add("--shm-name", [&](CLIParser &parser) { shm_name = parser.next_string(); });
 	cbs.add("--shm-mutex-name", [&](CLIParser &parser) { shm_mutex_name = parser.next_string(); });
 #else
 	cbs.add("--shmem-fd", [&](CLIParser &parser) { shmem_fd = parser.next_uint(); });
+#endif
 #endif
 
 	cbs.error_handler = [] { print_help(); };
@@ -1155,6 +1174,7 @@ int main(int argc, char *argv[])
 		return EXIT_FAILURE;
 	}
 
+#ifndef NO_ROBUST_REPLAYER
 	// We cannot safely deal with multiple threads here, force one thread.
 	if (slave_process)
 	{
@@ -1168,8 +1188,10 @@ int main(int argc, char *argv[])
 
 	if (!replayer_opts.on_disk_pipeline_cache_path.empty())
 		replayer_opts.pipeline_cache = true;
+#endif
 
 	int ret;
+#ifndef NO_ROBUST_REPLAYER
 	if (progress)
 	{
 		ret = run_progress_process(opts, replayer_opts, db_path, timeout);
@@ -1191,6 +1213,7 @@ int main(int argc, char *argv[])
 #endif
 	}
 	else
+#endif
 	{
 		ThreadedReplayer replayer(opts, replayer_opts);
 		ret = run_normal_process(replayer, db_path);
