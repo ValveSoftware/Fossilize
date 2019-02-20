@@ -1,4 +1,4 @@
-/* Copyright (c) 2018 Hans-Kristian Arntzen
+/* Copyright (c) 2018-2019 Hans-Kristian Arntzen
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -34,6 +34,7 @@
 #include "path.hpp"
 #include "fossilize_db.hpp"
 #include "layer/utils.hpp"
+#include "fossilize_exception.hpp"
 
 #define RAPIDJSON_HAS_STDSTRING 1
 #include "rapidjson/document.h"
@@ -170,6 +171,7 @@ struct StateReplayer::Impl
 	VkSpecializationMapEntry *parse_map_entries(const Value &map_entries);
 	VkViewport *parse_viewports(const Value &viewports);
 	VkRect2D *parse_scissors(const Value &scissors);
+	const void *parse_pnext_chain(const Value &pnext);
 	VkPipelineVertexInputStateCreateInfo *parse_vertex_input_state(const Value &state);
 	VkPipelineColorBlendStateCreateInfo *parse_color_blend_state(const Value &state);
 	VkPipelineDepthStencilStateCreateInfo *parse_depth_stencil_state(const Value &state);
@@ -183,6 +185,7 @@ struct StateReplayer::Impl
 	VkVertexInputAttributeDescription *parse_vertex_attributes(const Value &attributes);
 	VkVertexInputBindingDescription *parse_vertex_bindings(const Value &bindings);
 	VkPipelineColorBlendAttachmentState *parse_blend_attachments(const Value &attachments);
+	VkPipelineVertexInputDivisorStateCreateInfoEXT *parse_vertex_input_divisor_state(const Value &state);
 	uint32_t *parse_uints(const Value &attachments);
 	const char *duplicate_string(const char *str, size_t len);
 
@@ -238,6 +241,9 @@ struct StateRecorder::Impl
 
 	VkSpecializationInfo *copy_specialization_info(const VkSpecializationInfo *info, ScratchAllocator &alloc);
 
+	void *copy_pnext_struct(const VkPipelineVertexInputDivisorStateCreateInfoEXT *create_info,
+	                        ScratchAllocator &alloc);
+
 	VkSampler remap_sampler_handle(VkSampler sampler) const;
 	VkDescriptorSetLayout remap_descriptor_set_layout_handle(VkDescriptorSetLayout layout) const;
 	VkPipelineLayout remap_pipeline_layout_handle(VkPipelineLayout layout) const;
@@ -275,6 +281,7 @@ struct StateRecorder::Impl
 
 	template <typename T>
 	T *copy(const T *src, size_t count, ScratchAllocator &alloc);
+	const void *copy_pnext_chain(const void *pNext, ScratchAllocator &alloc);
 };
 
 // reinterpret_cast does not work reliably on MSVC 2013 for Vulkan objects.
@@ -439,6 +446,39 @@ static void hash_specialization_info(Hasher &h, const VkSpecializationInfo &spec
 		h.u32(spec.pMapEntries[i].offset);
 		h.u64(spec.pMapEntries[i].size);
 		h.u32(spec.pMapEntries[i].constantID);
+	}
+}
+
+static void hash_pnext_struct(const StateRecorder &,
+                              Hasher &h,
+                              const VkPipelineVertexInputDivisorStateCreateInfoEXT &create_info)
+{
+	h.u32(create_info.vertexBindingDivisorCount);
+	for (uint32_t i = 0; i < create_info.vertexBindingDivisorCount; i++)
+	{
+		h.u32(create_info.pVertexBindingDivisors[i].binding);
+		h.u32(create_info.pVertexBindingDivisors[i].divisor);
+	}
+}
+
+static void hash_pnext_chain(const StateRecorder &recorder, Hasher &h, const void *pNext)
+{
+	while (pNext != nullptr)
+	{
+		auto *pin = static_cast<const VkBaseInStructure *>(pNext);
+		h.s32(pin->sType);
+
+		switch (pin->sType)
+		{
+		case VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_DIVISOR_STATE_CREATE_INFO_EXT:
+			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineVertexInputDivisorStateCreateInfoEXT *>(pNext));
+			break;
+
+		default:
+			FOSSILIZE_THROW(std::string("Unsupported pNext found, cannot hash sType: ") + std::to_string(pin->sType));
+		}
+
+		pNext = pin->pNext;
 	}
 }
 
@@ -669,6 +709,8 @@ Hash compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 			h.u32(vi.pVertexBindingDescriptions[i].inputRate);
 			h.u32(vi.pVertexBindingDescriptions[i].stride);
 		}
+
+		hash_pnext_chain(recorder, h, vi.pNext);
 	}
 	else
 		h.u32(0);
@@ -1547,6 +1589,9 @@ VkPipelineVertexInputStateCreateInfo *StateReplayer::Impl::parse_vertex_input_st
 		state->pVertexBindingDescriptions = parse_vertex_bindings(vi["bindings"]);
 	}
 
+	if (vi.HasMember("pNext"))
+		state->pNext = parse_pnext_chain(vi["pNext"]);
+
 	return state;
 }
 
@@ -1903,6 +1948,71 @@ void StateReplayer::Impl::parse_graphics_pipelines(StateCreatorInterface &iface,
 	iface.notify_replayed_resources_for_type();
 }
 
+VkPipelineVertexInputDivisorStateCreateInfoEXT *
+StateReplayer::Impl::parse_vertex_input_divisor_state(const Value &state)
+{
+	auto *info = allocator.allocate_cleared<VkPipelineVertexInputDivisorStateCreateInfoEXT>();
+	info->vertexBindingDivisorCount = state["vertexBindingDivisorCount"].GetUint();
+	if (state.HasMember("vertexBindingDivisors"))
+	{
+		auto *new_divisors =
+				allocator.allocate_n_cleared<VkVertexInputBindingDivisorDescriptionEXT>(info->vertexBindingDivisorCount);
+		info->pVertexBindingDivisors = new_divisors;
+
+		auto &divisors = state["vertexBindingDivisors"];
+		for (auto divisor_itr = divisors.Begin(); divisor_itr != divisors.End(); ++divisor_itr, new_divisors++)
+		{
+			auto &divisor = *divisor_itr;
+			new_divisors->binding = divisor["binding"].GetUint();
+			new_divisors->divisor = divisor["divisor"].GetUint();
+		}
+	}
+
+	return info;
+}
+
+const void *StateReplayer::Impl::parse_pnext_chain(const Value &pnext)
+{
+	VkBaseInStructure *ret = nullptr;
+	VkBaseInStructure *chain = nullptr;
+
+	for (auto itr = pnext.Begin(); itr != pnext.End(); ++itr)
+	{
+		auto &next = *itr;
+		auto sType = static_cast<VkStructureType>(next["sType"].GetInt());
+		VkBaseInStructure *new_struct = nullptr;
+
+		switch (sType)
+		{
+		case VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_DIVISOR_STATE_CREATE_INFO_EXT:
+		{
+			auto *info = parse_vertex_input_divisor_state(next);
+			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
+			break;
+		}
+
+		default:
+			FOSSILIZE_THROW(std::string("Failed to parse pNext chain for sType: ") + std::to_string(sType));
+		}
+
+		new_struct->sType = sType;
+		new_struct->pNext = nullptr;
+
+		if (!chain)
+		{
+			chain = new_struct;
+			ret = chain;
+		}
+		else
+		{
+			chain->pNext = new_struct;
+			chain = new_struct;
+		}
+	}
+
+	return ret;
+}
+
 StateReplayer::StateReplayer()
 {
 	impl = new Impl;
@@ -1989,6 +2099,51 @@ T *StateRecorder::Impl::copy(const T *src, size_t count, ScratchAllocator &alloc
 	if (new_data)
 		std::copy(src, src + count, new_data);
 	return new_data;
+}
+
+void *StateRecorder::Impl::copy_pnext_struct(
+		const VkPipelineVertexInputDivisorStateCreateInfoEXT *create_info,
+		ScratchAllocator &alloc)
+{
+	auto *info = copy(create_info, 1, alloc);
+	if (info->pVertexBindingDivisors)
+	{
+		info->pVertexBindingDivisors = copy(create_info->pVertexBindingDivisors,
+		                                    create_info->vertexBindingDivisorCount,
+		                                    alloc);
+	}
+
+	return info;
+}
+
+const void *StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &alloc)
+{
+	VkBaseInStructure new_pnext = {};
+	const VkBaseInStructure **ppNext = &new_pnext.pNext;
+
+	while (pNext != nullptr)
+	{
+		auto *pin = static_cast<const VkBaseInStructure *>(pNext);
+
+		switch (pin->sType)
+		{
+		case VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_DIVISOR_STATE_CREATE_INFO_EXT:
+		{
+			auto *ci = static_cast<const VkPipelineVertexInputDivisorStateCreateInfoEXT *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			break;
+		}
+
+		default:
+			FOSSILIZE_THROW(std::string("Cannot copy unknown sType :") + std::to_string(pin->sType));
+		}
+
+		pNext = pin->pNext;
+		ppNext = const_cast<const VkBaseInStructure **>(&(*ppNext)->pNext);
+		*ppNext = nullptr;
+	}
+
+	return new_pnext.pNext;
 }
 
 struct ScratchAllocator::Impl
@@ -2394,9 +2549,9 @@ VkGraphicsPipelineCreateInfo *StateRecorder::Impl::copy_graphics_pipeline(const 
 
 	if (info->pVertexInputState)
 	{
-		if (info->pVertexInputState->pNext)
-			FOSSILIZE_THROW("pNext in VkPipelineVertexInputStateCreateInfo not supported.");
 		info->pVertexInputState = copy(info->pVertexInputState, 1, alloc);
+		const_cast<VkPipelineVertexInputStateCreateInfo *>(info->pVertexInputState)->pNext =
+				copy_pnext_chain(info->pVertexInputState->pNext, alloc);
 	}
 
 	if (info->pMultisampleState)
@@ -3239,6 +3394,56 @@ static Value json_value(const VkComputePipelineCreateInfo& pipe, Allocator& allo
 }
 
 template <typename Allocator>
+static Value json_value(const VkPipelineVertexInputDivisorStateCreateInfoEXT &create_info, Allocator &alloc)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("vertexBindingDivisorCount", create_info.vertexBindingDivisorCount, alloc);
+
+	if (create_info.pVertexBindingDivisors)
+	{
+		Value divisors(kArrayType);
+		for (uint32_t i = 0; i < create_info.vertexBindingDivisorCount; i++)
+		{
+			Value divisor(kObjectType);
+			divisor.AddMember("binding", create_info.pVertexBindingDivisors[i].binding, alloc);
+			divisor.AddMember("divisor", create_info.pVertexBindingDivisors[i].divisor, alloc);
+			divisors.PushBack(divisor, alloc);
+		}
+		value.AddMember("vertexBindingDivisors", divisors, alloc);
+	}
+
+	return value;
+}
+
+template <typename Allocator>
+static Value pnext_chain_json_value(const void *pNext, Allocator &alloc)
+{
+	Value nexts(kArrayType);
+
+	while (pNext != nullptr)
+	{
+		auto *pin = static_cast<const VkBaseInStructure *>(pNext);
+		Value next;
+		switch (pin->sType)
+		{
+		case VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_DIVISOR_STATE_CREATE_INFO_EXT:
+			next = json_value(*static_cast<const VkPipelineVertexInputDivisorStateCreateInfoEXT *>(pNext),
+			                  alloc);
+			break;
+
+		default:
+			FOSSILIZE_THROW(std::string("Unsupported pNext found, cannot hash sType: ") + std::to_string(pin->sType));
+		}
+
+		nexts.PushBack(next, alloc);
+		pNext = pin->pNext;
+	}
+
+	return nexts;
+}
+
+template <typename Allocator>
 static Value json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& alloc)
 {
 	Value p(kObjectType);
@@ -3320,6 +3525,12 @@ static Value json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& all
 		}
 		vi.AddMember("attributes", attribs, alloc);
 		vi.AddMember("bindings", bindings, alloc);
+
+		if (pipe.pVertexInputState->pNext)
+		{
+			Value nexts = pnext_chain_json_value(pipe.pVertexInputState->pNext, alloc);
+			vi.AddMember("pNext", nexts, alloc);
+		}
 
 		p.AddMember("vertexInputState", vi, alloc);
 	}

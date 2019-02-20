@@ -373,6 +373,21 @@ static void record_graphics_pipelines(StateRecorder &recorder)
 	VkPipelineRasterizationStateCreateInfo rs = { VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
 	VkPipelineInputAssemblyStateCreateInfo ia = { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
 
+	VkPipelineVertexInputDivisorStateCreateInfoEXT divisor = { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_DIVISOR_STATE_CREATE_INFO_EXT };
+	VkPipelineVertexInputDivisorStateCreateInfoEXT divisor2 = { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_DIVISOR_STATE_CREATE_INFO_EXT };
+	divisor.vertexBindingDivisorCount = 2;
+	divisor2.vertexBindingDivisorCount = 1;
+
+	VkVertexInputBindingDivisorDescriptionEXT divisor_descs[2] = {};
+	divisor_descs[0].binding = 0;
+	divisor_descs[0].divisor = 1;
+	divisor_descs[1].binding = 1;
+	divisor_descs[1].divisor = 4;
+	divisor.pVertexBindingDivisors = divisor_descs;
+	divisor2.pVertexBindingDivisors = divisor_descs;
+	vi.pNext = &divisor;
+	divisor.pNext = &divisor2;
+
 	static const VkVertexInputAttributeDescription attrs[2] = {
 		{ 2, 1, VK_FORMAT_R16G16_SFLOAT, 5 },
 		{ 9, 1, VK_FORMAT_R8_UINT, 5 },

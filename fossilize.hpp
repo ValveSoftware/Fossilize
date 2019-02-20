@@ -25,13 +25,6 @@
 #include "vulkan.h"
 #include <stdint.h>
 #include <stddef.h>
-#include <stdexcept>
-
-#if defined(_MSC_VER) && (_MSC_VER <= 1800)
-#define FOSSILIZE_NOEXCEPT
-#else
-#define FOSSILIZE_NOEXCEPT noexcept
-#endif
 
 namespace Fossilize
 {
@@ -41,24 +34,6 @@ enum
 };
 
 class DatabaseInterface;
-
-// TODO: Do we want to get rid of this?
-class Exception : public std::exception
-{
-public:
-	Exception(const char *what)
-		: msg(what)
-	{
-	}
-
-	const char *what() const FOSSILIZE_NOEXCEPT override
-	{
-		return msg;
-	}
-
-private:
-	const char *msg;
-};
 
 using Hash = uint64_t;
 
