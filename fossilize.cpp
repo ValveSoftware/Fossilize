@@ -480,8 +480,6 @@ static void hash_pnext_chain(const StateRecorder &recorder, Hasher &h, const voi
 
 		pNext = pin->pNext;
 	}
-
-	h.u32(0);
 }
 
 Hash compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraphicsPipelineCreateInfo &create_info)
