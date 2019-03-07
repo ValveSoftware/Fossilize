@@ -12,3 +12,4 @@ add_test(NAME varint-system-test COMMAND varint-test)
 
 add_executable(multi-instance-and-device-test multi_instance_and_device_test.cpp)
 target_link_libraries(multi-instance-and-device-test cli-utils fossilize)
+set_target_properties(multi-instance-and-device-test PROPERTIES LINK_FLAGS "${FOSSILIZE_LINK_FLAGS}")
