@@ -176,6 +176,8 @@ struct ThreadedReplayer : StateCreatorInterface
 		graphics_pipeline_count.store(0);
 		compute_pipeline_count.store(0);
 		shader_module_count.store(0);
+		thread_total_ns.store(0);
+		total_idle_ns.store(0);
 
 		thread_current_graphics_index = opts.start_graphics_index;
 		thread_current_compute_index = opts.start_compute_index;
@@ -207,9 +209,13 @@ struct ThreadedReplayer : StateCreatorInterface
 		uint64_t shader_ns = 0;
 		unsigned shader_count = 0;
 
+		uint64_t idle_ns = 0;
+		auto thread_start_time = chrono::steady_clock::now();
+
 		for (;;)
 		{
 			PipelineWorkItem work_item;
+			auto idle_start_time = chrono::steady_clock::now();
 			{
 				unique_lock<mutex> lock(pipeline_work_queue_mutex);
 				work_available_condition.wait(lock, [&]() -> bool {
@@ -222,6 +228,9 @@ struct ThreadedReplayer : StateCreatorInterface
 				work_item = pipeline_work_queue.front();
 				pipeline_work_queue.pop();
 			}
+			auto idle_end_time = chrono::steady_clock::now();
+			auto duration_ns = chrono::duration_cast<chrono::nanoseconds>(idle_end_time - idle_start_time).count();
+			idle_ns += duration_ns;
 
 			switch (work_item.tag)
 			{
@@ -239,7 +248,7 @@ struct ThreadedReplayer : StateCreatorInterface
 					                         nullptr, work_item.output.shader_module) == VK_SUCCESS)
 					{
 						auto end_time = chrono::steady_clock::now();
-						auto duration_ns = chrono::duration_cast<chrono::nanoseconds>(end_time - start_time).count();
+						duration_ns = chrono::duration_cast<chrono::nanoseconds>(end_time - start_time).count();
 						shader_module_ns += duration_ns;
 						shader_module_count++;
 						*work_item.hash_map_entry.shader_module = *work_item.output.shader_module;
@@ -279,7 +288,6 @@ struct ThreadedReplayer : StateCreatorInterface
 					}
 				}
 
-
 				for (unsigned i = 0; i < loop_count; i++)
 				{
 					// Avoid leak.
@@ -297,7 +305,7 @@ struct ThreadedReplayer : StateCreatorInterface
 					                              nullptr, work_item.output.pipeline) == VK_SUCCESS)
 					{
 						auto end_time = chrono::steady_clock::now();
-						auto duration_ns = chrono::duration_cast<chrono::nanoseconds>(end_time - start_time).count();
+						duration_ns = chrono::duration_cast<chrono::nanoseconds>(end_time - start_time).count();
 						graphics_pipeline_ns += duration_ns;
 						graphics_pipeline_count++;
 						*work_item.hash_map_entry.pipeline = *work_item.output.pipeline;
@@ -352,7 +360,7 @@ struct ThreadedReplayer : StateCreatorInterface
 					                             nullptr, work_item.output.pipeline) == VK_SUCCESS)
 					{
 						auto end_time = chrono::steady_clock::now();
-						auto duration_ns = chrono::duration_cast<chrono::nanoseconds>(end_time - start_time).count();
+						duration_ns = chrono::duration_cast<chrono::nanoseconds>(end_time - start_time).count();
 						compute_pipeline_ns += duration_ns;
 						compute_pipeline_count++;
 						*work_item.hash_map_entry.pipeline = *work_item.output.pipeline;
@@ -373,12 +381,18 @@ struct ThreadedReplayer : StateCreatorInterface
 				break;
 			}
 
+			idle_start_time = chrono::steady_clock::now();
 			{
+
 				lock_guard<mutex> lock(pipeline_work_queue_mutex);
 				completed_count++;
 				if (completed_count == queued_count) // Makes sense to signal main thread now.
 					work_done_condition.notify_one();
+
 			}
+			idle_end_time = chrono::steady_clock::now();
+			duration_ns = chrono::duration_cast<chrono::nanoseconds>(idle_end_time - idle_start_time).count();
+			idle_ns += duration_ns;
 		}
 
 		graphics_pipeline_count.fetch_add(graphics_count, std::memory_order_relaxed);
@@ -387,6 +401,10 @@ struct ThreadedReplayer : StateCreatorInterface
 		compute_pipeline_ns.fetch_add(compute_ns, std::memory_order_relaxed);
 		shader_module_count.fetch_add(shader_count, std::memory_order_relaxed);
 		shader_module_ns.fetch_add(shader_ns, std::memory_order_relaxed);
+		total_idle_ns.fetch_add(idle_ns, std::memory_order_relaxed);
+		auto thread_end_time = chrono::steady_clock::now();
+		thread_total_ns.fetch_add(std::chrono::duration_cast<std::chrono::nanoseconds>(thread_end_time - thread_start_time).count(),
+		                          std::memory_order_relaxed);
 	}
 
 	void flush_pipeline_cache()
@@ -415,7 +433,7 @@ struct ThreadedReplayer : StateCreatorInterface
 		}
 	}
 
-	~ThreadedReplayer()
+	void tear_down_threads()
 	{
 		// Signal that it's time for threads to die.
 		{
@@ -427,7 +445,12 @@ struct ThreadedReplayer : StateCreatorInterface
 		for (auto &thread : thread_pool)
 			if (thread.joinable())
 				thread.join();
+		thread_pool.clear();
+	}
 
+	~ThreadedReplayer()
+	{
+		tear_down_threads();
 		flush_pipeline_cache();
 
 		for (auto &sampler : samplers)
@@ -818,6 +841,8 @@ struct ThreadedReplayer : StateCreatorInterface
 	std::atomic<std::uint64_t> graphics_pipeline_ns;
 	std::atomic<std::uint64_t> compute_pipeline_ns;
 	std::atomic<std::uint64_t> shader_module_ns;
+	std::atomic<std::uint64_t> total_idle_ns;
+	std::atomic<std::uint64_t> thread_total_ns;
 	std::atomic<std::uint32_t> graphics_pipeline_count;
 	std::atomic<std::uint32_t> compute_pipeline_count;
 	std::atomic<std::uint32_t> shader_module_count;
@@ -1001,8 +1026,21 @@ static int run_normal_process(ThreadedReplayer &replayer, const string &db_path)
 		RESOURCE_COMPUTE_PIPELINE, // Multi-threaded
 	};
 
+	static const char *tag_names[] = {
+		"AppInfo",
+		"Sampler",
+		"Descriptor Set Layout",
+		"Pipeline Layout",
+		"Shader Module",
+		"Render Pass",
+		"Graphics Pipeline",
+		"Compute Pipeline",
+	};
+
 	for (auto &tag : playback_order)
 	{
+		auto main_thread_start = std::chrono::steady_clock::now();
+		size_t tag_total_size = 0;
 		size_t resource_hash_count = 0;
 		if (!resolver->get_hash_list_for_resource_tag(tag, &resource_hash_count, nullptr))
 		{
@@ -1028,6 +1066,7 @@ static int run_normal_process(ThreadedReplayer &replayer, const string &db_path)
 			}
 
 			state_json.resize(state_json_size);
+			tag_total_size += state_json_size;
 
 			if (!resolver->read_entry(tag, hash, &state_json_size, state_json.data(), 0))
 			{
@@ -1045,6 +1084,11 @@ static int run_normal_process(ThreadedReplayer &replayer, const string &db_path)
 			}
 		}
 
+		LOGI("Total binary size for %s: %llu\n", tag_names[tag], static_cast<unsigned long long>(tag_total_size));
+		auto main_thread_end = std::chrono::steady_clock::now();
+		auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(main_thread_end - main_thread_start).count();
+		LOGI("Total time decoding %s in main thread: %.3f s\n", tag_names[tag], duration * 1e-9);
+
 		// Before continuing with pipelines, make sure the threaded shader modules have been created.
 		if (tag == RESOURCE_RENDER_PASS)
 			replayer.sync_worker_threads();
@@ -1052,6 +1096,7 @@ static int run_normal_process(ThreadedReplayer &replayer, const string &db_path)
 
 	// VALVE: drain all outstanding pipeline compiles
 	replayer.sync_worker_threads();
+	replayer.tear_down_threads();
 
 	unsigned long total_size =
 		replayer.samplers.size() +
@@ -1080,6 +1125,12 @@ static int run_normal_process(ThreadedReplayer &replayer, const string &db_path)
 	LOGI("Playing back %u compute pipelines took %.3f s (accumulated time)\n",
 	     replayer.compute_pipeline_count.load(),
 	     replayer.compute_pipeline_ns.load() * 1e-9);
+
+	LOGI("Threads were idling in total for %.3f s (accumulated time)\n",
+	     replayer.total_idle_ns.load() * 1e-9);
+
+	LOGI("Threads were active in total for %.3f s (accumulated time)\n",
+	     replayer.thread_total_ns.load() * 1e-9);
 
 	LOGI("Replayed %lu objects in %ld ms:\n", total_size, elapsed_ms);
 	LOGI("  samplers:              %7lu\n", (unsigned long)replayer.samplers.size());
