@@ -1041,7 +1041,9 @@ static int run_normal_process(ThreadedReplayer &replayer, const string &db_path)
 	{
 		auto main_thread_start = std::chrono::steady_clock::now();
 		size_t tag_total_size = 0;
+		size_t tag_total_size_compressed = 0;
 		size_t resource_hash_count = 0;
+
 		if (!resolver->get_hash_list_for_resource_tag(tag, &resource_hash_count, nullptr))
 		{
 			LOGE("Failed to get list of resource hashes.\n");
@@ -1059,6 +1061,13 @@ static int run_normal_process(ThreadedReplayer &replayer, const string &db_path)
 		for (auto &hash : resource_hashes)
 		{
 			size_t state_json_size = 0;
+			if (!resolver->read_entry(tag, hash, &state_json_size, nullptr, PAYLOAD_READ_RAW_FOSSILIZE_DB_BIT))
+			{
+				LOGE("Failed to load blob from cache.\n");
+				return EXIT_FAILURE;
+			}
+			tag_total_size_compressed += state_json_size;
+
 			if (!resolver->read_entry(tag, hash, &state_json_size, nullptr, 0))
 			{
 				LOGE("Failed to load blob from cache.\n");
@@ -1084,7 +1093,10 @@ static int run_normal_process(ThreadedReplayer &replayer, const string &db_path)
 			}
 		}
 
-		LOGI("Total binary size for %s: %llu\n", tag_names[tag], static_cast<unsigned long long>(tag_total_size));
+		LOGI("Total binary size for %s: %llu (%llu compressed)\n", tag_names[tag],
+		     static_cast<unsigned long long>(tag_total_size),
+		     static_cast<unsigned long long>(tag_total_size_compressed));
+
 		auto main_thread_end = std::chrono::steady_clock::now();
 		auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(main_thread_end - main_thread_start).count();
 		LOGI("Total time decoding %s in main thread: %.3f s\n", tag_names[tag], duration * 1e-9);
