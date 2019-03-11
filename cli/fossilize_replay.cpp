@@ -45,6 +45,7 @@
 #include <fstream>
 #include <atomic>
 #include <algorithm>
+#include <utility>
 
 using namespace Fossilize;
 using namespace std;
@@ -138,6 +139,24 @@ void spurious_deadlock()
 }
 #endif
 
+// Unstable, but deterministic.
+template <typename BidirectionalItr, typename UnaryPredicate>
+BidirectionalItr unstable_remove_if(BidirectionalItr first, BidirectionalItr last, UnaryPredicate &&p)
+{
+	while (first != last)
+	{
+		if (p(*first))
+		{
+			--last;
+			std::swap(*first, *last);
+		}
+		else
+			++first;
+	}
+
+	return first;
+}
+
 struct ThreadedReplayer : StateCreatorInterface
 {
 	struct Options
@@ -162,6 +181,22 @@ struct ThreadedReplayer : StateCreatorInterface
 
 		void (*on_thread_callback)(void *userdata) = nullptr;
 		void *on_thread_callback_userdata = nullptr;
+	};
+
+	struct DeferredGraphicsInfo
+	{
+		VkGraphicsPipelineCreateInfo *info;
+		Hash hash;
+		VkPipeline *pipeline;
+		bool contributes_to_index;
+	};
+
+	struct DeferredComputeInfo
+	{
+		VkComputePipelineCreateInfo *info;
+		Hash hash;
+		VkPipeline *pipeline;
+		bool contributes_to_index;
 	};
 
 	ThreadedReplayer(const VulkanDevice::Options &device_opts_, const Options &opts_)
@@ -249,8 +284,8 @@ struct ThreadedReplayer : StateCreatorInterface
 					{
 						auto end_time = chrono::steady_clock::now();
 						duration_ns = chrono::duration_cast<chrono::nanoseconds>(end_time - start_time).count();
-						shader_module_ns += duration_ns;
-						shader_module_count++;
+						shader_ns += duration_ns;
+						shader_count++;
 						*work_item.hash_map_entry.shader_module = *work_item.output.shader_module;
 
 						if (robustness)
@@ -267,7 +302,8 @@ struct ThreadedReplayer : StateCreatorInterface
 
 			case RESOURCE_GRAPHICS_PIPELINE:
 			{
-				thread_current_graphics_index++;
+				if (work_item.contributes_to_index)
+					thread_current_graphics_index++;
 
 				// Make sure to iterate the index so main thread and worker threads
 				// have a coherent idea of replayer state.
@@ -285,6 +321,17 @@ struct ThreadedReplayer : StateCreatorInterface
 					{
 						VkShaderModule module = work_item.create_info.graphics_create_info->pStages[i].module;
 						failed_module_hashes[i] = shader_module_to_hash[module];
+					}
+				}
+
+				if ((work_item.create_info.graphics_create_info->flags & VK_PIPELINE_CREATE_DERIVATIVE_BIT) != 0)
+				{
+					// This pipeline failed for some reason, don't try to compile this one either.
+					if (work_item.create_info.graphics_create_info->basePipelineHandle == VK_NULL_HANDLE)
+					{
+						*work_item.output.pipeline = VK_NULL_HANDLE;
+						LOGE("Invalid derivative pipeline!\n");
+						break;
 					}
 				}
 
@@ -306,11 +353,16 @@ struct ThreadedReplayer : StateCreatorInterface
 					{
 						auto end_time = chrono::steady_clock::now();
 						duration_ns = chrono::duration_cast<chrono::nanoseconds>(end_time - start_time).count();
-						graphics_pipeline_ns += duration_ns;
-						graphics_pipeline_count++;
+
+						if (work_item.contributes_to_index)
+						{
+							graphics_ns += duration_ns;
+							graphics_count++;
+						}
+
 						*work_item.hash_map_entry.pipeline = *work_item.output.pipeline;
 
-						if (opts.control_block && i == 0)
+						if (opts.control_block && i == 0 && work_item.contributes_to_index)
 							opts.control_block->successful_graphics.fetch_add(1, std::memory_order_relaxed);
 					}
 					else
@@ -324,7 +376,8 @@ struct ThreadedReplayer : StateCreatorInterface
 
 			case RESOURCE_COMPUTE_PIPELINE:
 			{
-				thread_current_compute_index++;
+				if (work_item.contributes_to_index)
+					thread_current_compute_index++;
 
 				// Make sure to iterate the index so main thread and worker threads
 				// have a coherent idea of replayer state.
@@ -340,6 +393,16 @@ struct ThreadedReplayer : StateCreatorInterface
 					num_failed_module_hashes = 1;
 					VkShaderModule module = work_item.create_info.compute_create_info->stage.module;
 					failed_module_hashes[0] = shader_module_to_hash[module];
+				}
+
+				if ((work_item.create_info.compute_create_info->flags & VK_PIPELINE_CREATE_DERIVATIVE_BIT) != 0)
+				{
+					// This pipeline failed for some reason, don't try to compile this one either.
+					if (work_item.create_info.compute_create_info->basePipelineHandle == VK_NULL_HANDLE)
+					{
+						*work_item.output.pipeline = VK_NULL_HANDLE;
+						break;
+					}
 				}
 
 				for (unsigned i = 0; i < loop_count; i++)
@@ -361,11 +424,16 @@ struct ThreadedReplayer : StateCreatorInterface
 					{
 						auto end_time = chrono::steady_clock::now();
 						duration_ns = chrono::duration_cast<chrono::nanoseconds>(end_time - start_time).count();
-						compute_pipeline_ns += duration_ns;
-						compute_pipeline_count++;
+
+						if (work_item.contributes_to_index)
+						{
+							compute_ns += duration_ns;
+							compute_count++;
+						}
+
 						*work_item.hash_map_entry.pipeline = *work_item.output.pipeline;
 
-						if (opts.control_block && i == 0)
+						if (opts.control_block && i == 0 && work_item.contributes_to_index)
 							opts.control_block->successful_compute.fetch_add(1, std::memory_order_relaxed);
 					}
 					else
@@ -690,8 +758,17 @@ struct ThreadedReplayer : StateCreatorInterface
 
 	bool enqueue_create_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
-		if (compute_pipeline_index >= opts.start_compute_index &&
-		    compute_pipeline_index < opts.end_compute_index)
+		bool derived = (create_info->flags & VK_PIPELINE_CREATE_DERIVATIVE_BIT) != 0;
+		if (derived && create_info->basePipelineHandle == VK_NULL_HANDLE)
+			LOGE("Creating a derived pipeline with NULL handle.\n");
+
+		if (derived)
+		{
+			// We don't have the appropriate base pipeline yet, so defer it.
+			derived_compute.push_back({ const_cast<VkComputePipelineCreateInfo *>(create_info), hash, pipeline, true });
+		}
+		else if (compute_pipeline_index >= opts.start_compute_index &&
+		         compute_pipeline_index < opts.end_compute_index)
 		{
 			PipelineWorkItem work_item = {};
 			work_item.hash = hash;
@@ -716,16 +793,41 @@ struct ThreadedReplayer : StateCreatorInterface
 			}
 		}
 		else
+		{
+			// We might have to replay this later if a derived pipeline required this
+			// pipeline after all.
+			if ((create_info->flags & VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT) != 0)
+			{
+				potential_compute_parent[hash] = {
+					const_cast<VkComputePipelineCreateInfo *>(create_info),
+					hash,
+					pipeline,
+					false
+				};
+			}
 			*pipeline = VK_NULL_HANDLE;
+		}
 
-		compute_pipeline_index++;
+		// Makes it so that derived pipelines are indexed last. We need a stable pipeline index order which also allows
+		// us to pipeline parsing with pipeline compilation.
+		if (!derived)
+			compute_pipeline_index++;
 		return true;
 	}
 
 	bool enqueue_create_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
-		if (graphics_pipeline_index >= opts.start_graphics_index &&
-		    graphics_pipeline_index < opts.end_graphics_index)
+		bool derived = (create_info->flags & VK_PIPELINE_CREATE_DERIVATIVE_BIT) != 0;
+		if (derived && create_info->basePipelineHandle == VK_NULL_HANDLE)
+			LOGE("Creating a derived pipeline with NULL handle.\n");
+
+		if (derived)
+		{
+			// We don't have the appropriate base pipeline yet, so defer it.
+			derived_graphics.push_back({ const_cast<VkGraphicsPipelineCreateInfo *>(create_info), hash, pipeline, true });
+		}
+		else if (graphics_pipeline_index >= opts.start_graphics_index &&
+		         graphics_pipeline_index < opts.end_graphics_index)
 		{
 			bool valid_handles = true;
 			for (uint32_t i = 0; i < create_info->stageCount; i++)
@@ -755,9 +857,166 @@ struct ThreadedReplayer : StateCreatorInterface
 			}
 		}
 		else
+		{
+			// We might have to replay this later if a derived pipeline requires this
+			// pipeline after all.
+			if ((create_info->flags & VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT) != 0)
+			{
+				potential_graphics_parent[hash] = {
+					const_cast<VkGraphicsPipelineCreateInfo *>(create_info),
+					hash,
+					pipeline,
+					false,
+				};
+			}
 			*pipeline = VK_NULL_HANDLE;
+		}
 
-		graphics_pipeline_index++;
+		// Makes it so that derived pipelines are indexed last. We need a stable pipeline index order which also allows
+		// us to pipeline parsing with pipeline compilation.
+		if (!derived)
+			graphics_pipeline_index++;
+
+		return true;
+	}
+
+	template <typename DerivedInfo>
+	bool resolve_derived_pipelines(vector<DerivedInfo> &derived, unordered_map<Hash, DerivedInfo> &potential_parent,
+	                               unordered_map<Hash, VkPipeline> &pipelines)
+	{
+		// Figure out which of the potential parent pipelines we really need.
+		for (auto &derived : derived)
+		{
+			auto itr = potential_parent.find((Hash)derived.info->basePipelineHandle);
+			if (itr != end(potential_parent))
+			{
+				// No dependencies, enqueue it, but it must not contribute to the pipeline index in any way, since
+				// it lived outside our expected replay range.
+				enqueue_pipeline(itr->second.hash, itr->second.info, itr->second.pipeline, itr->second.contributes_to_index);
+				potential_parent.erase(itr);
+			}
+		}
+
+		// We will have to potentially iterate a bit here.
+		// It is technically possible to have a deep hierarchy of derived pipelines, but we don't optimize for that case here.
+		while (!derived.empty())
+		{
+			// Go over all pipelines. If there are no further dependencies to resolve, we can go ahead and queue them up.
+			// If an entry exists in graphics_pipelines, we have queued up that hash earlier, but it might not be done compiling yet.
+			auto itr = unstable_remove_if(begin(derived), end(derived), [&](const DerivedInfo &info) -> bool {
+				Hash hash = (Hash)info.info->basePipelineHandle;
+				return pipelines.count(hash) != 0;
+			});
+
+			if (itr == end(derived)) // We cannot progress ... This shouldn't happen.
+			{
+				LOGE("Nothing more to do in resolve_derived_pipelines, but there are still pipelines left to replay.\n");
+				return false;
+			}
+
+			sync_worker_threads();
+
+			// Now we can enqueue with correct pipeline handles.
+			for (auto i = itr; i != end(derived); ++i)
+			{
+				i->info->basePipelineHandle = pipelines[(Hash)i->info->basePipelineHandle];
+				if (!enqueue_pipeline(i->hash, i->info, i->pipeline, i->contributes_to_index))
+					return false;
+			}
+
+			// The pipelines are now in-flight, try resolving new dependencies in next iteration.
+			derived.erase(itr, end(derived));
+		}
+
+		return true;
+	}
+
+	bool resolve_derived_compute_pipelines()
+	{
+		return resolve_derived_pipelines(derived_compute, potential_compute_parent, compute_pipelines);
+	}
+
+	bool resolve_derived_graphics_pipelines()
+	{
+		return resolve_derived_pipelines(derived_graphics, potential_graphics_parent, graphics_pipelines);
+	}
+
+	bool enqueue_pipeline(Hash hash, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline,
+	                      bool contributes_to_index)
+	{
+		if (!contributes_to_index ||
+		    (compute_pipeline_index >= opts.start_compute_index &&
+		     compute_pipeline_index < opts.end_compute_index))
+		{
+			PipelineWorkItem work_item = {};
+			work_item.hash = hash;
+			work_item.tag = RESOURCE_COMPUTE_PIPELINE;
+			work_item.output.pipeline = pipeline;
+			work_item.contributes_to_index = contributes_to_index;
+
+			if (create_info->stage.module != VK_NULL_HANDLE)
+			{
+				// Pointer to value in std::unordered_map remains fixed per spec (node-based).
+				work_item.hash_map_entry.pipeline = &compute_pipelines[hash];
+				work_item.create_info.compute_create_info = create_info;
+			}
+			//else
+			//	LOGE("Skipping replay of graphics pipeline index %u.\n", graphics_pipeline_index);
+
+			{
+				// Pipeline parsing with pipeline creation.
+				lock_guard<mutex> lock(pipeline_work_queue_mutex);
+				pipeline_work_queue.push(work_item);
+				work_available_condition.notify_one();
+				queued_count++;
+			}
+		}
+
+		if (contributes_to_index)
+			compute_pipeline_index++;
+
+		return true;
+	}
+
+	bool enqueue_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline,
+	                      bool contributes_to_index)
+	{
+		if (!contributes_to_index ||
+		    (graphics_pipeline_index >= opts.start_graphics_index &&
+		     graphics_pipeline_index < opts.end_graphics_index))
+		{
+			bool valid_handles = true;
+			for (uint32_t i = 0; i < create_info->stageCount; i++)
+				if (create_info->pStages[i].module == VK_NULL_HANDLE)
+					valid_handles = false;
+
+			PipelineWorkItem work_item = {};
+			work_item.hash = hash;
+			work_item.tag = RESOURCE_GRAPHICS_PIPELINE;
+			work_item.output.pipeline = pipeline;
+			work_item.contributes_to_index = contributes_to_index;
+
+			if (valid_handles)
+			{
+				// Pointer to value in std::unordered_map remains fixed per spec (node-based).
+				work_item.hash_map_entry.pipeline = &graphics_pipelines[hash];
+				work_item.create_info.graphics_create_info = create_info;
+			}
+			//else
+			//	LOGE("Skipping replay of graphics pipeline index %u.\n", graphics_pipeline_index);
+
+			{
+				// Pipeline parsing with pipeline creation.
+				lock_guard<mutex> lock(pipeline_work_queue_mutex);
+				pipeline_work_queue.push(work_item);
+				work_available_condition.notify_one();
+				queued_count++;
+			}
+		}
+
+		if (contributes_to_index)
+			graphics_pipeline_index++;
+
 		return true;
 	}
 
@@ -806,6 +1065,7 @@ struct ThreadedReplayer : StateCreatorInterface
 	{
 		Hash hash = 0;
 		ResourceTag tag = RESOURCE_COUNT;
+		bool contributes_to_index = true;
 
 		union
 		{
@@ -836,6 +1096,11 @@ struct ThreadedReplayer : StateCreatorInterface
 	std::queue<PipelineWorkItem> pipeline_work_queue;
 	std::condition_variable work_available_condition;
 	std::condition_variable work_done_condition;
+
+	std::unordered_map<Hash, DeferredGraphicsInfo> potential_graphics_parent;
+	std::unordered_map<Hash, DeferredComputeInfo> potential_compute_parent;
+	std::vector<DeferredGraphicsInfo> derived_graphics;
+	std::vector<DeferredComputeInfo> derived_compute;
 
 	// Feed statistics from the worker threads.
 	std::atomic<std::uint64_t> graphics_pipeline_ns;
@@ -1011,6 +1276,7 @@ static int run_normal_process(ThreadedReplayer &replayer, const string &db_path)
 	auto end_prepare = chrono::steady_clock::now();
 
 	StateReplayer state_replayer;
+	state_replayer.set_resolve_derivative_pipeline_handles(false);
 
 	vector<Hash> resource_hashes;
 	vector<uint8_t> state_json;
@@ -1048,6 +1314,17 @@ static int run_normal_process(ThreadedReplayer &replayer, const string &db_path)
 		{
 			LOGE("Failed to get list of resource hashes.\n");
 			return EXIT_FAILURE;
+		}
+
+		if (tag == RESOURCE_GRAPHICS_PIPELINE)
+		{
+			replayer.derived_graphics.reserve(resource_hash_count);
+			replayer.potential_graphics_parent.reserve(resource_hash_count);
+		}
+		else if (tag == RESOURCE_COMPUTE_PIPELINE)
+		{
+			replayer.derived_compute.reserve(resource_hash_count);
+			replayer.potential_compute_parent.reserve(resource_hash_count);
 		}
 
 		resource_hashes.resize(resource_hash_count);
@@ -1104,6 +1381,10 @@ static int run_normal_process(ThreadedReplayer &replayer, const string &db_path)
 		// Before continuing with pipelines, make sure the threaded shader modules have been created.
 		if (tag == RESOURCE_RENDER_PASS)
 			replayer.sync_worker_threads();
+		else if (tag == RESOURCE_GRAPHICS_PIPELINE && !replayer.derived_graphics.empty())
+			replayer.resolve_derived_graphics_pipelines();
+		else if (tag == RESOURCE_COMPUTE_PIPELINE && !replayer.derived_compute.empty())
+			replayer.resolve_derived_compute_pipelines();
 	}
 
 	// VALVE: drain all outstanding pipeline compiles
@@ -1281,5 +1562,6 @@ int main(int argc, char *argv[])
 		ThreadedReplayer replayer(opts, replayer_opts);
 		ret = run_normal_process(replayer, db_path);
 	}
+
 	return ret;
 }

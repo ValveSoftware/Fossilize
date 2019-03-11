@@ -127,6 +127,13 @@ public:
 	StateReplayer();
 	~StateReplayer();
 	void parse(StateCreatorInterface &iface, DatabaseInterface *database, const void *buffer, size_t size);
+
+	// Default is true. If true, the replayer will make sure the derivative pipeline handles provided to
+	// the API is a correct VkPipeline. If false, pipelines with VK_PIPELINE_CREATE_DERIVATIVE_BIT will have its basePipelineHandle
+	// set to the hash of the pipeline. It is up to the caller to resolve this hash to a real pipeline later.
+	// Setting to false can help improve replay performance in multi-threaded scenarios.
+	void set_resolve_derivative_pipeline_handles(bool enable);
+
 	ScratchAllocator &get_allocator();
 
 	// Disable copies (and moves).
@@ -170,8 +177,10 @@ public:
 	void record_descriptor_set_layout(VkDescriptorSetLayout set_layout, const VkDescriptorSetLayoutCreateInfo &layout_info);
 	void record_pipeline_layout(VkPipelineLayout pipeline_layout, const VkPipelineLayoutCreateInfo &layout_info);
 	void record_shader_module(VkShaderModule module, const VkShaderModuleCreateInfo &create_info);
-	void record_graphics_pipeline(VkPipeline pipeline, const VkGraphicsPipelineCreateInfo &create_info);
-	void record_compute_pipeline(VkPipeline pipeline, const VkComputePipelineCreateInfo &create_info);
+	void record_graphics_pipeline(VkPipeline pipeline, const VkGraphicsPipelineCreateInfo &create_info,
+	                              const VkPipeline *base_pipelines, uint32_t base_pipeline_count);
+	void record_compute_pipeline(VkPipeline pipeline, const VkComputePipelineCreateInfo &create_info,
+	                             const VkPipeline *base_pipelines, uint32_t base_pipeline_count);
 	void record_render_pass(VkRenderPass render_pass, const VkRenderPassCreateInfo &create_info);
 	void record_sampler(VkSampler sampler, const VkSamplerCreateInfo &create_info);
 

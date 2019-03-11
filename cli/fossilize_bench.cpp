@@ -181,7 +181,7 @@ static void bench_recorder(const char *path, bool compressed, bool checksum)
 		VkPipelineViewportStateCreateInfo vp = { VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
 		info.pViewportState = &vp;
 
-		recorder.record_graphics_pipeline((VkPipeline)uint64_t(i + 1), info);
+		recorder.record_graphics_pipeline((VkPipeline)uint64_t(i + 1), info, nullptr, 0);
 	}
 }
 

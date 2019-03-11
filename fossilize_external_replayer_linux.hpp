@@ -299,7 +299,8 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 			argv.push_back(self_path.c_str());
 		argv.push_back(options.database);
 		argv.push_back("--master-process");
-		argv.push_back("--quiet-slave");
+		if (options.quiet)
+			argv.push_back("--quiet-slave");
 		argv.push_back("--shmem-fd");
 		argv.push_back(fd_name);
 

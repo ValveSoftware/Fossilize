@@ -86,14 +86,14 @@ struct OptimizeReplayer : StateCreatorInterface
 	bool enqueue_create_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
 		*pipeline = fake_handle<VkPipeline>(hash);
-		recorder.record_compute_pipeline(*pipeline, *create_info);
+		recorder.record_compute_pipeline(*pipeline, *create_info, nullptr, 0);
 		return true;
 	}
 
 	bool enqueue_create_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
 		*pipeline = fake_handle<VkPipeline>(hash);
-		recorder.record_graphics_pipeline(*pipeline, *create_info);
+		recorder.record_graphics_pipeline(*pipeline, *create_info, nullptr, 0);
 		return true;
 	}
 };

@@ -148,24 +148,22 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(VkDevice device, V
 {
 	auto *layer = get_device_layer(device);
 
+	// Have to create all pipelines here, in case the application makes use of basePipelineIndex.
+	auto res = layer->getTable()->CreateGraphicsPipelines(layer->getDevice(), pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
+	if (res != VK_SUCCESS)
+		return res;
+
 	for (uint32_t i = 0; i < createInfoCount; i++)
 	{
-		auto res = layer->getTable()->CreateGraphicsPipelines(layer->getDevice(), pipelineCache, 1, &pCreateInfos[i], pAllocator, &pPipelines[i]);
-
-		if (res == VK_SUCCESS)
+		try
 		{
-			try
-			{
-				// Record methods may throw on unexpected input. We cannot propagate this error up.
-				layer->getRecorder().record_graphics_pipeline(pPipelines[i], pCreateInfos[i]);
-			}
-			catch (const std::exception &e)
-			{
-				LOGE("Failed to record graphics pipeline: %s\n", e.what());
-			}
+			// Record methods may throw on unexpected input. We cannot propagate this error up.
+			layer->getRecorder().record_graphics_pipeline(pPipelines[i], pCreateInfos[i], pPipelines, createInfoCount);
 		}
-		else
-			return res;
+		catch (const std::exception &e)
+		{
+			LOGE("Failed to record graphics pipeline: %s\n", e.what());
+		}
 	}
 
 	return VK_SUCCESS;
@@ -179,24 +177,22 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelines(VkDevice device, Vk
 {
 	auto *layer = get_device_layer(device);
 
+	// Have to create all pipelines here, in case the application makes use of basePipelineIndex.
+	auto res = layer->getTable()->CreateComputePipelines(layer->getDevice(), pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
+	if (res != VK_SUCCESS)
+		return res;
+
 	for (uint32_t i = 0; i < createInfoCount; i++)
 	{
-		auto res = layer->getTable()->CreateComputePipelines(layer->getDevice(), pipelineCache, 1, &pCreateInfos[i], pAllocator, &pPipelines[i]);
-
-		if (res == VK_SUCCESS)
+		try
 		{
-			try
-			{
-				// Record methods may throw on unexpected input. We cannot propagate this error up.
-				layer->getRecorder().record_compute_pipeline(pPipelines[i], pCreateInfos[i]);
-			}
-			catch (const std::exception &e)
-			{
-				LOGE("Failed to record compute pipeline: %s\n", e.what());
-			}
+			// Record methods may throw on unexpected input. We cannot propagate this error up.
+			layer->getRecorder().record_compute_pipeline(pPipelines[i], pCreateInfos[i], pPipelines, createInfoCount);
 		}
-		else
-			return res;
+		catch (const std::exception &e)
+		{
+			LOGE("Failed to record compute pipeline: %s\n", e.what());
+		}
 	}
 
 	return VK_SUCCESS;

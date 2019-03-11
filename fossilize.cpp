@@ -188,6 +188,7 @@ struct StateReplayer::Impl
 	VkPipelineVertexInputDivisorStateCreateInfoEXT *parse_vertex_input_divisor_state(const Value &state);
 	uint32_t *parse_uints(const Value &attachments);
 	const char *duplicate_string(const char *str, size_t len);
+	bool resolve_derivative_pipelines = true;
 
 	template <typename T>
 	T *copy(const T *src, size_t count);
@@ -232,8 +233,10 @@ struct StateRecorder::Impl
 	VkDescriptorSetLayoutCreateInfo *copy_descriptor_set_layout(const VkDescriptorSetLayoutCreateInfo *create_info, ScratchAllocator &alloc);
 	VkPipelineLayoutCreateInfo *copy_pipeline_layout(const VkPipelineLayoutCreateInfo *create_info, ScratchAllocator &alloc);
 	VkShaderModuleCreateInfo *copy_shader_module(const VkShaderModuleCreateInfo *create_info, ScratchAllocator &alloc);
-	VkGraphicsPipelineCreateInfo *copy_graphics_pipeline(const VkGraphicsPipelineCreateInfo *create_info, ScratchAllocator &alloc);
-	VkComputePipelineCreateInfo *copy_compute_pipeline(const VkComputePipelineCreateInfo *create_info, ScratchAllocator &alloc);
+	VkGraphicsPipelineCreateInfo *copy_graphics_pipeline(const VkGraphicsPipelineCreateInfo *create_info, ScratchAllocator &alloc,
+	                                                     const VkPipeline *base_pipelines, uint32_t base_pipeline_count);
+	VkComputePipelineCreateInfo *copy_compute_pipeline(const VkComputePipelineCreateInfo *create_info, ScratchAllocator &alloc,
+	                                                   const VkPipeline *base_pipelines, uint32_t base_pipeline_count);
 	VkSamplerCreateInfo *copy_sampler(const VkSamplerCreateInfo *create_info, ScratchAllocator &alloc);
 	VkRenderPassCreateInfo *copy_render_pass(const VkRenderPassCreateInfo *create_info, ScratchAllocator &alloc);
 	VkApplicationInfo *copy_application_info(const VkApplicationInfo *app_info, ScratchAllocator &alloc);
@@ -1441,7 +1444,7 @@ void StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, D
 	info.basePipelineIndex = obj["basePipelineIndex"].GetInt();
 
 	auto pipeline = string_to_uint64(obj["basePipelineHandle"].GetString());
-	if (pipeline > 0)
+	if (pipeline > 0 && resolve_derivative_pipelines)
 	{
 		// This is pretty bad for multithreaded replay, but this should be very rare.
 		iface.sync_threads();
@@ -1482,6 +1485,8 @@ void StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, D
 		}
 		info.basePipelineHandle = pipeline_iter->second;
 	}
+	else
+		info.basePipelineHandle = api_object_cast<VkPipeline>(pipeline);
 
 	auto layout = string_to_uint64(obj["layout"].GetString());
 	if (layout > 0)
@@ -1861,7 +1866,7 @@ void StateReplayer::Impl::parse_graphics_pipeline(StateCreatorInterface &iface, 
 	info.basePipelineIndex = obj["basePipelineIndex"].GetInt();
 
 	auto pipeline = string_to_uint64(obj["basePipelineHandle"].GetString());
-	if (pipeline > 0)
+	if (pipeline > 0 && resolve_derivative_pipelines)
 	{
 		// This is pretty bad for multithreaded replay, but this should be very rare.
 		iface.sync_threads();
@@ -1901,6 +1906,8 @@ void StateReplayer::Impl::parse_graphics_pipeline(StateCreatorInterface &iface, 
 		}
 		info.basePipelineHandle = pipeline_iter->second;
 	}
+	else
+		info.basePipelineHandle = api_object_cast<VkPipeline>(pipeline);
 
 	auto layout = string_to_uint64(obj["layout"].GetString());
 	if (layout > 0)
@@ -2031,6 +2038,11 @@ ScratchAllocator &StateReplayer::get_allocator()
 void StateReplayer::parse(StateCreatorInterface &iface, DatabaseInterface *resolver, const void *buffer, size_t size)
 {
 	impl->parse(iface, resolver, buffer, size);
+}
+
+void StateReplayer::set_resolve_derivative_pipeline_handles(bool enable)
+{
+	impl->resolve_derivative_pipelines = enable;
 }
 
 void StateReplayer::Impl::parse(StateCreatorInterface &iface, DatabaseInterface *resolver, const void *buffer_, size_t total_size)
@@ -2311,7 +2323,8 @@ void StateRecorder::record_pipeline_layout(VkPipelineLayout pipeline_layout, con
 		impl->record_task(this, false);
 }
 
-void StateRecorder::record_graphics_pipeline(VkPipeline pipeline, const VkGraphicsPipelineCreateInfo &create_info)
+void StateRecorder::record_graphics_pipeline(VkPipeline pipeline, const VkGraphicsPipelineCreateInfo &create_info,
+                                             const VkPipeline *base_pipelines, uint32_t base_pipeline_count)
 {
 	{
 		if (create_info.pNext)
@@ -2319,7 +2332,9 @@ void StateRecorder::record_graphics_pipeline(VkPipeline pipeline, const VkGraphi
 		std::lock_guard<std::mutex> lock(impl->record_lock);
 		impl->record_queue.push({api_object_cast<uint64_t>(pipeline),
 		                         reinterpret_cast<void *>(impl->copy_graphics_pipeline(&create_info,
-		                                                                               impl->temp_allocator))});
+		                                                                               impl->temp_allocator,
+		                                                                               base_pipelines,
+		                                                                               base_pipeline_count))});
 		impl->record_cv.notify_one();
 	}
 
@@ -2328,7 +2343,8 @@ void StateRecorder::record_graphics_pipeline(VkPipeline pipeline, const VkGraphi
 		impl->record_task(this, false);
 }
 
-void StateRecorder::record_compute_pipeline(VkPipeline pipeline, const VkComputePipelineCreateInfo &create_info)
+void StateRecorder::record_compute_pipeline(VkPipeline pipeline, const VkComputePipelineCreateInfo &create_info,
+                                            const VkPipeline *base_pipelines, uint32_t base_pipeline_count)
 {
 	{
 		if (create_info.pNext)
@@ -2336,7 +2352,9 @@ void StateRecorder::record_compute_pipeline(VkPipeline pipeline, const VkCompute
 		std::lock_guard<std::mutex> lock(impl->record_lock);
 		impl->record_queue.push({api_object_cast<uint64_t>(pipeline),
 		                         reinterpret_cast<void *>(impl->copy_compute_pipeline(&create_info,
-		                                                                              impl->temp_allocator))});
+		                                                                              impl->temp_allocator,
+		                                                                              base_pipelines,
+		                                                                              base_pipeline_count))});
 		impl->record_cv.notify_one();
 	}
 
@@ -2517,9 +2535,27 @@ VkSpecializationInfo *StateRecorder::Impl::copy_specialization_info(const VkSpec
 	return ret;
 }
 
-VkComputePipelineCreateInfo *StateRecorder::Impl::copy_compute_pipeline(const VkComputePipelineCreateInfo *create_info, ScratchAllocator &alloc)
+VkComputePipelineCreateInfo *StateRecorder::Impl::copy_compute_pipeline(const VkComputePipelineCreateInfo *create_info, ScratchAllocator &alloc,
+                                                                        const VkPipeline *base_pipelines, uint32_t base_pipeline_count)
 {
 	auto *info = copy(create_info, 1, alloc);
+
+	// Check for case where application made use of derivative pipelines and relied on the indexing behavior
+	// into an array of pCreateInfos. In the replayer, we only do it one by one,
+	// so we need to pass the correct handle to the create pipeline calls.
+	if ((info->flags & VK_PIPELINE_CREATE_DERIVATIVE_BIT) != 0)
+	{
+		if (info->basePipelineHandle == VK_NULL_HANDLE &&
+		    info->basePipelineIndex >= 0)
+		{
+			if (uint32_t(info->basePipelineIndex) >= base_pipeline_count)
+				FOSSILIZE_THROW("Base pipeline index is out of range.");
+
+			info->basePipelineHandle = base_pipelines[info->basePipelineIndex];
+			info->basePipelineIndex = -1;
+		}
+	}
+
 	if (info->stage.pSpecializationInfo)
 		info->stage.pSpecializationInfo = copy_specialization_info(info->stage.pSpecializationInfo, alloc);
 	if (info->stage.pNext)
@@ -2528,9 +2564,26 @@ VkComputePipelineCreateInfo *StateRecorder::Impl::copy_compute_pipeline(const Vk
 	return info;
 }
 
-VkGraphicsPipelineCreateInfo *StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateInfo *create_info, ScratchAllocator &alloc)
+VkGraphicsPipelineCreateInfo *StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateInfo *create_info, ScratchAllocator &alloc,
+                                                                          const VkPipeline *base_pipelines, uint32_t base_pipeline_count)
 {
 	auto *info = copy(create_info, 1, alloc);
+
+	// Check for case where application made use of derivative pipelines and relied on the indexing behavior
+	// into an array of pCreateInfos. In the replayer, we only do it one by one,
+	// so we need to pass the correct handle to the create pipeline calls.
+	if ((info->flags & VK_PIPELINE_CREATE_DERIVATIVE_BIT) != 0)
+	{
+		if (info->basePipelineHandle == VK_NULL_HANDLE &&
+		    info->basePipelineIndex >= 0)
+		{
+			if (uint32_t(info->basePipelineIndex) >= base_pipeline_count)
+				FOSSILIZE_THROW("Base pipeline index is out of range.");
+
+			info->basePipelineHandle = base_pipelines[info->basePipelineIndex];
+			info->basePipelineIndex = -1;
+		}
+	}
 
 	info->pStages = copy(info->pStages, info->stageCount, alloc);
 	if (info->pTessellationState)
@@ -3022,7 +3075,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 				auto hash = Hashing::compute_hash_graphics_pipeline(*recorder, *create_info);
 				graphics_pipeline_to_hash[api_object_cast<VkPipeline>(record_item.handle)] = hash;
 
-				auto create_info_copy = copy_graphics_pipeline(create_info, allocator);
+				auto create_info_copy = copy_graphics_pipeline(create_info, allocator, nullptr, 0);
 				remap_graphics_pipeline_ci(create_info_copy);
 
 				if (database_iface)
@@ -3052,7 +3105,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 				auto hash = Hashing::compute_hash_compute_pipeline(*recorder, *create_info);
 				compute_pipeline_to_hash[api_object_cast<VkPipeline>(record_item.handle)] = hash;
 
-				auto create_info_copy = copy_compute_pipeline(create_info, allocator);
+				auto create_info_copy = copy_compute_pipeline(create_info, allocator, nullptr, 0);
 				remap_compute_pipeline_ci(create_info_copy);
 
 				if (database_iface)

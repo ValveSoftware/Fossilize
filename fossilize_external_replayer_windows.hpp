@@ -240,7 +240,8 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 	cmdline += options.database;
 	cmdline += "\"";
 	cmdline += " --master-process";
-	cmdline += " --quiet-slave";
+	if (options.quiet)
+		cmdline += " --quiet-slave";
 	cmdline += " --shm-name ";
 	cmdline += shm_name;
 	cmdline += " --shm-mutex-name ";
