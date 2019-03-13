@@ -120,7 +120,7 @@ struct ReplayInterface : StateCreatorInterface
 			return false;
 
 		*pipeline = fake_handle<VkPipeline>(hash);
-		recorder.record_compute_pipeline(*pipeline, *create_info);
+		recorder.record_compute_pipeline(*pipeline, *create_info, nullptr, 0);
 		return true;
 	}
 
@@ -131,7 +131,7 @@ struct ReplayInterface : StateCreatorInterface
 			return false;
 
 		*pipeline = fake_handle<VkPipeline>(hash);
-		recorder.record_graphics_pipeline(*pipeline, *create_info);
+		recorder.record_graphics_pipeline(*pipeline, *create_info, nullptr, 0);
 		return true;
 	}
 };
@@ -324,12 +324,12 @@ static void record_compute_pipelines(StateRecorder &recorder)
 	pipe.stage.pSpecializationInfo = &spec;
 	pipe.layout = fake_handle<VkPipelineLayout>(10001);
 
-	recorder.record_compute_pipeline(fake_handle<VkPipeline>(80000), pipe);
+	recorder.record_compute_pipeline(fake_handle<VkPipeline>(80000), pipe, nullptr, 0);
 
 	//pipe.basePipelineHandle = fake_handle<VkPipeline>(80000);
 	pipe.basePipelineIndex = 10;
 	pipe.stage.pSpecializationInfo = nullptr;
-	recorder.record_compute_pipeline(fake_handle<VkPipeline>(80001), pipe);
+	recorder.record_compute_pipeline(fake_handle<VkPipeline>(80001), pipe, nullptr, 0);
 }
 
 static void record_graphics_pipelines(StateRecorder &recorder)
@@ -497,13 +497,13 @@ static void record_graphics_pipelines(StateRecorder &recorder)
 	pipe.pRasterizationState = &rs;
 	pipe.pInputAssemblyState = &ia;
 
-	recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100000), pipe);
+	recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100000), pipe, nullptr, 0);
 
 	vp.viewportCount = 0;
 	vp.scissorCount = 0;
 	pipe.basePipelineHandle = fake_handle<VkPipeline>(100000);
 	pipe.basePipelineIndex = 200;
-	recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100001), pipe);
+	recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100001), pipe, nullptr, 0);
 }
 
 static bool test_database()
