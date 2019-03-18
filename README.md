@@ -239,6 +239,15 @@ This tool serves as the main "repro" tool as well as a pipeline driver cache war
 After you have a capture, you should ideally be able to repro crashes using this tool.
 To make replay faster, use `--graphics-pipeline-range [start-index] [end-index]` and `--compute-pipeline-range [start-index] [end-index]` to isolate which pipelines are actually compiled.
 
+### `fossilize-merge-db`
+
+This tool merges and appends multiple databases into one database.
+
+### `fossilize-convert-db`
+
+This tool can convert the binary Fossilize database to a human readable representation and back to a Fossilize database.
+This can be used to inspect individual database entries by hand.
+
 ### `fossilize-disasm`
 
 **NOTE: This tool hasn't been updated since the change to the new database format. It might not work as intended at the moment.**
