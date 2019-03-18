@@ -30,12 +30,13 @@
 namespace Fossilize
 {
 
-void Device::init(VkPhysicalDevice gpu_, VkDevice device_, Instance *pInstance,
+void Device::init(VkPhysicalDevice gpu_, VkDevice device_, Instance *pInstance_,
                   const VkPhysicalDeviceFeatures2 &features,
                   VkLayerDispatchTable *pTable_)
 {
 	gpu = gpu_;
 	device = device_;
+	pInstance = pInstance_;
 	pInstanceTable = pInstance->getTable();
 	pTable = pTable_;
 	recorder = Instance::getStateRecorderForDevice(pInstance->getApplicationInfo(), &features);

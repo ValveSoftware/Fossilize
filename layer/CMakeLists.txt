@@ -11,6 +11,11 @@ target_include_directories(VkLayer_fossilize PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 target_compile_options(VkLayer_fossilize PUBLIC ${FOSSILIZE_CXX_FLAGS})
 set_target_properties(VkLayer_fossilize PROPERTIES LINK_FLAGS "${FOSSILIZE_LINK_FLAGS}")
 
+option(FOSSILIZE_LAYER_CAPTURE_SIGSEGV "Support capturing segfaults." ON)
+if (FOSSILIZE_LAYER_CAPTURE_SIGSEGV)
+	target_compile_definitions(VkLayer_fossilize PRIVATE FOSSILIZE_LAYER_CAPTURE_SIGSEGV)
+endif()
+
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/layer)
 
 if (WIN32)

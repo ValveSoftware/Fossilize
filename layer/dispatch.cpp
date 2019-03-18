@@ -140,16 +140,15 @@ static VKAPI_ATTR void VKAPI_CALL DestroyInstance(VkInstance instance, const VkA
 	destroyLayerData(key, instanceData);
 }
 
-static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
-                                                              uint32_t createInfoCount,
-                                                              const VkGraphicsPipelineCreateInfo *pCreateInfos,
-                                                              const VkAllocationCallbacks *pAllocator,
-                                                              VkPipeline *pPipelines)
+static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelinesNormal(Device *layer,
+                                                                    VkDevice device, VkPipelineCache pipelineCache,
+                                                                    uint32_t createInfoCount,
+                                                                    const VkGraphicsPipelineCreateInfo *pCreateInfos,
+                                                                    const VkAllocationCallbacks *pAllocator,
+                                                                    VkPipeline *pPipelines)
 {
-	auto *layer = get_device_layer(device);
-
 	// Have to create all pipelines here, in case the application makes use of basePipelineIndex.
-	auto res = layer->getTable()->CreateGraphicsPipelines(layer->getDevice(), pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
+	auto res = layer->getTable()->CreateGraphicsPipelines(device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
 	if (res != VK_SUCCESS)
 		return res;
 
@@ -168,17 +167,85 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(VkDevice device, V
 
 	return VK_SUCCESS;
 }
+#ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
+static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelinesParanoid(Device *layer,
+                                                                      VkDevice device, VkPipelineCache pipelineCache,
+                                                                      uint32_t createInfoCount,
+                                                                      const VkGraphicsPipelineCreateInfo *pCreateInfos,
+                                                                      const VkAllocationCallbacks *pAllocator,
+                                                                      VkPipeline *pPipelines)
+{
+	for (uint32_t i = 0; i < createInfoCount; i++)
+	{
+		// Fixup base pipeline index since we unroll the Create call.
+		auto info = pCreateInfos[i];
+		if ((info.flags & VK_PIPELINE_CREATE_DERIVATIVE_BIT) != 0 &&
+		    info.basePipelineHandle == VK_NULL_HANDLE &&
+		    info.basePipelineIndex >= 0)
+		{
+			info.basePipelineHandle = pPipelines[info.basePipelineIndex];
+			info.basePipelineIndex = -1;
+		}
 
-static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelines(VkDevice device, VkPipelineCache pipelineCache,
-                                                             uint32_t createInfoCount,
-                                                             const VkComputePipelineCreateInfo *pCreateInfos,
-                                                             const VkAllocationCallbacks *pAllocator,
-                                                             VkPipeline *pPipelines)
+		// Have to create all pipelines here, in case the application makes use of basePipelineIndex.
+		// Write arguments in TLS in-case we crash here.
+		Instance::braceForGraphicsPipelineCrash(&layer->getRecorder(), &info);
+		auto res = layer->getTable()->CreateGraphicsPipelines(device, pipelineCache, 1, &info,
+		                                                      pAllocator, &pPipelines[i]);
+		Instance::completedPipelineCompilation();
+
+		// Record failing pipelines for repro.
+		try
+		{
+			// Record methods may throw on unexpected input. We cannot propagate this error up.
+			layer->getRecorder().record_graphics_pipeline(res == VK_SUCCESS ? pPipelines[i] : VK_NULL_HANDLE, info, nullptr, 0);
+		}
+		catch (const std::exception &e)
+		{
+			LOGE("Failed to record graphics pipeline: %s\n", e.what());
+		}
+
+		if (res != VK_SUCCESS)
+		{
+			for (uint32_t j = 0; j < i; j++)
+				layer->getTable()->DestroyPipeline(device, pPipelines[j], pAllocator);
+			return res;
+		}
+	}
+
+	return VK_SUCCESS;
+}
+#endif
+
+static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
+                                                              uint32_t createInfoCount,
+                                                              const VkGraphicsPipelineCreateInfo *pCreateInfos,
+                                                              const VkAllocationCallbacks *pAllocator,
+                                                              VkPipeline *pPipelines)
 {
 	auto *layer = get_device_layer(device);
 
+#ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
+	if (layer->getInstance()->capturesCrashes())
+		CreateGraphicsPipelinesParanoid(layer, device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
+	else
+		CreateGraphicsPipelinesNormal(layer, device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
+#else
+	CreateGraphicsPipelinesNormal(layer, device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
+#endif
+
+	return VK_SUCCESS;
+}
+
+static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelinesNormal(Device *layer,
+                                                                   VkDevice device, VkPipelineCache pipelineCache,
+                                                                   uint32_t createInfoCount,
+                                                                   const VkComputePipelineCreateInfo *pCreateInfos,
+                                                                   const VkAllocationCallbacks *pAllocator,
+                                                                   VkPipeline *pPipelines)
+{
 	// Have to create all pipelines here, in case the application makes use of basePipelineIndex.
-	auto res = layer->getTable()->CreateComputePipelines(layer->getDevice(), pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
+	auto res = layer->getTable()->CreateComputePipelines(device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
 	if (res != VK_SUCCESS)
 		return res;
 
@@ -194,6 +261,76 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelines(VkDevice device, Vk
 			LOGE("Failed to record compute pipeline: %s\n", e.what());
 		}
 	}
+
+	return VK_SUCCESS;
+}
+
+#ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
+static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelinesParanoid(Device *layer,
+                                                                     VkDevice device, VkPipelineCache pipelineCache,
+                                                                     uint32_t createInfoCount,
+                                                                     const VkComputePipelineCreateInfo *pCreateInfos,
+                                                                     const VkAllocationCallbacks *pAllocator,
+                                                                     VkPipeline *pPipelines)
+{
+	for (uint32_t i = 0; i < createInfoCount; i++)
+	{
+		// Fixup base pipeline index since we unroll the Create call.
+		auto info = pCreateInfos[i];
+		if ((info.flags & VK_PIPELINE_CREATE_DERIVATIVE_BIT) != 0 &&
+		    info.basePipelineHandle == VK_NULL_HANDLE &&
+		    info.basePipelineIndex >= 0)
+		{
+			info.basePipelineHandle = pPipelines[info.basePipelineIndex];
+			info.basePipelineIndex = -1;
+		}
+
+		// Have to create all pipelines here, in case the application makes use of basePipelineIndex.
+		// Write arguments in TLS in-case we crash here.
+		Instance::braceForComputePipelineCrash(&layer->getRecorder(), &info);
+		auto res = layer->getTable()->CreateComputePipelines(device, pipelineCache, 1, &info,
+		                                                     pAllocator, &pPipelines[i]);
+		Instance::completedPipelineCompilation();
+
+		// Record failing pipelines for repro.
+		try
+		{
+			// Record methods may throw on unexpected input. We cannot propagate this error up.
+			layer->getRecorder().record_compute_pipeline(res == VK_SUCCESS ? pPipelines[i] : VK_NULL_HANDLE, info, nullptr, 0);
+		}
+		catch (const std::exception &e)
+		{
+			LOGE("Failed to record compute pipeline: %s\n", e.what());
+		}
+
+		if (res != VK_SUCCESS)
+		{
+			for (uint32_t j = 0; j < i; j++)
+				layer->getTable()->DestroyPipeline(device, pPipelines[j], pAllocator);
+			return res;
+		}
+	}
+
+	return VK_SUCCESS;
+}
+#endif
+
+static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelines(VkDevice device, VkPipelineCache pipelineCache,
+                                                             uint32_t createInfoCount,
+                                                             const VkComputePipelineCreateInfo *pCreateInfos,
+                                                             const VkAllocationCallbacks *pAllocator,
+                                                             VkPipeline *pPipelines)
+{
+	auto *layer = get_device_layer(device);
+
+#ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
+	if (layer->getInstance()->capturesCrashes())
+		CreateComputePipelinesParanoid(layer, device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
+	else
+		CreateComputePipelinesNormal(layer, device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
+#else
+	CreateComputePipelinesNormal(layer, device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
+#endif
 
 	return VK_SUCCESS;
 }

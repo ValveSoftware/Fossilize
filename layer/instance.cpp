@@ -26,6 +26,11 @@
 #include <unordered_map>
 #include <memory>
 
+#ifndef _WIN32
+#include <unistd.h>
+#include <signal.h>
+#endif
+
 namespace Fossilize
 {
 void Instance::init(VkInstance instance_, const VkApplicationInfo *pApp, VkLayerInstanceDispatchTable *pTable_, PFN_vkGetInstanceProcAddr gpa_)
@@ -104,6 +109,98 @@ static std::string getSystemProperty(const char *key)
 #define FOSSILIZE_DUMP_PATH_READ_ONLY_ENV "FOSSILIZE_DUMP_PATH_READ_ONLY"
 #endif
 
+#ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
+static thread_local const VkComputePipelineCreateInfo *tls_compute_create_info = nullptr;
+static thread_local const VkGraphicsPipelineCreateInfo *tls_graphics_create_info = nullptr;
+static thread_local StateRecorder *tls_recorder = nullptr;
+
+static void emergencyRecord()
+{
+	if (tls_recorder)
+	{
+		if (tls_graphics_create_info)
+			tls_recorder->record_graphics_pipeline(VK_NULL_HANDLE, *tls_graphics_create_info, nullptr, 0);
+		if (tls_compute_create_info)
+			tls_recorder->record_compute_pipeline(VK_NULL_HANDLE, *tls_compute_create_info, nullptr, 0);
+
+		// Flush out the recording thread.
+		tls_recorder->tear_down_recording_thread();
+	}
+}
+
+#ifdef _WIN32
+#else
+static void segfaultHandler(int sig)
+{
+	LOGE("Caught segmentation fault! Emergency serialization of state to disk ...\n");
+	emergencyRecord();
+	LOGE("Done with emergency serialization, hopefully this worked :D\n");
+
+	// Now we can die properly.
+	raise(sig);
+}
+
+static void installSegfaultHandler()
+{
+	struct sigaction sa = {};
+	sa.sa_flags = SA_RESETHAND;
+	sigemptyset(&sa.sa_mask);
+	sa.sa_handler = segfaultHandler;
+
+	if (sigaction(SIGSEGV, &sa, nullptr) < 0)
+		LOGE("Failed to install SIGSEGV handler!\n");
+	if (sigaction(SIGFPE, &sa, nullptr) < 0)
+		LOGE("Failed to install SIGFPE handler!\n");
+	if (sigaction(SIGABRT, &sa, nullptr) < 0)
+		LOGE("Failed to install SIGABRT handler!\n");
+}
+#endif
+
+void Instance::braceForGraphicsPipelineCrash(StateRecorder *recorder,
+                                             const VkGraphicsPipelineCreateInfo *info)
+{
+	tls_recorder = recorder;
+	tls_graphics_create_info = info;
+	tls_compute_create_info = nullptr;
+}
+
+void Instance::braceForComputePipelineCrash(StateRecorder *recorder,
+                                            const VkComputePipelineCreateInfo *info)
+{
+	tls_recorder = recorder;
+	tls_compute_create_info = info;
+	tls_graphics_create_info = nullptr;
+}
+
+void Instance::completedPipelineCompilation()
+{
+	tls_recorder = nullptr;
+	tls_graphics_create_info = nullptr;
+	tls_compute_create_info = nullptr;
+}
+#endif
+
+Instance::Instance()
+{
+#ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
+#ifdef ANDROID
+	auto sigsegv = getSystemProperty("debug.fossilize.dump_sigsegv");
+	if (!sigsegv.empty() && strtoul(sigsegv.c_str(), nullptr, 0) != 0)
+	{
+		installSegfaultHandler();
+		enableCrashHandler = true;
+	}
+#else
+	const char *sigsegv = getenv("FOSSILIZE_DUMP_SIGSEGV");
+	if (sigsegv && strtoul(sigsegv, nullptr, 0) != 0)
+	{
+		installSegfaultHandler();
+		enableCrashHandler = true;
+	}
+#endif
+#endif
+}
+
 StateRecorder *Instance::getStateRecorderForDevice(const VkApplicationInfo *appInfo, const VkPhysicalDeviceFeatures2 *features)
 {
 	auto appInfoFeatureHash = Hashing::compute_application_feature_hash(appInfo, features);
@@ -155,6 +252,7 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkApplicationInfo *appI
 	if (features)
 		recorder->record_physical_device_features(*features);
 	recorder->init_recording_thread(entry.interface.get());
+
 	return recorder;
 }
 

@@ -51,11 +51,17 @@ public:
 		return device;
 	}
 
+	Instance *getInstance()
+	{
+		return pInstance;
+	}
+
 private:
 	VkPhysicalDevice gpu = VK_NULL_HANDLE;
 	VkDevice device = VK_NULL_HANDLE;
 	VkLayerInstanceDispatchTable *pInstanceTable = nullptr;
 	VkLayerDispatchTable *pTable = nullptr;
 	StateRecorder *recorder = nullptr;
+	Instance *pInstance = nullptr;
 };
 }

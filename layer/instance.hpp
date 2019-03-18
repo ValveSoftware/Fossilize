@@ -32,6 +32,8 @@ namespace Fossilize
 class Instance
 {
 public:
+	Instance();
+
 	VkInstance getInstance()
 	{
 		return instance;
@@ -55,11 +57,25 @@ public:
 
 	static StateRecorder *getStateRecorderForDevice(const VkApplicationInfo *appInfo, const VkPhysicalDeviceFeatures2 *features);
 
+#ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
+	bool capturesCrashes() const
+	{
+		return enableCrashHandler;
+	}
+
+	static void braceForGraphicsPipelineCrash(StateRecorder *recorder, const VkGraphicsPipelineCreateInfo *info);
+	static void braceForComputePipelineCrash(StateRecorder *recorder, const VkComputePipelineCreateInfo *info);
+	static void completedPipelineCompilation();
+#endif
+
 private:
 	ScratchAllocator alloc;
 	VkApplicationInfo *pAppInfo = nullptr;
 	VkInstance instance = VK_NULL_HANDLE;
 	VkLayerInstanceDispatchTable *pTable = nullptr;
 	PFN_vkGetInstanceProcAddr gpa = nullptr;
+#ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
+	bool enableCrashHandler = false;
+#endif
 };
 }
