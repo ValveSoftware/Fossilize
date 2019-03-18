@@ -196,7 +196,8 @@ as MinGW does not readily support the __try/__except extension. Patches welcome!
 
 #### `export FOSSILIZE_DUMP_PATH=/my/custom/path`
 
-Custom file path for capturing state.
+Custom file path for capturing state. The actual path which is written to disk will be `$FOSSILIZE_DUMP_PATH.$hash.$index.foz`.
+This is to allow multiple processes and applications to dump concurrently.
 
 ### Android
 

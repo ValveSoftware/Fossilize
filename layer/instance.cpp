@@ -119,7 +119,7 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkApplicationInfo *appI
 	std::string serializationPath;
 	const char *extraPaths = nullptr;
 #ifdef ANDROID
-	serializationPath = "/sdcard/";
+	serializationPath = "/sdcard/fossilize";
 	auto logPath = getSystemProperty("debug.fossilize.dump_path");
 	if (!logPath.empty())
 	{
@@ -127,6 +127,7 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkApplicationInfo *appI
 		LOGI("Overriding serialization path: \"%s\".\n", logPath.c_str());
 	}
 #else
+	serializationPath = "fossilize";
 	const char *path = getenv(FOSSILIZE_DUMP_PATH_ENV);
 	if (path)
 	{
