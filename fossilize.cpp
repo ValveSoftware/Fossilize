@@ -3138,6 +3138,9 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 		}
 	}
 
+	if (database_iface)
+		database_iface->flush();
+
 	// We no longer need a reference to this.
 	// This should allow us to call init_recording_thread again if we want,
 	// or emit some final single threaded recording tasks.
@@ -4081,6 +4084,11 @@ void StateRecorder::init_recording_thread(DatabaseInterface *iface)
 {
 	impl->database_iface = iface;
 	impl->worker_thread = std::thread(&StateRecorder::Impl::record_task, impl, this, true);
+}
+
+void StateRecorder::tear_down_recording_thread()
+{
+	impl->sync_thread();
 }
 
 StateRecorder::StateRecorder()

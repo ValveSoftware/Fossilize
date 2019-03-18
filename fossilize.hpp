@@ -208,8 +208,13 @@ public:
 	// Serializes and allocates data for it. This can only be used if a database interface was not used.
 	// The result is a monolithic JSON document which contains all recorded state.
 	// Free with free_serialized() to make sure alloc/frees happens in same module.
+	// This is the "legacy" way of doing things. Ideally, use the DatabaseInterface.
 	bool serialize(uint8_t **serialized, size_t *serialized_size);
 	static void free_serialized(uint8_t *serialized);
+
+	// Stops the recording thread and joins with it.
+	// Should only be used in emergency situations, e.g. for FOSSILIZE_DUMP_SIGSEGV=1.
+	void tear_down_recording_thread();
 
 	// Disable copies (and moves).
 	StateRecorder(const StateRecorder &) = delete;

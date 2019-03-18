@@ -185,14 +185,15 @@ However, due to the nature of some drivers, there might be crashes in-between. F
 
 #### `export FOSSILIZE_DUMP_SIGSEGV=1`
 
-This only works on Linux. A SIGSEGV handler is registered, and the state is serialized to disk in the segfault handler.
-This is a bit sketchy, but should work well if drivers are crashing on pipeline creation (or just crashing in general).
+On Linux and Android, a SIGSEGV handler is registered on instance creation,
+and the offending pipeline is serialized to disk in the segfault handler.
+This is very sketchy for general use since it's not guaranteed to work and it overrides any application handlers,
+but it should work well if drivers are crashing on pipeline creation.
+On Windows, the global SEH handler is overridden instead.
 
-On Windows, all `vkCreate*Pipelines` calls are always wrapped in SEH-style __try/__except blocks, which will catch access violations
-specifically inside those calls. If an access violation is triggered, a safety serialization is performed,
-a message box will appear, notifying user about this,
-and immediately terminate the process after. This functionality however, is only enabled when building with MSVC,
-as MinGW does not readily support the __try/__except extension. Patches welcome!
+If an access violation is triggered, the serialization thread is flushed.
+A message box will appear on Windows, notifying user about this,
+and immediately terminates the process after.
 
 #### `export FOSSILIZE_DUMP_PATH=/my/custom/path`
 
