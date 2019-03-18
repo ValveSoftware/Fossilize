@@ -885,9 +885,9 @@ struct ThreadedReplayer : StateCreatorInterface
 	                               unordered_map<Hash, VkPipeline> &pipelines)
 	{
 		// Figure out which of the potential parent pipelines we really need.
-		for (auto &derived : derived)
+		for (auto &d : derived)
 		{
-			auto itr = potential_parent.find((Hash)derived.info->basePipelineHandle);
+			auto itr = potential_parent.find((Hash)d.info->basePipelineHandle);
 			if (itr != end(potential_parent))
 			{
 				// No dependencies, enqueue it, but it must not contribute to the pipeline index in any way, since

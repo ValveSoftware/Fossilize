@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.8.2)
+cmake_minimum_required(VERSION 3.5)
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_C_STANDARD 99)
 project(Fossilize LANGUAGES CXX C)
@@ -35,7 +35,7 @@ add_library(miniz STATIC miniz/miniz.h miniz/miniz.c)
 target_include_directories(miniz PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/miniz)
 if (CMAKE_COMPILER_IS_GNUCXX OR (${CMAKE_CXX_COMPILER_ID} MATCHES "Clang"))
     target_compile_options(miniz PRIVATE -fvisibility=hidden)
-    if (NOT APPLE)
+    if (NOT APPLE AND NOT ANDROID)
         target_compile_definitions(miniz PRIVATE _LARGEFILE64_SOURCE)
     endif()
 endif()
@@ -45,8 +45,11 @@ add_library(fossilize STATIC
         fossilize_exception.hpp
         varint.cpp varint.hpp
         fossilize_db.cpp fossilize_db.hpp
-        fossilize_external_replayer.cpp fossilize_external_replayer.hpp
         path.hpp path.cpp)
+
+if (NOT ANDROID)
+    target_sources(fossilize PRIVATE fossilize_external_replayer.cpp fossilize_external_replayer.hpp)
+endif()
 
 if (WIN32)
     target_sources(fossilize PRIVATE fossilize_external_replayer_windows.hpp)
@@ -59,7 +62,11 @@ target_compile_options(fossilize PUBLIC ${FOSSILIZE_CXX_FLAGS})
 if (NOT WIN32)
     target_link_libraries(fossilize -pthread)
     if (NOT APPLE)
-        target_link_libraries(fossilize rt)
+        if (ANDROID)
+            target_link_libraries(fossilize android log)
+        else()
+            target_link_libraries(fossilize rt)
+        endif()
     endif()
 endif()
 target_link_libraries(fossilize miniz)

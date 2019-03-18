@@ -1,6 +1,6 @@
 # Fossilize
 
-Fossilize is a simple library for serializing various persistent Vulkan objects which typically end up
+Fossilize is a library and Vulkan layer for serializing various persistent Vulkan objects which typically end up
 in hashmaps. CreateInfo structs for these Vulkan objects can be recorded and replayed.
 
 - VkSampler (immutable samplers in set layouts)
@@ -12,26 +12,11 @@ in hashmaps. CreateInfo structs for these Vulkan objects can be recorded and rep
 
 The goal for this project is to cover some main use cases:
 
-### High priority
-
 - For internal engine use. Extend the notion of VkPipelineCache to also include these persistent objects,
 so they can be automatically created in load time rather than manually declaring everything up front.
 Ideally, this serialized cache could be shipped, and applications can assume all persistent objects are already created.
-- Create a Vulkan layer which can capture this cache for repro purposes.
-A paranoid mode would serialize the cache before every pipeline creation, to deal with crashing drivers.
-- Easy way of sending shader compilation repros to conformance. Capture internally or via a Vulkan layer and send it off.
-Normally, this is very difficult with normal debuggers because they generally rely on capturing frames or similar,
-which doesn't work if compilation segfaults the driver. Shader compilation in Vulkan requires a lot of state,
-which requires sending more complete repro applications.
-
-### Mid priority
-
-- Some convenience tools to modify/disassemble/spirv-opt parts of the cache.
-
-### Low priority
-
+- Create a Vulkan layer which can capture this cache for repro purposes when errors occur before we can create a conventional capture.
 - Serialize state in application once, replay on N devices to build up VkPipelineCache objects without having to run application.
-- Benchmark a pipeline offline by feeding it fake input.
 
 ## Build
 
@@ -70,26 +55,18 @@ See the script for more details.
 
 ## Serialization format
 
-Overall, a binary format which combines JSON with varint-encoded SPIR-V (light compression).
-- Magic "FOSSILIZE0000001" (16 bytes ASCII)
-- Size of entire binary (64-bit LE)
-- JSON magic "JSON    " (8 bytes ASCII)
-- JSON size (64-bit LE)
-- JSON data (JSON size bytes)
-- SPIR-V magic "SPIR-V  " (8 bytes ASCII)
-- SPIR-V size (64-bit LE)
-- Varint-encoded SPIR-V words (SPIR-V size bytes)
-
-64-bit little-endian values are not necessarily aligned to 8 bytes.
+Overall, a binary database format which contains deflated JSON or deflated varint-encoded SPIR-V (light compression).
+The database is a bespoke format with extension ".foz".
+It is designed to be robust in cases where writes to the database are
+cut off abrubtly due to external instability issues,
+which can happen when capturing real applications in a layer which applications might not know about.
+See `fossilize_db.cpp` for details on the archive format.
 
 The JSON is a simple format which represents the various `Vk*CreateInfo` structures.
-`pNext` is currently not supported.
 When referring to other VK handle types like `pImmutableSamplers` in `VkDescriptorSetLayout`, or `VkRenderPass` in `VkPipeline`,
-a 1-indexed format is used. 0 represents `VK_NULL_HANDLE` and 1+, represents an array index into the respective array (off-by-one).
-Data blobs (specialization constant data, SPIR-V) are encoded in base64, but I'll likely need something smarter to deal with large applications which have half a trillion SPIR-V files.
-When recording or replaying, a mapping from and to real Vk object handles must be provided by the application so the offset-based indexing scheme can be resolved to real handles.
-
-`VkShaderModuleCreateInfo` refers to an encoded buffer in the SPIR-V block by codeBinaryOffset and codeBinarySize.
+a hash is used. 0 represents `VK_NULL_HANDLE` and anything else represents a key.
+Small data blobs like specialization constant data are encoded in base64.
+When recording or replaying, a mapping from and to real Vk object handles must be provided by the application so the key-based indexing scheme can be resolved to real handles.
 
 The varint encoding scheme encodes every 32-bit SPIR-V word by encoding 7 bits at a time starting with the LSBs,
 the MSB bit in an encoded byte is set if another byte needs to be read (7 bit) for the same SPIR-V word.
@@ -116,23 +93,20 @@ void create_state()
         };
 
         // Fill in stuff.
-
-        Fossilize::Hash hash = Fossilize::Hashing::compute_hash_descriptor_set_layout(recorder, info);
-        // Or use your own hash. This 64-bit hash will be provided back to application when replaying the state.
-        // The builtin hashing functions are mostly useful for a Vulkan capturing layer, testing or similar.
-        unsigned set_index = recorder.register_descriptor_set_layout(hash, info);
-
         vkCreateDescriptorSetLayout(..., &layout);
 
-        // Register the true handle of the set layout so that the recorder can map
-        // layout to an internal index when using register_pipeline_layout for example.
-        // Setting handles are only required when other Vk*CreateInfo calls refer to any other Vulkan handles.
-        recorder.set_descriptor_set_layout_handle(set_index, layout);
+        // Records the descriptor set layout.
+        recorder.record_descriptor_set_layout(layout, info);
 
         // Do the same for render passes, pipelines, shader modules, samplers (if using immutable samplers) as necessary.
 
-        std::vector<uint8_t> serialized = recorder.serialize();
-        save_to_disk(serialized);
+        // This method gives you a standalone JSON file which contains everything.
+        // The alternative is using init_recording_thread() to set up a database backend.
+        uint8_t *serialized;
+        size_t size;
+        recorder.serialize(&serialized, &size);
+        save_to_disk(serialized, size);
+        recorder.free_serialized(serialized);
     }
     catch (const std::exception &e)
     {
@@ -150,13 +124,8 @@ void create_state()
 struct Device : Fossilize::StateCreatorInterface
 {
     // See header for other functions.
-    bool set_num_descriptor_set_layouts(unsigned count) override
-    {
-        // Know a-head of time how many set layouts there will be, useful for multi-threading.
-        return true;
-    }
 
-    bool enqueue_create_descriptor_set_layout(Hash hash, unsigned index,
+    bool enqueue_create_descriptor_set_layout(Hash hash,
                                               const VkDescriptorSetLayoutCreateInfo *create_info,
                                               VkDescriptorSetLayout *layout) override
     {
@@ -170,9 +139,19 @@ struct Device : Fossilize::StateCreatorInterface
         return true;
     }
 
-    void wait_enqueue() override
+    void notify_replayed_resources_for_type() override
     {
         // If using multi-threaded creation, join all queued tasks here.
+    }
+
+    void sync_threads() override
+    {
+        // If using multi-threaded creation, join all queued tasks here.
+    }
+
+    void sync_threads_modules() override
+    {
+        // If using multi-threaded creation, join all queued tasks here if we have pending VkShaderModule creations.
     }
 };
 
@@ -181,7 +160,7 @@ void replay_state(Device &device)
     try
     {
         Fossilize::Replayer replayer;
-        replayer.parse(device, serialized_state, serialized_state_size);
+        replayer.parse(device, nullptr, serialized_state, serialized_state_size);
         // Now internal hashmaps are warmed up, and all pipelines have been created.
     }
     catch (const std::exception &e)
@@ -201,13 +180,8 @@ The layer and JSON is placed in `layer/` in the build folder.
 
 ### Linux/Windows
 
-By default the layer will serialize to `fossilize.json` in the working directory on `vkDestroyDevice`.
+By default the layer will serialize to `fossilize.$hash.$index.foz` in the working directory on `vkDestroyDevice`.
 However, due to the nature of some drivers, there might be crashes in-between. For this, there are two other modes.
-
-#### `export FOSSILIZE_PARANOID_MODE=1`
-
-Before every call to `vkCreateComputePipelines` and `vkCreateGraphicsPipelines`, data is serialized to disk.
-This can be quite slow for application with lots of pipelines, so only use it if the method below doesn't work ...
 
 #### `export FOSSILIZE_DUMP_SIGSEGV=1`
 
@@ -237,7 +211,6 @@ Options can be set through `setprop`.
 #### Setprop options
 
 - `setprop debug.fossilize.dump_path /custom/path`
-- `setprop debug.fossilize.paranoid_mode 1`
 - `setprop debug.fossilize.dump_sigsegv 1`
 
 To force layer to be enabled outside application: `setprop debug.vulkan.layers "VK_LAYER_fossilize"`.
@@ -259,12 +232,15 @@ The CLI currently has 3 tools available. These are found in `cli/` after build.
 
 This tool is for taking a capture, and replaying it on any device.
 Currently, all basic PhysicalDeviceFeatures (not PhysicalDeviceFeatures2 stuff) and extensions will be enabled
-to make sure a capture will validate properly. robustBufferAccess however is forced off.
+to make sure a capture will validate properly. robustBufferAccess however is set to whatever the database has used.
 
-This tool serves as the main "repro" tool. After you have a capture, you should ideally be able to repro crashes using this tool.
-To make replay faster, use `--filter-compute` and `--filter-graphics` to isolate which pipelines are actually compiled.
+This tool serves as the main "repro" tool as well as a pipeline driver cache warming tool.
+After you have a capture, you should ideally be able to repro crashes using this tool.
+To make replay faster, use `--graphics-pipeline-range [start-index] [end-index]` and `--compute-pipeline-range [start-index] [end-index]` to isolate which pipelines are actually compiled.
 
 ### `fossilize-disasm`
+
+**NOTE: This tool hasn't been updated since the change to the new database format. It might not work as intended at the moment.**
 
 This tool can disassemble any pipeline into something human readable. Three modes are provided:
 - ASM (using SPIRV-Tools)
@@ -274,6 +250,8 @@ This tool can disassemble any pipeline into something human readable. Three mode
 TODO is disassembling more of the other state for quick introspection. Currently only SPIR-V disassembly is provided.
 
 ### `fossilize-opt`
+
+**NOTE: This tool hasn't been updated since the change to the new database format. It might not work as intended at the moment.**
 
 Runs spirv-opt over all shader modules in the capture and serializes out an optimized version.
 Useful to sanity check that an optimized capture can compile on your driver.

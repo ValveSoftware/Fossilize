@@ -812,7 +812,7 @@ struct StreamArchive : DatabaseInterface
 		}
 
 		// The entry is irrelevant, we're not going to read from this archive any time soon.
-		seen_blobs[tag].emplace(hash, Entry{0, 0});
+		seen_blobs[tag].emplace(hash, Entry{});
 		return true;
 	}
 

@@ -34,7 +34,7 @@ else()
 	target_sources(fossilize-replay PRIVATE fossilize_replay_linux.hpp)
 endif()
 
-if (APPLE)
+if (APPLE OR ANDROID)
 	target_compile_definitions(fossilize-replay PRIVATE NO_ROBUST_REPLAYER=1)
 endif()
 
