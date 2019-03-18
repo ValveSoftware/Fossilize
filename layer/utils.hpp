@@ -22,7 +22,9 @@
 
 #pragma once
 
-#define VK_LAYER_steam_fossilize "VK_LAYER_steam_fossilize"
+#ifndef VK_LAYER_fossilize
+#define VK_LAYER_fossilize "VK_LAYER_fossilize"
+#endif
 
 #ifdef ANDROID
 #include <android/log.h>

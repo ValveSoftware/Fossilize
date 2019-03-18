@@ -1,9 +1,3 @@
-if (WIN32)
-	set(export-file exports.def)
-else()
-	set(export-file )
-endif()
-
 add_library(VkLayer_fossilize SHARED
 	device.cpp
 	device.hpp
@@ -11,8 +5,8 @@ add_library(VkLayer_fossilize SHARED
 	instance.hpp
 	dispatch.cpp
 	dispatch_helper.hpp
-	dispatch_helper.cpp
-	${export-file})
+	dispatch_helper.cpp)
+
 target_include_directories(VkLayer_fossilize PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_options(VkLayer_fossilize PUBLIC ${FOSSILIZE_CXX_FLAGS})
 set_target_properties(VkLayer_fossilize PROPERTIES LINK_FLAGS "${FOSSILIZE_LINK_FLAGS}")
@@ -31,6 +25,10 @@ if (WIN32)
 		endif()
 	endif()
 else()
+	if (CMAKE_COMPILER_IS_GNUCXX OR (${CMAKE_CXX_COMPILER_ID} MATCHES "Clang"))
+		target_compile_options(VkLayer_fossilize PRIVATE -fvisibility=hidden)
+	endif()
+
 	if (NOT ANDROID)
 		if (APPLE)
 			add_custom_command(TARGET VkLayer_fossilize POST_BUILD

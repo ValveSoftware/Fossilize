@@ -96,6 +96,14 @@ static std::string getSystemProperty(const char *key)
 }
 #endif
 
+#ifndef FOSSILIZE_DUMP_PATH_ENV
+#define FOSSILIZE_DUMP_PATH_ENV "FOSSILIZE_DUMP_PATH"
+#endif
+
+#ifndef FOSSILIZE_DUMP_PATH_READ_ONLY_ENV
+#define FOSSILIZE_DUMP_PATH_READ_ONLY_ENV "FOSSILIZE_DUMP_PATH_READ_ONLY"
+#endif
+
 StateRecorder *Instance::getStateRecorderForDevice(const VkApplicationInfo *appInfo, const VkPhysicalDeviceFeatures2 *features)
 {
 	auto appInfoFeatureHash = Hashing::compute_application_feature_hash(appInfo, features);
@@ -119,13 +127,13 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkApplicationInfo *appI
 		LOGI("Overriding serialization path: \"%s\".\n", logPath.c_str());
 	}
 #else
-	const char *path = getenv("STEAM_FOSSILIZE_DUMP_PATH");
+	const char *path = getenv(FOSSILIZE_DUMP_PATH_ENV);
 	if (path)
 	{
 		serializationPath = path;
 		LOGI("Overriding serialization path: \"%s\".\n", path);
 	}
-	extraPaths = getenv("STEAM_FOSSILIZE_DUMP_PATH_READ_ONLY");
+	extraPaths = getenv(FOSSILIZE_DUMP_PATH_READ_ONLY_ENV);
 #endif
 
 	char hashString[17];
