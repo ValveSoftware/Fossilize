@@ -26,10 +26,13 @@
 #include <unordered_map>
 #include <memory>
 
-#ifndef _WIN32
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#else
 #include <unistd.h>
-#include <signal.h>
 #endif
+#include <signal.h>
 
 namespace Fossilize
 {
@@ -129,6 +132,28 @@ static void emergencyRecord()
 }
 
 #ifdef _WIN32
+static LONG WINAPI crashHandler(_EXCEPTION_POINTERS *)
+{
+	LOGE("Caught segmentation fault! Emergency serialization of state to disk ...\n");
+	emergencyRecord();
+	LOGE("Done with emergency serialization, hopefully this worked :D\n");
+
+	MessageBoxA(nullptr, "Pipeline creation triggered an access violation, the offending state was serialized. The application will now terminate.",
+	            "Pipeline creation access violation", 0);
+
+	// Clean exit instead of reporting the segfault.
+	// Use exit code 2 to mark a segfaulted child.
+	ExitProcess(2);
+	return EXCEPTION_EXECUTE_HANDLER;
+}
+
+static void installSegfaultHandler()
+{
+	// Setup a last resort SEH handler. This overrides any global messagebox saying "application crashed",
+	// which is what we want.
+	SetErrorMode(SEM_NOGPFAULTERRORBOX | SEM_FAILCRITICALERRORS);
+	SetUnhandledExceptionFilter(crashHandler);
+}
 #else
 static void segfaultHandler(int sig)
 {
