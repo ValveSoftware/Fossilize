@@ -174,15 +174,22 @@ public:
 
 	const StateRecorderApplicationFeatureHash &get_application_feature_hash() const;
 
-	void record_descriptor_set_layout(VkDescriptorSetLayout set_layout, const VkDescriptorSetLayoutCreateInfo &layout_info);
-	void record_pipeline_layout(VkPipelineLayout pipeline_layout, const VkPipelineLayoutCreateInfo &layout_info);
-	void record_shader_module(VkShaderModule module, const VkShaderModuleCreateInfo &create_info);
+	void record_descriptor_set_layout(VkDescriptorSetLayout set_layout, const VkDescriptorSetLayoutCreateInfo &layout_info,
+	                                  Hash custom_hash = 0);
+	void record_pipeline_layout(VkPipelineLayout pipeline_layout, const VkPipelineLayoutCreateInfo &layout_info,
+	                            Hash custom_hash = 0);
+	void record_shader_module(VkShaderModule module, const VkShaderModuleCreateInfo &create_info,
+	                          Hash custom_hash = 0);
 	void record_graphics_pipeline(VkPipeline pipeline, const VkGraphicsPipelineCreateInfo &create_info,
-	                              const VkPipeline *base_pipelines, uint32_t base_pipeline_count);
+	                              const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
+	                              Hash custom_hash = 0);
 	void record_compute_pipeline(VkPipeline pipeline, const VkComputePipelineCreateInfo &create_info,
-	                             const VkPipeline *base_pipelines, uint32_t base_pipeline_count);
-	void record_render_pass(VkRenderPass render_pass, const VkRenderPassCreateInfo &create_info);
-	void record_sampler(VkSampler sampler, const VkSamplerCreateInfo &create_info);
+	                             const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
+	                             Hash custom_hash = 0);
+	void record_render_pass(VkRenderPass render_pass, const VkRenderPassCreateInfo &create_info,
+	                        Hash custom_hash = 0);
+	void record_sampler(VkSampler sampler, const VkSamplerCreateInfo &create_info,
+	                    Hash custom_hash = 0);
 
 	// Used by hashing functions in Hashing namespace. Should be considered an implementation detail.
 	Hash get_hash_for_descriptor_set_layout(VkDescriptorSetLayout layout) const;
