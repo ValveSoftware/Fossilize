@@ -450,6 +450,10 @@ static void record_graphics_pipelines(StateRecorder &recorder)
 	blend.pAttachments = blend_attachments;
 
 	tess.patchControlPoints = 9;
+	VkPipelineTessellationDomainOriginStateCreateInfo domain =
+			{ VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_DOMAIN_ORIGIN_STATE_CREATE_INFO };
+	domain.domainOrigin = VK_TESSELLATION_DOMAIN_ORIGIN_LOWER_LEFT;
+	tess.pNext = &domain;
 
 	ds.front.compareOp = VK_COMPARE_OP_GREATER;
 	ds.front.writeMask = 9;
@@ -483,6 +487,11 @@ static void record_graphics_pipelines(StateRecorder &recorder)
 	rs.rasterizerDiscardEnable = VK_TRUE;
 	rs.lineWidth = 0.1f;
 	rs.cullMode = VK_CULL_MODE_FRONT_AND_BACK;
+
+	VkPipelineRasterizationDepthClipStateCreateInfoEXT clip_state =
+			{ VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_DEPTH_CLIP_STATE_CREATE_INFO_EXT };
+	clip_state.depthClipEnable = VK_TRUE;
+	rs.pNext = &clip_state;
 
 	ia.topology = VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
 	ia.primitiveRestartEnable = VK_TRUE;
