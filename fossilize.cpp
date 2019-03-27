@@ -185,6 +185,7 @@ struct StateReplayer::Impl
 	VkVertexInputAttributeDescription *parse_vertex_attributes(const Value &attributes);
 	VkVertexInputBindingDescription *parse_vertex_bindings(const Value &bindings);
 	VkPipelineColorBlendAttachmentState *parse_blend_attachments(const Value &attachments);
+	VkPipelineTessellationDomainOriginStateCreateInfo *parse_tessellation_domain_origin_state(const Value &state);
 	VkPipelineVertexInputDivisorStateCreateInfoEXT *parse_vertex_input_divisor_state(const Value &state);
 	uint32_t *parse_uints(const Value &attachments);
 	const char *duplicate_string(const char *str, size_t len);
@@ -244,6 +245,8 @@ struct StateRecorder::Impl
 
 	VkSpecializationInfo *copy_specialization_info(const VkSpecializationInfo *info, ScratchAllocator &alloc);
 
+	void *copy_pnext_struct(const VkPipelineTessellationDomainOriginStateCreateInfo *create_info,
+	                        ScratchAllocator &alloc);
 	void *copy_pnext_struct(const VkPipelineVertexInputDivisorStateCreateInfoEXT *create_info,
 	                        ScratchAllocator &alloc);
 
@@ -454,6 +457,13 @@ static void hash_specialization_info(Hasher &h, const VkSpecializationInfo &spec
 
 static void hash_pnext_struct(const StateRecorder &,
                               Hasher &h,
+                              const VkPipelineTessellationDomainOriginStateCreateInfo &create_info)
+{
+	h.u32(create_info.domainOrigin);
+}
+
+static void hash_pnext_struct(const StateRecorder &,
+                              Hasher &h,
                               const VkPipelineVertexInputDivisorStateCreateInfoEXT &create_info)
 {
 	h.u32(create_info.vertexBindingDivisorCount);
@@ -473,6 +483,10 @@ static void hash_pnext_chain(const StateRecorder &recorder, Hasher &h, const voi
 
 		switch (pin->sType)
 		{
+		case VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_DOMAIN_ORIGIN_STATE_CREATE_INFO:
+			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineTessellationDomainOriginStateCreateInfo *>(pNext));
+			break;
+
 		case VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_DIVISOR_STATE_CREATE_INFO_EXT:
 			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineVertexInputDivisorStateCreateInfoEXT *>(pNext));
 			break;
@@ -1657,6 +1671,10 @@ VkPipelineTessellationStateCreateInfo *StateReplayer::Impl::parse_tessellation_s
 	state->sType = VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO;
 	state->flags = tess["flags"].GetUint();
 	state->patchControlPoints = tess["patchControlPoints"].GetUint();
+
+	if (tess.HasMember("pNext"))
+		state->pNext = parse_pnext_chain(tess["pNext"]);
+
 	return state;
 }
 
@@ -1955,6 +1973,16 @@ void StateReplayer::Impl::parse_graphics_pipelines(StateCreatorInterface &iface,
 	iface.notify_replayed_resources_for_type();
 }
 
+VkPipelineTessellationDomainOriginStateCreateInfo *
+StateReplayer::Impl::parse_tessellation_domain_origin_state(const Value &state)
+{
+	auto *info = allocator.allocate_cleared<VkPipelineTessellationDomainOriginStateCreateInfo>();
+
+	info->domainOrigin = static_cast<VkTessellationDomainOrigin>(state["domainOrigin"].GetUint());
+
+	return info;
+}
+
 VkPipelineVertexInputDivisorStateCreateInfoEXT *
 StateReplayer::Impl::parse_vertex_input_divisor_state(const Value &state)
 {
@@ -1991,6 +2019,13 @@ const void *StateReplayer::Impl::parse_pnext_chain(const Value &pnext)
 
 		switch (sType)
 		{
+		case VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_DOMAIN_ORIGIN_STATE_CREATE_INFO:
+		{
+			auto *info = parse_tessellation_domain_origin_state(next);
+			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
+			break;
+		}
+
 		case VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_DIVISOR_STATE_CREATE_INFO_EXT:
 		{
 			auto *info = parse_vertex_input_divisor_state(next);
@@ -2114,6 +2149,13 @@ T *StateRecorder::Impl::copy(const T *src, size_t count, ScratchAllocator &alloc
 }
 
 void *StateRecorder::Impl::copy_pnext_struct(
+		const VkPipelineTessellationDomainOriginStateCreateInfo *create_info,
+		ScratchAllocator &alloc)
+{
+	return copy(create_info, 1, alloc);
+}
+
+void *StateRecorder::Impl::copy_pnext_struct(
 		const VkPipelineVertexInputDivisorStateCreateInfoEXT *create_info,
 		ScratchAllocator &alloc)
 {
@@ -2139,6 +2181,13 @@ const void *StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllo
 
 		switch (pin->sType)
 		{
+		case VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_DOMAIN_ORIGIN_STATE_CREATE_INFO:
+		{
+			auto ci = static_cast<const VkPipelineTessellationDomainOriginStateCreateInfo *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			break;
+		}
+
 		case VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_DIVISOR_STATE_CREATE_INFO_EXT:
 		{
 			auto *ci = static_cast<const VkPipelineVertexInputDivisorStateCreateInfoEXT *>(pNext);
@@ -2588,9 +2637,9 @@ VkGraphicsPipelineCreateInfo *StateRecorder::Impl::copy_graphics_pipeline(const 
 	info->pStages = copy(info->pStages, info->stageCount, alloc);
 	if (info->pTessellationState)
 	{
-		if (info->pTessellationState->pNext)
-			FOSSILIZE_THROW("pNext in VkPipelineTessellationStateCreateInfo not supported.");
 		info->pTessellationState = copy(info->pTessellationState, 1, alloc);
+		const_cast<VkPipelineTessellationStateCreateInfo *>(info->pTessellationState)->pNext =
+				copy_pnext_chain(info->pTessellationState->pNext, alloc);
 	}
 
 	if (info->pColorBlendState)
@@ -3450,6 +3499,15 @@ static Value json_value(const VkComputePipelineCreateInfo& pipe, Allocator& allo
 }
 
 template <typename Allocator>
+static Value json_value(const VkPipelineTessellationDomainOriginStateCreateInfo &create_info, Allocator &alloc)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("domainOrigin", create_info.domainOrigin, alloc);
+	return value;
+}
+
+template <typename Allocator>
 static Value json_value(const VkPipelineVertexInputDivisorStateCreateInfoEXT &create_info, Allocator &alloc)
 {
 	Value value(kObjectType);
@@ -3483,6 +3541,11 @@ static Value pnext_chain_json_value(const void *pNext, Allocator &alloc)
 		Value next;
 		switch (pin->sType)
 		{
+		case VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_DOMAIN_ORIGIN_STATE_CREATE_INFO:
+			next = json_value(*static_cast<const VkPipelineTessellationDomainOriginStateCreateInfo *>(pNext),
+			                  alloc);
+			break;
+
 		case VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_DIVISOR_STATE_CREATE_INFO_EXT:
 			next = json_value(*static_cast<const VkPipelineVertexInputDivisorStateCreateInfoEXT *>(pNext),
 			                  alloc);
@@ -3515,6 +3578,13 @@ static Value json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& all
 		Value tess(kObjectType);
 		tess.AddMember("flags", pipe.pTessellationState->flags, alloc);
 		tess.AddMember("patchControlPoints", pipe.pTessellationState->patchControlPoints, alloc);
+
+		if (pipe.pTessellationState->pNext)
+		{
+			Value nexts = pnext_chain_json_value(pipe.pTessellationState->pNext, alloc);
+			tess.AddMember("pNext", nexts, alloc);
+		}
+
 		p.AddMember("tessellationState", tess, alloc);
 	}
 
