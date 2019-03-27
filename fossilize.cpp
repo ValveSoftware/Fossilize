@@ -187,6 +187,7 @@ struct StateReplayer::Impl
 	VkPipelineColorBlendAttachmentState *parse_blend_attachments(const Value &attachments);
 	VkPipelineTessellationDomainOriginStateCreateInfo *parse_tessellation_domain_origin_state(const Value &state);
 	VkPipelineVertexInputDivisorStateCreateInfoEXT *parse_vertex_input_divisor_state(const Value &state);
+	VkPipelineRasterizationDepthClipStateCreateInfoEXT *parse_rasterization_depth_clip_state(const Value &state);
 	uint32_t *parse_uints(const Value &attachments);
 	const char *duplicate_string(const char *str, size_t len);
 	bool resolve_derivative_pipelines = true;
@@ -248,6 +249,8 @@ struct StateRecorder::Impl
 	void *copy_pnext_struct(const VkPipelineTessellationDomainOriginStateCreateInfo *create_info,
 	                        ScratchAllocator &alloc);
 	void *copy_pnext_struct(const VkPipelineVertexInputDivisorStateCreateInfoEXT *create_info,
+	                        ScratchAllocator &alloc);
+	void *copy_pnext_struct(const VkPipelineRasterizationDepthClipStateCreateInfoEXT *create_info,
 	                        ScratchAllocator &alloc);
 
 	VkSampler remap_sampler_handle(VkSampler sampler) const;
@@ -474,6 +477,14 @@ static void hash_pnext_struct(const StateRecorder &,
 	}
 }
 
+static void hash_pnext_struct(const StateRecorder &,
+                              Hasher &h,
+                              const VkPipelineRasterizationDepthClipStateCreateInfoEXT &create_info)
+{
+	h.u32(create_info.flags);
+	h.u32(create_info.depthClipEnable);
+}
+
 static void hash_pnext_chain(const StateRecorder &recorder, Hasher &h, const void *pNext)
 {
 	while (pNext != nullptr)
@@ -489,6 +500,10 @@ static void hash_pnext_chain(const StateRecorder &recorder, Hasher &h, const voi
 
 		case VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_DIVISOR_STATE_CREATE_INFO_EXT:
 			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineVertexInputDivisorStateCreateInfoEXT *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_DEPTH_CLIP_STATE_CREATE_INFO_EXT:
+			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineRasterizationDepthClipStateCreateInfoEXT *>(pNext));
 			break;
 
 		default:
@@ -1662,6 +1677,9 @@ VkPipelineRasterizationStateCreateInfo *StateReplayer::Impl::parse_rasterization
 	state->polygonMode = static_cast<VkPolygonMode>(rs["polygonMode"].GetUint());
 	state->frontFace = static_cast<VkFrontFace>(rs["frontFace"].GetUint());
 
+	if (rs.HasMember("pNext"))
+		state->pNext = parse_pnext_chain(rs["pNext"]);
+
 	return state;
 }
 
@@ -2006,6 +2024,17 @@ StateReplayer::Impl::parse_vertex_input_divisor_state(const Value &state)
 	return info;
 }
 
+VkPipelineRasterizationDepthClipStateCreateInfoEXT *
+StateReplayer::Impl::parse_rasterization_depth_clip_state(const Value &state)
+{
+	auto *info = allocator.allocate_cleared<VkPipelineRasterizationDepthClipStateCreateInfoEXT>();
+
+	info->flags = state["flags"].GetUint();
+	info->depthClipEnable = state["depthClipEnable"].GetUint();
+
+	return info;
+}
+
 const void *StateReplayer::Impl::parse_pnext_chain(const Value &pnext)
 {
 	VkBaseInStructure *ret = nullptr;
@@ -2029,6 +2058,13 @@ const void *StateReplayer::Impl::parse_pnext_chain(const Value &pnext)
 		case VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_DIVISOR_STATE_CREATE_INFO_EXT:
 		{
 			auto *info = parse_vertex_input_divisor_state(next);
+			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_DEPTH_CLIP_STATE_CREATE_INFO_EXT:
+		{
+			auto *info = parse_rasterization_depth_clip_state(next);
 			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
 			break;
 		}
@@ -2170,6 +2206,13 @@ void *StateRecorder::Impl::copy_pnext_struct(
 	return info;
 }
 
+void *StateRecorder::Impl::copy_pnext_struct(
+		const VkPipelineRasterizationDepthClipStateCreateInfoEXT *create_info,
+		ScratchAllocator &alloc)
+{
+	return copy(create_info, 1, alloc);
+}
+
 const void *StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &alloc)
 {
 	VkBaseInStructure new_pnext = {};
@@ -2191,6 +2234,13 @@ const void *StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllo
 		case VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_DIVISOR_STATE_CREATE_INFO_EXT:
 		{
 			auto *ci = static_cast<const VkPipelineVertexInputDivisorStateCreateInfoEXT *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_DEPTH_CLIP_STATE_CREATE_INFO_EXT:
+		{
+			auto *ci = static_cast<const VkPipelineRasterizationDepthClipStateCreateInfoEXT *>(pNext);
 			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
 			break;
 		}
@@ -2686,9 +2736,9 @@ VkGraphicsPipelineCreateInfo *StateRecorder::Impl::copy_graphics_pipeline(const 
 
 	if (info->pRasterizationState)
 	{
-		if (info->pRasterizationState->pNext)
-			FOSSILIZE_THROW("pNext in VkPipelineRasterizationCreateInfo not supported.");
 		info->pRasterizationState = copy(info->pRasterizationState, 1, alloc);
+		const_cast<VkPipelineRasterizationStateCreateInfo *>(info->pRasterizationState)->pNext =
+				copy_pnext_chain(info->pRasterizationState->pNext, alloc);
 	}
 
 	if (info->pDynamicState)
@@ -3531,6 +3581,16 @@ static Value json_value(const VkPipelineVertexInputDivisorStateCreateInfoEXT &cr
 }
 
 template <typename Allocator>
+static Value json_value(const VkPipelineRasterizationDepthClipStateCreateInfoEXT &create_info, Allocator &alloc)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("flags", create_info.flags, alloc);
+	value.AddMember("depthClipEnable", create_info.depthClipEnable, alloc);
+	return value;
+}
+
+template <typename Allocator>
 static Value pnext_chain_json_value(const void *pNext, Allocator &alloc)
 {
 	Value nexts(kArrayType);
@@ -3548,6 +3608,11 @@ static Value pnext_chain_json_value(const void *pNext, Allocator &alloc)
 
 		case VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_DIVISOR_STATE_CREATE_INFO_EXT:
 			next = json_value(*static_cast<const VkPipelineVertexInputDivisorStateCreateInfoEXT *>(pNext),
+			                  alloc);
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_DEPTH_CLIP_STATE_CREATE_INFO_EXT:
+			next = json_value(*static_cast<const VkPipelineRasterizationDepthClipStateCreateInfoEXT *>(pNext),
 			                  alloc);
 			break;
 
@@ -3675,6 +3740,13 @@ static Value json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& all
 		rs.AddMember("frontFace", pipe.pRasterizationState->frontFace, alloc);
 		rs.AddMember("lineWidth", pipe.pRasterizationState->lineWidth, alloc);
 		rs.AddMember("cullMode", pipe.pRasterizationState->cullMode, alloc);
+
+		if (pipe.pRasterizationState->pNext)
+		{
+			Value nexts = pnext_chain_json_value(pipe.pRasterizationState->pNext, alloc);
+			rs.AddMember("pNext", nexts, alloc);
+		}
+
 		p.AddMember("rasterizationState", rs, alloc);
 	}
 
