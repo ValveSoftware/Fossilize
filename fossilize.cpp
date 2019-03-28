@@ -53,6 +53,7 @@ using namespace std;
 namespace Fossilize
 {
 #define FOSSILIZE_THROW(x) throw ::Fossilize::Exception(x)
+#define FOSSILIZE_THROW_PNEXT(x, pnext) ::Fossilize::throw_pnext_chain(x, pnext)
 class Hasher
 {
 public:
@@ -508,7 +509,8 @@ static void hash_pnext_chain(const StateRecorder &recorder, Hasher &h, const voi
 			break;
 
 		default:
-			FOSSILIZE_THROW(std::string("Unsupported pNext found, cannot hash sType: ") + std::to_string(pin->sType));
+			FOSSILIZE_THROW_PNEXT("Unsupported pNext found, cannot hash.", pNext);
+			break;
 		}
 
 		pNext = pin->pNext;
@@ -2247,7 +2249,8 @@ const void *StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllo
 		}
 
 		default:
-			FOSSILIZE_THROW(std::string("Cannot copy unknown sType :") + std::to_string(pin->sType));
+			FOSSILIZE_THROW_PNEXT("Cannot copy unknown pNext sType.", pNext);
+			break;
 		}
 
 		pNext = pin->pNext;
@@ -2351,7 +2354,7 @@ void StateRecorder::set_database_enable_compression(bool enable)
 void StateRecorder::record_application_info(const VkApplicationInfo &info)
 {
 	if (info.pNext)
-		FOSSILIZE_THROW("pNext in VkApplicationInfo not supported.");
+		FOSSILIZE_THROW_PNEXT("pNext in VkApplicationInfo not supported.", info.pNext);
 	std::lock_guard<std::mutex> lock(impl->record_lock);
 	impl->application_info = impl->copy_application_info(&info, impl->allocator);
 	impl->application_feature_hash.application_info_hash = Hashing::compute_hash_application_info(*impl->application_info);
@@ -2381,7 +2384,7 @@ void StateRecorder::record_sampler(VkSampler sampler, const VkSamplerCreateInfo 
 {
 	{
 		if (create_info.pNext)
-			FOSSILIZE_THROW("pNext in VkSamplerCreateInfo not supported.");
+			FOSSILIZE_THROW_PNEXT("pNext in VkSamplerCreateInfo not supported.", create_info.pNext);
 		std::lock_guard<std::mutex> lock(impl->record_lock);
 		impl->record_queue.push({api_object_cast<uint64_t>(sampler),
 		                         reinterpret_cast<void *>(impl->copy_sampler(&create_info, impl->temp_allocator)),
@@ -2434,7 +2437,7 @@ void StateRecorder::record_graphics_pipeline(VkPipeline pipeline, const VkGraphi
 {
 	{
 		if (create_info.pNext)
-			FOSSILIZE_THROW("pNext in VkGraphicsPipelineCreateInfo not supported.");
+			FOSSILIZE_THROW_PNEXT("pNext in VkGraphicsPipelineCreateInfo not supported.", create_info.pNext);
 		std::lock_guard<std::mutex> lock(impl->record_lock);
 		impl->record_queue.push({api_object_cast<uint64_t>(pipeline),
 		                         reinterpret_cast<void *>(impl->copy_graphics_pipeline(&create_info,
@@ -2456,7 +2459,7 @@ void StateRecorder::record_compute_pipeline(VkPipeline pipeline, const VkCompute
 {
 	{
 		if (create_info.pNext)
-			FOSSILIZE_THROW("pNext in VkComputePipelineCreateInfo not supported.");
+			FOSSILIZE_THROW_PNEXT("pNext in VkComputePipelineCreateInfo not supported.", create_info.pNext);
 		std::lock_guard<std::mutex> lock(impl->record_lock);
 		impl->record_queue.push({api_object_cast<uint64_t>(pipeline),
 		                         reinterpret_cast<void *>(impl->copy_compute_pipeline(&create_info,
@@ -2477,7 +2480,7 @@ void StateRecorder::record_render_pass(VkRenderPass render_pass, const VkRenderP
 {
 	{
 		if (create_info.pNext)
-			FOSSILIZE_THROW("pNext in VkRenderPassCreateInfo not supported.");
+			FOSSILIZE_THROW_PNEXT("pNext in VkRenderPassCreateInfo not supported.", create_info.pNext);
 		std::lock_guard<std::mutex> lock(impl->record_lock);
 		impl->record_queue.push({api_object_cast<uint64_t>(render_pass),
 		                         reinterpret_cast<void *>(impl->copy_render_pass(&create_info, impl->temp_allocator)),
@@ -2495,7 +2498,7 @@ void StateRecorder::record_shader_module(VkShaderModule module, const VkShaderMo
 {
 	{
 		if (create_info.pNext)
-			FOSSILIZE_THROW("pNext in VkShaderModuleCreateInfo not supported.");
+			FOSSILIZE_THROW_PNEXT("pNext in VkShaderModuleCreateInfo not supported.", create_info.pNext);
 		std::lock_guard<std::mutex> lock(impl->record_lock);
 		impl->record_queue.push({api_object_cast<uint64_t>(module),
 		                         reinterpret_cast<void *>(impl->copy_shader_module(&create_info,
@@ -2672,7 +2675,7 @@ VkComputePipelineCreateInfo *StateRecorder::Impl::copy_compute_pipeline(const Vk
 	if (info->stage.pSpecializationInfo)
 		info->stage.pSpecializationInfo = copy_specialization_info(info->stage.pSpecializationInfo, alloc);
 	if (info->stage.pNext)
-		FOSSILIZE_THROW("pNext in VkPipelineShaderStageCreateInfo not supported.");
+		FOSSILIZE_THROW_PNEXT("pNext in VkPipelineShaderStageCreateInfo not supported.", info->stage.pNext);
 	info->stage.pName = copy(info->stage.pName, strlen(info->stage.pName) + 1, alloc);
 	return info;
 }
@@ -2709,7 +2712,7 @@ VkGraphicsPipelineCreateInfo *StateRecorder::Impl::copy_graphics_pipeline(const 
 	if (info->pColorBlendState)
 	{
 		if (info->pColorBlendState->pNext)
-			FOSSILIZE_THROW("pNext in VkPipelineColorBlendStateCreateInfo not supported.");
+			FOSSILIZE_THROW_PNEXT("pNext in VkPipelineColorBlendStateCreateInfo not supported.", info->pColorBlendState->pNext);
 		info->pColorBlendState = copy(info->pColorBlendState, 1, alloc);
 	}
 
@@ -2723,28 +2726,28 @@ VkGraphicsPipelineCreateInfo *StateRecorder::Impl::copy_graphics_pipeline(const 
 	if (info->pMultisampleState)
 	{
 		if (info->pMultisampleState->pNext)
-			FOSSILIZE_THROW("pNext in VkPipelineMultisampleStateCreateInfo not supported.");
+			FOSSILIZE_THROW_PNEXT("pNext in VkPipelineMultisampleStateCreateInfo not supported.", info->pMultisampleState->pNext);
 		info->pMultisampleState = copy(info->pMultisampleState, 1, alloc);
 	}
 
 	if (info->pViewportState)
 	{
 		if (info->pViewportState->pNext)
-			FOSSILIZE_THROW("pNext in VkPipelineViewportStateCreateInfo not supported.");
+			FOSSILIZE_THROW_PNEXT("pNext in VkPipelineViewportStateCreateInfo not supported.", info->pViewportState->pNext);
 		info->pViewportState = copy(info->pViewportState, 1, alloc);
 	}
 
 	if (info->pInputAssemblyState)
 	{
 		if (info->pInputAssemblyState->pNext)
-			FOSSILIZE_THROW("pNext in VkPipelineInputAssemblyStateCreateInfo not supported.");
+			FOSSILIZE_THROW_PNEXT("pNext in VkPipelineInputAssemblyStateCreateInfo not supported.", info->pInputAssemblyState->pNext);
 		info->pInputAssemblyState = copy(info->pInputAssemblyState, 1, alloc);
 	}
 
 	if (info->pDepthStencilState)
 	{
 		if (info->pDepthStencilState->pNext)
-			FOSSILIZE_THROW("pNext in VkPipelineDepthStencilStateCreateInfo not supported.");
+			FOSSILIZE_THROW_PNEXT("pNext in VkPipelineDepthStencilStateCreateInfo not supported.", info->pDepthStencilState->pNext);
 		info->pDepthStencilState = copy(info->pDepthStencilState, 1, alloc);
 	}
 
@@ -2758,7 +2761,7 @@ VkGraphicsPipelineCreateInfo *StateRecorder::Impl::copy_graphics_pipeline(const 
 	if (info->pDynamicState)
 	{
 		if (info->pDynamicState->pNext)
-			FOSSILIZE_THROW("pNext in VkPipelineDynamicStateCreateInfo not supported.");
+			FOSSILIZE_THROW_PNEXT("pNext in VkPipelineDynamicStateCreateInfo not supported.", info->pDynamicState->pNext);
 		info->pDynamicState = copy(info->pDynamicState, 1, alloc);
 	}
 
@@ -2766,7 +2769,7 @@ VkGraphicsPipelineCreateInfo *StateRecorder::Impl::copy_graphics_pipeline(const 
 	{
 		auto &stage = const_cast<VkPipelineShaderStageCreateInfo &>(info->pStages[i]);
 		if (stage.pNext)
-			FOSSILIZE_THROW("pNext in VkPipelineShaderStageCreateInfo not supported.");
+			FOSSILIZE_THROW_PNEXT("pNext in VkPipelineShaderStageCreateInfo not supported.", stage.pNext);
 		stage.pName = copy(stage.pName, strlen(stage.pName) + 1, alloc);
 		if (stage.pSpecializationInfo)
 			stage.pSpecializationInfo = copy_specialization_info(stage.pSpecializationInfo, alloc);
@@ -3645,7 +3648,8 @@ static Value pnext_chain_json_value(const void *pNext, Allocator &alloc)
 			break;
 
 		default:
-			FOSSILIZE_THROW(std::string("Unsupported pNext found, cannot hash sType: ") + std::to_string(pin->sType));
+			FOSSILIZE_THROW_PNEXT("Unsupported pNext found, cannot hash sType.", pNext);
+			break;
 		}
 
 		nexts.PushBack(next, alloc);

@@ -43,18 +43,33 @@ public:
 	{
 	}
 
-	explicit Exception(std::string what)
+	explicit Exception(std::string what) FOSSILIZE_NOEXCEPT
 		: msg(std::move(what))
 	{
 	}
 
 	const char *what() const FOSSILIZE_NOEXCEPT override
 	{
-			return msg.c_str();
+		return msg.c_str();
 	}
 
 private:
 	std::string msg;
 };
+
+static void throw_pnext_chain(std::string what, const void *pNext)
+{
+	what += " (pNext->sType chain: [";
+	while (pNext != nullptr)
+	{
+		auto *next = static_cast<const VkBaseInStructure *>(pNext);
+		what += std::to_string(next->sType);
+		pNext = next->pNext;
+		if (pNext != nullptr)
+			what += ", ";
+	}
+	what += "])";
+	throw Exception(std::move(what));
+}
 }
 

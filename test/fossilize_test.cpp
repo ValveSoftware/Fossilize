@@ -157,6 +157,22 @@ static void record_samplers(StateRecorder &recorder)
 	recorder.record_sampler(fake_handle<VkSampler>(100), sampler);
 	sampler.minLod = 11.0f;
 	recorder.record_sampler(fake_handle<VkSampler>(101), sampler);
+
+	// Intentionally trip an error.
+	try
+	{
+		VkSamplerYcbcrConversionCreateInfo ycbcr = {VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_CREATE_INFO};
+		VkSamplerYcbcrConversionCreateInfo reduction = {VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO_EXT};
+		sampler.pNext = &ycbcr;
+		ycbcr.pNext = &reduction;
+		recorder.record_sampler(fake_handle<VkSampler>(102), sampler);
+		// Should not reach here.
+		exit(1);
+	}
+	catch (const std::exception &e)
+	{
+		LOGE("=== Intentional error for testing: %s ===\n", e.what());
+	}
 }
 
 static void record_set_layouts(StateRecorder &recorder)
