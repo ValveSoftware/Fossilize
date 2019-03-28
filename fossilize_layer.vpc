@@ -33,8 +33,8 @@ $Configuration
 {
 	$Compiler
 	{
-		$PreprocessorDefinitions			"$BASE;NOMINMAX=1;VK_LAYER_fossilize=\"VK_LAYER_steam_fossilize\";FOSSILIZE_DUMP_PATH_ENV=\"STEAM_FOSSILIZE_DUMP_PATH\";FOSSILIZE_DUMP_PATH_READ_ONLY_ENV=\"STEAM_FOSSILIZE_DUMP_PATH_READ_ONLY\"" [$WINDOWS]
-		$PreprocessorDefinitions			"$BASE;DONT_WRAP_FILEIO;VK_LAYER_fossilize=\"VK_LAYER_steam_fossilize\";FOSSILIZE_DUMP_PATH_ENV=\"STEAM_FOSSILIZE_DUMP_PATH\";FOSSILIZE_DUMP_PATH_READ_ONLY_ENV=\"STEAM_FOSSILIZE_DUMP_PATH_READ_ONLY\"" [$POSIX]
+		$PreprocessorDefinitions			"$BASE;NOMINMAX=1";VK_LAYER_fossilize="VK_LAYER_steam_fossilize";FOSSILIZE_DUMP_PATH_ENV="STEAM_FOSSILIZE_DUMP_PATH";FOSSILIZE_DUMP_PATH_READ_ONLY_ENV="STEAM_FOSSILIZE_DUMP_PATH_READ_ONLY" [$WINDOWS]
+		$PreprocessorDefinitions			"$BASE;DONT_WRAP_FILEIO";VK_LAYER_fossilize=\"VK_LAYER_steam_fossilize\";FOSSILIZE_DUMP_PATH_ENV=\"STEAM_FOSSILIZE_DUMP_PATH\";FOSSILIZE_DUMP_PATH_READ_ONLY_ENV=\"STEAM_FOSSILIZE_DUMP_PATH_READ_ONLY\" [$POSIX]
 		$AdditionalIncludeDirectories		"$BASE;.\rapidjson\include"
 		$AdditionalIncludeDirectories		"$BASE;.\khronos\vulkan"
 		$AdditionalIncludeDirectories		"$BASE;.\miniz"
