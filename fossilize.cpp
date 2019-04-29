@@ -2153,6 +2153,9 @@ void StateReplayer::Impl::parse(StateCreatorInterface &iface, DatabaseInterface 
 	else
 		iface.set_application_info(nullptr, nullptr);
 
+	if (doc.HasMember("application"))
+		iface.set_current_application_info(string_to_uint64(doc["application"].GetString()));
+
 	if (doc.HasMember("shaderModules"))
 		parse_shader_modules(iface, doc["shaderModules"], varint_buffer, varint_size);
 
