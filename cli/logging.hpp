@@ -34,6 +34,6 @@
 } while(0)
 #else
 #include <stdio.h>
-#define LOGI(...) fprintf(stderr, "Fossilize INFO: " __VA_ARGS__)
-#define LOGE(...) fprintf(stderr, "Fossilize ERROR: " __VA_ARGS__)
+#define LOGI(...) do { fprintf(stderr, "Fossilize INFO: " __VA_ARGS__); fflush(stderr); } while(0)
+#define LOGE(...) do { fprintf(stderr, "Fossilize ERROR: " __VA_ARGS__); fflush(stderr); } while(0)
 #endif
