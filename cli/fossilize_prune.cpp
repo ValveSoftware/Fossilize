@@ -26,13 +26,14 @@
 #include <unordered_set>
 #include <unordered_map>
 #include "layer/utils.hpp"
+#include "cli_parser.hpp"
 
 using namespace Fossilize;
 using namespace std;
 
 static void print_help()
 {
-	LOGI("Usage: fossilize-prune input-db output-db\n");
+	LOGI("Usage: fossilize-prune [--input-db path] [--output-db path] [--filter-application hash]\n");
 }
 
 template <typename T>
@@ -48,9 +49,41 @@ struct PruneReplayer : StateCreatorInterface
 	unordered_set<Hash> accessed_pipeline_layouts;
 	unordered_set<Hash> accessed_shader_modules;
 	unordered_set<Hash> accessed_render_passes;
+	unordered_set<Hash> accessed_graphics_pipelines;
+	unordered_set<Hash> accessed_compute_pipelines;
 
 	unordered_map<Hash, const VkDescriptorSetLayoutCreateInfo *> descriptor_sets;
 	unordered_map<Hash, const VkPipelineLayoutCreateInfo *> pipeline_layouts;
+
+	Hash current_application = 0;
+	Hash filter_application_hash = 0;
+	bool should_filter_application_hash = false;
+	bool allow_application_info = false;
+
+	void set_application_info(const VkApplicationInfo *app,
+	                          const VkPhysicalDeviceFeatures2 *features) override
+	{
+		if (allow_application_info)
+		{
+			Hash hash = Hashing::compute_combined_application_feature_hash(
+					Hashing::compute_application_feature_hash(app, features));
+
+			LOGI("Available application feature hash: %016llx\n",
+			     static_cast<unsigned long long>(hash));
+
+			if (app)
+			{
+				LOGI("  applicationInfo: engineName = %s, applicationName = %s, engineVersion = %u, appVersion = %u\n",
+				     app->pEngineName ? app->pEngineName : "N/A", app->pApplicationName ? app->pApplicationName : "N/A",
+				     app->engineVersion, app->applicationVersion);
+			}
+		}
+	}
+
+	void set_current_application_info(Hash hash) override
+	{
+		current_application = hash;
+	}
 
 	bool enqueue_create_sampler(Hash hash, const VkSamplerCreateInfo *, VkSampler *sampler) override
 	{
@@ -128,18 +161,28 @@ struct PruneReplayer : StateCreatorInterface
 	bool enqueue_create_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
 		*pipeline = fake_handle<VkPipeline>(hash);
-		access_pipeline_layout((Hash)create_info->layout);
-		accessed_shader_modules.insert((Hash)create_info->stage.module);
+
+		if (!should_filter_application_hash || current_application == filter_application_hash)
+		{
+			access_pipeline_layout((Hash) create_info->layout);
+			accessed_shader_modules.insert((Hash) create_info->stage.module);
+			accessed_compute_pipelines.insert(hash);
+		}
 		return true;
 	}
 
 	bool enqueue_create_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
 		*pipeline = fake_handle<VkPipeline>(hash);
-		access_pipeline_layout((Hash)create_info->layout);
-		accessed_render_passes.insert((Hash)create_info->renderPass);
-		for (uint32_t stage = 0; stage < create_info->stageCount; stage++)
-			accessed_shader_modules.insert((Hash)create_info->pStages[stage].module);
+
+		if (!should_filter_application_hash || current_application == filter_application_hash)
+		{
+			access_pipeline_layout((Hash) create_info->layout);
+			accessed_render_passes.insert((Hash) create_info->renderPass);
+			for (uint32_t stage = 0; stage < create_info->stageCount; stage++)
+				accessed_shader_modules.insert((Hash) create_info->pStages[stage].module);
+			accessed_graphics_pipelines.insert(hash);
+		}
 		return true;
 	}
 };
@@ -168,14 +211,35 @@ static bool copy_accessed_types(DatabaseInterface &input_db,
 
 int main(int argc, char *argv[])
 {
-	if (argc != 3)
+	CLICallbacks cbs;
+	string input_db_path;
+	string output_db_path;
+	Hash application_hash = 0;
+	bool should_filter_application_hash = false;
+	cbs.add("--help", [](CLIParser &parser) { print_help(); parser.end(); });
+	cbs.add("--input-db", [&](CLIParser &parser) { input_db_path = parser.next_string(); });
+	cbs.add("--output-db", [&](CLIParser &parser) { output_db_path = parser.next_string(); });
+	cbs.add("--filter-application", [&](CLIParser &parser) {
+		application_hash = strtoull(parser.next_string(), nullptr, 16);
+		should_filter_application_hash = true;
+	});
+
+	cbs.error_handler = [] { print_help(); };
+
+	CLIParser parser(move(cbs), argc - 1, argv + 1);
+	if (!parser.parse())
+		return EXIT_FAILURE;
+	if (parser.is_ended_state())
+		return EXIT_SUCCESS;
+
+	if (input_db_path.empty() || output_db_path.empty())
 	{
 		print_help();
 		return EXIT_FAILURE;
 	}
 
-	auto input_db = std::unique_ptr<DatabaseInterface>(create_database(argv[1], DatabaseMode::ReadOnly));
-	auto output_db = std::unique_ptr<DatabaseInterface>(create_database(argv[2], DatabaseMode::OverWrite));
+	auto input_db = std::unique_ptr<DatabaseInterface>(create_database(input_db_path.c_str(), DatabaseMode::ReadOnly));
+	auto output_db = std::unique_ptr<DatabaseInterface>(create_database(output_db_path.c_str(), DatabaseMode::OverWrite));
 	if (!input_db || !input_db->prepare())
 	{
 		LOGE("Failed to load database: %s\n", argv[1]);
@@ -190,6 +254,13 @@ int main(int argc, char *argv[])
 
 	StateReplayer replayer;
 	PruneReplayer prune_replayer;
+
+	if (should_filter_application_hash)
+	{
+		prune_replayer.should_filter_application_hash = true;
+		prune_replayer.filter_application_hash = application_hash;
+	}
+
 	static const ResourceTag playback_order[] = {
 		RESOURCE_APPLICATION_INFO, // This will create the device, etc.
 		RESOURCE_SHADER_MODULE, // Kick off shader modules first since it can be done in a thread while we deal with trivial objects.
@@ -219,6 +290,8 @@ int main(int argc, char *argv[])
 
 	for (auto &tag : playback_order)
 	{
+		prune_replayer.allow_application_info = tag == RESOURCE_APPLICATION_INFO;
+
 		size_t hash_count = 0;
 		if (!input_db->get_hash_list_for_resource_tag(tag, &hash_count, nullptr))
 		{
@@ -263,20 +336,22 @@ int main(int argc, char *argv[])
 				     static_cast<unsigned long long>(hash), e.what());
 			}
 
-			// All pipelines and app infos are assumed to be relevant, copy right away.
-			if (tag == RESOURCE_GRAPHICS_PIPELINE ||
-			    tag == RESOURCE_COMPUTE_PIPELINE ||
-			    tag == RESOURCE_APPLICATION_INFO)
+			if (tag == RESOURCE_APPLICATION_INFO)
 			{
-				size_t compressed_size = 0;
-				if (!input_db->read_entry(tag, hash, &compressed_size, nullptr, PAYLOAD_READ_RAW_FOSSILIZE_DB_BIT))
-					return EXIT_FAILURE;
-				state_json.resize(compressed_size);
-				if (!input_db->read_entry(tag, hash, &compressed_size, state_json.data(), PAYLOAD_READ_RAW_FOSSILIZE_DB_BIT))
-					return EXIT_FAILURE;
-				if (!output_db->write_entry(tag, hash, state_json.data(), state_json.size(), PAYLOAD_WRITE_RAW_FOSSILIZE_DB_BIT))
-					return EXIT_FAILURE;
-				per_tag_written[tag] = per_tag_read[tag];
+				if (!should_filter_application_hash || hash == application_hash)
+				{
+					size_t compressed_size = 0;
+					if (!input_db->read_entry(tag, hash, &compressed_size, nullptr, PAYLOAD_READ_RAW_FOSSILIZE_DB_BIT))
+						return EXIT_FAILURE;
+					state_json.resize(compressed_size);
+					if (!input_db->read_entry(tag, hash, &compressed_size, state_json.data(),
+					                          PAYLOAD_READ_RAW_FOSSILIZE_DB_BIT))
+						return EXIT_FAILURE;
+					if (!output_db->write_entry(tag, hash, state_json.data(), state_json.size(),
+					                            PAYLOAD_WRITE_RAW_FOSSILIZE_DB_BIT))
+						return EXIT_FAILURE;
+					per_tag_written[tag]++;
+				}
 			}
 		}
 	}
@@ -318,6 +393,22 @@ int main(int argc, char *argv[])
 	                         per_tag_written))
 	{
 		LOGE("Failed to copy PIPELINE_LAYOUTs.\n");
+		return EXIT_FAILURE;
+	}
+
+	if (!copy_accessed_types(*input_db, *output_db, state_json,
+	                         prune_replayer.accessed_graphics_pipelines, RESOURCE_GRAPHICS_PIPELINE,
+	                         per_tag_written))
+	{
+		LOGE("Failed to copy GRAPHICS_PIPELINEs.\n");
+		return EXIT_FAILURE;
+	}
+
+	if (!copy_accessed_types(*input_db, *output_db, state_json,
+	                         prune_replayer.accessed_compute_pipelines, RESOURCE_COMPUTE_PIPELINE,
+	                         per_tag_written))
+	{
+		LOGE("Failed to copy COMPUTE_PIPELINEs.\n");
 		return EXIT_FAILURE;
 	}
 
