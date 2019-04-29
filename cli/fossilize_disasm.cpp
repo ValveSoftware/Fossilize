@@ -26,6 +26,7 @@
 #include "cli_parser.hpp"
 #include "logging.hpp"
 #include "file.hpp"
+#include "fossilize_db.hpp"
 
 #include <cinttypes>
 #include <string>
@@ -85,11 +86,11 @@ struct DisasmReplayer : StateCreatorInterface
 		}
 	}
 
-	bool enqueue_create_sampler(Hash index, const VkSamplerCreateInfo *create_info, VkSampler *sampler) override
+	bool enqueue_create_sampler(Hash hash, const VkSamplerCreateInfo *create_info, VkSampler *sampler) override
 	{
 		if (device)
 		{
-			LOGI("Creating sampler #%0" PRIX64 "\n", index);
+			LOGI("Creating sampler %0" PRIX64 "\n", hash);
 			if (vkCreateSampler(device->get_device(), create_info, nullptr, sampler) != VK_SUCCESS)
 			{
 				LOGE(" ... Failed!\n");
@@ -98,19 +99,18 @@ struct DisasmReplayer : StateCreatorInterface
 			LOGI(" ... Succeeded!\n");
 		}
 		else
-			*sampler = fake_handle<VkSampler>(index + 1);
+			*sampler = fake_handle<VkSampler>(hash);
 
-		samplers[index] = *sampler;
-		sampler_to_index[*sampler] = index;
-		sampler_infos[index] = create_info;
+		samplers.push_back(*sampler);
+		sampler_infos.push_back(create_info);
 		return true;
 	}
 
-	bool enqueue_create_descriptor_set_layout(Hash index, const VkDescriptorSetLayoutCreateInfo *create_info, VkDescriptorSetLayout *layout) override
+	bool enqueue_create_descriptor_set_layout(Hash hash, const VkDescriptorSetLayoutCreateInfo *create_info, VkDescriptorSetLayout *layout) override
 	{
 		if (device)
 		{
-			LOGI("Creating descriptor set layout #0%" PRIX64 "\n", index);
+			LOGI("Creating descriptor set layout 0%" PRIX64 "\n", hash);
 			if (vkCreateDescriptorSetLayout(device->get_device(), create_info, nullptr, layout) != VK_SUCCESS)
 			{
 				LOGE(" ... Failed!\n");
@@ -119,19 +119,18 @@ struct DisasmReplayer : StateCreatorInterface
 			LOGI(" ... Succeeded!\n");
 		}
 		else
-			*layout =  fake_handle<VkDescriptorSetLayout>(index + 1);
+			*layout = fake_handle<VkDescriptorSetLayout>(hash);
 
-		layouts[index] = *layout;
-		set_to_index[*layout] = index;
-		set_layout_infos[index] = create_info;
+		layouts.push_back(*layout);
+		set_layout_infos.push_back(create_info);
 		return true;
 	}
 
-	bool enqueue_create_pipeline_layout(Hash index, const VkPipelineLayoutCreateInfo *create_info, VkPipelineLayout *layout) override
+	bool enqueue_create_pipeline_layout(Hash hash, const VkPipelineLayoutCreateInfo *create_info, VkPipelineLayout *layout) override
 	{
 		if (device)
 		{
-			LOGI("Creating pipeline layout #0%" PRIX64 "\n", index);
+			LOGI("Creating pipeline layout 0%" PRIX64 "\n", hash);
 			if (vkCreatePipelineLayout(device->get_device(), create_info, nullptr, layout) != VK_SUCCESS)
 			{
 				LOGE(" ... Failed!\n");
@@ -140,19 +139,18 @@ struct DisasmReplayer : StateCreatorInterface
 			LOGI(" ... Succeeded!\n");
 		}
 		else
-			*layout = fake_handle<VkPipelineLayout>(index + 1);
+			*layout = fake_handle<VkPipelineLayout>(hash);
 
-		pipeline_layouts[index] = *layout;
-		layout_to_index[*layout] = index;
-		pipeline_layout_infos[index] = create_info;
+		pipeline_layouts.push_back(*layout);
+		pipeline_layout_infos.push_back(create_info);
 		return true;
 	}
 
-	bool enqueue_create_shader_module(Hash index, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module) override
+	bool enqueue_create_shader_module(Hash hash, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module) override
 	{
 		if (device)
 		{
-			LOGI("Creating shader module #0%" PRIX64 "\n", index);
+			LOGI("Creating shader module 0%" PRIX64 "\n", hash);
 			if (vkCreateShaderModule(device->get_device(), create_info, nullptr, module) != VK_SUCCESS)
 			{
 				LOGE(" ... Failed!\n");
@@ -161,19 +159,19 @@ struct DisasmReplayer : StateCreatorInterface
 			LOGI(" ... Succeeded!\n");
 		}
 		else
-			*module = fake_handle<VkShaderModule>(index + 1);
+			*module = fake_handle<VkShaderModule>(hash);
 
-		shader_modules[index] = *module;
-		module_to_index[*module] = index;
-		shader_module_infos[index] = create_info;
+		module_to_index[*module] = shader_modules.size();
+		shader_modules.push_back(*module);
+		shader_module_infos.push_back(create_info);
 		return true;
 	}
 
-	bool enqueue_create_render_pass(Hash index, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass) override
+	bool enqueue_create_render_pass(Hash hash, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass) override
 	{
 		if (device)
 		{
-			LOGI("Creating render pass #%0" PRIX64 "\n", index);
+			LOGI("Creating render pass %0" PRIX64 "\n", hash);
 			if (vkCreateRenderPass(device->get_device(), create_info, nullptr, render_pass) != VK_SUCCESS)
 			{
 				LOGE(" ... Failed!\n");
@@ -182,19 +180,18 @@ struct DisasmReplayer : StateCreatorInterface
 			LOGI(" ... Succeeded!\n");
 		}
 		else
-			*render_pass = fake_handle<VkRenderPass>(index + 1);
+			*render_pass = fake_handle<VkRenderPass>(hash);
 
-		render_passes[index] = *render_pass;
-		render_pass_to_index[*render_pass] = index;
-		render_pass_infos[index] = create_info;
+		render_passes.push_back(*render_pass);
+		render_pass_infos.push_back(create_info);
 		return true;
 	}
 
-	bool enqueue_create_compute_pipeline(Hash index, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) override
+	bool enqueue_create_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
 		if (device)
 		{
-			LOGI("Creating compute pipeline #0%" PRIX64 "\n", index);
+			LOGI("Creating compute pipeline %0" PRIX64 "\n", hash);
 			if (vkCreateComputePipelines(device->get_device(), pipeline_cache, 1, create_info, nullptr, pipeline) !=
 			    VK_SUCCESS)
 			{
@@ -204,19 +201,19 @@ struct DisasmReplayer : StateCreatorInterface
 			LOGI(" ... Succeeded!\n");
 		}
 		else
-			*pipeline = fake_handle<VkPipeline>(index + 1);
+			*pipeline = fake_handle<VkPipeline>(hash);
 
-		compute_pipelines[index] = *pipeline;
-		compute_to_index[*pipeline] = index;
-		compute_infos[index] = create_info;
+		compute_pipelines.push_back(*pipeline);
+		compute_infos.push_back(create_info);
+		compute_hashes.push_back(hash);
 		return true;
 	}
 
-	bool enqueue_create_graphics_pipeline(Hash index, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline) override
+	bool enqueue_create_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
 		if (device)
 		{
-			LOGI("Creating graphics pipeline #%0" PRIX64 "\n", index);
+			LOGI("Creating graphics pipeline %0" PRIX64 "\n", hash);
 			if (vkCreateGraphicsPipelines(device->get_device(), pipeline_cache, 1, create_info, nullptr, pipeline) !=
 			    VK_SUCCESS)
 			{
@@ -226,11 +223,11 @@ struct DisasmReplayer : StateCreatorInterface
 			LOGI(" ... Succeeded!\n");
 		}
 		else
-			*pipeline = fake_handle<VkPipeline>(index + 1);
+			*pipeline = fake_handle<VkPipeline>(hash);
 
-		graphics_pipelines[index] = *pipeline;
-		graphics_to_index[*pipeline] = index;
-		graphics_infos[index] = create_info;
+		graphics_pipelines.push_back(*pipeline);
+		graphics_infos.push_back(create_info);
+		graphics_hashes.push_back(hash);
 		return true;
 	}
 
@@ -244,13 +241,9 @@ struct DisasmReplayer : StateCreatorInterface
 	vector<const VkGraphicsPipelineCreateInfo *> graphics_infos;
 	vector<const VkComputePipelineCreateInfo *> compute_infos;
 
-	unordered_map<VkSampler, unsigned> sampler_to_index;
-	unordered_map<VkDescriptorSetLayout, unsigned> set_to_index;
-	unordered_map<VkPipelineLayout, unsigned> layout_to_index;
+	vector<Hash> graphics_hashes;
+	vector<Hash> compute_hashes;
 	unordered_map<VkShaderModule, unsigned> module_to_index;
-	unordered_map<VkRenderPass, unsigned> render_pass_to_index;
-	unordered_map<VkPipeline, unsigned> compute_to_index;
-	unordered_map<VkPipeline, unsigned> graphics_to_index;
 
 	vector<VkSampler> samplers;
 	vector<VkDescriptorSetLayout> layouts;
@@ -284,6 +277,7 @@ static DisasmMethod method_from_string(const char *method)
 	}
 }
 
+#if 0
 static VkShaderStageFlagBits stage_from_string(const char *stage)
 {
 	if (strcmp(stage, "vert") == 0)
@@ -302,11 +296,12 @@ static VkShaderStageFlagBits stage_from_string(const char *stage)
 		exit(EXIT_FAILURE);
 	}
 }
+#endif
 
 static string disassemble_spirv_asm(const VkShaderModuleCreateInfo *create_info)
 {
 	string str;
-	spvtools::SpirvTools tools(SPV_ENV_VULKAN_1_0);
+	spvtools::SpirvTools tools(SPV_ENV_VULKAN_1_1);
 	if (!tools.Disassemble(create_info->pCode, create_info->codeSize / sizeof(uint32_t), &str))
 		return "";
 	return str;
@@ -314,45 +309,52 @@ static string disassemble_spirv_asm(const VkShaderModuleCreateInfo *create_info)
 
 static string disassemble_spirv_glsl(const VkShaderModuleCreateInfo *create_info, const char *entry, VkShaderStageFlagBits stage)
 {
-	spirv_cross::CompilerGLSL comp(create_info->pCode, create_info->codeSize / sizeof(uint32_t));
-	spirv_cross::CompilerGLSL::Options opts;
-	opts.version = 450;
-	opts.es = false;
-	opts.vulkan_semantics = true;
-	comp.set_common_options(opts);
-	comp.build_dummy_sampler_for_combined_images();
-
-	switch (stage)
+	try
 	{
-	case VK_SHADER_STAGE_VERTEX_BIT:
-		comp.set_entry_point(entry, spv::ExecutionModelVertex);
-		break;
+		spirv_cross::CompilerGLSL comp(create_info->pCode, create_info->codeSize / sizeof(uint32_t));
+		spirv_cross::CompilerGLSL::Options opts;
+		opts.version = 460;
+		opts.es = false;
+		opts.vulkan_semantics = true;
+		comp.set_common_options(opts);
 
-	case VK_SHADER_STAGE_FRAGMENT_BIT:
-		comp.set_entry_point(entry, spv::ExecutionModelFragment);
-		break;
+		switch (stage)
+		{
+		case VK_SHADER_STAGE_VERTEX_BIT:
+			comp.set_entry_point(entry, spv::ExecutionModelVertex);
+			break;
 
-	case VK_SHADER_STAGE_GEOMETRY_BIT:
-		comp.set_entry_point(entry, spv::ExecutionModelGeometry);
-		break;
+		case VK_SHADER_STAGE_FRAGMENT_BIT:
+			comp.set_entry_point(entry, spv::ExecutionModelFragment);
+			break;
 
-	case VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT:
-		comp.set_entry_point(entry, spv::ExecutionModelTessellationControl);
-		break;
+		case VK_SHADER_STAGE_GEOMETRY_BIT:
+			comp.set_entry_point(entry, spv::ExecutionModelGeometry);
+			break;
 
-	case VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT:
-		comp.set_entry_point(entry, spv::ExecutionModelTessellationEvaluation);
-		break;
+		case VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT:
+			comp.set_entry_point(entry, spv::ExecutionModelTessellationControl);
+			break;
 
-	case VK_SHADER_STAGE_COMPUTE_BIT:
-		comp.set_entry_point(entry, spv::ExecutionModelGLCompute);
-		break;
+		case VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT:
+			comp.set_entry_point(entry, spv::ExecutionModelTessellationEvaluation);
+			break;
 
-	default:
-		return "";
+		case VK_SHADER_STAGE_COMPUTE_BIT:
+			comp.set_entry_point(entry, spv::ExecutionModelGLCompute);
+			break;
+
+		default:
+			return "";
+		}
+
+		return comp.compile();
 	}
-
-	return comp.compile();
+	catch (const std::exception &e)
+	{
+		LOGE("SPIRV-Cross threw exception %s.\n", e.what());
+		return e.what();
+	}
 }
 
 static string disassemble_spirv_amd(const VulkanDevice &device, VkPipeline pipeline, VkShaderStageFlagBits stage)
@@ -408,12 +410,36 @@ static void print_help()
 	     "\t[--help]\n"
 	     "\t[--device-index <index>]\n"
 	     "\t[--enable-validation]\n"
-	     "\t[--graphics-pipeline <index>]\n"
-	     "\t[--compute-pipeline <index>]\n"
-	     "\t[--stage vert/frag/comp/geom/tesc/tese]\n"
 	     "\t[--output <path>]\n"
 	     "\t[--target asm/glsl/amd]\n"
 	     "state.json\n");
+}
+static string uint64_string(uint64_t value)
+{
+	char str[17]; // 16 digits + null
+	sprintf(str, "%016llx", static_cast<unsigned long long>(value));
+	return string(str);
+}
+
+static string stage_to_string(VkShaderStageFlagBits stage)
+{
+	switch (stage)
+	{
+	case VK_SHADER_STAGE_VERTEX_BIT:
+		return "vert";
+	case VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT:
+		return "tesc";
+	case VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT:
+		return "tese";
+	case VK_SHADER_STAGE_GEOMETRY_BIT:
+		return "geom";
+	case VK_SHADER_STAGE_FRAGMENT_BIT:
+		return "frag";
+	case VK_SHADER_STAGE_COMPUTE_BIT:
+		return "comp";
+	default:
+		return "????";
+	}
 }
 
 int main(int argc, char *argv[])
@@ -422,19 +448,12 @@ int main(int argc, char *argv[])
 	string output;
 	VulkanDevice::Options opts;
 	DisasmMethod method = DisasmMethod::Asm;
-	VkShaderStageFlagBits stage = VK_SHADER_STAGE_ALL;
-
-	int graphics_index = -1;
-	int compute_index = -1;
 
 	CLICallbacks cbs;
 	cbs.default_handler = [&](const char *arg) { json_path = arg; };
 	cbs.add("--help", [](CLIParser &parser) { print_help(); parser.end(); });
 	cbs.add("--device-index", [&](CLIParser &parser) { opts.device_index = parser.next_uint(); });
 	cbs.add("--enable-validation", [&](CLIParser &) { opts.enable_validation = true; });
-	cbs.add("--graphics-pipeline", [&](CLIParser &parser) { graphics_index = parser.next_uint(); });
-	cbs.add("--compute-pipeline", [&](CLIParser &parser) { compute_index = parser.next_uint(); });
-	cbs.add("--stage", [&](CLIParser &parser) { stage = stage_from_string(parser.next_string()); });
 	cbs.add("--output", [&](CLIParser &parser) { output = parser.next_string(); });
 	cbs.add("--target", [&](CLIParser &parser) {
 		method = method_from_string(parser.next_string());
@@ -454,21 +473,6 @@ int main(int argc, char *argv[])
 		return EXIT_FAILURE;
 	}
 
-	if (compute_index >= 0)
-		stage = VK_SHADER_STAGE_COMPUTE_BIT;
-
-	if (stage == VK_SHADER_STAGE_ALL)
-	{
-		LOGE("Must choose --stage!\n");
-		return EXIT_FAILURE;
-	}
-
-	if (((graphics_index >= 0 && compute_index >= 0)) || ((graphics_index < 0) && (compute_index < 0)))
-	{
-		LOGE("Use either --graphics-pipeline or --compute-pipeline.\n");
-		return EXIT_FAILURE;
-	}
-
 	VulkanDevice device;
 	if (method == DisasmMethod::AMD)
 	{
@@ -481,82 +485,138 @@ int main(int argc, char *argv[])
 
 	DisasmReplayer replayer(device.get_device() ? &device : nullptr);
 	StateReplayer state_replayer;
-
-	try
+	auto resolver = unique_ptr<DatabaseInterface>(create_database(json_path.c_str(), DatabaseMode::ReadOnly));
+	if (!resolver->prepare())
 	{
-		auto state_json = load_buffer_from_file(json_path.c_str());
-		if (state_json.empty())
-		{
-			LOGE("Failed to load state JSON from disk.\n");
-			return EXIT_FAILURE;
-		}
-		state_replayer.parse(replayer, nullptr, state_json.data(), state_json.size());
-	}
-	catch (const exception &e)
-	{
-		LOGE("Caught exception: %s\n", e.what());
+		LOGE("Failed to open database: %s\n", json_path.c_str());
 		return EXIT_FAILURE;
 	}
 
-	string disassembled;
-	if (compute_index >= 0)
+	static const ResourceTag playback_order[] = {
+		RESOURCE_APPLICATION_INFO, // This will create the device, etc.
+		RESOURCE_SHADER_MODULE, // Kick off shader modules first since it can be done in a thread while we deal with trivial objects.
+		RESOURCE_SAMPLER, // Trivial, run in main thread.
+		RESOURCE_DESCRIPTOR_SET_LAYOUT, // Trivial, run in main thread
+		RESOURCE_PIPELINE_LAYOUT, // Trivial, run in main thread
+		RESOURCE_RENDER_PASS, // Trivial, run in main thread
+		RESOURCE_GRAPHICS_PIPELINE, // Multi-threaded
+		RESOURCE_COMPUTE_PIPELINE, // Multi-threaded
+	};
+
+	static const char *tag_names[] = {
+		"AppInfo",
+		"Sampler",
+		"Descriptor Set Layout",
+		"Pipeline Layout",
+		"Shader Module",
+		"Render Pass",
+		"Graphics Pipeline",
+		"Compute Pipeline",
+	};
+
+	vector<uint8_t> state_json;
+
+	for (auto &tag : playback_order)
 	{
-		if (size_t(compute_index) >= replayer.compute_infos.size())
+		LOGI("Replaying tag: %s\n", tag_names[tag]);
+		size_t hash_count = 0;
+		if (!resolver->get_hash_list_for_resource_tag(tag, &hash_count, nullptr))
 		{
-			LOGE("Used compute index: %d, but there's only %u compute pipelines in the dump.\n",
-			     compute_index, unsigned(replayer.compute_infos.size()));
+			LOGE("Failed to get hashes.\n");
 			return EXIT_FAILURE;
 		}
 
-		auto *info = replayer.compute_infos[compute_index];
-		auto *module_info = replayer.shader_module_infos[replayer.module_to_index[info->stage.module]];
-		disassembled = disassemble_spirv(device, replayer.compute_pipelines[compute_index], method, stage, module_info, info->stage.pName);
-	}
-	else if (graphics_index >= 0)
-	{
-		if (size_t(graphics_index) >= replayer.graphics_infos.size())
+		vector<Hash> hashes(hash_count);
+
+		if (!resolver->get_hash_list_for_resource_tag(tag, &hash_count, hashes.data()))
 		{
-			LOGE("Used graphics index: %d, but there's only %u graphics pipelines in the dump.\n",
-			     graphics_index, unsigned(replayer.graphics_infos.size()));
+			LOGE("Failed to get shader module hashes.\n");
 			return EXIT_FAILURE;
 		}
 
-		auto *info = replayer.graphics_infos[graphics_index];
-
-		VkShaderModule module = VK_NULL_HANDLE;
-		const char *entry = nullptr;
-
-		for (uint32_t i = 0; i < info->stageCount; i++)
+		for (auto hash : hashes)
 		{
-			if (info->pStages[i].stage == stage)
+			size_t state_json_size;
+			if (!resolver->read_entry(tag, hash, &state_json_size, nullptr, 0))
 			{
-				module = info->pStages[i].module;
-				entry = info->pStages[i].pName;
-				break;
+				LOGE("Failed to load blob from cache.\n");
+				return EXIT_FAILURE;
+			}
+
+			state_json.resize(state_json_size);
+
+			if (!resolver->read_entry(tag, hash, &state_json_size, state_json.data(), 0))
+			{
+				LOGE("Failed to load blob from cache.\n");
+				return EXIT_FAILURE;
+			}
+
+			try
+			{
+				state_replayer.parse(replayer, resolver.get(), state_json.data(), state_json.size());
+			}
+			catch (const exception &e)
+			{
+				LOGE("StateReplayer threw exception parsing (tag: %d, hash: 0x%llx): %s\n", tag,
+				     static_cast<unsigned long long>(hash), e.what());
 			}
 		}
+		LOGI("Replayed tag: %s\n", tag_names[tag]);
+	}
 
-		if (!module)
+	unordered_set<VkShaderModule> unique_shader_modules;
+
+	string disassembled;
+	size_t graphics_pipeline_count = replayer.graphics_infos.size();
+	for (size_t i = 0; i < graphics_pipeline_count; i++)
+	{
+		auto *info = replayer.graphics_infos[i];
+		for (uint32_t j = 0; j < info->stageCount; j++)
 		{
-			LOGE("Cannot find module for --stage ...\n");
-			return EXIT_FAILURE;
+			VkShaderModule module = info->pStages[j].module;
+			unique_shader_modules.insert(module);
+			auto *module_info = replayer.shader_module_infos[replayer.module_to_index[module]];
+			disassembled = disassemble_spirv(device, replayer.graphics_pipelines[i], method, info->pStages[j].stage,
+			                                 module_info, info->pStages[j].pName);
+
+			string path = output + "/" + uint64_string((uint64_t) module) + "." +
+			              info->pStages[j].pName + "." +
+			              uint64_string(replayer.graphics_hashes[i]) +
+			              "." + stage_to_string(info->pStages[j].stage);
+
+			LOGI("Dumping disassembly to: %s\n", path.c_str());
+			if (!write_string_to_file(path.c_str(), disassembled.c_str()))
+			{
+				LOGE("Failed to write disassembly to file: %s\n", output.c_str());
+				return EXIT_FAILURE;
+			}
 		}
+	}
 
+	size_t compute_pipeline_count = replayer.compute_infos.size();
+	for (size_t i = 0; i < compute_pipeline_count; i++)
+	{
+		auto *info = replayer.compute_infos[i];
+		VkShaderModule module = info->stage.module;
+		unique_shader_modules.insert(module);
 		auto *module_info = replayer.shader_module_infos[replayer.module_to_index[module]];
-		disassembled = disassemble_spirv(device, replayer.graphics_pipelines[graphics_index], method, stage, module_info, entry);
-	}
+		disassembled = disassemble_spirv(device, replayer.compute_pipelines[i], method, info->stage.stage,
+		                                 module_info, info->stage.pName);
 
-	if (output.empty())
-	{
-		printf("%s\n", disassembled.c_str());
-	}
-	else
-	{
-		if (!write_string_to_file(output.c_str(), disassembled.c_str()))
+		string path = output + "/" + uint64_string((uint64_t) module) + "." +
+		              info->stage.pName + "." +
+		              uint64_string(replayer.compute_hashes[i]) +
+		              "." + stage_to_string(info->stage.stage);
+
+		LOGI("Dumping disassembly to: %s\n", path.c_str());
+		if (!write_string_to_file(path.c_str(), disassembled.c_str()))
 		{
 			LOGE("Failed to write disassembly to file: %s\n", output.c_str());
 			return EXIT_FAILURE;
 		}
 	}
+
+	LOGI("Shader modules used: %u, shader modules in database: %u\n",
+	     unsigned(unique_shader_modules.size()), unsigned(replayer.shader_module_infos.size()));
 	return EXIT_SUCCESS;
 }
