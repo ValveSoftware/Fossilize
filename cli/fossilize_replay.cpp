@@ -274,6 +274,11 @@ struct ThreadedReplayer : StateCreatorInterface
 		try
 		{
 			replayer.parse(*this, global_database, buffer.data(), buffer.size());
+			if (work_item.tag == RESOURCE_SHADER_MODULE)
+			{
+				// No reason to retain memory in this allocator anymore.
+				replayer.get_allocator().reset();
+			}
 		}
 		catch (const std::exception &e)
 		{
@@ -288,37 +293,6 @@ struct ThreadedReplayer : StateCreatorInterface
 	{
 		switch (work_item.tag)
 		{
-		case RESOURCE_SHADER_MODULE:
-		{
-			for (unsigned i = 0; i < loop_count; i++)
-			{
-				// Avoid leak.
-				if (*work_item.hash_map_entry.shader_module != VK_NULL_HANDLE)
-					vkDestroyShaderModule(device->get_device(), *work_item.hash_map_entry.shader_module, nullptr);
-				*work_item.hash_map_entry.shader_module = VK_NULL_HANDLE;
-
-				auto start_time = chrono::steady_clock::now();
-				if (vkCreateShaderModule(device->get_device(), work_item.create_info.shader_module_create_info,
-				                         nullptr, work_item.output.shader_module) == VK_SUCCESS)
-				{
-					auto end_time = chrono::steady_clock::now();
-					auto duration_ns = chrono::duration_cast<chrono::nanoseconds>(end_time - start_time).count();
-					shader_module_ns.fetch_add(duration_ns, std::memory_order_relaxed);
-					shader_module_count.fetch_add(1, std::memory_order_relaxed);
-					*work_item.hash_map_entry.shader_module = *work_item.output.shader_module;
-
-					if (robustness)
-						shader_module_to_hash[*work_item.output.shader_module] = work_item.hash;
-				}
-				else
-				{
-					LOGE("Failed to create shader module for hash 0x%llx.\n",
-					     static_cast<unsigned long long>(work_item.hash));
-				}
-			}
-			break;
-		}
-
 		case RESOURCE_GRAPHICS_PIPELINE:
 		{
 			if (work_item.contributes_to_index)
@@ -484,6 +458,10 @@ struct ThreadedReplayer : StateCreatorInterface
 		per_thread_replayer.set_resolve_shader_module_handles(false);
 		per_thread_replayer.copy_handle_references(*global_replayer);
 
+		// A separate replayer for shader modules so we can reclaim memory right after parsing.
+		// After replaying a VkShaderModule, we never need to refer to any de-serialized shader module create info again.
+		StateReplayer per_thread_replayer_shader_modules;
+
 		vector<uint8_t> json_buffer;
 
 		for (;;)
@@ -508,7 +486,11 @@ struct ThreadedReplayer : StateCreatorInterface
 			idle_ns += duration_ns;
 
 			if (work_item.parse_only)
-				run_parse_work_item(per_thread_replayer, json_buffer, work_item);
+			{
+				run_parse_work_item(work_item.tag == RESOURCE_SHADER_MODULE ? per_thread_replayer_shader_modules
+				                                                            : per_thread_replayer,
+				                    json_buffer, work_item);
+			}
 			else
 				run_creation_work_item(work_item);
 
@@ -518,8 +500,8 @@ struct ThreadedReplayer : StateCreatorInterface
 				completed_count++;
 				if (completed_count == queued_count) // Makes sense to signal main thread now.
 					work_done_condition.notify_one();
-
 			}
+
 			idle_end_time = chrono::steady_clock::now();
 			duration_ns = chrono::duration_cast<chrono::nanoseconds>(idle_end_time - idle_start_time).count();
 			idle_ns += duration_ns;
@@ -793,19 +775,41 @@ struct ThreadedReplayer : StateCreatorInterface
 			return true;
 		}
 
-		PipelineWorkItem work_item;
-		work_item.hash = hash;
-		work_item.tag = RESOURCE_SHADER_MODULE;
-		work_item.output.shader_module = module;
-		work_item.create_info.shader_module_create_info = create_info;
-
+		VkShaderModule *hash_map_entry;
 		{
 			lock_guard<mutex> lock(internal_enqueue_mutex);
-			// Pointer to value in std::unordered_map remains fixed per spec (node-based).
-			work_item.hash_map_entry.shader_module = &shader_modules[hash];
+			hash_map_entry = &shader_modules[hash];
 		}
 
-		enqueue_work_item(work_item);
+		for (unsigned i = 0; i < loop_count; i++)
+		{
+			// Avoid leak.
+			if (*hash_map_entry != VK_NULL_HANDLE)
+				vkDestroyShaderModule(device->get_device(), *hash_map_entry, nullptr);
+			*hash_map_entry = VK_NULL_HANDLE;
+
+			auto start_time = chrono::steady_clock::now();
+			if (vkCreateShaderModule(device->get_device(), create_info, nullptr, module) == VK_SUCCESS)
+			{
+				auto end_time = chrono::steady_clock::now();
+				auto duration_ns = chrono::duration_cast<chrono::nanoseconds>(end_time - start_time).count();
+				shader_module_ns.fetch_add(duration_ns, std::memory_order_relaxed);
+				shader_module_count.fetch_add(1, std::memory_order_relaxed);
+				*hash_map_entry = *module;
+
+				if (robustness)
+				{
+					lock_guard<mutex> lock(internal_enqueue_mutex);
+					shader_module_to_hash[*module] = hash;
+				}
+			}
+			else
+			{
+				LOGE("Failed to create shader module for hash 0x%llx.\n",
+				     static_cast<unsigned long long>(hash));
+			}
+		}
+
 		return true;
 	}
 
@@ -1456,7 +1460,6 @@ static int run_normal_process(ThreadedReplayer &replayer, const string &db_path)
 
 	for (auto &tag : threaded_playback_order)
 	{
-		auto main_thread_start = std::chrono::steady_clock::now();
 		size_t tag_total_size = 0;
 		size_t tag_total_size_compressed = 0;
 		size_t resource_hash_count = 0;
@@ -1503,6 +1506,7 @@ static int run_normal_process(ThreadedReplayer &replayer, const string &db_path)
 				LOGE("Failed to load blob from cache.\n");
 				return EXIT_FAILURE;
 			}
+			tag_total_size += state_json_size;
 
 			// Defer parsing and decompression to the worker threads.
 			ThreadedReplayer::PipelineWorkItem work_item;
@@ -1515,10 +1519,6 @@ static int run_normal_process(ThreadedReplayer &replayer, const string &db_path)
 		LOGI("Total binary size for %s: %llu (%llu compressed)\n", tag_names[tag],
 		     static_cast<unsigned long long>(tag_total_size),
 		     static_cast<unsigned long long>(tag_total_size_compressed));
-
-		auto main_thread_end = std::chrono::steady_clock::now();
-		auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(main_thread_end - main_thread_start).count();
-		LOGI("Total time decoding %s in main thread: %.3f s\n", tag_names[tag], duration * 1e-9);
 	}
 
 	replayer.flush_deferred_pipelines();
