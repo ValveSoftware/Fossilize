@@ -192,6 +192,7 @@ struct StateReplayer::Impl
 	uint32_t *parse_uints(const Value &attachments);
 	const char *duplicate_string(const char *str, size_t len);
 	bool resolve_derivative_pipelines = true;
+	bool resolve_shader_modules = true;
 
 	template <typename T>
 	T *copy(const T *src, size_t count);
@@ -1529,7 +1530,7 @@ void StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, D
 	info.stage.stage = static_cast<VkShaderStageFlagBits>(stage["stage"].GetUint());
 
 	auto module = string_to_uint64(stage["module"].GetString());
-	if (module > 0)
+	if (module > 0 && resolve_shader_modules)
 	{
 		auto module_iter = replayed_shader_modules.find(module);
 		if (module_iter == replayed_shader_modules.end())
@@ -1559,6 +1560,8 @@ void StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, D
 			iface.sync_shader_modules();
 		info.stage.module = module_iter->second;
 	}
+	else
+		info.stage.module = api_object_cast<VkShaderModule>(module);
 
 	info.stage.pName = duplicate_string(stage["name"].GetString(), stage["name"].GetStringLength());
 	if (stage.HasMember("specializationInfo"))
@@ -1855,7 +1858,7 @@ VkPipelineShaderStageCreateInfo *StateReplayer::Impl::parse_stages(StateCreatorI
 			state->pSpecializationInfo = parse_specialization_info(obj["specializationInfo"]);
 
 		auto module = string_to_uint64(obj["module"].GetString());
-		if (module > 0)
+		if (module > 0 && resolve_shader_modules)
 		{
 			auto module_iter = replayed_shader_modules.find(module);
 			if (module_iter == replayed_shader_modules.end())
@@ -1886,6 +1889,8 @@ VkPipelineShaderStageCreateInfo *StateReplayer::Impl::parse_stages(StateCreatorI
 
 			state->module = module_iter->second;
 		}
+		else
+			state->module = api_object_cast<VkShaderModule>(module);
 	}
 
 	return ret;
@@ -2117,6 +2122,11 @@ void StateReplayer::parse(StateCreatorInterface &iface, DatabaseInterface *resol
 void StateReplayer::set_resolve_derivative_pipeline_handles(bool enable)
 {
 	impl->resolve_derivative_pipelines = enable;
+}
+
+void StateReplayer::set_resolve_shader_module_handles(bool enable)
+{
+	impl->resolve_shader_modules = enable;
 }
 
 void StateReplayer::Impl::parse(StateCreatorInterface &iface, DatabaseInterface *resolver, const void *buffer_, size_t total_size)

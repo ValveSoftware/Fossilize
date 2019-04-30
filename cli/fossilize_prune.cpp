@@ -255,6 +255,8 @@ int main(int argc, char *argv[])
 	StateReplayer replayer;
 	PruneReplayer prune_replayer;
 
+	replayer.set_resolve_shader_module_handles(false);
+
 	if (should_filter_application_hash)
 	{
 		prune_replayer.should_filter_application_hash = true;
@@ -262,14 +264,14 @@ int main(int argc, char *argv[])
 	}
 
 	static const ResourceTag playback_order[] = {
-		RESOURCE_APPLICATION_INFO, // This will create the device, etc.
-		RESOURCE_SHADER_MODULE, // Kick off shader modules first since it can be done in a thread while we deal with trivial objects.
-		RESOURCE_SAMPLER, // Trivial, run in main thread.
-		RESOURCE_DESCRIPTOR_SET_LAYOUT, // Trivial, run in main thread
-		RESOURCE_PIPELINE_LAYOUT, // Trivial, run in main thread
-		RESOURCE_RENDER_PASS, // Trivial, run in main thread
-		RESOURCE_GRAPHICS_PIPELINE, // Multi-threaded
-		RESOURCE_COMPUTE_PIPELINE, // Multi-threaded
+		RESOURCE_APPLICATION_INFO,
+		RESOURCE_SHADER_MODULE,
+		RESOURCE_SAMPLER,
+		RESOURCE_DESCRIPTOR_SET_LAYOUT,
+		RESOURCE_PIPELINE_LAYOUT,
+		RESOURCE_RENDER_PASS,
+		RESOURCE_GRAPHICS_PIPELINE,
+		RESOURCE_COMPUTE_PIPELINE,
 	};
 
 	unsigned per_tag_read[RESOURCE_COUNT] = {};
@@ -290,6 +292,10 @@ int main(int argc, char *argv[])
 
 	for (auto &tag : playback_order)
 	{
+		// No need to resolve this type.
+		if (tag == RESOURCE_SHADER_MODULE)
+			continue;
+
 		prune_replayer.allow_application_info = tag == RESOURCE_APPLICATION_INFO;
 
 		size_t hash_count = 0;
