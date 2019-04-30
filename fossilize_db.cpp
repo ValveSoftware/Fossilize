@@ -49,6 +49,27 @@ static_assert(FOSSILIZE_BLOB_HASH_LENGTH >= 32, "Blob hash length must be at lea
 
 namespace Fossilize
 {
+class ConditionalLockGuard
+{
+public:
+	ConditionalLockGuard(std::mutex &lock_, bool enable_)
+		: lock(lock_), enable(enable_)
+	{
+		if (enable)
+			lock.lock();
+	}
+
+	~ConditionalLockGuard()
+	{
+		if (enable)
+			lock.unlock();
+	}
+
+private:
+	std::mutex &lock;
+	bool enable;
+};
+
 struct DumbDirectoryDatabase : DatabaseInterface
 {
 	DumbDirectoryDatabase(const string &base, DatabaseMode mode_)
@@ -665,6 +686,7 @@ struct StreamArchive : DatabaseInterface
 			if ((flags & PAYLOAD_READ_RAW_FOSSILIZE_DB_BIT) != 0)
 			{
 				// Include the header.
+				ConditionalLockGuard holder(read_lock, (flags & PAYLOAD_READ_CONCURRENT_BIT) != 0);
 				if (fseek(file, itr->second.offset - sizeof(PayloadHeaderRaw), SEEK_SET) < 0)
 					return false;
 
@@ -674,7 +696,7 @@ struct StreamArchive : DatabaseInterface
 			}
 			else
 			{
-				if (!decode_payload(blob, out_size, itr->second))
+				if (!decode_payload(blob, out_size, itr->second, (flags & PAYLOAD_READ_CONCURRENT_BIT) != 0))
 					return false;
 			}
 		}
@@ -850,17 +872,20 @@ struct StreamArchive : DatabaseInterface
 		PayloadHeader header;
 	};
 
-	bool decode_payload_uncompressed(void *blob, size_t blob_size, const Entry &entry)
+	bool decode_payload_uncompressed(void *blob, size_t blob_size, const Entry &entry, bool concurrent)
 	{
 		if (entry.header.uncompressed_size != blob_size || entry.header.payload_size != blob_size)
 			return false;
 
-		if (fseek(file, entry.offset, SEEK_SET) < 0)
-			return false;
+		{
+			ConditionalLockGuard holder(read_lock, concurrent);
+			if (fseek(file, entry.offset, SEEK_SET) < 0)
+				return false;
 
-		size_t read_size = entry.header.payload_size;
-		if (fread(blob, 1, read_size, file) != read_size)
-			return false;
+			size_t read_size = entry.header.payload_size;
+			if (fread(blob, 1, read_size, file) != read_size)
+				return false;
+		}
 
 		if (entry.header.crc != 0) // Verify checksum.
 		{
@@ -875,34 +900,37 @@ struct StreamArchive : DatabaseInterface
 		return true;
 	}
 
-	bool decode_payload_deflate(void *blob, size_t blob_size, const Entry &entry)
+	bool decode_payload_deflate(void *blob, size_t blob_size, const Entry &entry, bool concurrent)
 	{
 		if (entry.header.uncompressed_size != blob_size)
 			return false;
 
-		if (zlib_buffer_size < entry.header.payload_size)
 		{
-			auto *new_zlib_buffer = static_cast<uint8_t *>(realloc(zlib_buffer, entry.header.payload_size));
-			if (new_zlib_buffer)
+			ConditionalLockGuard holder(read_lock, concurrent);
+			if (zlib_buffer_size < entry.header.payload_size)
 			{
-				zlib_buffer = new_zlib_buffer;
-				zlib_buffer_size = entry.header.payload_size;
+				auto *new_zlib_buffer = static_cast<uint8_t *>(realloc(zlib_buffer, entry.header.payload_size));
+				if (new_zlib_buffer)
+				{
+					zlib_buffer = new_zlib_buffer;
+					zlib_buffer_size = entry.header.payload_size;
+				}
+				else
+				{
+					free(zlib_buffer);
+					zlib_buffer = nullptr;
+					zlib_buffer_size = 0;
+				}
 			}
-			else
-			{
-				free(zlib_buffer);
-				zlib_buffer = nullptr;
-				zlib_buffer_size = 0;
-			}
+
+			if (!zlib_buffer)
+				return false;
+
+			if (fseek(file, entry.offset, SEEK_SET) < 0)
+				return false;
+			if (fread(zlib_buffer, 1, entry.header.payload_size, file) != entry.header.payload_size)
+				return false;
 		}
-
-		if (!zlib_buffer)
-			return false;
-
-		if (fseek(file, entry.offset, SEEK_SET) < 0)
-			return false;
-		if (fread(zlib_buffer, 1, entry.header.payload_size, file) != entry.header.payload_size)
-			return false;
 
 		if (entry.header.crc != 0) // Verify checksum.
 		{
@@ -923,12 +951,12 @@ struct StreamArchive : DatabaseInterface
 		return true;
 	}
 
-	bool decode_payload(void *blob, size_t blob_size, const Entry &entry)
+	bool decode_payload(void *blob, size_t blob_size, const Entry &entry, bool concurrent)
 	{
 		if (entry.header.format == FOSSILIZE_COMPRESSION_NONE)
-			return decode_payload_uncompressed(blob, blob_size, entry);
+			return decode_payload_uncompressed(blob, blob_size, entry, concurrent);
 		else if (entry.header.format == FOSSILIZE_COMPRESSION_DEFLATE)
-			return decode_payload_deflate(blob, blob_size, entry);
+			return decode_payload_deflate(blob, blob_size, entry, concurrent);
 		else
 			return false;
 	}
@@ -940,6 +968,7 @@ struct StreamArchive : DatabaseInterface
 	uint8_t *zlib_buffer = nullptr;
 	size_t zlib_buffer_size = 0;
 	bool alive = false;
+	std::mutex read_lock;
 };
 
 DatabaseInterface *create_stream_archive_database(const char *path, DatabaseMode mode)

@@ -143,6 +143,9 @@ public:
 	// It is up to the application to overwrite the correct VkShaderModule later.
 	void set_resolve_shader_module_handles(bool enable);
 
+	// Lets other StateReplayers have the same references to objects.
+	void copy_handle_references(const StateReplayer &replayer);
+
 	ScratchAllocator &get_allocator();
 
 	// Disable copies (and moves).

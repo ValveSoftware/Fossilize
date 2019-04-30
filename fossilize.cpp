@@ -149,6 +149,7 @@ struct StateReplayer::Impl
 	std::unordered_map<Hash, VkPipeline> replayed_compute_pipelines;
 	std::unordered_map<Hash, VkPipeline> replayed_graphics_pipelines;
 
+	void copy_handle_references(const Impl &impl);
 	void parse_samplers(StateCreatorInterface &iface, const Value &samplers);
 	void parse_descriptor_set_layouts(StateCreatorInterface &iface, const Value &layouts);
 	void parse_pipeline_layouts(StateCreatorInterface &iface, const Value &layouts);
@@ -2127,6 +2128,22 @@ void StateReplayer::set_resolve_derivative_pipeline_handles(bool enable)
 void StateReplayer::set_resolve_shader_module_handles(bool enable)
 {
 	impl->resolve_shader_modules = enable;
+}
+
+void StateReplayer::copy_handle_references(const StateReplayer &replayer)
+{
+	impl->copy_handle_references(*replayer.impl);
+}
+
+void StateReplayer::Impl::copy_handle_references(const StateReplayer::Impl &impl)
+{
+	replayed_samplers = impl.replayed_samplers;
+	replayed_descriptor_set_layouts = impl.replayed_descriptor_set_layouts;
+	replayed_pipeline_layouts = impl.replayed_pipeline_layouts;
+	replayed_shader_modules = impl.replayed_shader_modules;
+	replayed_render_passes = impl.replayed_render_passes;
+	replayed_compute_pipelines = impl.replayed_compute_pipelines;
+	replayed_graphics_pipelines = impl.replayed_graphics_pipelines;
 }
 
 void StateReplayer::Impl::parse(StateCreatorInterface &iface, DatabaseInterface *resolver, const void *buffer_, size_t total_size)
