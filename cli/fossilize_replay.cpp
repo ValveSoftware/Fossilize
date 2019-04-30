@@ -818,11 +818,13 @@ struct ThreadedReplayer : StateCreatorInterface
 		if (derived)
 		{
 			// We don't have the appropriate base pipeline yet, so defer it.
+			lock_guard<mutex> lock(internal_enqueue_mutex);
 			derived_compute.push_back({ const_cast<VkComputePipelineCreateInfo *>(create_info), hash, pipeline, true });
 		}
 		else if (compute_pipeline_index >= opts.start_compute_index &&
 		         compute_pipeline_index < opts.end_compute_index)
 		{
+			lock_guard<mutex> lock(internal_enqueue_mutex);
 			deferred_compute.push_back({ const_cast<VkComputePipelineCreateInfo *>(create_info), hash, pipeline, true });
 		}
 		else
@@ -1050,7 +1052,7 @@ struct ThreadedReplayer : StateCreatorInterface
 	bool enqueue_shader_modules(const VkGraphicsPipelineCreateInfo *info)
 	{
 		bool ret = false;
-		for (uint32_t i = 0; info->stageCount; i++)
+		for (uint32_t i = 0; i < info->stageCount; i++)
 			if (enqueue_shader_module(info->pStages[i].module))
 				ret = true;
 		return ret;
@@ -1064,7 +1066,7 @@ struct ThreadedReplayer : StateCreatorInterface
 
 	void resolve_shader_modules(VkGraphicsPipelineCreateInfo *info)
 	{
-		for (uint32_t i = 0; info->stageCount; i++)
+		for (uint32_t i = 0; i < info->stageCount; i++)
 		{
 			const_cast<VkPipelineShaderStageCreateInfo *>(info->pStages)[i].module =
 					shader_modules[(Hash) info->pStages[i].module];

@@ -2135,15 +2135,15 @@ void StateReplayer::copy_handle_references(const StateReplayer &replayer)
 	impl->copy_handle_references(*replayer.impl);
 }
 
-void StateReplayer::Impl::copy_handle_references(const StateReplayer::Impl &impl)
+void StateReplayer::Impl::copy_handle_references(const StateReplayer::Impl &other)
 {
-	replayed_samplers = impl.replayed_samplers;
-	replayed_descriptor_set_layouts = impl.replayed_descriptor_set_layouts;
-	replayed_pipeline_layouts = impl.replayed_pipeline_layouts;
-	replayed_shader_modules = impl.replayed_shader_modules;
-	replayed_render_passes = impl.replayed_render_passes;
-	replayed_compute_pipelines = impl.replayed_compute_pipelines;
-	replayed_graphics_pipelines = impl.replayed_graphics_pipelines;
+	replayed_samplers = other.replayed_samplers;
+	replayed_descriptor_set_layouts = other.replayed_descriptor_set_layouts;
+	replayed_pipeline_layouts = other.replayed_pipeline_layouts;
+	replayed_shader_modules = other.replayed_shader_modules;
+	replayed_render_passes = other.replayed_render_passes;
+	replayed_compute_pipelines = other.replayed_compute_pipelines;
+	replayed_graphics_pipelines = other.replayed_graphics_pipelines;
 }
 
 void StateReplayer::Impl::parse(StateCreatorInterface &iface, DatabaseInterface *resolver, const void *buffer_, size_t total_size)

@@ -905,9 +905,17 @@ struct StreamArchive : DatabaseInterface
 		if (entry.header.uncompressed_size != blob_size)
 			return false;
 
+		uint8_t *dst_zlib_buffer = nullptr;
+		std::unique_ptr<uint8_t[]> zlib_buffer_holder;
+
 		{
 			ConditionalLockGuard holder(read_lock, concurrent);
-			if (zlib_buffer_size < entry.header.payload_size)
+			if (concurrent)
+			{
+				dst_zlib_buffer = new uint8_t[entry.header.payload_size];
+				zlib_buffer_holder.reset(dst_zlib_buffer);
+			}
+			else if (zlib_buffer_size < entry.header.payload_size)
 			{
 				auto *new_zlib_buffer = static_cast<uint8_t *>(realloc(zlib_buffer, entry.header.payload_size));
 				if (new_zlib_buffer)
@@ -921,20 +929,24 @@ struct StreamArchive : DatabaseInterface
 					zlib_buffer = nullptr;
 					zlib_buffer_size = 0;
 				}
-			}
 
-			if (!zlib_buffer)
-				return false;
+				if (!zlib_buffer)
+					return false;
+
+				dst_zlib_buffer = zlib_buffer;
+			}
+			else
+				dst_zlib_buffer = zlib_buffer;
 
 			if (fseek(file, entry.offset, SEEK_SET) < 0)
 				return false;
-			if (fread(zlib_buffer, 1, entry.header.payload_size, file) != entry.header.payload_size)
+			if (fread(dst_zlib_buffer, 1, entry.header.payload_size, file) != entry.header.payload_size)
 				return false;
 		}
 
 		if (entry.header.crc != 0) // Verify checksum.
 		{
-			auto disk_crc = uint32_t(mz_crc32(MZ_CRC32_INIT, zlib_buffer, entry.header.payload_size));
+			auto disk_crc = uint32_t(mz_crc32(MZ_CRC32_INIT, dst_zlib_buffer, entry.header.payload_size));
 			if (disk_crc != entry.header.crc)
 			{
 				LOGE("CRC mismatch!\n");
@@ -943,7 +955,7 @@ struct StreamArchive : DatabaseInterface
 		}
 
 		mz_ulong zsize = blob_size;
-		if (mz_uncompress(static_cast<unsigned char *>(blob), &zsize, zlib_buffer, entry.header.payload_size) != MZ_OK)
+		if (mz_uncompress(static_cast<unsigned char *>(blob), &zsize, dst_zlib_buffer, entry.header.payload_size) != MZ_OK)
 			return false;
 		if (zsize != blob_size)
 			return false;
