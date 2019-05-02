@@ -1305,6 +1305,7 @@ static int run_progress_process(const VulkanDevice::Options &,
 	opts.quiet = true;
 	opts.database = db_path.c_str();
 	opts.external_replayer_path = nullptr;
+	opts.inherit_process_group = true;
 
 	ExternalReplayer replayer;
 	if (!replayer.start(opts))

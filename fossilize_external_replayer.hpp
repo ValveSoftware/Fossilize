@@ -50,6 +50,11 @@ public:
 
 		// Redirect stdout and stderr to /dev/null or NUL.
 		bool quiet;
+
+		// (Linux only) Inherits the process group used by caller. Lets all child processes for replayer
+		// belong to caller. Useful for CLI tools which use this interface.
+		// If this is used, ExternalReplayer::kill() won't work since it relies on process groups to work.
+		bool inherit_process_group;
 	};
 
 	ExternalReplayer();

@@ -279,11 +279,14 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 	}
 	else if (new_pid == 0)
 	{
-		// Set the process group ID so we can kill all the child processes as needed.
-		if (setpgid(0, 0) < 0)
+		if (!options.inherit_process_group)
 		{
-			LOGE("Failed to set PGID in child.\n");
-			exit(1);
+			// Set the process group ID so we can kill all the child processes as needed.
+			if (setpgid(0, 0) < 0)
+			{
+				LOGE("Failed to set PGID in child.\n");
+				exit(1);
+			}
 		}
 
 		char fd_name[16];
