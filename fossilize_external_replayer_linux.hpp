@@ -270,8 +270,7 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 		return false;
 	}
 
-	// vfork blocks until the child has called exec().
-	pid_t new_pid = vfork();
+	pid_t new_pid = fork();
 	if (new_pid > 0)
 	{
 		close(fd);
