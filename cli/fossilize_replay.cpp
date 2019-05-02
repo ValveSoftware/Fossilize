@@ -241,6 +241,9 @@ struct ThreadedReplayer : StateCreatorInterface
 		thread_total_ns.store(0);
 		total_idle_ns.store(0);
 
+		shader_module_total_compressed_size.store(0);
+		shader_module_total_size.store(0);
+
 		thread_current_graphics_index = opts.start_graphics_index;
 		thread_current_compute_index = opts.start_compute_index;
 	}
@@ -278,6 +281,11 @@ struct ThreadedReplayer : StateCreatorInterface
 			{
 				// No reason to retain memory in this allocator anymore.
 				replayer.get_allocator().reset();
+
+				// Feed shader module statistics.
+				shader_module_total_size.fetch_add(json_size, std::memory_order_relaxed);
+				if (global_database->read_entry(work_item.tag, work_item.hash, &json_size, nullptr, PAYLOAD_READ_RAW_FOSSILIZE_DB_BIT))
+					shader_module_total_compressed_size.fetch_add(json_size, std::memory_order_relaxed);
 			}
 		}
 		catch (const std::exception &e)
@@ -1191,6 +1199,9 @@ struct ThreadedReplayer : StateCreatorInterface
 	std::atomic<std::uint32_t> compute_pipeline_count;
 	std::atomic<std::uint32_t> shader_module_count;
 
+	std::atomic<std::uint64_t> shader_module_total_size;
+	std::atomic<std::uint64_t> shader_module_total_compressed_size;
+
 	bool shutting_down = false;
 
 	unique_ptr<VulkanDevice> device;
@@ -1532,6 +1543,10 @@ static int run_normal_process(ThreadedReplayer &replayer, const string &db_path)
 	// VALVE: drain all outstanding pipeline compiles
 	replayer.sync_worker_threads();
 	replayer.tear_down_threads();
+
+	LOGI("Total binary size for %s: %llu (%llu compressed)\n", tag_names[RESOURCE_SHADER_MODULE],
+	     static_cast<unsigned long long>(replayer.shader_module_total_size.load()),
+	     static_cast<unsigned long long>(replayer.shader_module_total_compressed_size.load()));
 
 	unsigned long total_size =
 		replayer.samplers.size() +
