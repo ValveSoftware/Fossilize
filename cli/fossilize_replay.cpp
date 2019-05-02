@@ -363,7 +363,7 @@ struct ThreadedReplayer : StateCreatorInterface
 
 					*work_item.hash_map_entry.pipeline = *work_item.output.pipeline;
 
-					if (opts.control_block && i == 0 && work_item.contributes_to_index)
+					if (opts.control_block && i == 0)
 						opts.control_block->successful_graphics.fetch_add(1, std::memory_order_relaxed);
 				}
 				else
@@ -434,7 +434,7 @@ struct ThreadedReplayer : StateCreatorInterface
 
 					*work_item.hash_map_entry.pipeline = *work_item.output.pipeline;
 
-					if (opts.control_block && i == 0 && work_item.contributes_to_index)
+					if (opts.control_block && i == 0)
 						opts.control_block->successful_compute.fetch_add(1, std::memory_order_relaxed);
 				}
 				else
@@ -837,7 +837,8 @@ struct ThreadedReplayer : StateCreatorInterface
 		         compute_pipeline_index < opts.end_compute_index)
 		{
 			lock_guard<mutex> lock(internal_enqueue_mutex);
-			deferred_compute.push_back({ const_cast<VkComputePipelineCreateInfo *>(create_info), hash, pipeline, true });
+			// Does not contribute further to the pipeline index since we're incrementing it here.
+			deferred_compute.push_back({ const_cast<VkComputePipelineCreateInfo *>(create_info), hash, pipeline, false });
 		}
 		else
 		{
@@ -879,7 +880,8 @@ struct ThreadedReplayer : StateCreatorInterface
 		         graphics_pipeline_index < opts.end_graphics_index)
 		{
 			lock_guard<mutex> lock(internal_enqueue_mutex);
-			deferred_graphics.push_back({ const_cast<VkGraphicsPipelineCreateInfo *>(create_info), hash, pipeline, true });
+			// Does not contribute further to the pipeline index since we're incrementing it here.
+			deferred_graphics.push_back({ const_cast<VkGraphicsPipelineCreateInfo *>(create_info), hash, pipeline, false });
 		}
 		else
 		{
