@@ -858,6 +858,10 @@ struct ThreadedReplayer : StateCreatorInterface
 		// us to pipeline parsing with pipeline compilation.
 		if (!derived)
 			compute_pipeline_index++;
+
+		if (opts.control_block)
+			opts.control_block->parsed_compute.fetch_add(1, std::memory_order_relaxed);
+
 		return true;
 	}
 
@@ -901,6 +905,9 @@ struct ThreadedReplayer : StateCreatorInterface
 		// us to pipeline parsing with pipeline compilation.
 		if (!derived)
 			graphics_pipeline_index++;
+
+		if (opts.control_block)
+			opts.control_block->parsed_graphics.fetch_add(1, std::memory_order_relaxed);
 
 		return true;
 	}
@@ -1263,9 +1270,11 @@ static void log_progress(const ExternalReplayer::Progress &progress)
 {
 	LOGI("=================\n");
 	LOGI(" Progress report:\n");
-	LOGI("   Graphics %u / %u, skipped %u\n", progress.graphics.completed, progress.graphics.total, progress.graphics.skipped);
-	LOGI("   Compute %u / %u, skipped %u\n", progress.compute.completed, progress.compute.total, progress.compute.skipped);
-	LOGI("   Modules %u / %u, skipped %u\n", progress.completed_modules, progress.total_modules, progress.banned_modules);
+	LOGI("   Parsed graphics %u / %u\n", progress.graphics.parsed, progress.graphics.total);
+	LOGI("   Parsed compute %u / %u\n", progress.compute.parsed, progress.compute.total);
+	LOGI("   Decompress modules %u / %u, skipped %u\n", progress.completed_modules, progress.total_modules, progress.banned_modules);
+	LOGI("   Compile graphics %u / %u, skipped %u\n", progress.graphics.completed, progress.graphics.total, progress.graphics.skipped);
+	LOGI("   Compile compute %u / %u, skipped %u\n", progress.compute.completed, progress.compute.total, progress.compute.skipped);
 	LOGI("   Clean crashes %u\n", progress.clean_crashes);
 	LOGI("   Dirty crashes %u\n", progress.dirty_crashes);
 	LOGI("=================\n");

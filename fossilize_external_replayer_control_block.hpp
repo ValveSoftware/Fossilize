@@ -57,6 +57,8 @@ struct SharedControlBlock
 	std::atomic<uint32_t> skipped_compute;
 	std::atomic<uint32_t> clean_process_deaths;
 	std::atomic<uint32_t> dirty_process_deaths;
+	std::atomic<uint32_t> parsed_graphics;
+	std::atomic<uint32_t> parsed_compute;
 	std::atomic<uint32_t> total_graphics;
 	std::atomic<uint32_t> total_compute;
 	std::atomic<uint32_t> total_modules;

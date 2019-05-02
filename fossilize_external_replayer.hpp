@@ -94,6 +94,7 @@ public:
 
 	struct TypeProgress
 	{
+		uint32_t parsed;
 		uint32_t completed;
 		uint32_t skipped;
 		uint32_t total;
