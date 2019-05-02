@@ -39,42 +39,18 @@ static_assert(sizeof(std::atomic<uint32_t>) == sizeof(uint32_t), "Atomic size mi
 namespace Fossilize
 {
 enum { ControlBlockMessageSize = 32 };
-enum { ControlBlockMagic = 0x19bcde12 };
-#ifdef _WIN32
+enum { ControlBlockMagic = 0x19bcde13 };
+
 struct SharedControlBlock
 {
 	uint32_t version_cookie;
 
-	// Progress. Just need atomics to implements this.
-	std::atomic<uint32_t> successful_graphics;
-	std::atomic<uint32_t> successful_compute;
-	std::atomic<uint32_t> skipped_graphics;
-	std::atomic<uint32_t> skipped_compute;
-	std::atomic<uint32_t> clean_process_deaths;
-	std::atomic<uint32_t> dirty_process_deaths;
-	std::atomic<uint32_t> total_graphics;
-	std::atomic<uint32_t> total_compute;
-	std::atomic<uint32_t> total_modules;
-	std::atomic<uint32_t> banned_modules;
-	std::atomic<bool> progress_started;
-	std::atomic<bool> progress_complete;
-
-	// Ring buffer. Needs lock.
-	uint64_t write_count;
-	uint64_t read_count;
-
-	size_t read_offset;
-	size_t write_offset;
-	size_t ring_buffer_offset;
-	size_t ring_buffer_size;
-};
-#else
-struct SharedControlBlock
-{
-	uint32_t version_cookie;
+#ifndef _WIN32
 	pthread_mutex_t lock;
+#endif
 
 	// Progress. Just need atomics to implements this.
+	std::atomic<uint32_t> successful_modules;
 	std::atomic<uint32_t> successful_graphics;
 	std::atomic<uint32_t> successful_compute;
 	std::atomic<uint32_t> skipped_graphics;
@@ -97,7 +73,6 @@ struct SharedControlBlock
 	size_t ring_buffer_offset;
 	size_t ring_buffer_size;
 };
-#endif
 
 // These are not thread-safe. Need to lock them by external means.
 static inline size_t shared_control_block_read_avail(SharedControlBlock *control_block)

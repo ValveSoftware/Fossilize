@@ -355,11 +355,8 @@ struct ThreadedReplayer : StateCreatorInterface
 					auto end_time = chrono::steady_clock::now();
 					auto duration_ns = chrono::duration_cast<chrono::nanoseconds>(end_time - start_time).count();
 
-					if (work_item.contributes_to_index)
-					{
-						graphics_pipeline_ns.fetch_add(duration_ns, std::memory_order_relaxed);
-						graphics_pipeline_count.fetch_add(1, std::memory_order_relaxed);
-					}
+					graphics_pipeline_ns.fetch_add(duration_ns, std::memory_order_relaxed);
+					graphics_pipeline_count.fetch_add(1, std::memory_order_relaxed);
 
 					*work_item.hash_map_entry.pipeline = *work_item.output.pipeline;
 
@@ -426,11 +423,8 @@ struct ThreadedReplayer : StateCreatorInterface
 					auto end_time = chrono::steady_clock::now();
 					auto duration_ns = chrono::duration_cast<chrono::nanoseconds>(end_time - start_time).count();
 
-					if (work_item.contributes_to_index)
-					{
-						compute_pipeline_ns.fetch_add(duration_ns, std::memory_order_relaxed);
-						compute_pipeline_count.fetch_add(1, std::memory_order_relaxed);
-					}
+					compute_pipeline_ns.fetch_add(duration_ns, std::memory_order_relaxed);
+					compute_pipeline_count.fetch_add(1, std::memory_order_relaxed);
 
 					*work_item.hash_map_entry.pipeline = *work_item.output.pipeline;
 
@@ -810,6 +804,9 @@ struct ThreadedReplayer : StateCreatorInterface
 					lock_guard<mutex> lock(internal_enqueue_mutex);
 					shader_module_to_hash[*module] = hash;
 				}
+
+				if (opts.control_block && i == 0)
+					opts.control_block->successful_modules.fetch_add(1, std::memory_order_relaxed);
 			}
 			else
 			{
@@ -1051,6 +1048,9 @@ struct ThreadedReplayer : StateCreatorInterface
 	{
 		if (enqueued_shader_modules.count(shader_module_hash) == 0)
 		{
+			if (opts.control_block)
+				opts.control_block->total_modules.fetch_add(1, std::memory_order_relaxed);
+
 			PipelineWorkItem work_item;
 			work_item.tag = RESOURCE_SHADER_MODULE;
 			work_item.hash = (Hash) shader_module_hash;
@@ -1265,7 +1265,7 @@ static void log_progress(const ExternalReplayer::Progress &progress)
 	LOGI(" Progress report:\n");
 	LOGI("   Graphics %u / %u, skipped %u\n", progress.graphics.completed, progress.graphics.total, progress.graphics.skipped);
 	LOGI("   Compute %u / %u, skipped %u\n", progress.compute.completed, progress.compute.total, progress.compute.skipped);
-	LOGI("   Modules %u, skipped %u\n", progress.total_modules, progress.banned_modules);
+	LOGI("   Modules %u / %u, skipped %u\n", progress.completed_modules, progress.total_modules, progress.banned_modules);
 	LOGI("   Clean crashes %u\n", progress.clean_crashes);
 	LOGI("   Dirty crashes %u\n", progress.dirty_crashes);
 	LOGI("=================\n");

@@ -104,6 +104,7 @@ public:
 		TypeProgress compute;
 		TypeProgress graphics;
 
+		uint32_t completed_modules;
 		uint32_t total_modules;
 		uint32_t banned_modules;
 

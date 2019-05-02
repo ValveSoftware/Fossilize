@@ -101,6 +101,7 @@ ExternalReplayer::PollResult ExternalReplayer::Impl::poll_progress(ExternalRepla
 	progress.graphics.total = shm_block->total_graphics.load(std::memory_order_relaxed);
 	progress.graphics.skipped = shm_block->skipped_graphics.load(std::memory_order_relaxed);
 	progress.graphics.completed = shm_block->successful_graphics.load(std::memory_order_relaxed);
+	progress.completed_modules = shm_block->successful_modules.load(std::memory_order_relaxed);
 	progress.total_modules = shm_block->total_modules.load(std::memory_order_relaxed);
 	progress.banned_modules = shm_block->banned_modules.load(std::memory_order_relaxed);
 	progress.clean_crashes = shm_block->clean_process_deaths.load(std::memory_order_relaxed);
