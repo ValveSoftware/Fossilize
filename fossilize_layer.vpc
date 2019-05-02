@@ -17,7 +17,7 @@ $include "$SRCDIR\vpc_scripts\steam_copy_target_client_dll.vpc"
 $include "$SRCDIR\vstdlib\vstdlib_s_exclude.vpc"
 $include "$SRCDIR\tier0\tier0_s_exclude.vpc"
 
-$macro OUTBINDIR "$SRCDIR\..\bin\$(ConfigurationName)"
+$macro OUTBINDIR "$SRCDIR\..\bin/$(ConfigurationName)"
 
 $Configuration
 {
