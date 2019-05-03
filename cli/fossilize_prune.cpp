@@ -55,34 +55,30 @@ struct PruneReplayer : StateCreatorInterface
 	unordered_map<Hash, const VkDescriptorSetLayoutCreateInfo *> descriptor_sets;
 	unordered_map<Hash, const VkPipelineLayoutCreateInfo *> pipeline_layouts;
 
+	unordered_set<Hash> filtered_blob_hashes[RESOURCE_COUNT];
+
 	Hash current_application = 0;
 	Hash filter_application_hash = 0;
 	bool should_filter_application_hash = false;
-	bool allow_application_info = false;
 
-	void set_application_info(const VkApplicationInfo *app,
-	                          const VkPhysicalDeviceFeatures2 *features) override
+	void set_application_info(Hash hash, const VkApplicationInfo *app,
+	                          const VkPhysicalDeviceFeatures2 *) override
 	{
-		if (allow_application_info)
+		LOGI("Available application feature hash: %016llx\n",
+		     static_cast<unsigned long long>(hash));
+
+		if (app)
 		{
-			Hash hash = Hashing::compute_combined_application_feature_hash(
-					Hashing::compute_application_feature_hash(app, features));
-
-			LOGI("Available application feature hash: %016llx\n",
-			     static_cast<unsigned long long>(hash));
-
-			if (app)
-			{
-				LOGI("  applicationInfo: engineName = %s, applicationName = %s, engineVersion = %u, appVersion = %u\n",
-				     app->pEngineName ? app->pEngineName : "N/A", app->pApplicationName ? app->pApplicationName : "N/A",
-				     app->engineVersion, app->applicationVersion);
-			}
+			LOGI("  applicationInfo: engineName = %s, applicationName = %s, engineVersion = %u, appVersion = %u\n",
+			     app->pEngineName ? app->pEngineName : "N/A", app->pApplicationName ? app->pApplicationName : "N/A",
+			     app->engineVersion, app->applicationVersion);
 		}
 	}
 
-	void set_current_application_info(Hash hash) override
+	void notify_application_info_link(Hash app_hash, ResourceTag tag, Hash hash) override
 	{
-		current_application = hash;
+		if (should_filter_application_hash && app_hash == filter_application_hash)
+			filtered_blob_hashes[tag].insert(hash);
 	}
 
 	bool enqueue_create_sampler(Hash hash, const VkSamplerCreateInfo *, VkSampler *sampler) override
@@ -265,6 +261,7 @@ int main(int argc, char *argv[])
 
 	static const ResourceTag playback_order[] = {
 		RESOURCE_APPLICATION_INFO,
+		RESOURCE_APPLICATION_BLOB_LINK,
 		RESOURCE_SHADER_MODULE,
 		RESOURCE_SAMPLER,
 		RESOURCE_DESCRIPTOR_SET_LAYOUT,
@@ -296,23 +293,42 @@ int main(int argc, char *argv[])
 		if (tag == RESOURCE_SHADER_MODULE)
 			continue;
 
-		prune_replayer.allow_application_info = tag == RESOURCE_APPLICATION_INFO;
+		bool use_blob_link_cache = tag != RESOURCE_APPLICATION_INFO &&
+		                           tag != RESOURCE_APPLICATION_BLOB_LINK &&
+		                           should_filter_application_hash;
 
 		size_t hash_count = 0;
-		if (!input_db->get_hash_list_for_resource_tag(tag, &hash_count, nullptr))
+		if (use_blob_link_cache)
 		{
-			LOGE("Failed to get hashes.\n");
-			return EXIT_FAILURE;
+			hash_count = prune_replayer.filtered_blob_hashes[tag].size();
+		}
+		else
+		{
+			if (!input_db->get_hash_list_for_resource_tag(tag, &hash_count, nullptr))
+			{
+				LOGE("Failed to get hashes.\n");
+				return EXIT_FAILURE;
+			}
 		}
 
 		per_tag_read[tag] = hash_count;
 
-		vector<Hash> hashes(hash_count);
+		vector<Hash> hashes;
 
-		if (!input_db->get_hash_list_for_resource_tag(tag, &hash_count, hashes.data()))
+		if (use_blob_link_cache)
 		{
-			LOGE("Failed to get shader module hashes.\n");
-			return EXIT_FAILURE;
+			hashes.reserve(hash_count);
+			for (auto &hash : prune_replayer.filtered_blob_hashes[tag])
+				hashes.push_back(hash);
+		}
+		else
+		{
+			hashes.resize(hash_count);
+			if (!input_db->get_hash_list_for_resource_tag(tag, &hash_count, hashes.data()))
+			{
+				LOGE("Failed to get shader module hashes.\n");
+				return EXIT_FAILURE;
+			}
 		}
 
 		for (auto hash : hashes)
@@ -358,6 +374,20 @@ int main(int argc, char *argv[])
 						return EXIT_FAILURE;
 					per_tag_written[tag]++;
 				}
+			}
+			else if (tag == RESOURCE_APPLICATION_BLOB_LINK)
+			{
+				size_t compressed_size = 0;
+				if (!input_db->read_entry(tag, hash, &compressed_size, nullptr, PAYLOAD_READ_RAW_FOSSILIZE_DB_BIT))
+					return EXIT_FAILURE;
+				state_json.resize(compressed_size);
+				if (!input_db->read_entry(tag, hash, &compressed_size, state_json.data(),
+				                          PAYLOAD_READ_RAW_FOSSILIZE_DB_BIT))
+					return EXIT_FAILURE;
+				if (!output_db->write_entry(tag, hash, state_json.data(), state_json.size(),
+				                            PAYLOAD_WRITE_RAW_FOSSILIZE_DB_BIT))
+					return EXIT_FAILURE;
+				per_tag_written[tag]++;
 			}
 		}
 	}

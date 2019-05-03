@@ -160,6 +160,7 @@ struct StateReplayer::Impl
 	void parse_compute_pipeline(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines, const Value &member);
 	void parse_graphics_pipeline(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines, const Value &member);
 	void parse_application_info(StateCreatorInterface &iface, const Value &app_info, const Value &pdf_info);
+	void parse_application_info_link(StateCreatorInterface &iface, const Value &link);
 	VkPushConstantRange *parse_push_constant_ranges(const Value &ranges);
 	VkDescriptorSetLayout *parse_set_layouts(const Value &layouts);
 	VkDescriptorSetLayoutBinding *parse_descriptor_set_bindings(const Value &bindings);
@@ -274,6 +275,9 @@ struct StateRecorder::Impl
 	void remap_render_pass_ci(VkRenderPassCreateInfo *create_info);
 
 	void serialize_application_info(std::vector<uint8_t> &blob) const;
+	void serialize_application_blob_link(Hash hash, ResourceTag tag, std::vector<uint8_t> &blob) const;
+	Hash get_application_link_hash(ResourceTag tag, Hash hash) const;
+	bool register_application_link_hash(ResourceTag tag, Hash hash, std::vector<uint8_t> &blob) const;
 	void serialize_sampler(Hash hash, const VkSamplerCreateInfo &create_info, std::vector<uint8_t> &blob) const;
 	void serialize_descriptor_set_layout(Hash hash, const VkDescriptorSetLayoutCreateInfo &create_info, std::vector<uint8_t> &blob) const;
 	void serialize_pipeline_layout(Hash hash, const VkPipelineLayoutCreateInfo &create_info, std::vector<uint8_t> &blob) const;
@@ -359,10 +363,9 @@ Hash compute_combined_application_feature_hash(const StateRecorderApplicationFea
 	return h.get();
 }
 
-Hash compute_hash_sampler(const StateRecorderApplicationFeatureHash &base_hash, const VkSamplerCreateInfo &sampler)
+Hash compute_hash_sampler(const VkSamplerCreateInfo &sampler)
 {
 	Hasher h;
-	hash_application_feature_info(h, base_hash);
 
 	h.u32(sampler.flags);
 	h.f32(sampler.maxAnisotropy);
@@ -387,7 +390,6 @@ Hash compute_hash_sampler(const StateRecorderApplicationFeatureHash &base_hash, 
 Hash compute_hash_descriptor_set_layout(const StateRecorder &recorder, const VkDescriptorSetLayoutCreateInfo &layout)
 {
 	Hasher h;
-	hash_application_feature_info(h, recorder.get_application_feature_hash());
 
 	h.u32(layout.bindingCount);
 	h.u32(layout.flags);
@@ -414,7 +416,6 @@ Hash compute_hash_descriptor_set_layout(const StateRecorder &recorder, const VkD
 Hash compute_hash_pipeline_layout(const StateRecorder &recorder, const VkPipelineLayoutCreateInfo &layout)
 {
 	Hasher h;
-	hash_application_feature_info(h, recorder.get_application_feature_hash());
 
 	h.u32(layout.setLayoutCount);
 	for (uint32_t i = 0; i < layout.setLayoutCount; i++)
@@ -439,11 +440,9 @@ Hash compute_hash_pipeline_layout(const StateRecorder &recorder, const VkPipelin
 	return h.get();
 }
 
-Hash compute_hash_shader_module(const StateRecorderApplicationFeatureHash &base_hash, const VkShaderModuleCreateInfo &create_info)
+Hash compute_hash_shader_module(const VkShaderModuleCreateInfo &create_info)
 {
 	Hasher h;
-	hash_application_feature_info(h, base_hash);
-
 	h.data(create_info.pCode, create_info.codeSize);
 	h.u32(create_info.flags);
 	return h.get();
@@ -522,7 +521,6 @@ static void hash_pnext_chain(const StateRecorder &recorder, Hasher &h, const voi
 Hash compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraphicsPipelineCreateInfo &create_info)
 {
 	Hasher h;
-	hash_application_feature_info(h, recorder.get_application_feature_hash());
 
 	h.u32(create_info.flags);
 
@@ -826,7 +824,6 @@ Hash compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 Hash compute_hash_compute_pipeline(const StateRecorder &recorder, const VkComputePipelineCreateInfo &create_info)
 {
 	Hasher h;
-	hash_application_feature_info(h, recorder.get_application_feature_hash());
 
 	h.u64(recorder.get_hash_for_pipeline_layout(create_info.layout));
 	h.u32(create_info.flags);
@@ -917,10 +914,9 @@ static void hash_subpass(Hasher &h, const VkSubpassDescription &subpass)
 		h.u32(0);
 }
 
-Hash compute_hash_render_pass(const StateRecorderApplicationFeatureHash &base_hash, const VkRenderPassCreateInfo &create_info)
+Hash compute_hash_render_pass(const VkRenderPassCreateInfo &create_info)
 {
 	Hasher h;
-	hash_application_feature_info(h, base_hash);
 
 	h.u32(create_info.attachmentCount);
 	h.u32(create_info.dependencyCount);
@@ -1237,10 +1233,26 @@ void StateReplayer::Impl::parse_application_info(StateCreatorInterface &iface, c
 		pdf->sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
 		pdf->features.robustBufferAccess = pdf_info["robustBufferAccess"].GetUint();
 
-		iface.set_application_info(app, pdf);
+		auto hash =
+				Hashing::compute_combined_application_feature_hash(
+						Hashing::compute_application_feature_hash(app, pdf));
+		iface.set_application_info(hash, app, pdf);
 	}
 	else
-		iface.set_application_info(nullptr, nullptr);
+	{
+		auto hash =
+				Hashing::compute_combined_application_feature_hash(
+						Hashing::compute_application_feature_hash(nullptr, nullptr));
+		iface.set_application_info(hash, nullptr, nullptr);
+	}
+}
+
+void StateReplayer::Impl::parse_application_info_link(StateCreatorInterface &iface, const Value &link)
+{
+	Hash application_hash = string_to_uint64(link["application"].GetString());
+	auto tag = static_cast<ResourceTag>(link["tag"].GetInt());
+	Hash hash = string_to_uint64(link["hash"].GetString());
+	iface.notify_application_info_link(application_hash, tag, hash);
 }
 
 void StateReplayer::Impl::parse_samplers(StateCreatorInterface &iface, const Value &samplers)
@@ -2177,11 +2189,9 @@ void StateReplayer::Impl::parse(StateCreatorInterface &iface, DatabaseInterface 
 
 	if (doc.HasMember("applicationInfo") && doc.HasMember("physicalDeviceFeatures"))
 		parse_application_info(iface, doc["applicationInfo"], doc["physicalDeviceFeatures"]);
-	else
-		iface.set_application_info(nullptr, nullptr);
 
-	if (doc.HasMember("application"))
-		iface.set_current_application_info(string_to_uint64(doc["application"].GetString()));
+	if (doc.HasMember("link"))
+		parse_application_info_link(iface, doc["link"]);
 
 	if (doc.HasMember("shaderModules"))
 		parse_shader_modules(iface, doc["shaderModules"], varint_buffer, varint_size);
@@ -3078,11 +3088,14 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 				auto *create_info = reinterpret_cast<VkSamplerCreateInfo *>(record_item.create_info);
 				auto hash = record_item.custom_hash;
 				if (hash == 0)
-					hash = Hashing::compute_hash_sampler(application_feature_hash, *create_info);
+					hash = Hashing::compute_hash_sampler(*create_info);
 				sampler_to_hash[api_object_cast<VkSampler>(record_item.handle)] = hash;
 
 				if (database_iface)
 				{
+					if (register_application_link_hash(RESOURCE_SAMPLER, hash, blob))
+						need_flush = true;
+
 					if (!database_iface->has_entry(RESOURCE_SAMPLER, hash))
 					{
 						serialize_sampler(hash, *create_info, blob);
@@ -3107,11 +3120,14 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 				auto *create_info = reinterpret_cast<VkRenderPassCreateInfo *>(record_item.create_info);
 				auto hash = record_item.custom_hash;
 				if (hash == 0)
-					hash = Hashing::compute_hash_render_pass(application_feature_hash, *create_info);
+					hash = Hashing::compute_hash_render_pass(*create_info);
 				render_pass_to_hash[api_object_cast<VkRenderPass>(record_item.handle)] = hash;
 
 				if (database_iface)
 				{
+					if (register_application_link_hash(RESOURCE_RENDER_PASS, hash, blob))
+						need_flush = true;
+
 					if (!database_iface->has_entry(RESOURCE_RENDER_PASS, hash))
 					{
 						serialize_render_pass(hash, *create_info, blob);
@@ -3136,11 +3152,14 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 				auto *create_info = reinterpret_cast<VkShaderModuleCreateInfo *>(record_item.create_info);
 				auto hash = record_item.custom_hash;
 				if (hash == 0)
-					hash = Hashing::compute_hash_shader_module(application_feature_hash, *create_info);
+					hash = Hashing::compute_hash_shader_module(*create_info);
 				shader_module_to_hash[api_object_cast<VkShaderModule>(record_item.handle)] = hash;
 
 				if (database_iface)
 				{
+					if (register_application_link_hash(RESOURCE_SHADER_MODULE, hash, blob))
+						need_flush = true;
+
 					if (!database_iface->has_entry(RESOURCE_SHADER_MODULE, hash))
 					{
 						serialize_shader_module(hash, *create_info, blob, allocator);
@@ -3174,6 +3193,9 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 
 				if (database_iface)
 				{
+					if (register_application_link_hash(RESOURCE_DESCRIPTOR_SET_LAYOUT, hash, blob))
+						need_flush = true;
+
 					if (!database_iface->has_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, hash))
 					{
 						serialize_descriptor_set_layout(hash, *create_info_copy, blob);
@@ -3206,6 +3228,9 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 
 				if (database_iface)
 				{
+					if (register_application_link_hash(RESOURCE_PIPELINE_LAYOUT, hash, blob))
+						need_flush = true;
+
 					if (!database_iface->has_entry(RESOURCE_PIPELINE_LAYOUT, hash))
 					{
 						serialize_pipeline_layout(hash, *create_info_copy, blob);
@@ -3238,6 +3263,9 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 
 				if (database_iface)
 				{
+					if (register_application_link_hash(RESOURCE_GRAPHICS_PIPELINE, hash, blob))
+						need_flush = true;
+
 					if (!database_iface->has_entry(RESOURCE_GRAPHICS_PIPELINE, hash))
 					{
 						serialize_graphics_pipeline(hash, *create_info_copy, blob);
@@ -3270,6 +3298,9 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 
 				if (database_iface)
 				{
+					if (register_application_link_hash(RESOURCE_COMPUTE_PIPELINE, hash, blob))
+						need_flush = true;
+
 					if (!database_iface->has_entry(RESOURCE_COMPUTE_PIPELINE, hash))
 					{
 						serialize_compute_pipeline(hash, *create_info_copy, blob);
@@ -4000,6 +4031,54 @@ void StateRecorder::Impl::serialize_application_info(vector<uint8_t> &blob) cons
 	memcpy(blob.data(), buffer.GetString(), buffer.GetSize());
 }
 
+Hash StateRecorder::Impl::get_application_link_hash(ResourceTag tag, Hash hash) const
+{
+	Hasher h;
+	Hashing::hash_application_feature_info(h, application_feature_hash);
+	h.s32(tag);
+	h.u64(hash);
+	return h.get();
+}
+
+bool StateRecorder::Impl::register_application_link_hash(ResourceTag tag, Hash hash, vector<uint8_t> &blob) const
+{
+	Hash link_hash = get_application_link_hash(tag, hash);
+	if (!database_iface->has_entry(RESOURCE_APPLICATION_BLOB_LINK, link_hash))
+	{
+		serialize_application_blob_link(hash, tag, blob);
+		database_iface->write_entry(RESOURCE_APPLICATION_BLOB_LINK, link_hash, blob.data(), blob.size(), 0);
+		return true;
+	}
+	else
+		return false;
+}
+
+void StateRecorder::Impl::serialize_application_blob_link(Hash hash, ResourceTag tag, vector<uint8_t> &blob) const
+{
+	Document doc;
+	doc.SetObject();
+	auto &alloc = doc.GetAllocator();
+
+	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
+
+	Value links(kArrayType);
+	Value link(kObjectType);
+
+	Hasher h;
+	Hashing::hash_application_feature_info(h, application_feature_hash);
+	link.AddMember("application", uint64_string(h.get(), alloc), alloc);
+	link.AddMember("tag", uint32_t(tag), alloc);
+	link.AddMember("hash", uint64_string(hash, alloc), alloc);
+	doc.AddMember("link", link, alloc);
+
+	StringBuffer buffer;
+	CustomWriter writer(buffer);
+	doc.Accept(writer);
+
+	blob.resize(buffer.GetSize());
+	memcpy(blob.data(), buffer.GetString(), buffer.GetSize());
+}
+
 void StateRecorder::Impl::serialize_sampler(Hash hash, const VkSamplerCreateInfo &create_info, vector<uint8_t> &blob) const
 {
 	Document doc;
@@ -4009,11 +4088,7 @@ void StateRecorder::Impl::serialize_sampler(Hash hash, const VkSamplerCreateInfo
 	Value serialized_samplers(kObjectType);
 	serialized_samplers.AddMember(uint64_string(hash, alloc), json_value(create_info, alloc), alloc);
 
-	Hasher h;
-	Hashing::hash_application_feature_info(h, application_feature_hash);
-
 	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
-	doc.AddMember("application", uint64_string(h.get(), alloc), alloc);
 	doc.AddMember("samplers", serialized_samplers, alloc);
 
 	StringBuffer buffer;
@@ -4034,11 +4109,7 @@ void StateRecorder::Impl::serialize_descriptor_set_layout(Hash hash, const VkDes
 	Value layouts(kObjectType);
 	layouts.AddMember(uint64_string(hash, alloc), json_value(create_info, alloc), alloc);
 
-	Hasher h;
-	Hashing::hash_application_feature_info(h, application_feature_hash);
-
 	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
-	doc.AddMember("application", uint64_string(h.get(), alloc), alloc);
 	doc.AddMember("setLayouts", layouts, alloc);
 
 	StringBuffer buffer;
@@ -4059,11 +4130,7 @@ void StateRecorder::Impl::serialize_pipeline_layout(Hash hash, const VkPipelineL
 	Value layouts(kObjectType);
 	layouts.AddMember(uint64_string(hash, alloc), json_value(create_info, alloc), alloc);
 
-	Hasher h;
-	Hashing::hash_application_feature_info(h, application_feature_hash);
-
 	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
-	doc.AddMember("application", uint64_string(h.get(), alloc), alloc);
 	doc.AddMember("pipelineLayouts", layouts, alloc);
 
 	StringBuffer buffer;
@@ -4083,11 +4150,7 @@ void StateRecorder::Impl::serialize_render_pass(Hash hash, const VkRenderPassCre
 	Value serialized_render_passes(kObjectType);
 	serialized_render_passes.AddMember(uint64_string(hash, alloc), json_value(create_info, alloc), alloc);
 
-	Hasher h;
-	Hashing::hash_application_feature_info(h, application_feature_hash);
-
 	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
-	doc.AddMember("application", uint64_string(h.get(), alloc), alloc);
 	doc.AddMember("renderPasses", serialized_render_passes, alloc);
 
 	StringBuffer buffer;
@@ -4107,11 +4170,7 @@ void StateRecorder::Impl::serialize_graphics_pipeline(Hash hash, const VkGraphic
 	Value serialized_graphics_pipelines(kObjectType);
 	serialized_graphics_pipelines.AddMember(uint64_string(hash, alloc), json_value(create_info, alloc), alloc);
 
-	Hasher h;
-	Hashing::hash_application_feature_info(h, application_feature_hash);
-
 	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
-	doc.AddMember("application", uint64_string(h.get(), alloc), alloc);
 	doc.AddMember("graphicsPipelines", serialized_graphics_pipelines, alloc);
 
 	StringBuffer buffer;
@@ -4131,11 +4190,7 @@ void StateRecorder::Impl::serialize_compute_pipeline(Hash hash, const VkComputeP
 	Value serialized_compute_pipelines(kObjectType);
 	serialized_compute_pipelines.AddMember(uint64_string(hash, alloc), json_value(create_info, alloc), alloc);
 
-	Hasher h;
-	Hashing::hash_application_feature_info(h, application_feature_hash);
-
 	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
-	doc.AddMember("application", uint64_string(h.get(), alloc), alloc);
 	doc.AddMember("computePipelines", serialized_compute_pipelines, alloc);
 
 	StringBuffer buffer;
@@ -4168,11 +4223,7 @@ void StateRecorder::Impl::serialize_shader_module(Hash hash, const VkShaderModul
 	// Varint binary form, starts at offset 0 after the delim '\0' character.
 	serialized_shader_modules.AddMember(uint64_string(hash, alloc), varint, alloc);
 
-	Hasher h;
-	Hashing::hash_application_feature_info(h, application_feature_hash);
-
 	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
-	doc.AddMember("application", uint64_string(h.get(), alloc), alloc);
 	doc.AddMember("shaderModules", serialized_shader_modules, alloc);
 
 	StringBuffer buffer;
