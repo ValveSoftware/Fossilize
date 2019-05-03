@@ -96,11 +96,14 @@ ExternalReplayer::PollResult ExternalReplayer::Impl::poll_progress(ExternalRepla
 		return ExternalReplayer::PollResult::ResultNotReady;
 
 	progress.compute.total = shm_block->total_compute.load(std::memory_order_relaxed);
+	progress.compute.parsed = shm_block->parsed_compute.load(std::memory_order_relaxed);
 	progress.compute.skipped = shm_block->skipped_compute.load(std::memory_order_relaxed);
 	progress.compute.completed = shm_block->successful_compute.load(std::memory_order_relaxed);
 	progress.graphics.total = shm_block->total_graphics.load(std::memory_order_relaxed);
+	progress.graphics.parsed = shm_block->parsed_graphics.load(std::memory_order_relaxed);
 	progress.graphics.skipped = shm_block->skipped_graphics.load(std::memory_order_relaxed);
 	progress.graphics.completed = shm_block->successful_graphics.load(std::memory_order_relaxed);
+	progress.completed_modules = shm_block->successful_modules.load(std::memory_order_relaxed);
 	progress.total_modules = shm_block->total_modules.load(std::memory_order_relaxed);
 	progress.banned_modules = shm_block->banned_modules.load(std::memory_order_relaxed);
 	progress.clean_crashes = shm_block->clean_process_deaths.load(std::memory_order_relaxed);
@@ -267,8 +270,7 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 		return false;
 	}
 
-	// vfork blocks until the child has called exec().
-	pid_t new_pid = vfork();
+	pid_t new_pid = fork();
 	if (new_pid > 0)
 	{
 		close(fd);
@@ -277,11 +279,14 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 	}
 	else if (new_pid == 0)
 	{
-		// Set the process group ID so we can kill all the child processes as needed.
-		if (setpgid(0, 0) < 0)
+		if (!options.inherit_process_group)
 		{
-			LOGE("Failed to set PGID in child.\n");
-			exit(1);
+			// Set the process group ID so we can kill all the child processes as needed.
+			if (setpgid(0, 0) < 0)
+			{
+				LOGE("Failed to set PGID in child.\n");
+				exit(1);
+			}
 		}
 
 		char fd_name[16];

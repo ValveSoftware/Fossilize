@@ -50,6 +50,12 @@ public:
 
 		// Redirect stdout and stderr to /dev/null or NUL.
 		bool quiet;
+
+		// (Linux only) Inherits the process group used by caller. Lets all child processes for replayer
+		// belong to caller. Useful for CLI tools which use this interface.
+		// If this is used, ExternalReplayer::kill() won't work since it relies on process groups to work.
+		// (Windows only) If true, a JobObject is created to make sure that if the calling process is killed, so are the Fossilize replayer processes.
+		bool inherit_process_group;
 	};
 
 	ExternalReplayer();
@@ -94,6 +100,7 @@ public:
 
 	struct TypeProgress
 	{
+		uint32_t parsed;
 		uint32_t completed;
 		uint32_t skipped;
 		uint32_t total;
@@ -104,6 +111,7 @@ public:
 		TypeProgress compute;
 		TypeProgress graphics;
 
+		uint32_t completed_modules;
 		uint32_t total_modules;
 		uint32_t banned_modules;
 

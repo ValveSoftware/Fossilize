@@ -138,6 +138,14 @@ public:
 	// Setting to false can help improve replay performance in multi-threaded scenarios.
 	void set_resolve_derivative_pipeline_handles(bool enable);
 
+	// Default is true. If true, the replayer will make sure the shader module handle is a valid VkShaderModule.
+	// If false, VkShaderModule handles are filled with the object hash instead.
+	// It is up to the application to overwrite the correct VkShaderModule later.
+	void set_resolve_shader_module_handles(bool enable);
+
+	// Lets other StateReplayers have the same references to objects.
+	void copy_handle_references(const StateReplayer &replayer);
+
 	ScratchAllocator &get_allocator();
 
 	// Disable copies (and moves).

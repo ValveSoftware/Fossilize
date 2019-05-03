@@ -42,6 +42,7 @@ struct ExternalReplayer::Impl
 	HANDLE process = nullptr;
 	HANDLE mapping_handle = nullptr;
 	HANDLE mutex = nullptr;
+	HANDLE job_handle = nullptr;
 	SharedControlBlock *shm_block = nullptr;
 	size_t shm_block_size = 0;
 	DWORD exit_code = 0;
@@ -68,6 +69,8 @@ ExternalReplayer::Impl::~Impl()
 		CloseHandle(mutex);
 	if (process)
 		CloseHandle(process);
+	if (job_handle)
+		CloseHandle(job_handle);
 }
 
 uintptr_t ExternalReplayer::Impl::get_process_handle() const
@@ -86,11 +89,14 @@ ExternalReplayer::PollResult ExternalReplayer::Impl::poll_progress(ExternalRepla
 		return ExternalReplayer::PollResult::ResultNotReady;
 
 	progress.compute.total = shm_block->total_compute.load(std::memory_order_relaxed);
+	progress.compute.parsed = shm_block->parsed_compute.load(std::memory_order_relaxed);
 	progress.compute.skipped = shm_block->skipped_compute.load(std::memory_order_relaxed);
 	progress.compute.completed = shm_block->successful_compute.load(std::memory_order_relaxed);
 	progress.graphics.total = shm_block->total_graphics.load(std::memory_order_relaxed);
+	progress.graphics.parsed = shm_block->parsed_graphics.load(std::memory_order_relaxed);
 	progress.graphics.skipped = shm_block->skipped_graphics.load(std::memory_order_relaxed);
 	progress.graphics.completed = shm_block->successful_graphics.load(std::memory_order_relaxed);
+	progress.completed_modules = shm_block->successful_modules.load(std::memory_order_relaxed);
 	progress.total_modules = shm_block->total_modules.load(std::memory_order_relaxed);
 	progress.banned_modules = shm_block->banned_modules.load(std::memory_order_relaxed);
 	progress.clean_crashes = shm_block->clean_process_deaths.load(std::memory_order_relaxed);
@@ -160,6 +166,11 @@ int ExternalReplayer::Impl::wait()
 	GetExitCodeProcess(process, &exit_code);
 	CloseHandle(process);
 	process = nullptr;
+	if (job_handle)
+	{
+		CloseHandle(job_handle);
+		job_handle = nullptr;
+	}
 	return exit_code;
 }
 
@@ -302,16 +313,46 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 		si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
 	}
 
+	if (options.inherit_process_group)
+	{
+		job_handle = CreateJobObjectA(nullptr, nullptr);
+		if (!job_handle)
+		{
+			LOGE("Failed to create job handle.\n");
+			// Not fatal, we just won't bother with this.
+		}
+		else
+		{
+			// Kill all child processes if the parent dies.
+			JOBOBJECT_EXTENDED_LIMIT_INFORMATION jeli = {};
+			jeli.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+			if (!SetInformationJobObject(job_handle, JobObjectExtendedLimitInformation, &jeli, sizeof(jeli)))
+			{
+				LOGE("Failed to set information for job object.\n");
+				// Again, not fatal.
+			}
+		}
+	}
+
 	// For whatever reason, this string must be mutable. Dupe it.
 	char *duped_string = _strdup(cmdline.c_str());
 	PROCESS_INFORMATION pi = {};
-	if (!CreateProcessA(nullptr, duped_string, nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr, nullptr,
+	if (!CreateProcessA(nullptr, duped_string, nullptr, nullptr, TRUE, CREATE_NO_WINDOW | CREATE_SUSPENDED, nullptr, nullptr,
 	                    &si, &pi))
 	{
 		LOGE("Failed to create child process.\n");
 		free(duped_string);
 		return false;
 	}
+
+	if (job_handle && !AssignProcessToJobObject(job_handle, pi.hProcess))
+	{
+		LOGE("Failed to assign process to job handle.\n");
+		// This isn't really fatal, just continue on.
+	}
+
+	// Now we can resume the main thread, after we've added the process to our job object.
+	ResumeThread(pi.hThread);
 
 	free(duped_string);
 	if (nul != INVALID_HANDLE_VALUE)

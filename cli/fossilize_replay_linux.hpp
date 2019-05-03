@@ -414,7 +414,6 @@ static int run_master_process(const VulkanDevice::Options &opts,
 	{
 		Global::control_block->total_graphics.store(num_graphics_pipelines, std::memory_order_relaxed);
 		Global::control_block->total_compute.store(num_compute_pipelines, std::memory_order_relaxed);
-		Global::control_block->total_modules.store(num_modules, std::memory_order_relaxed);
 		Global::control_block->progress_started.store(true, std::memory_order_release);
 	}
 

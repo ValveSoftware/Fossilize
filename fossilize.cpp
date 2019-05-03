@@ -149,6 +149,7 @@ struct StateReplayer::Impl
 	std::unordered_map<Hash, VkPipeline> replayed_compute_pipelines;
 	std::unordered_map<Hash, VkPipeline> replayed_graphics_pipelines;
 
+	void copy_handle_references(const Impl &impl);
 	void parse_samplers(StateCreatorInterface &iface, const Value &samplers);
 	void parse_descriptor_set_layouts(StateCreatorInterface &iface, const Value &layouts);
 	void parse_pipeline_layouts(StateCreatorInterface &iface, const Value &layouts);
@@ -192,6 +193,7 @@ struct StateReplayer::Impl
 	uint32_t *parse_uints(const Value &attachments);
 	const char *duplicate_string(const char *str, size_t len);
 	bool resolve_derivative_pipelines = true;
+	bool resolve_shader_modules = true;
 
 	template <typename T>
 	T *copy(const T *src, size_t count);
@@ -1529,7 +1531,7 @@ void StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, D
 	info.stage.stage = static_cast<VkShaderStageFlagBits>(stage["stage"].GetUint());
 
 	auto module = string_to_uint64(stage["module"].GetString());
-	if (module > 0)
+	if (module > 0 && resolve_shader_modules)
 	{
 		auto module_iter = replayed_shader_modules.find(module);
 		if (module_iter == replayed_shader_modules.end())
@@ -1559,6 +1561,8 @@ void StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, D
 			iface.sync_shader_modules();
 		info.stage.module = module_iter->second;
 	}
+	else
+		info.stage.module = api_object_cast<VkShaderModule>(module);
 
 	info.stage.pName = duplicate_string(stage["name"].GetString(), stage["name"].GetStringLength());
 	if (stage.HasMember("specializationInfo"))
@@ -1855,7 +1859,7 @@ VkPipelineShaderStageCreateInfo *StateReplayer::Impl::parse_stages(StateCreatorI
 			state->pSpecializationInfo = parse_specialization_info(obj["specializationInfo"]);
 
 		auto module = string_to_uint64(obj["module"].GetString());
-		if (module > 0)
+		if (module > 0 && resolve_shader_modules)
 		{
 			auto module_iter = replayed_shader_modules.find(module);
 			if (module_iter == replayed_shader_modules.end())
@@ -1886,6 +1890,8 @@ VkPipelineShaderStageCreateInfo *StateReplayer::Impl::parse_stages(StateCreatorI
 
 			state->module = module_iter->second;
 		}
+		else
+			state->module = api_object_cast<VkShaderModule>(module);
 	}
 
 	return ret;
@@ -2117,6 +2123,27 @@ void StateReplayer::parse(StateCreatorInterface &iface, DatabaseInterface *resol
 void StateReplayer::set_resolve_derivative_pipeline_handles(bool enable)
 {
 	impl->resolve_derivative_pipelines = enable;
+}
+
+void StateReplayer::set_resolve_shader_module_handles(bool enable)
+{
+	impl->resolve_shader_modules = enable;
+}
+
+void StateReplayer::copy_handle_references(const StateReplayer &replayer)
+{
+	impl->copy_handle_references(*replayer.impl);
+}
+
+void StateReplayer::Impl::copy_handle_references(const StateReplayer::Impl &other)
+{
+	replayed_samplers = other.replayed_samplers;
+	replayed_descriptor_set_layouts = other.replayed_descriptor_set_layouts;
+	replayed_pipeline_layouts = other.replayed_pipeline_layouts;
+	replayed_shader_modules = other.replayed_shader_modules;
+	replayed_render_passes = other.replayed_render_passes;
+	replayed_compute_pipelines = other.replayed_compute_pipelines;
+	replayed_graphics_pipelines = other.replayed_graphics_pipelines;
 }
 
 void StateReplayer::Impl::parse(StateCreatorInterface &iface, DatabaseInterface *resolver, const void *buffer_, size_t total_size)

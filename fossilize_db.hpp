@@ -71,6 +71,12 @@ enum PayloadReadFlagBits
 	// The only use for this flag is to transparently transfer payloads to other stream archive databases.
 	PAYLOAD_READ_RAW_FOSSILIZE_DB_BIT = 1 << 0,
 
+	// Allows read_entry to be called concurrently from multiple threads.
+	// Might cause locking when reading from database depending on implementation.
+	// Decompression if needed is always lock-free.
+	// *NOTE*: Only tested with the Fossilize database format.
+	PAYLOAD_READ_CONCURRENT_BIT = 1 << 1,
+
 	PAYLOAD_READ_MAX_ENUM = 0x7fffffff
 };
 using PayloadWriteFlags = uint32_t;
