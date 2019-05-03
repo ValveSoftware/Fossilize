@@ -54,6 +54,7 @@ public:
 		// (Linux only) Inherits the process group used by caller. Lets all child processes for replayer
 		// belong to caller. Useful for CLI tools which use this interface.
 		// If this is used, ExternalReplayer::kill() won't work since it relies on process groups to work.
+		// (Windows only) If true, a JobObject is created to make sure that if the calling process is killed, so are the Fossilize replayer processes.
 		bool inherit_process_group;
 	};
 
