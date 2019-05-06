@@ -363,6 +363,24 @@ Hash compute_combined_application_feature_hash(const StateRecorderApplicationFea
 	return h.get();
 }
 
+static Hash compute_hash_application_info_link(const StateRecorderApplicationFeatureHash &app, ResourceTag tag, Hash hash)
+{
+	Hasher h;
+	h.u64(compute_combined_application_feature_hash(app));
+	h.s32(tag);
+	h.u64(hash);
+	return h.get();
+}
+
+static Hash compute_hash_application_info_link(Hash app_hash, ResourceTag tag, Hash hash)
+{
+	Hasher h;
+	h.u64(app_hash);
+	h.s32(tag);
+	h.u64(hash);
+	return h.get();
+}
+
 Hash compute_hash_sampler(const VkSamplerCreateInfo &sampler)
 {
 	Hasher h;
@@ -1252,7 +1270,8 @@ void StateReplayer::Impl::parse_application_info_link(StateCreatorInterface &ifa
 	Hash application_hash = string_to_uint64(link["application"].GetString());
 	auto tag = static_cast<ResourceTag>(link["tag"].GetInt());
 	Hash hash = string_to_uint64(link["hash"].GetString());
-	iface.notify_application_info_link(application_hash, tag, hash);
+	Hash link_hash = Hashing::compute_hash_application_info_link(application_hash, tag, hash);
+	iface.notify_application_info_link(link_hash, application_hash, tag, hash);
 }
 
 void StateReplayer::Impl::parse_samplers(StateCreatorInterface &iface, const Value &samplers)
@@ -2189,6 +2208,9 @@ void StateReplayer::Impl::parse(StateCreatorInterface &iface, DatabaseInterface 
 
 	if (doc.HasMember("applicationInfo") && doc.HasMember("physicalDeviceFeatures"))
 		parse_application_info(iface, doc["applicationInfo"], doc["physicalDeviceFeatures"]);
+
+	if (doc.HasMember("application"))
+		iface.set_current_application_info(string_to_uint64(doc["application"].GetString()));
 
 	if (doc.HasMember("link"))
 		parse_application_info_link(iface, doc["link"]);
@@ -4033,20 +4055,20 @@ void StateRecorder::Impl::serialize_application_info(vector<uint8_t> &blob) cons
 
 Hash StateRecorder::Impl::get_application_link_hash(ResourceTag tag, Hash hash) const
 {
-	Hasher h;
-	Hashing::hash_application_feature_info(h, application_feature_hash);
-	h.s32(tag);
-	h.u64(hash);
-	return h.get();
+	return Hashing::compute_hash_application_info_link(application_feature_hash, tag, hash);
 }
 
 bool StateRecorder::Impl::register_application_link_hash(ResourceTag tag, Hash hash, vector<uint8_t> &blob) const
 {
+	PayloadWriteFlags payload_flags = 0;
+	if (checksum)
+		payload_flags |= PAYLOAD_WRITE_COMPUTE_CHECKSUM_BIT;
+
 	Hash link_hash = get_application_link_hash(tag, hash);
 	if (!database_iface->has_entry(RESOURCE_APPLICATION_BLOB_LINK, link_hash))
 	{
 		serialize_application_blob_link(hash, tag, blob);
-		database_iface->write_entry(RESOURCE_APPLICATION_BLOB_LINK, link_hash, blob.data(), blob.size(), 0);
+		database_iface->write_entry(RESOURCE_APPLICATION_BLOB_LINK, link_hash, blob.data(), blob.size(), payload_flags);
 		return true;
 	}
 	else

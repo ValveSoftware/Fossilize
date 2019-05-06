@@ -57,7 +57,7 @@ struct RehashReplayer : StateCreatorInterface
 		{
 			LOGE("There are multiple VkApplicationInfo in this database. All blobs in this input database will be assigned to the first application info.\n");
 		}
-		else if (!should_filter_application_hash || hash == filter_application_hash)
+		else if (!has_set_application_info && (!should_filter_application_hash || hash == filter_application_hash))
 		{
 			if (info)
 				recorder->record_application_info(*info);
@@ -168,7 +168,6 @@ int main(int argc, char *argv[])
 	}
 
 	StateReplayer replayer;
-	recorder.init_recording_thread(output_db.get());
 
 	static const ResourceTag playback_order[] = {
 		RESOURCE_APPLICATION_INFO,
@@ -225,6 +224,12 @@ int main(int argc, char *argv[])
 				LOGE("StateReplayer threw exception parsing (tag: %d, hash: 0x%llx): %s\n", tag,
 				     static_cast<unsigned long long>(hash), e.what());
 			}
+		}
+
+		if (tag == RESOURCE_APPLICATION_INFO)
+		{
+			// Now we have set the application info, so we can start the recording thread now.
+			recorder.init_recording_thread(output_db.get());
 		}
 	}
 }

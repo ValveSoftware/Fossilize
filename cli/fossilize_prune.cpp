@@ -57,9 +57,12 @@ struct PruneReplayer : StateCreatorInterface
 
 	unordered_set<Hash> filtered_blob_hashes[RESOURCE_COUNT];
 
-	Hash current_application = 0;
 	Hash filter_application_hash = 0;
 	bool should_filter_application_hash = false;
+
+	Hash application_info_blob = 0;
+	bool has_application_info_for_blob = false;
+	bool blob_belongs_to_application_info = false;
 
 	void set_application_info(Hash hash, const VkApplicationInfo *app,
 	                          const VkPhysicalDeviceFeatures2 *) override
@@ -75,10 +78,22 @@ struct PruneReplayer : StateCreatorInterface
 		}
 	}
 
-	void notify_application_info_link(Hash app_hash, ResourceTag tag, Hash hash) override
+	void set_current_application_info(Hash hash) override
+	{
+		application_info_blob = hash;
+		has_application_info_for_blob = true;
+		blob_belongs_to_application_info = !should_filter_application_hash || (hash == filter_application_hash);
+	}
+
+	void notify_application_info_link(Hash link_hash, Hash app_hash, ResourceTag tag, Hash hash) override
 	{
 		if (should_filter_application_hash && app_hash == filter_application_hash)
+		{
 			filtered_blob_hashes[tag].insert(hash);
+			filtered_blob_hashes[RESOURCE_APPLICATION_BLOB_LINK].insert(link_hash);
+		}
+		else if (!should_filter_application_hash)
+			filtered_blob_hashes[RESOURCE_APPLICATION_BLOB_LINK].insert(link_hash);
 	}
 
 	bool enqueue_create_sampler(Hash hash, const VkSamplerCreateInfo *, VkSampler *sampler) override
@@ -154,11 +169,16 @@ struct PruneReplayer : StateCreatorInterface
 		return true;
 	}
 
+	bool filter_object(ResourceTag tag, Hash hash) const
+	{
+		return blob_belongs_to_application_info || !should_filter_application_hash || filtered_blob_hashes[tag].count(hash);
+	}
+
 	bool enqueue_create_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
 		*pipeline = fake_handle<VkPipeline>(hash);
 
-		if (!should_filter_application_hash || current_application == filter_application_hash)
+		if (filter_object(RESOURCE_COMPUTE_PIPELINE, hash))
 		{
 			access_pipeline_layout((Hash) create_info->layout);
 			accessed_shader_modules.insert((Hash) create_info->stage.module);
@@ -171,7 +191,7 @@ struct PruneReplayer : StateCreatorInterface
 	{
 		*pipeline = fake_handle<VkPipeline>(hash);
 
-		if (!should_filter_application_hash || current_application == filter_application_hash)
+		if (filter_object(RESOURCE_GRAPHICS_PIPELINE, hash))
 		{
 			access_pipeline_layout((Hash) create_info->layout);
 			accessed_render_passes.insert((Hash) create_info->renderPass);
@@ -283,52 +303,31 @@ int main(int argc, char *argv[])
 		"Render Pass",
 		"Graphics Pipeline",
 		"Compute Pipeline",
+		"Application Blob Link",
 	};
 
 	vector<uint8_t> state_json;
 
 	for (auto &tag : playback_order)
 	{
-		// No need to resolve this type.
-		if (tag == RESOURCE_SHADER_MODULE)
-			continue;
-
-		bool use_blob_link_cache = tag != RESOURCE_APPLICATION_INFO &&
-		                           tag != RESOURCE_APPLICATION_BLOB_LINK &&
-		                           should_filter_application_hash;
-
 		size_t hash_count = 0;
-		if (use_blob_link_cache)
+		if (!input_db->get_hash_list_for_resource_tag(tag, &hash_count, nullptr))
 		{
-			hash_count = prune_replayer.filtered_blob_hashes[tag].size();
-		}
-		else
-		{
-			if (!input_db->get_hash_list_for_resource_tag(tag, &hash_count, nullptr))
-			{
-				LOGE("Failed to get hashes.\n");
-				return EXIT_FAILURE;
-			}
+			LOGE("Failed to get hashes.\n");
+			return EXIT_FAILURE;
 		}
 
 		per_tag_read[tag] = hash_count;
 
-		vector<Hash> hashes;
+		// No need to resolve this type.
+		if (tag == RESOURCE_SHADER_MODULE)
+			continue;
 
-		if (use_blob_link_cache)
+		vector<Hash> hashes(hash_count);
+		if (!input_db->get_hash_list_for_resource_tag(tag, &hash_count, hashes.data()))
 		{
-			hashes.reserve(hash_count);
-			for (auto &hash : prune_replayer.filtered_blob_hashes[tag])
-				hashes.push_back(hash);
-		}
-		else
-		{
-			hashes.resize(hash_count);
-			if (!input_db->get_hash_list_for_resource_tag(tag, &hash_count, hashes.data()))
-			{
-				LOGE("Failed to get shader module hashes.\n");
-				return EXIT_FAILURE;
-			}
+			LOGE("Failed to get shader module hashes.\n");
+			return EXIT_FAILURE;
 		}
 
 		for (auto hash : hashes)
@@ -350,6 +349,8 @@ int main(int argc, char *argv[])
 
 			try
 			{
+				prune_replayer.has_application_info_for_blob = false;
+				prune_replayer.blob_belongs_to_application_info = false;
 				replayer.parse(prune_replayer, input_db.get(), state_json.data(), state_json.size());
 			}
 			catch (const exception &e)
@@ -375,21 +376,16 @@ int main(int argc, char *argv[])
 					per_tag_written[tag]++;
 				}
 			}
-			else if (tag == RESOURCE_APPLICATION_BLOB_LINK)
-			{
-				size_t compressed_size = 0;
-				if (!input_db->read_entry(tag, hash, &compressed_size, nullptr, PAYLOAD_READ_RAW_FOSSILIZE_DB_BIT))
-					return EXIT_FAILURE;
-				state_json.resize(compressed_size);
-				if (!input_db->read_entry(tag, hash, &compressed_size, state_json.data(),
-				                          PAYLOAD_READ_RAW_FOSSILIZE_DB_BIT))
-					return EXIT_FAILURE;
-				if (!output_db->write_entry(tag, hash, state_json.data(), state_json.size(),
-				                            PAYLOAD_WRITE_RAW_FOSSILIZE_DB_BIT))
-					return EXIT_FAILURE;
-				per_tag_written[tag]++;
-			}
 		}
+	}
+
+	if (!copy_accessed_types(*input_db, *output_db, state_json,
+	                         prune_replayer.filtered_blob_hashes[RESOURCE_APPLICATION_BLOB_LINK],
+	                         RESOURCE_APPLICATION_BLOB_LINK,
+	                         per_tag_written))
+	{
+		LOGE("Failed to copy APPLICATION_BLOCK_LINK.\n");
+		return EXIT_FAILURE;
 	}
 
 	if (!copy_accessed_types(*input_db, *output_db, state_json,
