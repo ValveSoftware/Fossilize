@@ -963,7 +963,7 @@ struct ThreadedReplayer : StateCreatorInterface
 				if (!outside_range_hashes.count(h))
 				{
 					PipelineWorkItem work_item;
-					work_item.index = d.index;
+					work_item.index = ~0u;
 					work_item.hash = d.hash;
 					work_item.parse_only = true;
 					work_item.tag = DerivedInfo::get_tag();
