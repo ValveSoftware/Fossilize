@@ -158,6 +158,11 @@ BidirectionalItr unstable_remove_if(BidirectionalItr first, BidirectionalItr las
 	return first;
 }
 
+namespace Global
+{
+static thread_local unsigned worker_thread_index;
+}
+
 struct ThreadedReplayer : StateCreatorInterface
 {
 	struct Options
@@ -210,6 +215,7 @@ struct ThreadedReplayer : StateCreatorInterface
 		ResourceTag tag = RESOURCE_COUNT;
 		unsigned index = 0;
 		bool parse_only = false;
+		bool force_outside_range = false;
 
 		union
 		{
@@ -231,6 +237,17 @@ struct ThreadedReplayer : StateCreatorInterface
 		} hash_map_entry = {};
 	};
 
+	struct PerThreadData
+	{
+		unsigned current_parse_index = ~0u;
+		unsigned current_graphics_index = ~0u;
+		unsigned current_compute_index = ~0u;
+		bool force_outside_range = false;
+
+		// Make sure each per-thread data lands in its own cache line to avoid false sharing.
+		uint8_t _padding[64 - 3 * sizeof(unsigned) - sizeof(bool)];
+	};
+
 	ThreadedReplayer(const VulkanDevice::Options &device_opts_, const Options &opts_)
 		: opts(opts_),
 		  num_worker_threads(opts.num_threads), loop_count(opts.loop_count),
@@ -248,16 +265,25 @@ struct ThreadedReplayer : StateCreatorInterface
 
 		shader_module_total_compressed_size.store(0);
 		shader_module_total_size.store(0);
+	}
 
-		thread_current_graphics_index = opts.start_graphics_index;
-		thread_current_compute_index = opts.start_compute_index;
+	PerThreadData &get_per_thread_data()
+	{
+		return per_thread_data[Global::worker_thread_index];
 	}
 
 	void start_worker_threads()
 	{
+		per_thread_data.resize(num_worker_threads + 1);
+		for (auto &d : per_thread_data)
+		{
+			d.current_graphics_index = opts.start_graphics_index;
+			d.current_compute_index = opts.start_compute_index;
+		}
+
 		// Create a thread pool with the # of specified worker threads (defaults to thread::hardware_concurrency()).
 		for (unsigned i = 0; i < num_worker_threads; i++)
-			thread_pool.push_back(std::thread(&ThreadedReplayer::worker_thread, this));
+			thread_pool.push_back(std::thread(&ThreadedReplayer::worker_thread, this, i + 1));
 	}
 
 	void sync_worker_threads()
@@ -279,15 +305,21 @@ struct ThreadedReplayer : StateCreatorInterface
 		if (!global_database->read_entry(work_item.tag, work_item.hash, &json_size, buffer.data(), PAYLOAD_READ_CONCURRENT_BIT))
 			return false;
 
-		if (work_item.tag == RESOURCE_GRAPHICS_PIPELINE)
+		per_thread_data[Global::worker_thread_index].current_parse_index = work_item.index;
+		per_thread_data[Global::worker_thread_index].force_outside_range = work_item.force_outside_range;
+
+		if (!work_item.force_outside_range)
 		{
-			lock_guard<mutex> holder(hash_to_index_lock);
-			graphics_hash_to_index[work_item.hash] = work_item.index;
-		}
-		else if (work_item.tag == RESOURCE_COMPUTE_PIPELINE)
-		{
-			lock_guard<mutex> holder(hash_to_index_lock);
-			compute_hash_to_index[work_item.hash] = work_item.index;
+			if (work_item.tag == RESOURCE_GRAPHICS_PIPELINE)
+			{
+				lock_guard<mutex> holder(hash_lock);
+				graphics_hashes_in_range.insert(work_item.hash);
+			}
+			else if (work_item.tag == RESOURCE_COMPUTE_PIPELINE)
+			{
+				lock_guard<mutex> holder(hash_lock);
+				compute_hashes_in_range.insert(work_item.hash);
+			}
 		}
 
 		try
@@ -319,7 +351,7 @@ struct ThreadedReplayer : StateCreatorInterface
 		{
 		case RESOURCE_GRAPHICS_PIPELINE:
 		{
-			thread_current_graphics_index = work_item.index;
+			get_per_thread_data().current_graphics_index = work_item.index + 1;
 
 			// Make sure to iterate the index so main thread and worker threads
 			// have a coherent idea of replayer state.
@@ -389,7 +421,7 @@ struct ThreadedReplayer : StateCreatorInterface
 
 		case RESOURCE_COMPUTE_PIPELINE:
 		{
-			thread_current_compute_index = work_item.index;
+			get_per_thread_data().current_compute_index = work_item.index + 1;
 
 			// Make sure to iterate the index so main thread and worker threads
 			// have a coherent idea of replayer state.
@@ -459,8 +491,10 @@ struct ThreadedReplayer : StateCreatorInterface
 		}
 	}
 
-	void worker_thread()
+	void worker_thread(unsigned thread_index)
 	{
+		Global::worker_thread_index = thread_index;
+
 		if (opts.on_thread_callback)
 			opts.on_thread_callback(opts.on_thread_callback_userdata);
 
@@ -855,16 +889,11 @@ struct ThreadedReplayer : StateCreatorInterface
 			info->basePipelineIndex = 0;
 		}
 
-		unsigned index;
-		{
-			lock_guard<mutex> holder(hash_to_index_lock);
-			auto itr = compute_hash_to_index.find(hash);
-			if (itr == end(compute_hash_to_index))
-				return false;
-			index = itr->second;
-		}
+		auto &per_thread = get_per_thread_data();
+		unsigned index = per_thread.current_parse_index;
+		bool force_outside_range = per_thread.force_outside_range;
 
-		if (index >= opts.start_compute_index && index < opts.end_compute_index)
+		if (!force_outside_range && index >= opts.start_compute_index && index < opts.end_compute_index)
 		{
 			deferred_compute[index - opts.start_compute_index] = {
 				const_cast<VkComputePipelineCreateInfo *>(create_info), hash, pipeline, index,
@@ -872,9 +901,9 @@ struct ThreadedReplayer : StateCreatorInterface
 		}
 		else
 		{
-			lock_guard<mutex> holder(hash_to_index_lock);
+			lock_guard<mutex> holder(hash_lock);
 			compute_parents[hash] = {
-				const_cast<VkComputePipelineCreateInfo *>(create_info), hash, pipeline, ~0u,
+				const_cast<VkComputePipelineCreateInfo *>(create_info), hash, pipeline, index,
 			};
 		}
 
@@ -908,16 +937,11 @@ struct ThreadedReplayer : StateCreatorInterface
 			info->basePipelineIndex = 0;
 		}
 
-		unsigned index;
-		{
-			lock_guard<mutex> holder(hash_to_index_lock);
-			auto itr = graphics_hash_to_index.find(hash);
-			if (itr == end(graphics_hash_to_index))
-				return false;
-			index = itr->second;
-		}
+		auto &per_thread = get_per_thread_data();
+		unsigned index = per_thread.current_parse_index;
+		bool force_outside_range = per_thread.force_outside_range;
 
-		if (index >= opts.start_graphics_index && index < opts.end_graphics_index)
+		if (!force_outside_range && index >= opts.start_graphics_index && index < opts.end_graphics_index)
 		{
 			deferred_graphics[index - opts.start_graphics_index] = {
 				const_cast<VkGraphicsPipelineCreateInfo *>(create_info), hash, pipeline, index,
@@ -925,9 +949,9 @@ struct ThreadedReplayer : StateCreatorInterface
 		}
 		else
 		{
-			lock_guard<mutex> holder(hash_to_index_lock);
+			lock_guard<mutex> holder(hash_lock);
 			graphics_parents[hash] = {
-				const_cast<VkGraphicsPipelineCreateInfo *>(create_info), hash, pipeline, ~0u,
+				const_cast<VkGraphicsPipelineCreateInfo *>(create_info), hash, pipeline, index,
 			};
 		};
 
@@ -940,7 +964,7 @@ struct ThreadedReplayer : StateCreatorInterface
 
 	template <typename DerivedInfo>
 	bool resolve_derived_pipelines(vector<DerivedInfo> &derived,
-	                               unordered_map<Hash, unsigned> &to_index,
+	                               const unordered_set<Hash> &in_range_set,
 	                               unordered_map<Hash, DerivedInfo> &parents,
 	                               unordered_map<Hash, VkPipeline> &pipelines)
 	{
@@ -950,12 +974,7 @@ struct ThreadedReplayer : StateCreatorInterface
 		for (auto &d : derived)
 		{
 			Hash h = (Hash)d.info->basePipelineHandle;
-
-			bool is_inside_range;
-			{
-				lock_guard<mutex> holder(hash_to_index_lock);
-				is_inside_range = to_index.count(h);
-			}
+			bool is_inside_range = in_range_set.count(h) != 0;
 
 			if (!is_inside_range)
 			{
@@ -963,9 +982,10 @@ struct ThreadedReplayer : StateCreatorInterface
 				if (!outside_range_hashes.count(h))
 				{
 					PipelineWorkItem work_item;
-					work_item.index = ~0u;
-					work_item.hash = d.hash;
+					work_item.index = d.index;
+					work_item.hash = h;
 					work_item.parse_only = true;
+					work_item.force_outside_range = true;
 					work_item.tag = DerivedInfo::get_tag();
 					outside_range_hashes.insert(h);
 					enqueue_work_item(work_item);
@@ -984,10 +1004,18 @@ struct ThreadedReplayer : StateCreatorInterface
 
 		sync_worker_threads();
 
+		if (opts.control_block)
+		{
+			if (DerivedInfo::get_tag() == RESOURCE_GRAPHICS_PIPELINE)
+				opts.control_block->total_graphics.fetch_add(parents.size(), std::memory_order_relaxed);
+			else if (DerivedInfo::get_tag() == RESOURCE_COMPUTE_PIPELINE)
+				opts.control_block->total_compute.fetch_add(parents.size(), std::memory_order_relaxed);
+		}
+
 		for (auto &parent : parents)
 		{
 			resolve_shader_modules(parent.second.info);
-			assert((parent.second.info->flags & VK_PIPELINE_CREATE_DERIVATIVE_BIT) != 0);
+			assert((parent.second.info->flags & VK_PIPELINE_CREATE_DERIVATIVE_BIT) == 0);
 			enqueue_pipeline(parent.second.hash, parent.second.info, parent.second.pipeline, parent.second.index);
 		}
 
@@ -1020,19 +1048,17 @@ struct ThreadedReplayer : StateCreatorInterface
 
 		// The pipelines are now in-flight, try resolving new dependencies in next iteration.
 		derived.erase(itr, end(derived));
-
-		assert(derived.empty());
 		return true;
 	}
 
 	bool resolve_derived_compute_pipelines()
 	{
-		return resolve_derived_pipelines(deferred_compute, graphics_hash_to_index, compute_parents, compute_pipelines);
+		return resolve_derived_pipelines(deferred_compute, graphics_hashes_in_range, compute_parents, compute_pipelines);
 	}
 
 	bool resolve_derived_graphics_pipelines()
 	{
-		return resolve_derived_pipelines(deferred_graphics, compute_hash_to_index, graphics_parents, graphics_pipelines);
+		return resolve_derived_pipelines(deferred_graphics, compute_hashes_in_range, graphics_parents, graphics_pipelines);
 	}
 
 	bool enqueue_pipeline(Hash hash, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline,
@@ -1138,7 +1164,7 @@ struct ThreadedReplayer : StateCreatorInterface
 	}
 
 	template <typename DerivedInfo>
-	void sort_deferred_derived_pipelines(vector<DerivedInfo> &derived, vector<DerivedInfo> &deferred, unsigned start_index)
+	void sort_deferred_derived_pipelines(vector<DerivedInfo> &derived, vector<DerivedInfo> &deferred)
 	{
 		sort(begin(deferred), end(deferred), [&](const DerivedInfo &a, const DerivedInfo &b) -> bool {
 			bool a_derived = (a.info->flags & VK_PIPELINE_CREATE_DERIVATIVE_BIT) != 0;
@@ -1149,16 +1175,17 @@ struct ThreadedReplayer : StateCreatorInterface
 				return b_derived;
 		});
 
-		unsigned end_index_non_derived = start_index;
-		unsigned index = start_index;
+		unsigned end_index_non_derived = deferred.size();
+		unsigned index = 0;
 		for (auto &def : deferred)
 		{
-			def.index = index++;
+			index++;
 			if ((def.info->flags & VK_PIPELINE_CREATE_DERIVATIVE_BIT) == 0)
-				end_index_non_derived = index - start_index;
+				end_index_non_derived = index;
 		}
 
 		derived.clear();
+		assert(deferred.size() >= end_index_non_derived);
 		derived.reserve(deferred.size() - end_index_non_derived);
 		copy(begin(deferred) + end_index_non_derived, end(deferred), back_inserter(derived));
 		deferred.erase(begin(deferred) + end_index_non_derived, end(deferred));
@@ -1180,8 +1207,8 @@ struct ThreadedReplayer : StateCreatorInterface
 		// We want a stable index order, so indices for non-derived will be smaller than derived ones.
 		vector<DeferredGraphicsInfo> derived_graphics;
 		vector<DeferredComputeInfo> derived_compute;
-		sort_deferred_derived_pipelines(derived_graphics, deferred_graphics, opts.start_graphics_index);
-		sort_deferred_derived_pipelines(derived_compute, deferred_compute, opts.start_compute_index);
+		sort_deferred_derived_pipelines(derived_graphics, deferred_graphics);
+		sort_deferred_derived_pipelines(derived_compute, deferred_compute);
 
 		// Make sure all VkShaderModules have been queued and completed.
 		// Remap VkShaderModule references from hashes to real handles and enqueue for work.
@@ -1257,19 +1284,20 @@ struct ThreadedReplayer : StateCreatorInterface
 	unsigned queued_count = 0;
 	unsigned completed_count = 0;
 	std::vector<std::thread> thread_pool;
+	std::vector<PerThreadData> per_thread_data;
 	std::mutex pipeline_work_queue_mutex;
 	std::mutex internal_enqueue_mutex;
 	std::queue<PipelineWorkItem> pipeline_work_queue;
 	std::condition_variable work_available_condition;
 	std::condition_variable work_done_condition;
 
-	std::mutex hash_to_index_lock;
+	std::mutex hash_lock;
 	std::unordered_map<Hash, DeferredGraphicsInfo> graphics_parents;
 	std::unordered_map<Hash, DeferredComputeInfo> compute_parents;
 	std::vector<DeferredGraphicsInfo> deferred_graphics;
 	std::vector<DeferredComputeInfo> deferred_compute;
-	std::unordered_map<Hash, unsigned> graphics_hash_to_index;
-	std::unordered_map<Hash, unsigned> compute_hash_to_index;
+	std::unordered_set<Hash> graphics_hashes_in_range;
+	std::unordered_set<Hash> compute_hashes_in_range;
 
 	// Feed statistics from the worker threads.
 	std::atomic<std::uint64_t> graphics_pipeline_ns;
@@ -1293,8 +1321,6 @@ struct ThreadedReplayer : StateCreatorInterface
 	// Crash recovery.
 	Hash failed_module_hashes[6] = {};
 	unsigned num_failed_module_hashes = 0;
-	unsigned thread_current_graphics_index = 0;
-	unsigned thread_current_compute_index = 0;
 	bool robustness = false;
 
 	const StateReplayer *global_replayer = nullptr;
@@ -1577,6 +1603,9 @@ static int run_normal_process(ThreadedReplayer &replayer, const string &db_path)
 			start_index = min(end_index, start_index);
 
 			replayer.deferred_graphics.resize(end_index - start_index);
+
+			if (replayer.opts.control_block)
+				replayer.opts.control_block->total_graphics.fetch_add(end_index - start_index, std::memory_order_relaxed);
 		}
 		else if (tag == RESOURCE_COMPUTE_PIPELINE)
 		{
@@ -1585,6 +1614,8 @@ static int run_normal_process(ThreadedReplayer &replayer, const string &db_path)
 			start_index = min(end_index, start_index);
 
 			replayer.deferred_compute.resize(end_index - start_index);
+			if (replayer.opts.control_block)
+				replayer.opts.control_block->total_compute.fetch_add(end_index - start_index, std::memory_order_relaxed);
 		}
 
 		resource_hashes.resize(resource_hash_count);

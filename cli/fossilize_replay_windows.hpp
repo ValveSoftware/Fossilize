@@ -568,7 +568,6 @@ static int run_master_process(const VulkanDevice::Options &opts,
 
 	size_t num_graphics_pipelines;
 	size_t num_compute_pipelines;
-	size_t num_modules;
 	{
 		auto db = unique_ptr<DatabaseInterface>(create_database(db_path.c_str(), DatabaseMode::ReadOnly));
 		if (!db->prepare())
@@ -588,20 +587,10 @@ static int run_master_process(const VulkanDevice::Options &opts,
 			LOGE("Failed to parse database %s.\n", db_path.c_str());
 			return EXIT_FAILURE;
 		}
-
-		if (!db->get_hash_list_for_resource_tag(RESOURCE_SHADER_MODULE, &num_modules, nullptr))
-		{
-			LOGE("Failed to parse database %s.\n", db_path.c_str());
-			return EXIT_FAILURE;
-		}
 	}
 
 	if (Global::control_block)
-	{
-		Global::control_block->total_graphics.store(num_graphics_pipelines, std::memory_order_relaxed);
-		Global::control_block->total_compute.store(num_compute_pipelines, std::memory_order_relaxed);
 		Global::control_block->progress_started.store(true, std::memory_order_release);
-	}
 
 	Global::active_processes = 0;
 	vector<ProcessProgress> child_processes(processes);
@@ -743,11 +732,11 @@ static LONG WINAPI crash_handler(_EXCEPTION_POINTERS *)
 		}
 
 		// Report where we stopped, so we can continue.
-		sprintf(buffer, "GRAPHICS %u\n", global_replayer->thread_current_graphics_index);
+		sprintf(buffer, "GRAPHICS %u\n", global_replayer->get_per_thread_data().current_graphics_index);
 		if (!write_all(crash_handle, buffer))
 			ExitProcess(2);
 
-		sprintf(buffer, "COMPUTE %u\n", global_replayer->thread_current_compute_index);
+		sprintf(buffer, "COMPUTE %u\n", global_replayer->get_per_thread_data().current_compute_index);
 		if (!write_all(crash_handle, buffer))
 			ExitProcess(2);
 
