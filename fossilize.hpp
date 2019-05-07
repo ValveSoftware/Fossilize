@@ -44,7 +44,8 @@ enum ResourceTag
 
 enum
 {
-	FOSSILIZE_FORMAT_VERSION = 5
+	FOSSILIZE_FORMAT_VERSION = 6,
+	FOSSILIZE_FORMAT_MIN_COMPAT_VERSION = 5
 };
 
 class DatabaseInterface;

@@ -2203,7 +2203,8 @@ void StateReplayer::Impl::parse(StateCreatorInterface &iface, DatabaseInterface 
 		FOSSILIZE_THROW("JSON parse error.");
 	}
 
-	if (doc["version"].GetInt() != FOSSILIZE_FORMAT_VERSION)
+	int version = doc["version"].GetInt();
+	if (version > FOSSILIZE_FORMAT_VERSION || version < FOSSILIZE_FORMAT_MIN_COMPAT_VERSION)
 		FOSSILIZE_THROW("JSON version mismatches.");
 
 	if (doc.HasMember("applicationInfo") && doc.HasMember("physicalDeviceFeatures"))
