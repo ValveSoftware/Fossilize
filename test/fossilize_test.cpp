@@ -43,15 +43,16 @@ static inline T fake_handle(uint64_t value)
 struct ReplayInterface : StateCreatorInterface
 {
 	StateRecorder recorder;
-	StateRecorderApplicationFeatureHash feature_hash = {};
+	Hash feature_hash = 0;
 
 	ReplayInterface()
 	{
 	}
 
-	void set_application_info(const VkApplicationInfo *info, const VkPhysicalDeviceFeatures2 *features) override
+	void set_application_info(Hash hash, const VkApplicationInfo *info, const VkPhysicalDeviceFeatures2 *features) override
 	{
-		feature_hash = Hashing::compute_application_feature_hash(info, features);
+		feature_hash = hash;
+
 		if (info)
 			recorder.record_application_info(*info);
 		if (features)
@@ -60,7 +61,7 @@ struct ReplayInterface : StateCreatorInterface
 
 	bool enqueue_create_sampler(Hash hash, const VkSamplerCreateInfo *create_info, VkSampler *sampler) override
 	{
-		Hash recorded_hash = Hashing::compute_hash_sampler(feature_hash, *create_info);
+		Hash recorded_hash = Hashing::compute_hash_sampler(*create_info);
 		if (recorded_hash != hash)
 			return false;
 
@@ -93,7 +94,7 @@ struct ReplayInterface : StateCreatorInterface
 
 	bool enqueue_create_shader_module(Hash hash, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module) override
 	{
-		Hash recorded_hash = Hashing::compute_hash_shader_module(feature_hash, *create_info);
+		Hash recorded_hash = Hashing::compute_hash_shader_module(*create_info);
 		if (recorded_hash != hash)
 			return false;
 
@@ -104,7 +105,7 @@ struct ReplayInterface : StateCreatorInterface
 
 	bool enqueue_create_render_pass(Hash hash, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass) override
 	{
-		Hash recorded_hash = Hashing::compute_hash_render_pass(feature_hash, *create_info);
+		Hash recorded_hash = Hashing::compute_hash_render_pass(*create_info);
 		if (recorded_hash != hash)
 			return false;
 

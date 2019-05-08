@@ -636,7 +636,7 @@ struct ThreadedReplayer : StateCreatorInterface
 		return true;
 	}
 
-	void set_application_info(const VkApplicationInfo *app, const VkPhysicalDeviceFeatures2 *features) override
+	void set_application_info(Hash, const VkApplicationInfo *app, const VkPhysicalDeviceFeatures2 *features) override
 	{
 		// TODO: Could use this to create multiple VkDevices for replay as necessary if app changes.
 

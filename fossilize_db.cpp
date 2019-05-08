@@ -569,7 +569,10 @@ struct StreamArchive : DatabaseInterface
 				if (fread(magic, 1, MagicSize, file) != MagicSize)
 					return false;
 
-				if (memcmp(magic, stream_reference_magic_and_version, MagicSize))
+				if (memcmp(magic, stream_reference_magic_and_version, MagicSize - 1))
+					return false;
+				int version = magic[MagicSize - 1];
+				if (version > FOSSILIZE_FORMAT_VERSION || version < FOSSILIZE_FORMAT_MIN_COMPAT_VERSION)
 					return false;
 
 				size_t offset = MagicSize;

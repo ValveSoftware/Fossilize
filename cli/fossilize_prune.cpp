@@ -55,34 +55,45 @@ struct PruneReplayer : StateCreatorInterface
 	unordered_map<Hash, const VkDescriptorSetLayoutCreateInfo *> descriptor_sets;
 	unordered_map<Hash, const VkPipelineLayoutCreateInfo *> pipeline_layouts;
 
-	Hash current_application = 0;
+	unordered_set<Hash> filtered_blob_hashes[RESOURCE_COUNT];
+
 	Hash filter_application_hash = 0;
 	bool should_filter_application_hash = false;
-	bool allow_application_info = false;
 
-	void set_application_info(const VkApplicationInfo *app,
-	                          const VkPhysicalDeviceFeatures2 *features) override
+	Hash application_info_blob = 0;
+	bool has_application_info_for_blob = false;
+	bool blob_belongs_to_application_info = false;
+
+	void set_application_info(Hash hash, const VkApplicationInfo *app,
+	                          const VkPhysicalDeviceFeatures2 *) override
 	{
-		if (allow_application_info)
+		LOGI("Available application feature hash: %016llx\n",
+		     static_cast<unsigned long long>(hash));
+
+		if (app)
 		{
-			Hash hash = Hashing::compute_combined_application_feature_hash(
-					Hashing::compute_application_feature_hash(app, features));
-
-			LOGI("Available application feature hash: %016llx\n",
-			     static_cast<unsigned long long>(hash));
-
-			if (app)
-			{
-				LOGI("  applicationInfo: engineName = %s, applicationName = %s, engineVersion = %u, appVersion = %u\n",
-				     app->pEngineName ? app->pEngineName : "N/A", app->pApplicationName ? app->pApplicationName : "N/A",
-				     app->engineVersion, app->applicationVersion);
-			}
+			LOGI("  applicationInfo: engineName = %s, applicationName = %s, engineVersion = %u, appVersion = %u\n",
+			     app->pEngineName ? app->pEngineName : "N/A", app->pApplicationName ? app->pApplicationName : "N/A",
+			     app->engineVersion, app->applicationVersion);
 		}
 	}
 
 	void set_current_application_info(Hash hash) override
 	{
-		current_application = hash;
+		application_info_blob = hash;
+		has_application_info_for_blob = true;
+		blob_belongs_to_application_info = !should_filter_application_hash || (hash == filter_application_hash);
+	}
+
+	void notify_application_info_link(Hash link_hash, Hash app_hash, ResourceTag tag, Hash hash) override
+	{
+		if (should_filter_application_hash && app_hash == filter_application_hash)
+		{
+			filtered_blob_hashes[tag].insert(hash);
+			filtered_blob_hashes[RESOURCE_APPLICATION_BLOB_LINK].insert(link_hash);
+		}
+		else if (!should_filter_application_hash)
+			filtered_blob_hashes[RESOURCE_APPLICATION_BLOB_LINK].insert(link_hash);
 	}
 
 	bool enqueue_create_sampler(Hash hash, const VkSamplerCreateInfo *, VkSampler *sampler) override
@@ -158,11 +169,16 @@ struct PruneReplayer : StateCreatorInterface
 		return true;
 	}
 
+	bool filter_object(ResourceTag tag, Hash hash) const
+	{
+		return blob_belongs_to_application_info || !should_filter_application_hash || filtered_blob_hashes[tag].count(hash);
+	}
+
 	bool enqueue_create_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
 		*pipeline = fake_handle<VkPipeline>(hash);
 
-		if (!should_filter_application_hash || current_application == filter_application_hash)
+		if (filter_object(RESOURCE_COMPUTE_PIPELINE, hash))
 		{
 			access_pipeline_layout((Hash) create_info->layout);
 			accessed_shader_modules.insert((Hash) create_info->stage.module);
@@ -175,7 +191,7 @@ struct PruneReplayer : StateCreatorInterface
 	{
 		*pipeline = fake_handle<VkPipeline>(hash);
 
-		if (!should_filter_application_hash || current_application == filter_application_hash)
+		if (filter_object(RESOURCE_GRAPHICS_PIPELINE, hash))
 		{
 			access_pipeline_layout((Hash) create_info->layout);
 			accessed_render_passes.insert((Hash) create_info->renderPass);
@@ -265,6 +281,7 @@ int main(int argc, char *argv[])
 
 	static const ResourceTag playback_order[] = {
 		RESOURCE_APPLICATION_INFO,
+		RESOURCE_APPLICATION_BLOB_LINK,
 		RESOURCE_SHADER_MODULE,
 		RESOURCE_SAMPLER,
 		RESOURCE_DESCRIPTOR_SET_LAYOUT,
@@ -286,18 +303,13 @@ int main(int argc, char *argv[])
 		"Render Pass",
 		"Graphics Pipeline",
 		"Compute Pipeline",
+		"Application Blob Link",
 	};
 
 	vector<uint8_t> state_json;
 
 	for (auto &tag : playback_order)
 	{
-		// No need to resolve this type.
-		if (tag == RESOURCE_SHADER_MODULE)
-			continue;
-
-		prune_replayer.allow_application_info = tag == RESOURCE_APPLICATION_INFO;
-
 		size_t hash_count = 0;
 		if (!input_db->get_hash_list_for_resource_tag(tag, &hash_count, nullptr))
 		{
@@ -307,8 +319,11 @@ int main(int argc, char *argv[])
 
 		per_tag_read[tag] = hash_count;
 
-		vector<Hash> hashes(hash_count);
+		// No need to resolve this type.
+		if (tag == RESOURCE_SHADER_MODULE)
+			continue;
 
+		vector<Hash> hashes(hash_count);
 		if (!input_db->get_hash_list_for_resource_tag(tag, &hash_count, hashes.data()))
 		{
 			LOGE("Failed to get shader module hashes.\n");
@@ -334,6 +349,8 @@ int main(int argc, char *argv[])
 
 			try
 			{
+				prune_replayer.has_application_info_for_blob = false;
+				prune_replayer.blob_belongs_to_application_info = false;
 				replayer.parse(prune_replayer, input_db.get(), state_json.data(), state_json.size());
 			}
 			catch (const exception &e)
@@ -360,6 +377,15 @@ int main(int argc, char *argv[])
 				}
 			}
 		}
+	}
+
+	if (!copy_accessed_types(*input_db, *output_db, state_json,
+	                         prune_replayer.filtered_blob_hashes[RESOURCE_APPLICATION_BLOB_LINK],
+	                         RESOURCE_APPLICATION_BLOB_LINK,
+	                         per_tag_written))
+	{
+		LOGE("Failed to copy APPLICATION_BLOCK_LINK.\n");
+		return EXIT_FAILURE;
 	}
 
 	if (!copy_accessed_types(*input_db, *output_db, state_json,

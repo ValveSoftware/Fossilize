@@ -28,9 +28,24 @@
 
 namespace Fossilize
 {
+enum ResourceTag
+{
+	RESOURCE_APPLICATION_INFO = 0,
+	RESOURCE_SAMPLER = 1,
+	RESOURCE_DESCRIPTOR_SET_LAYOUT = 2,
+	RESOURCE_PIPELINE_LAYOUT = 3,
+	RESOURCE_SHADER_MODULE = 4,
+	RESOURCE_RENDER_PASS = 5,
+	RESOURCE_GRAPHICS_PIPELINE = 6,
+	RESOURCE_COMPUTE_PIPELINE = 7,
+	RESOURCE_APPLICATION_BLOB_LINK = 8,
+	RESOURCE_COUNT = 9
+};
+
 enum
 {
-	FOSSILIZE_FORMAT_VERSION = 5
+	FOSSILIZE_FORMAT_VERSION = 6,
+	FOSSILIZE_FORMAT_MIN_COMPAT_VERSION = 5
 };
 
 class DatabaseInterface;
@@ -93,17 +108,27 @@ class StateCreatorInterface
 public:
 	virtual ~StateCreatorInterface() = default;
 
-	// All future calls to enqueue_create_* were created using this application info.
+	// Generally, this is only called when parsing standalone blogs with type RESOURCE_APPLICATION_INFO.
+
+	// If using stand-alone JSON format, all future calls to enqueue_create_* were created using this application info.
 	// app can be nullptr, in which case no pApplicationInfo was used (allowed in Vulkan 1.0).
 	// The pointer provided in app is persistent as long as StateReplayer lives.
 	// A physical device features 2 structure is also passed in, as it could affect compilation.
 	// For now, only robustBufferAccess is used. physical_device_features can also be nullptr, in
 	// which case the relevant feature robustBufferAccess is assumed to be turned off.
-	virtual void set_application_info(const VkApplicationInfo * /*app*/, const VkPhysicalDeviceFeatures2 * /*physical_device_features*/) {}
+	virtual void set_application_info(Hash /*application_feature_hash*/, const VkApplicationInfo * /*app*/, const VkPhysicalDeviceFeatures2 * /*physical_device_features*/) {}
 
 	// Called at the beginning of the state replayer to mark which application/feature hash
 	// was used for the following objects.
+	// This is only called if the blob was hashed using the older method of keying based on application info hash.
 	virtual void set_current_application_info(Hash /*hash*/) {}
+
+	// Called when parsing blobs of type RESOURCE_APPLICATION_BLOB_LINK.
+	// Marks that a blob of type "tag" and hash "hash" was seen for application hash "application_feature_hash".
+	virtual void notify_application_info_link(Hash /*application_info_link_hash*/,
+	                                          Hash /*application_feature_hash*/,
+	                                          ResourceTag /*blob_tag*/,
+	                                          Hash /*blob_hash*/) {}
 
 	virtual bool enqueue_create_sampler(Hash hash, const VkSamplerCreateInfo *create_info, VkSampler *sampler) = 0;
 	virtual bool enqueue_create_descriptor_set_layout(Hash hash, const VkDescriptorSetLayoutCreateInfo *create_info, VkDescriptorSetLayout *layout) = 0;
@@ -254,9 +279,9 @@ StateRecorderApplicationFeatureHash compute_application_feature_hash(const VkApp
 Hash compute_combined_application_feature_hash(const StateRecorderApplicationFeatureHash &base_hash);
 
 // Shader modules, samplers and render passes are standalone modules, so they can be hashed in isolation.
-Hash compute_hash_shader_module(const StateRecorderApplicationFeatureHash &base_hash, const VkShaderModuleCreateInfo &create_info);
-Hash compute_hash_sampler(const StateRecorderApplicationFeatureHash &base_hash, const VkSamplerCreateInfo &create_info);
-Hash compute_hash_render_pass(const StateRecorderApplicationFeatureHash &base_hash, const VkRenderPassCreateInfo &create_info);
+Hash compute_hash_shader_module(const VkShaderModuleCreateInfo &create_info);
+Hash compute_hash_sampler(const VkSamplerCreateInfo &create_info);
+Hash compute_hash_render_pass(const VkRenderPassCreateInfo &create_info);
 
 // If you are recording in threaded mode, these must only be called from the recording thread,
 // as the dependent objects might not have been recorded yet, and thus the mapping of dependent objects is unknown.
