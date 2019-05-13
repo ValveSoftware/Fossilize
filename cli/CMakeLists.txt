@@ -38,6 +38,12 @@ if (APPLE OR ANDROID)
 	target_compile_definitions(fossilize-replay PRIVATE NO_ROBUST_REPLAYER=1)
 endif()
 
+option(FOSSILIZE_REPLAYER_SPIRV_VAL "Enable support for SPIR-V validation in replayer." ON)
+if (FOSSILIZE_REPLAYER_SPIRV_VAL)
+	target_compile_definitions(fossilize-replay PRIVATE FOSSILIZE_REPLAYER_SPIRV_VAL)
+	target_link_libraries(fossilize-replay SPIRV-Tools)
+endif()
+
 add_fossilize_cli(fossilize-bench fossilize_bench.cpp)
 add_fossilize_cli(fossilize-convert-db fossilize_convert_db.cpp)
 add_fossilize_cli(fossilize-merge-db fossilize_merge_db.cpp)

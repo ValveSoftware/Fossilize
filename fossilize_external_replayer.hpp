@@ -56,6 +56,10 @@ public:
 		// If this is used, ExternalReplayer::kill() won't work since it relies on process groups to work.
 		// (Windows only) If true, a JobObject is created to make sure that if the calling process is killed, so are the Fossilize replayer processes.
 		bool inherit_process_group;
+
+		// Validates all SPIR-V with spirv-val before replaying.
+		// Modules which fail to validate will not be used.
+		bool spirv_validate;
 	};
 
 	ExternalReplayer();
@@ -114,6 +118,7 @@ public:
 		uint32_t completed_modules;
 		uint32_t total_modules;
 		uint32_t banned_modules;
+		uint32_t module_validation_failures;
 
 		uint32_t clean_crashes;
 		uint32_t dirty_crashes;
