@@ -99,6 +99,7 @@ ExternalReplayer::PollResult ExternalReplayer::Impl::poll_progress(ExternalRepla
 	progress.completed_modules = shm_block->successful_modules.load(std::memory_order_relaxed);
 	progress.total_modules = shm_block->total_modules.load(std::memory_order_relaxed);
 	progress.banned_modules = shm_block->banned_modules.load(std::memory_order_relaxed);
+	progress.module_validation_failures = shm_block->module_validation_failures.load(std::memory_order_relaxed);
 	progress.clean_crashes = shm_block->clean_process_deaths.load(std::memory_order_relaxed);
 	progress.dirty_crashes = shm_block->dirty_process_deaths.load(std::memory_order_relaxed);
 

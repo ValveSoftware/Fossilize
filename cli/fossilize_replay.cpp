@@ -836,7 +836,7 @@ struct ThreadedReplayer : StateCreatorInterface
 		if (opts.spirv_validate)
 		{
 			auto start_time = chrono::steady_clock::now();
-			spvtools::SpirvTools context(SPV_ENV_VULKAN_1_1);
+			spvtools::SpirvTools context(device->get_api_version() >= VK_VERSION_1_1 ? SPV_ENV_VULKAN_1_1 : SPV_ENV_VULKAN_1_0);
 			context.SetMessageConsumer([](spv_message_level_t, const char *, const spv_position_t &, const char *message) {
 				LOGE("spirv-val: %s\n", message);
 			});

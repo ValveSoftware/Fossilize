@@ -54,10 +54,16 @@ public:
 		return gpu;
 	}
 
+	uint32_t get_api_version() const
+	{
+		return api_version;
+	}
+
 private:
 	VkInstance instance = VK_NULL_HANDLE;
 	VkPhysicalDevice gpu = VK_NULL_HANDLE;
 	VkDevice device = VK_NULL_HANDLE;
 	VkDebugReportCallbackEXT callback = VK_NULL_HANDLE;
+	uint32_t api_version = 0;
 };
 }
