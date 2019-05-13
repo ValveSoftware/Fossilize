@@ -1,17 +1,47 @@
-language: cpp
-os:
-  - linux
+language:
+  - cpp
+  - python
 
-# Use Ubuntu 14.04 LTS (Trusty) as the Linux testing environment.
-sudo: required
-dist: trusty
+python: 3.7
+
+matrix:
+  include:
+    - os: linux
+      dist: trusty
+      compiler: gcc
+      env:
+        - GENERATOR="Unix Makefiles"
+    - os: linux
+      dist: trusty
+      compiler: clang
+      env:
+        - GENERATOR="Unix Makefiles"
+    - os: osx
+      compiler: clang
+      osx_image: xcode10
+      env:
+        - GENERATOR="Unix Makefiles"
+    - os: windows
+      before_install:
+        - choco install python3
+        - export PATH="/c/Python37:/c/Python37/Scripts:$PATH"
+      env:
+        - GENERATOR="Visual Studio 15 2017"
+    - os: windows
+      before_install:
+        - choco install python3
+        - export PATH="/c/Python37:/c/Python37/Scripts:$PATH"
+      env:
+        - GENERATOR="Visual Studio 15 2017 Win64"
 
 before_script:
   - git submodule update --init
 
 script:
+  - if [[ "$TRAVIS_OS_NAME" == "windows" ]]; then PYTHON3=$(which python); fi
+  - if [[ "$TRAVIS_OS_NAME" != "windows" ]]; then PYTHON3=$(which python3); fi
   - mkdir build
   - cd build
-  - cmake ..
-  - cmake --build .
-  - ctest
+  - cmake .. -DCMAKE_BUILD_TYPE=Release -G "${GENERATOR}" -DPYTHON_EXECUTABLE:FILEPATH="${PYTHON3}"
+  - cmake --build . --config Release
+  - ctest --verbose -C Release
