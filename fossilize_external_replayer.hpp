@@ -22,8 +22,8 @@
 
 #pragma once
 
-#include <stdint.h>
-#include "fossilize.hpp"
+#include "fossilize_types.hpp"
+#include <stddef.h>
 
 namespace Fossilize
 {

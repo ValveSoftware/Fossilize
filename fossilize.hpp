@@ -23,35 +23,12 @@
 #pragma once
 
 #include "vulkan.h"
-#include <stdint.h>
 #include <stddef.h>
+#include "fossilize_types.hpp"
 
 namespace Fossilize
 {
-enum ResourceTag
-{
-	RESOURCE_APPLICATION_INFO = 0,
-	RESOURCE_SAMPLER = 1,
-	RESOURCE_DESCRIPTOR_SET_LAYOUT = 2,
-	RESOURCE_PIPELINE_LAYOUT = 3,
-	RESOURCE_SHADER_MODULE = 4,
-	RESOURCE_RENDER_PASS = 5,
-	RESOURCE_GRAPHICS_PIPELINE = 6,
-	RESOURCE_COMPUTE_PIPELINE = 7,
-	RESOURCE_APPLICATION_BLOB_LINK = 8,
-	RESOURCE_COUNT = 9
-};
-
-enum
-{
-	FOSSILIZE_FORMAT_VERSION = 6,
-	FOSSILIZE_FORMAT_MIN_COMPAT_VERSION = 5
-};
-
 class DatabaseInterface;
-
-using Hash = uint64_t;
-
 class Hasher;
 
 class ScratchAllocator
