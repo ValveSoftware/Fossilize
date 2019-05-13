@@ -262,7 +262,7 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 	if (options.pipeline_cache)
 		cmdline += " --pipeline-cache";
 	if (options.spirv_validate)
-		cmdline += "--spirv-val";
+		cmdline += " --spirv-val";
 
 	if (options.num_threads)
 	{
