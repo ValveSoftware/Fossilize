@@ -48,6 +48,10 @@
 #include <utility>
 #include <assert.h>
 
+#ifdef FOSSILIZE_REPLAYER_SPIRV_VAL
+#include "spirv-tools/libspirv.hpp"
+#endif
+
 using namespace Fossilize;
 using namespace std;
 
@@ -168,6 +172,7 @@ struct ThreadedReplayer : StateCreatorInterface
 	struct Options
 	{
 		bool pipeline_cache = false;
+		bool spirv_validate = false;
 		string on_disk_pipeline_cache_path;
 
 		// VALVE: Add multi-threaded pipeline creation
@@ -822,8 +827,41 @@ struct ThreadedReplayer : StateCreatorInterface
 		if (masked_shader_modules.count(hash))
 		{
 			*module = VK_NULL_HANDLE;
+			lock_guard<mutex> lock(internal_enqueue_mutex);
+			shader_modules[hash] = VK_NULL_HANDLE;
 			return true;
 		}
+
+#ifdef FOSSILIZE_REPLAYER_SPIRV_VAL
+		if (opts.spirv_validate)
+		{
+			auto start_time = chrono::steady_clock::now();
+			spvtools::SpirvTools context(device->get_api_version() >= VK_VERSION_1_1 ? SPV_ENV_VULKAN_1_1 : SPV_ENV_VULKAN_1_0);
+			context.SetMessageConsumer([](spv_message_level_t, const char *, const spv_position_t &, const char *message) {
+				LOGE("spirv-val: %s\n", message);
+			});
+
+			bool ret = context.Validate(create_info->pCode, create_info->codeSize / 4);
+
+			auto end_time = chrono::steady_clock::now();
+			auto duration_ns = chrono::duration_cast<chrono::nanoseconds>(end_time - start_time).count();
+			shader_module_ns.fetch_add(duration_ns, std::memory_order_relaxed);
+
+			if (!ret)
+			{
+				LOGE("Failed to validate SPIR-V module: %0" PRIX64 "\n", hash);
+				*module = VK_NULL_HANDLE;
+				lock_guard<mutex> lock(internal_enqueue_mutex);
+				shader_modules[hash] = VK_NULL_HANDLE;
+				shader_module_count.fetch_add(1, std::memory_order_relaxed);
+
+				if (opts.control_block)
+					opts.control_block->module_validation_failures.fetch_add(1, std::memory_order_relaxed);
+
+				return true;
+			}
+		}
+#endif
 
 		VkShaderModule *hash_map_entry;
 		{
@@ -1355,6 +1393,7 @@ static void print_help()
 	     "\t[--device-index <index>]\n"
 	     "\t[--enable-validation]\n"
 	     "\t[--pipeline-cache]\n"
+	     "\t[--spirv-val]\n"
 	     "\t[--num-threads <count>]\n"
 	     "\t[--loop <count>]\n"
 	     "\t[--on-disk-pipeline-cache <path>]\n"
@@ -1371,7 +1410,8 @@ static void log_progress(const ExternalReplayer::Progress &progress)
 	LOGI(" Progress report:\n");
 	LOGI("   Parsed graphics %u / %u\n", progress.graphics.parsed, progress.graphics.total);
 	LOGI("   Parsed compute %u / %u\n", progress.compute.parsed, progress.compute.total);
-	LOGI("   Decompress modules %u / %u, skipped %u\n", progress.completed_modules, progress.total_modules, progress.banned_modules);
+	LOGI("   Decompress modules %u / %u, skipped %u, failed validation %u\n",
+	     progress.completed_modules, progress.total_modules, progress.banned_modules, progress.module_validation_failures);
 	LOGI("   Compile graphics %u / %u, skipped %u\n", progress.graphics.completed, progress.graphics.total, progress.graphics.skipped);
 	LOGI("   Compile compute %u / %u, skipped %u\n", progress.compute.completed, progress.compute.total, progress.compute.skipped);
 	LOGI("   Clean crashes %u\n", progress.clean_crashes);
@@ -1405,6 +1445,7 @@ static int run_progress_process(const VulkanDevice::Options &,
 	opts.database = db_path.c_str();
 	opts.external_replayer_path = nullptr;
 	opts.inherit_process_group = true;
+	opts.spirv_validate = replayer_opts.spirv_validate;
 
 	ExternalReplayer replayer;
 	if (!replayer.start(opts))
@@ -1763,6 +1804,7 @@ int main(int argc, char *argv[])
 	cbs.add("--device-index", [&](CLIParser &parser) { opts.device_index = parser.next_uint(); });
 	cbs.add("--enable-validation", [&](CLIParser &) { opts.enable_validation = true; });
 	cbs.add("--pipeline-cache", [&](CLIParser &) { replayer_opts.pipeline_cache = true; });
+	cbs.add("--spirv-val", [&](CLIParser &) { replayer_opts.spirv_validate = true; });
 	cbs.add("--on-disk-pipeline-cache", [&](CLIParser &parser) { replayer_opts.on_disk_pipeline_cache_path = parser.next_string(); });
 	cbs.add("--num-threads", [&](CLIParser &parser) { replayer_opts.num_threads = parser.next_uint(); });
 	cbs.add("--loop", [&](CLIParser &parser) { replayer_opts.loop_count = parser.next_uint(); });
@@ -1819,6 +1861,11 @@ int main(int argc, char *argv[])
 
 	if (!replayer_opts.on_disk_pipeline_cache_path.empty())
 		replayer_opts.pipeline_cache = true;
+#endif
+
+#ifndef FOSSILIZE_REPLAYER_SPIRV_VAL
+	if (replayer_opts.spirv_validate)
+		LOGE("--spirv-val is used, but SPIRV-Tools support was not enabled in fossilize-replay. Will be ignored.\n");
 #endif
 
 	int ret;

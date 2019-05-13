@@ -85,6 +85,11 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(VkDebugReportFlagsEXT flags
 	return VK_FALSE;
 }
 
+static uint32_t major_minor_version(uint32_t version)
+{
+	return VK_MAKE_VERSION(VK_VERSION_MAJOR(version), VK_VERSION_MINOR(version), 0);
+}
+
 bool VulkanDevice::init_device(const Options &opts)
 {
 	if (volkInitialize() != VK_SUCCESS)
@@ -93,9 +98,19 @@ bool VulkanDevice::init_device(const Options &opts)
 		return false;
 	}
 
-	if (volkGetInstanceVersion() == 0)
+	uint32_t instance_api_version = major_minor_version(volkGetInstanceVersion());
+	if (instance_api_version == 0)
 	{
 		LOGE("Could not find loader.\n");
+		return false;
+	}
+
+	uint32_t target_api_version = opts.application_info ? opts.application_info->apiVersion : instance_api_version;
+	target_api_version = major_minor_version(target_api_version);
+
+	if (target_api_version > instance_api_version)
+	{
+		LOGE("Database is targeting an API version which is unsupported by this Vulkan loader.\n");
 		return false;
 	}
 
@@ -130,7 +145,7 @@ bool VulkanDevice::init_device(const Options &opts)
 
 	VkInstanceCreateInfo instance_info = { VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO };
 	VkApplicationInfo app = { VK_STRUCTURE_TYPE_APPLICATION_INFO };
-	app.apiVersion = VK_API_VERSION_1_0;
+	app.apiVersion = instance_api_version;
 	app.pApplicationName = "Fossilize Replayer";
 	app.pEngineName = "Fossilize";
 
@@ -214,6 +229,18 @@ bool VulkanDevice::init_device(const Options &opts)
 	     VK_VERSION_PATCH(gpu_props.apiVersion));
 	LOGI("  vendorID: 0x%x\n", gpu_props.vendorID);
 	LOGI("  deviceID: 0x%x\n", gpu_props.deviceID);
+
+	uint32_t gpu_api_version = major_minor_version(gpu_props.apiVersion);
+	if (!opts.application_info)
+		target_api_version = instance_api_version < gpu_api_version ? instance_api_version : gpu_api_version;
+
+	if (target_api_version > gpu_api_version)
+	{
+		LOGE("Selected GPU does not support desired Vulkan API version.\n");
+		return false;
+	}
+
+	api_version = target_api_version;
 
 	// FIXME: There are arbitrary features we can request here from physical_device_features2.
 	VkPhysicalDeviceFeatures gpu_features = {};
