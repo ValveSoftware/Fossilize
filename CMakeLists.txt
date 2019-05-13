@@ -43,6 +43,7 @@ endif()
 add_library(fossilize STATIC
         fossilize.hpp fossilize.cpp
         fossilize_exception.hpp
+        fossilize_types.hpp
         varint.cpp varint.hpp
         fossilize_db.cpp fossilize_db.hpp
         path.hpp path.cpp)
