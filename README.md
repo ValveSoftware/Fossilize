@@ -1,5 +1,7 @@
 # Fossilize
 
+[![Build Status](https://travis-ci.org/ValveSoftware/Fossilize.svg?branch=master)](https://travis-ci.org/ValveSoftware/Fossilize)
+
 Fossilize is a library and Vulkan layer for serializing various persistent Vulkan objects which typically end up
 in hashmaps. CreateInfo structs for these Vulkan objects can be recorded and replayed.
 
