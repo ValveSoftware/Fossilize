@@ -38,13 +38,13 @@ namespace Fossilize
 class Exception : public std::exception
 {
 public:
-	explicit Exception(const char *what)
-		: msg(what)
+	explicit Exception(const char *what_)
+		: msg(what_)
 	{
 	}
 
-	explicit Exception(std::string what) FOSSILIZE_NOEXCEPT
-		: msg(std::move(what))
+	explicit Exception(std::string what_) FOSSILIZE_NOEXCEPT
+		: msg(std::move(what_))
 	{
 	}
 
