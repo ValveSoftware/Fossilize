@@ -32,6 +32,7 @@ if (FOSSILIZE_SANITIZE_THREADS)
 endif()
 
 add_library(miniz STATIC miniz/miniz.h miniz/miniz.c)
+set_target_properties(miniz PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(miniz PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/miniz)
 if (CMAKE_COMPILER_IS_GNUCXX OR (${CMAKE_CXX_COMPILER_ID} MATCHES "Clang"))
     target_compile_options(miniz PRIVATE -fvisibility=hidden)
@@ -47,6 +48,7 @@ add_library(fossilize STATIC
         varint.cpp varint.hpp
         fossilize_db.cpp fossilize_db.hpp
         path.hpp path.cpp)
+set_target_properties(fossilize PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 if (NOT ANDROID)
     target_sources(fossilize PRIVATE fossilize_external_replayer.cpp fossilize_external_replayer.hpp)
