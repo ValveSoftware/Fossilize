@@ -35,6 +35,7 @@
 #include <limits.h>
 #include <errno.h>
 #include "fossilize_external_replayer.hpp"
+#include "platform/futex_wrapper_linux.hpp"
 
 static bool write_all(int fd, const char *str)
 {
@@ -133,9 +134,9 @@ void ProcessProgress::parse(const char *cmd)
 			char buffer[ControlBlockMessageSize] = {};
 			strcpy(buffer, cmd);
 
-			pthread_mutex_lock(&Global::control_block->lock);
+			futex_wrapper_lock(&Global::control_block->futex_lock);
 			shared_control_block_write(Global::control_block, buffer, sizeof(buffer));
-			pthread_mutex_unlock(&Global::control_block->lock);
+			futex_wrapper_unlock(&Global::control_block->futex_lock);
 		}
 	}
 	else
@@ -405,7 +406,7 @@ static int run_master_process(const VulkanDevice::Options &opts,
 	}
 
 	if (Global::control_block)
-		Global::control_block->progress_started.store(true, std::memory_order_release);
+		Global::control_block->progress_started.store(1, std::memory_order_release);
 
 	Global::active_processes = 0;
 
@@ -570,7 +571,7 @@ static int run_master_process(const VulkanDevice::Options &opts,
 	}
 
 	if (Global::control_block)
-		Global::control_block->progress_complete.store(true, std::memory_order_release);
+		Global::control_block->progress_complete.store(1, std::memory_order_release);
 
 	return EXIT_SUCCESS;
 }
@@ -723,11 +724,11 @@ static int run_slave_process(const VulkanDevice::Options &opts,
 #if 0
 	if (Global::control_block)
 	{
-		pthread_mutex_lock(&Global::control_block->lock);
+		futex_wrapper_lock(&Global::control_block->futex_lock);
 		char msg[ControlBlockMessageSize] = {};
 		sprintf(msg, "SLAVE_FINISHED\n");
 		shared_control_block_write(Global::control_block, msg, sizeof(msg));
-		pthread_mutex_unlock(&Global::control_block->lock);
+		futex_wrapper_unlock(&Global::control_block->futex_lock);
 	}
 #endif
 
