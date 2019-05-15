@@ -36,11 +36,16 @@
 #include <vector>
 #include <unordered_set>
 #include <string>
-#include <pthread.h>
 #include <signal.h>
 #include <limits.h>
 #include "path.hpp"
 #include "fossilize_external_replayer_control_block.hpp"
+
+#ifdef __linux__
+#include "platform/futex_wrapper_linux.hpp"
+#else
+#include "platform/gcc_clang_spinlock.hpp"
+#endif
 
 namespace Fossilize
 {
@@ -74,10 +79,7 @@ ExternalReplayer::Impl::~Impl()
 		close(fd);
 
 	if (shm_block)
-	{
-		pthread_mutex_destroy(&shm_block->lock);
 		munmap(shm_block, shm_block_size);
-	}
 }
 
 uintptr_t ExternalReplayer::Impl::get_process_handle() const
@@ -90,9 +92,9 @@ ExternalReplayer::PollResult ExternalReplayer::Impl::poll_progress(ExternalRepla
 	if (pid < 0)
 		return ExternalReplayer::PollResult::Error;
 
-	bool complete = shm_block->progress_complete.load(std::memory_order_acquire);
+	bool complete = shm_block->progress_complete.load(std::memory_order_acquire) != 0;
 
-	if (!shm_block->progress_started.load(std::memory_order_acquire))
+	if (shm_block->progress_started.load(std::memory_order_acquire) == 0)
 		return ExternalReplayer::PollResult::ResultNotReady;
 
 	progress.compute.total = shm_block->total_compute.load(std::memory_order_relaxed);
@@ -110,7 +112,7 @@ ExternalReplayer::PollResult ExternalReplayer::Impl::poll_progress(ExternalRepla
 	progress.clean_crashes = shm_block->clean_process_deaths.load(std::memory_order_relaxed);
 	progress.dirty_crashes = shm_block->dirty_process_deaths.load(std::memory_order_relaxed);
 
-	pthread_mutex_lock(&shm_block->lock);
+	futex_wrapper_lock(&shm_block->futex_lock);
 	size_t read_avail = shared_control_block_read_avail(shm_block);
 	for (size_t i = ControlBlockMessageSize; i <= read_avail; i += ControlBlockMessageSize)
 	{
@@ -118,7 +120,7 @@ ExternalReplayer::PollResult ExternalReplayer::Impl::poll_progress(ExternalRepla
 		shared_control_block_read(shm_block, buf, sizeof(buf));
 		parse_message(buf);
 	}
-	pthread_mutex_unlock(&shm_block->lock);
+	futex_wrapper_unlock(&shm_block->futex_lock);
 	return complete ? ExternalReplayer::PollResult::Complete : ExternalReplayer::PollResult::Running;
 }
 
@@ -240,15 +242,6 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 
 	shm_block->ring_buffer_size = 64 * 1024;
 	shm_block->ring_buffer_offset = 4 * 1024;
-
-	pthread_mutexattr_t attr;
-	if (pthread_mutexattr_init(&attr) < 0)
-		return false;
-	if (pthread_mutexattr_setpshared(&attr, PTHREAD_PROCESS_SHARED) < 0)
-		return false;
-	if (pthread_mutex_init(&shm_block->lock, &attr) < 0)
-		return false;
-	pthread_mutexattr_destroy(&attr);
 
 	// We need to let our child inherit the shared FD.
 	int current_flags = fcntl(fd, F_GETFD);

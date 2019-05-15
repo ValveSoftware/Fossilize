@@ -23,13 +23,6 @@
 #pragma once
 
 #include <string.h>
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#else
-#include <pthread.h>
-#endif
-
 #include <atomic>
 static_assert(sizeof(std::atomic<uint32_t>) == sizeof(uint32_t), "Atomic size mismatch. This type likely requires a lock to work.");
 
@@ -39,17 +32,16 @@ static_assert(sizeof(std::atomic<uint32_t>) == sizeof(uint32_t), "Atomic size mi
 namespace Fossilize
 {
 enum { ControlBlockMessageSize = 32 };
-enum { ControlBlockMagic = 0x19bcde14 };
+enum { ControlBlockMagic = 0x19bcde15 };
 
 struct SharedControlBlock
 {
 	uint32_t version_cookie;
 
-#ifndef _WIN32
-	pthread_mutex_t lock;
-#endif
+	// Used to implement a lock (or spinlock).
+	int futex_lock;
 
-	// Progress. Just need atomics to implements this.
+	// Progress. Just need atomics to implement this.
 	std::atomic<uint32_t> successful_modules;
 	std::atomic<uint32_t> successful_graphics;
 	std::atomic<uint32_t> successful_compute;
@@ -64,30 +56,29 @@ struct SharedControlBlock
 	std::atomic<uint32_t> total_modules;
 	std::atomic<uint32_t> banned_modules;
 	std::atomic<uint32_t> module_validation_failures;
-	std::atomic<bool> progress_started;
-	std::atomic<bool> progress_complete;
+	std::atomic<uint32_t> progress_started;
+	std::atomic<uint32_t> progress_complete;
 
 	// Ring buffer. Needs lock.
-	uint64_t write_count;
-	uint64_t read_count;
-
-	size_t read_offset;
-	size_t write_offset;
-	size_t ring_buffer_offset;
-	size_t ring_buffer_size;
+	uint32_t write_count;
+	uint32_t read_count;
+	uint32_t read_offset;
+	uint32_t write_offset;
+	uint32_t ring_buffer_offset;
+	uint32_t ring_buffer_size;
 };
 
 // These are not thread-safe. Need to lock them by external means.
-static inline size_t shared_control_block_read_avail(SharedControlBlock *control_block)
+static inline uint32_t shared_control_block_read_avail(SharedControlBlock *control_block)
 {
-	size_t ret = control_block->write_count - control_block->read_count;
+	uint32_t ret = control_block->write_count - control_block->read_count;
 	return ret;
 }
 
-static inline size_t shared_control_block_write_avail(SharedControlBlock *control_block)
+static inline uint32_t shared_control_block_write_avail(SharedControlBlock *control_block)
 {
-	size_t ret = 0;
-	size_t max_capacity_write_count = control_block->read_count + control_block->ring_buffer_size;
+	uint32_t ret = 0;
+	uint32_t max_capacity_write_count = control_block->read_count + control_block->ring_buffer_size;
 	if (control_block->write_count >= max_capacity_write_count)
 		ret = 0;
 	else
@@ -96,7 +87,7 @@ static inline size_t shared_control_block_write_avail(SharedControlBlock *contro
 }
 
 static inline bool shared_control_block_read(SharedControlBlock *control_block,
-                                             void *data_, size_t size)
+                                             void *data_, uint32_t size)
 {
 	auto *data = static_cast<uint8_t *>(data_);
 	const uint8_t *ring = reinterpret_cast<const uint8_t *>(control_block) + control_block->ring_buffer_offset;
@@ -107,8 +98,8 @@ static inline bool shared_control_block_read(SharedControlBlock *control_block,
 	if (size > (control_block->write_count - control_block->read_count))
 		return false;
 
-	size_t read_first = control_block->ring_buffer_size - control_block->read_offset;
-	size_t read_second = 0;
+	uint32_t read_first = control_block->ring_buffer_size - control_block->read_offset;
+	uint32_t read_second = 0;
 	if (read_first > size)
 		read_first = size;
 	read_second = size - read_first;
@@ -123,7 +114,7 @@ static inline bool shared_control_block_read(SharedControlBlock *control_block,
 }
 
 static inline bool shared_control_block_write(SharedControlBlock *control_block,
-                                              const void *data_, size_t size)
+                                              const void *data_, uint32_t size)
 {
 	auto *data = static_cast<const uint8_t *>(data_);
 	uint8_t *ring = reinterpret_cast<uint8_t *>(control_block) + control_block->ring_buffer_offset;
@@ -131,12 +122,12 @@ static inline bool shared_control_block_write(SharedControlBlock *control_block,
 	if (size > control_block->ring_buffer_size)
 		return false;
 
-	size_t max_capacity_write_count = control_block->read_count + control_block->ring_buffer_size;
+	uint32_t max_capacity_write_count = control_block->read_count + control_block->ring_buffer_size;
 	if (control_block->write_count + size > max_capacity_write_count)
 		return false;
 
-	size_t write_first = control_block->ring_buffer_size - control_block->write_offset;
-	size_t write_second = 0;
+	uint32_t write_first = control_block->ring_buffer_size - control_block->write_offset;
+	uint32_t write_second = 0;
 	if (write_first > size)
 		write_first = size;
 	write_second = size - write_first;

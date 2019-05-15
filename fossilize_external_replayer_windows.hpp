@@ -83,9 +83,9 @@ ExternalReplayer::PollResult ExternalReplayer::Impl::poll_progress(ExternalRepla
 	if (!process)
 		return ExternalReplayer::PollResult::Error;
 
-	bool complete = shm_block->progress_complete.load(std::memory_order_acquire);
+	bool complete = shm_block->progress_complete.load(std::memory_order_acquire) != 0;
 
-	if (!shm_block->progress_started.load(std::memory_order_acquire))
+	if (shm_block->progress_started.load(std::memory_order_acquire) == 0)
 		return ExternalReplayer::PollResult::ResultNotReady;
 
 	progress.compute.total = shm_block->total_compute.load(std::memory_order_relaxed);

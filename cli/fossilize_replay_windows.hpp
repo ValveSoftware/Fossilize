@@ -593,7 +593,7 @@ static int run_master_process(const VulkanDevice::Options &opts,
 	}
 
 	if (Global::control_block)
-		Global::control_block->progress_started.store(true, std::memory_order_release);
+		Global::control_block->progress_started.store(1, std::memory_order_release);
 
 	Global::active_processes = 0;
 	vector<ProcessProgress> child_processes(processes);
@@ -700,6 +700,10 @@ static int run_master_process(const VulkanDevice::Options &opts,
 
 	if (Global::job_handle)
 		CloseHandle(Global::job_handle);
+
+	if (Global::control_block)
+		Global::control_block->progress_complete.store(1, std::memory_order_release);
+
 	return EXIT_SUCCESS;
 }
 
