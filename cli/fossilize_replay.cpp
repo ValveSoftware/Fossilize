@@ -30,6 +30,7 @@
 #include "fossilize_db.hpp"
 #include "fossilize_external_replayer.hpp"
 #include "fossilize_external_replayer_control_block.hpp"
+#include "fossilize_exception.hpp"
 
 #include <cinttypes>
 #include <string>
@@ -1605,8 +1606,8 @@ static int run_normal_process(ThreadedReplayer &replayer, const string &db_path)
 			}
 			catch (const exception &e)
 			{
-				LOGE("StateReplayer threw exception parsing (tag: %d, hash: 0x%llx): %s\n",
-				     tag, static_cast<unsigned long long>(hash), e.what());
+				LOGE("StateReplayer threw exception parsing (tag: %s, hash: %s): %s\n",
+				     tag_names[tag], uint64_string(hash).c_str(), e.what());
 			}
 		}
 

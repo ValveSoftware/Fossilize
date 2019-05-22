@@ -25,6 +25,7 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <stdint.h>
 
 #if defined(_MSC_VER) && (_MSC_VER <= 1800)
 #define FOSSILIZE_NOEXCEPT
@@ -57,7 +58,7 @@ private:
 	std::string msg;
 };
 
-static void throw_pnext_chain(std::string what, const void *pNext)
+static inline void throw_pnext_chain(std::string what, const void *pNext)
 {
 	what += " (pNext->sType chain: [";
 	while (pNext != nullptr)
@@ -71,5 +72,24 @@ static void throw_pnext_chain(std::string what, const void *pNext)
 	what += "])";
 	throw Exception(std::move(what));
 }
+
+static inline std::string uint64_string(uint64_t value)
+{
+	char str[17]; // 16 digits + null
+	sprintf(str, "%016llx", static_cast<unsigned long long>(value));
+	return str;
+}
+
+static inline void throw_missing_resource(const char *type, Hash hash)
+{
+	std::string buffer;
+	buffer += "Referenced ";
+	buffer += type;
+	buffer += " ";
+	buffer += uint64_string(hash);
+	buffer += ", but it does not exist.";
+	throw Exception(std::move(buffer));
+}
+
 }
 
