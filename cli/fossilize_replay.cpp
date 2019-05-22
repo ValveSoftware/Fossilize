@@ -30,6 +30,7 @@
 #include "fossilize_db.hpp"
 #include "fossilize_external_replayer.hpp"
 #include "fossilize_external_replayer_control_block.hpp"
+#include "fossilize_exception.hpp"
 
 #include <cinttypes>
 #include <string>
@@ -303,12 +304,18 @@ struct ThreadedReplayer : StateCreatorInterface
 	{
 		size_t json_size = 0;
 		if (!global_database->read_entry(work_item.tag, work_item.hash, &json_size, nullptr, PAYLOAD_READ_CONCURRENT_BIT))
+		{
+			LOGE("Failed to read entry (%u: %s)\n", unsigned(work_item.tag), uint64_string(work_item.hash).c_str());
 			return false;
+		}
 
 		buffer.resize(json_size);
 
 		if (!global_database->read_entry(work_item.tag, work_item.hash, &json_size, buffer.data(), PAYLOAD_READ_CONCURRENT_BIT))
+		{
+			LOGE("Failed to read entry (%u: %s)\n", unsigned(work_item.tag), uint64_string(work_item.hash).c_str());
 			return false;
+		}
 
 		per_thread_data[Global::worker_thread_index].current_parse_index = work_item.index;
 		per_thread_data[Global::worker_thread_index].force_outside_range = work_item.force_outside_range;
@@ -959,6 +966,7 @@ struct ThreadedReplayer : StateCreatorInterface
 		if (derived && create_info->basePipelineHandle == VK_NULL_HANDLE)
 			LOGE("Creating a derived pipeline with NULL handle.\n");
 
+
 		// It has never been observed that an application uses multiple layers of derived pipelines.
 		// Rather than trying to replay with arbitrary layers of derived-ness - which may or may not have any impact on caching -
 		// We force these pipelines to be non-derived.
@@ -1086,17 +1094,32 @@ struct ThreadedReplayer : StateCreatorInterface
 
 		// The pipelines are now in-flight, try resolving new dependencies in next iteration.
 		derived.erase(itr, end(derived));
+
+		if (!derived.empty())
+		{
+			LOGE("%u pipelines were not compiled because parent pipelines do not exist.\n",
+			     unsigned(derived.size()));
+
+			if (opts.control_block)
+			{
+				if (DerivedInfo::get_tag() == RESOURCE_GRAPHICS_PIPELINE)
+					opts.control_block->skipped_graphics.fetch_add(unsigned(derived.size()), std::memory_order_relaxed);
+				else if (DerivedInfo::get_tag() == RESOURCE_COMPUTE_PIPELINE)
+					opts.control_block->skipped_compute.fetch_add(unsigned(derived.size()), std::memory_order_relaxed);
+			}
+		}
+
 		return true;
 	}
 
 	bool resolve_derived_compute_pipelines()
 	{
-		return resolve_derived_pipelines(deferred_compute, graphics_hashes_in_range, compute_parents, compute_pipelines);
+		return resolve_derived_pipelines(deferred_compute, compute_hashes_in_range, compute_parents, compute_pipelines);
 	}
 
 	bool resolve_derived_graphics_pipelines()
 	{
-		return resolve_derived_pipelines(deferred_graphics, compute_hashes_in_range, graphics_parents, graphics_pipelines);
+		return resolve_derived_pipelines(deferred_graphics, graphics_hashes_in_range, graphics_parents, graphics_pipelines);
 	}
 
 	bool enqueue_pipeline(Hash hash, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline,
@@ -1471,17 +1494,19 @@ static int run_progress_process(const VulkanDevice::Options &,
 			}
 		}
 
-		std::this_thread::sleep_for(std::chrono::milliseconds(500));
+		std::this_thread::sleep_for(std::chrono::milliseconds(100));
 		ExternalReplayer::Progress progress = {};
-		auto result = replayer.poll_progress(progress);
 
 		if (replayer.is_process_complete(nullptr))
 		{
+			auto result = replayer.poll_progress(progress);
 			if (result != ExternalReplayer::PollResult::ResultNotReady)
 				log_progress(progress);
 			log_faulty_modules(replayer);
 			return replayer.wait();
 		}
+
+		auto result = replayer.poll_progress(progress);
 
 		switch (result)
 		{
@@ -1605,8 +1630,8 @@ static int run_normal_process(ThreadedReplayer &replayer, const string &db_path)
 			}
 			catch (const exception &e)
 			{
-				LOGE("StateReplayer threw exception parsing (tag: %d, hash: 0x%llx): %s\n",
-				     tag, static_cast<unsigned long long>(hash), e.what());
+				LOGE("StateReplayer threw exception parsing (tag: %s, hash: %s): %s\n",
+				     tag_names[tag], uint64_string(hash).c_str(), e.what());
 			}
 		}
 

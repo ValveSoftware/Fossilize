@@ -80,10 +80,10 @@ uintptr_t ExternalReplayer::Impl::get_process_handle() const
 
 ExternalReplayer::PollResult ExternalReplayer::Impl::poll_progress(ExternalReplayer::Progress &progress)
 {
-	if (!process)
-		return ExternalReplayer::PollResult::Error;
-
 	bool complete = shm_block->progress_complete.load(std::memory_order_acquire) != 0;
+
+	if (!process && !complete)
+		return ExternalReplayer::PollResult::Error;
 
 	if (shm_block->progress_started.load(std::memory_order_acquire) == 0)
 		return ExternalReplayer::PollResult::ResultNotReady;

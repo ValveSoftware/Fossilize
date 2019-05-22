@@ -136,6 +136,14 @@ struct HashedInfo
 	T info;
 };
 
+template <typename Allocator>
+static Value uint64_string(uint64_t value, Allocator &alloc)
+{
+	char str[17]; // 16 digits + null
+	sprintf(str, "%016llx", static_cast<unsigned long long>(value));
+	return Value(str, alloc);
+}
+
 struct StateReplayer::Impl
 {
 	void parse(StateCreatorInterface &iface, DatabaseInterface *resolver, const void *buffer, size_t size);
@@ -1049,7 +1057,13 @@ VkSampler *StateReplayer::Impl::parse_immutable_samplers(const Value &samplers)
 	{
 		auto index = string_to_uint64(itr->GetString());
 		if (index > 0)
-			*samps = replayed_samplers[index];
+		{
+			auto sampler_itr = replayed_samplers.find(index);
+			if (sampler_itr == end(replayed_samplers))
+				throw_missing_resource("Immutable sampler", index);
+			else
+				*samps = sampler_itr->second;
+		}
 	}
 
 	return ret;
@@ -1111,7 +1125,13 @@ VkDescriptorSetLayout *StateReplayer::Impl::parse_set_layouts(const Value &layou
 	{
 		auto index = string_to_uint64(itr->GetString());
 		if (index > 0)
-			*infos = replayed_descriptor_set_layouts[index];
+		{
+			auto set_itr = replayed_descriptor_set_layouts.find(index);
+			if (set_itr == end(replayed_descriptor_set_layouts))
+				throw_missing_resource("Descriptor set layout", index);
+			else
+				*infos = set_itr->second;
+		}
 	}
 
 	return ret;
@@ -1530,7 +1550,7 @@ void StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, D
 			if (!resolver || !resolver->read_entry(RESOURCE_COMPUTE_PIPELINE, pipeline, &external_state_size, nullptr,
 			                                       PAYLOAD_READ_NO_FLAGS))
 			{
-				FOSSILIZE_THROW("Failed to find referenced compute pipeline");
+				throw_missing_resource("Base pipeline", pipeline);
 			}
 
 			vector<uint8_t> external_state(external_state_size);
@@ -1538,7 +1558,7 @@ void StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, D
 			if (!resolver->read_entry(RESOURCE_COMPUTE_PIPELINE, pipeline, &external_state_size, external_state.data(),
 			                          PAYLOAD_READ_NO_FLAGS))
 			{
-				FOSSILIZE_THROW("Failed to find referenced compute pipeline");
+				throw_missing_resource("Base pipeline", pipeline);
 			}
 
 			this->parse(iface, resolver, external_state.data(), external_state.size());
@@ -1546,7 +1566,7 @@ void StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, D
 
 			pipeline_iter = replayed_compute_pipelines.find(pipeline);
 			if (pipeline_iter == replayed_compute_pipelines.end())
-				FOSSILIZE_THROW("Failed to find referenced compute pipeline");
+				throw_missing_resource("Base pipeline", pipeline);
 		}
 		info.basePipelineHandle = pipeline_iter->second;
 	}
@@ -1555,7 +1575,13 @@ void StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, D
 
 	auto layout = string_to_uint64(obj["layout"].GetString());
 	if (layout > 0)
-		info.layout = replayed_pipeline_layouts[layout];
+	{
+		auto layout_itr = replayed_pipeline_layouts.find(layout);
+		if (layout_itr == end(replayed_pipeline_layouts))
+			throw_missing_resource("Pipeline layout", layout);
+		else
+			info.layout = layout_itr->second;
+	}
 
 	auto &stage = obj["stage"];
 	info.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -1568,25 +1594,25 @@ void StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, D
 		if (module_iter == replayed_shader_modules.end())
 		{
 			size_t external_state_size = 0;
-			if (!resolver || !resolver->read_entry(RESOURCE_SHADER_MODULE, pipeline, &external_state_size, nullptr,
+			if (!resolver || !resolver->read_entry(RESOURCE_SHADER_MODULE, module, &external_state_size, nullptr,
 			                                       PAYLOAD_READ_NO_FLAGS))
 			{
-				FOSSILIZE_THROW("Failed to find referenced shader");
+				throw_missing_resource("Shader module", module);
 			}
 
 			vector<uint8_t> external_state(external_state_size);
 
-			if (!resolver->read_entry(RESOURCE_SHADER_MODULE, pipeline, &external_state_size, external_state.data(),
+			if (!resolver->read_entry(RESOURCE_SHADER_MODULE, module, &external_state_size, external_state.data(),
 			                          PAYLOAD_READ_NO_FLAGS))
 			{
-				FOSSILIZE_THROW("Failed to find referenced shader");
+				throw_missing_resource("Shader module", module);
 			}
 
 			this->parse(iface, resolver, external_state.data(), external_state.size());
 			iface.sync_shader_modules();
 			module_iter = replayed_shader_modules.find(module);
 			if (module_iter == replayed_shader_modules.end())
-				FOSSILIZE_THROW("Failed find referenced shader module");
+				throw_missing_resource("Shader module", module);
 		}
 		else
 			iface.sync_shader_modules();
@@ -1899,7 +1925,7 @@ VkPipelineShaderStageCreateInfo *StateReplayer::Impl::parse_stages(StateCreatorI
 				if (!resolver || !resolver->read_entry(RESOURCE_SHADER_MODULE, module, &external_state_size, nullptr,
 				                                       PAYLOAD_READ_NO_FLAGS))
 				{
-					FOSSILIZE_THROW("Failed to find referenced shader");
+					throw_missing_resource("Shader module", module);
 				}
 
 				vector<uint8_t> external_state(external_state_size);
@@ -1907,14 +1933,14 @@ VkPipelineShaderStageCreateInfo *StateReplayer::Impl::parse_stages(StateCreatorI
 				if (!resolver->read_entry(RESOURCE_SHADER_MODULE, module, &external_state_size, external_state.data(),
 				                          PAYLOAD_READ_NO_FLAGS))
 				{
-					FOSSILIZE_THROW("Failed to find referenced shader");
+					throw_missing_resource("Shader module", module);
 				}
 
 				this->parse(iface, resolver, external_state.data(), external_state.size());
 				iface.sync_shader_modules();
 				module_iter = replayed_shader_modules.find(module);
 				if (module_iter == replayed_shader_modules.end())
-					FOSSILIZE_THROW("Failed to find referenced shader module");
+					throw_missing_resource("Shader module", module);
 			}
 			else
 				iface.sync_shader_modules();
@@ -1963,7 +1989,7 @@ void StateReplayer::Impl::parse_graphics_pipeline(StateCreatorInterface &iface, 
 			if (!resolver || !resolver->read_entry(RESOURCE_GRAPHICS_PIPELINE, pipeline, &external_state_size, nullptr,
 			                                       PAYLOAD_READ_NO_FLAGS))
 			{
-				FOSSILIZE_THROW("Failed to find referenced graphics pipeline");
+				throw_missing_resource("Base pipeline", pipeline);
 			}
 
 			vector<uint8_t> external_state(external_state_size);
@@ -1971,14 +1997,14 @@ void StateReplayer::Impl::parse_graphics_pipeline(StateCreatorInterface &iface, 
 			if (!resolver->read_entry(RESOURCE_GRAPHICS_PIPELINE, pipeline, &external_state_size, external_state.data(),
 			                          PAYLOAD_READ_NO_FLAGS))
 			{
-				FOSSILIZE_THROW("Failed to find referenced graphics pipeline");
+				throw_missing_resource("Base pipeline", pipeline);
 			}
 
 			this->parse(iface, resolver, external_state.data(), external_state.size());
 			iface.sync_threads();
 			pipeline_iter = replayed_graphics_pipelines.find(pipeline);
 			if (pipeline_iter == replayed_graphics_pipelines.end())
-				FOSSILIZE_THROW("Failed to find referenced graphics pipeline");
+				throw_missing_resource("Base pipeline", pipeline);
 		}
 		info.basePipelineHandle = pipeline_iter->second;
 	}
@@ -1987,11 +2013,23 @@ void StateReplayer::Impl::parse_graphics_pipeline(StateCreatorInterface &iface, 
 
 	auto layout = string_to_uint64(obj["layout"].GetString());
 	if (layout > 0)
-		info.layout = replayed_pipeline_layouts[layout];
+	{
+		auto layout_itr = replayed_pipeline_layouts.find(layout);
+		if (layout_itr == end(replayed_pipeline_layouts))
+			throw_missing_resource("Pipeline layout", layout);
+		else
+			info.layout = layout_itr->second;
+	}
 
 	auto render_pass = string_to_uint64(obj["renderPass"].GetString());
 	if (render_pass > 0)
-		info.renderPass = replayed_render_passes[render_pass];
+	{
+		auto rp_itr = replayed_render_passes.find(render_pass);
+		if (rp_itr == end(replayed_render_passes))
+			throw_missing_resource("Render pass", render_pass);
+		else
+			info.renderPass = rp_itr->second;
+	}
 
 	info.subpass = obj["subpass"].GetUint();
 
@@ -3411,14 +3449,6 @@ static std::string encode_base64(const void *data_, size_t size)
 	}
 
 	return ret;
-}
-
-template <typename Allocator>
-static Value uint64_string(const uint64_t value, Allocator &alloc)
-{
-	char str[17]; // 16 digits + null
-	sprintf(str, "%016llx", static_cast<unsigned long long>(value));
-	return Value(str, alloc);
 }
 
 template <typename Allocator>
