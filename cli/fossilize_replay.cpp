@@ -268,6 +268,7 @@ struct ThreadedReplayer : StateCreatorInterface
 		shader_module_count.store(0);
 		thread_total_ns.store(0);
 		total_idle_ns.store(0);
+		total_peak_memory.store(0);
 
 		shader_module_total_compressed_size.store(0);
 		shader_module_total_size.store(0);
@@ -593,6 +594,11 @@ struct ThreadedReplayer : StateCreatorInterface
 		auto thread_end_time = chrono::steady_clock::now();
 		thread_total_ns.fetch_add(std::chrono::duration_cast<std::chrono::nanoseconds>(thread_end_time - thread_start_time).count(),
 		                          std::memory_order_relaxed);
+
+		total_peak_memory.fetch_add(
+				per_thread_replayer.get_allocator().get_peak_memory_consumption() +
+				per_thread_replayer_shader_modules.get_allocator().get_peak_memory_consumption(),
+				std::memory_order_relaxed);
 	}
 
 	void flush_pipeline_cache()
@@ -1393,6 +1399,8 @@ struct ThreadedReplayer : StateCreatorInterface
 	std::atomic<std::uint64_t> shader_module_total_size;
 	std::atomic<std::uint64_t> shader_module_total_compressed_size;
 
+	std::atomic<size_t> total_peak_memory;
+
 	bool shutting_down = false;
 
 	unique_ptr<VulkanDevice> device;
@@ -1797,6 +1805,9 @@ static int run_normal_process(ThreadedReplayer &replayer, const string &db_path)
 
 	LOGI("Threads were active in total for %.3f s (accumulated time)\n",
 	     replayer.thread_total_ns.load() * 1e-9);
+
+	LOGI("Total peak memory consumption by parser: %.3f MB.\n",
+	     (replayer.total_peak_memory.load() + state_replayer.get_allocator().get_peak_memory_consumption()) * 1e-6);
 
 	LOGI("Replayed %lu objects in %ld ms:\n", total_size, elapsed_ms);
 	LOGI("  samplers:              %7lu\n", (unsigned long)replayer.samplers.size());
