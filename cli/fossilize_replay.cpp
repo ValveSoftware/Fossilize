@@ -417,7 +417,17 @@ struct ThreadedReplayer : StateCreatorInterface
 					graphics_pipeline_ns.fetch_add(duration_ns, std::memory_order_relaxed);
 					graphics_pipeline_count.fetch_add(1, std::memory_order_relaxed);
 
-					*work_item.hash_map_entry.pipeline = *work_item.output.pipeline;
+					if ((work_item.create_info.graphics_create_info->flags & VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT) != 0)
+					{
+						*work_item.hash_map_entry.pipeline = *work_item.output.pipeline;
+					}
+					else
+					{
+						// Destroy the pipeline right away to save memory if we don't need it for purposes of creating derived pipelines later.
+						*work_item.hash_map_entry.pipeline = VK_NULL_HANDLE;
+						vkDestroyPipeline(device->get_device(), *work_item.output.pipeline, nullptr);
+						*work_item.output.pipeline = VK_NULL_HANDLE;
+					}
 
 					if (opts.control_block && i == 0)
 						opts.control_block->successful_graphics.fetch_add(1, std::memory_order_relaxed);
@@ -484,7 +494,17 @@ struct ThreadedReplayer : StateCreatorInterface
 					compute_pipeline_ns.fetch_add(duration_ns, std::memory_order_relaxed);
 					compute_pipeline_count.fetch_add(1, std::memory_order_relaxed);
 
-					*work_item.hash_map_entry.pipeline = *work_item.output.pipeline;
+					if ((work_item.create_info.compute_create_info->flags & VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT) != 0)
+					{
+						*work_item.hash_map_entry.pipeline = *work_item.output.pipeline;
+					}
+					else
+					{
+						// Destroy the pipeline right away to save memory if we don't need it for purposes of creating derived pipelines later.
+						*work_item.hash_map_entry.pipeline = VK_NULL_HANDLE;
+						vkDestroyPipeline(device->get_device(), *work_item.output.pipeline, nullptr);
+						*work_item.output.pipeline = VK_NULL_HANDLE;
+					}
 
 					if (opts.control_block && i == 0)
 						opts.control_block->successful_compute.fetch_add(1, std::memory_order_relaxed);
