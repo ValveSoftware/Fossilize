@@ -1474,15 +1474,17 @@ static int run_progress_process(const VulkanDevice::Options &,
 
 		std::this_thread::sleep_for(std::chrono::milliseconds(100));
 		ExternalReplayer::Progress progress = {};
-		auto result = replayer.poll_progress(progress);
 
 		if (replayer.is_process_complete(nullptr))
 		{
+			auto result = replayer.poll_progress(progress);
 			if (result != ExternalReplayer::PollResult::ResultNotReady)
 				log_progress(progress);
 			log_faulty_modules(replayer);
 			return replayer.wait();
 		}
+
+		auto result = replayer.poll_progress(progress);
 
 		switch (result)
 		{
