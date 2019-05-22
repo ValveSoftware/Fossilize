@@ -2373,6 +2373,7 @@ struct ScratchAllocator::Impl
 	std::vector<Block> blocks;
 
 	void add_block(size_t minimum_size);
+	size_t peak_history_size = 0;
 };
 
 ScratchAllocator::ScratchAllocator()
@@ -2427,6 +2428,11 @@ void *ScratchAllocator::allocate_raw(size_t size, size_t alignment)
 
 void ScratchAllocator::reset()
 {
+	// Keep track of how large the buffer can grow.
+	size_t peak = get_peak_memory_consumption();
+	if (peak > impl->peak_history_size)
+		impl->peak_history_size = peak;
+
 	if (impl->blocks.size() > 0)
 	{
 		// free all but first block
@@ -2435,6 +2441,18 @@ void ScratchAllocator::reset()
 		// reset offset on first block
 		impl->blocks[0].offset = 0;
 	}
+}
+
+size_t ScratchAllocator::get_peak_memory_consumption() const
+{
+	size_t current_size = 0;
+	for (auto &block : impl->blocks)
+		current_size += block.blob.size();
+
+	if (impl->peak_history_size > current_size)
+		return impl->peak_history_size;
+	else
+		return current_size;
 }
 
 ScratchAllocator &StateRecorder::get_allocator()

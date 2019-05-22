@@ -70,6 +70,7 @@ public:
 	void *allocate_raw_cleared(size_t size, size_t alignment);
 
 	void reset();
+	size_t get_peak_memory_consumption() const;
 
 	// Disable copies (and moves).
 	ScratchAllocator(const ScratchAllocator &) = delete;

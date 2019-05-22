@@ -268,6 +268,7 @@ struct ThreadedReplayer : StateCreatorInterface
 		shader_module_count.store(0);
 		thread_total_ns.store(0);
 		total_idle_ns.store(0);
+		total_peak_memory.store(0);
 
 		shader_module_total_compressed_size.store(0);
 		shader_module_total_size.store(0);
@@ -417,7 +418,17 @@ struct ThreadedReplayer : StateCreatorInterface
 					graphics_pipeline_ns.fetch_add(duration_ns, std::memory_order_relaxed);
 					graphics_pipeline_count.fetch_add(1, std::memory_order_relaxed);
 
-					*work_item.hash_map_entry.pipeline = *work_item.output.pipeline;
+					if ((work_item.create_info.graphics_create_info->flags & VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT) != 0)
+					{
+						*work_item.hash_map_entry.pipeline = *work_item.output.pipeline;
+					}
+					else
+					{
+						// Destroy the pipeline right away to save memory if we don't need it for purposes of creating derived pipelines later.
+						*work_item.hash_map_entry.pipeline = VK_NULL_HANDLE;
+						vkDestroyPipeline(device->get_device(), *work_item.output.pipeline, nullptr);
+						*work_item.output.pipeline = VK_NULL_HANDLE;
+					}
 
 					if (opts.control_block && i == 0)
 						opts.control_block->successful_graphics.fetch_add(1, std::memory_order_relaxed);
@@ -484,7 +495,17 @@ struct ThreadedReplayer : StateCreatorInterface
 					compute_pipeline_ns.fetch_add(duration_ns, std::memory_order_relaxed);
 					compute_pipeline_count.fetch_add(1, std::memory_order_relaxed);
 
-					*work_item.hash_map_entry.pipeline = *work_item.output.pipeline;
+					if ((work_item.create_info.compute_create_info->flags & VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT) != 0)
+					{
+						*work_item.hash_map_entry.pipeline = *work_item.output.pipeline;
+					}
+					else
+					{
+						// Destroy the pipeline right away to save memory if we don't need it for purposes of creating derived pipelines later.
+						*work_item.hash_map_entry.pipeline = VK_NULL_HANDLE;
+						vkDestroyPipeline(device->get_device(), *work_item.output.pipeline, nullptr);
+						*work_item.output.pipeline = VK_NULL_HANDLE;
+					}
 
 					if (opts.control_block && i == 0)
 						opts.control_block->successful_compute.fetch_add(1, std::memory_order_relaxed);
@@ -573,6 +594,11 @@ struct ThreadedReplayer : StateCreatorInterface
 		auto thread_end_time = chrono::steady_clock::now();
 		thread_total_ns.fetch_add(std::chrono::duration_cast<std::chrono::nanoseconds>(thread_end_time - thread_start_time).count(),
 		                          std::memory_order_relaxed);
+
+		total_peak_memory.fetch_add(
+				per_thread_replayer.get_allocator().get_peak_memory_consumption() +
+				per_thread_replayer_shader_modules.get_allocator().get_peak_memory_consumption(),
+				std::memory_order_relaxed);
 	}
 
 	void flush_pipeline_cache()
@@ -1373,6 +1399,8 @@ struct ThreadedReplayer : StateCreatorInterface
 	std::atomic<std::uint64_t> shader_module_total_size;
 	std::atomic<std::uint64_t> shader_module_total_compressed_size;
 
+	std::atomic<size_t> total_peak_memory;
+
 	bool shutting_down = false;
 
 	unique_ptr<VulkanDevice> device;
@@ -1777,6 +1805,9 @@ static int run_normal_process(ThreadedReplayer &replayer, const string &db_path)
 
 	LOGI("Threads were active in total for %.3f s (accumulated time)\n",
 	     replayer.thread_total_ns.load() * 1e-9);
+
+	LOGI("Total peak memory consumption by parser: %.3f MB.\n",
+	     (replayer.total_peak_memory.load() + state_replayer.get_allocator().get_peak_memory_consumption()) * 1e-6);
 
 	LOGI("Replayed %lu objects in %ld ms:\n", total_size, elapsed_ms);
 	LOGI("  samplers:              %7lu\n", (unsigned long)replayer.samplers.size());
