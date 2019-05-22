@@ -1099,6 +1099,14 @@ struct ThreadedReplayer : StateCreatorInterface
 		{
 			LOGE("%u pipelines were not compiled because parent pipelines do not exist.\n",
 			     unsigned(derived.size()));
+
+			if (opts.control_block)
+			{
+				if (DerivedInfo::get_tag() == RESOURCE_GRAPHICS_PIPELINE)
+					opts.control_block->skipped_graphics.fetch_add(unsigned(derived.size()), std::memory_order_relaxed);
+				else if (DerivedInfo::get_tag() == RESOURCE_COMPUTE_PIPELINE)
+					opts.control_block->skipped_compute.fetch_add(unsigned(derived.size()), std::memory_order_relaxed);
+			}
 		}
 
 		return true;
