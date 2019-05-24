@@ -1273,6 +1273,16 @@ struct ThreadedReplayer : StateCreatorInterface
 						                 work_item.parse_only = true;
 						                 work_item.memory_context_index = memory_index;
 						                 work_item.index = index - hash_offset;
+
+						                 auto tag = DerivedInfo::get_tag();
+						                 if (opts.control_block)
+						                 {
+							                 if (tag == RESOURCE_GRAPHICS_PIPELINE)
+								                 opts.control_block->total_graphics.fetch_add(1, std::memory_order_relaxed);
+							                 else if (tag == RESOURCE_COMPUTE_PIPELINE)
+								                 opts.control_block->total_compute.fetch_add(1, std::memory_order_relaxed);
+						                 }
+
 						                 enqueue_work_item(work_item);
 					                 }
 					                 else
@@ -1836,8 +1846,6 @@ static int run_normal_process(ThreadedReplayer &replayer, const string &db_path)
 			start_index = min(end_index, start_index);
 			graphics_start_index = start_index;
 
-			if (replayer.opts.control_block)
-				replayer.opts.control_block->total_graphics.fetch_add(end_index - start_index, std::memory_order_relaxed);
 		}
 		else if (tag == RESOURCE_COMPUTE_PIPELINE)
 		{
@@ -1847,9 +1855,6 @@ static int run_normal_process(ThreadedReplayer &replayer, const string &db_path)
 			start_index = max(start_index, replayer.opts.start_compute_index);
 			start_index = min(end_index, start_index);
 			compute_start_index = start_index;
-
-			if (replayer.opts.control_block)
-				replayer.opts.control_block->total_compute.fetch_add(end_index - start_index, std::memory_order_relaxed);
 		}
 
 		hashes->resize(resource_hash_count);
