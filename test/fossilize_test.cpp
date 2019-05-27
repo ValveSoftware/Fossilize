@@ -510,6 +510,11 @@ static void record_graphics_pipelines(StateRecorder &recorder)
 	clip_state.depthClipEnable = VK_TRUE;
 	rs.pNext = &clip_state;
 
+	VkPipelineRasterizationStateStreamCreateInfoEXT stream_state =
+			{ VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_STREAM_CREATE_INFO_EXT };
+	stream_state.rasterizationStream = VK_TRUE;
+	clip_state.pNext = &stream_state;
+
 	ia.topology = VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
 	ia.primitiveRestartEnable = VK_TRUE;
 
