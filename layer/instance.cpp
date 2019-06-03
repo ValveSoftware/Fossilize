@@ -25,6 +25,7 @@
 #include <mutex>
 #include <unordered_map>
 #include <memory>
+#include "fossilize_application_filter.hpp"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -72,6 +73,7 @@ static std::mutex recorderLock;
 
 struct Recorder
 {
+	std::unique_ptr<ApplicationInfoFilter> filter;
 	std::unique_ptr<DatabaseInterface> interface;
 	std::unique_ptr<StateRecorder> recorder;
 };
@@ -110,6 +112,10 @@ static std::string getSystemProperty(const char *key)
 
 #ifndef FOSSILIZE_DUMP_PATH_READ_ONLY_ENV
 #define FOSSILIZE_DUMP_PATH_READ_ONLY_ENV "FOSSILIZE_DUMP_PATH_READ_ONLY"
+#endif
+
+#ifndef FOSSILIZE_APPLICATION_INFO_FILTER_PATH_ENV
+#define FOSSILIZE_APPLICATION_INFO_FILTER_PATH_ENV "FOSSILIZE_APPLICATION_INFO_FILTER_PATH"
 #endif
 
 #ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
@@ -257,7 +263,14 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkApplicationInfo *appI
 		LOGI("Overriding serialization path: \"%s\".\n", path);
 	}
 	extraPaths = getenv(FOSSILIZE_DUMP_PATH_READ_ONLY_ENV);
+	const char *filterPath = getenv(FOSSILIZE_APPLICATION_INFO_FILTER_PATH_ENV);
 #endif
+
+	if (filterPath)
+	{
+		entry.filter.reset(new ApplicationInfoFilter);
+		entry.filter->parse_async(filterPath);
+	}
 
 	char hashString[17];
 	sprintf(hashString, "%016llx", static_cast<unsigned long long>(hash));
@@ -272,6 +285,7 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkApplicationInfo *appI
 	entry.recorder.reset(recorder);
 	recorder->set_database_enable_compression(true);
 	recorder->set_database_enable_checksum(true);
+	recorder->set_application_info_filter(entry.filter.get());
 	if (appInfo)
 		recorder->record_application_info(*appInfo);
 	if (features)

@@ -30,6 +30,7 @@ namespace Fossilize
 {
 class DatabaseInterface;
 class Hasher;
+class ApplicationInfoFilter;
 
 class ScratchAllocator
 {
@@ -186,6 +187,7 @@ public:
 	// This can be relevant when using more exotic features.
 	void record_physical_device_features(const VkPhysicalDeviceFeatures2 &device_features);
 	void record_physical_device_features(const VkPhysicalDeviceFeatures &device_features);
+	void set_application_info_filter(ApplicationInfoFilter *filter);
 
 	const StateRecorderApplicationFeatureHash &get_application_feature_hash() const;
 
