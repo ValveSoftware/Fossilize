@@ -254,6 +254,7 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkApplicationInfo *appI
 		serializationPath = logPath;
 		LOGI("Overriding serialization path: \"%s\".\n", logPath.c_str());
 	}
+	const char *filterPath = nullptr;
 #else
 	serializationPath = "fossilize";
 	const char *path = getenv(FOSSILIZE_DUMP_PATH_ENV);
