@@ -19,6 +19,7 @@
  * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
+
 #include <atomic>
 #include <mutex>
 #include <condition_variable>
@@ -35,12 +36,14 @@
 #include "fossilize_db.hpp"
 #include "layer/utils.hpp"
 #include "fossilize_exception.hpp"
+#include "fossilize_application_filter.hpp"
 
 #define RAPIDJSON_HAS_STDSTRING 1
 #include "rapidjson/document.h"
 #include "rapidjson/prettywriter.h"
 #include "rapidjson/writer.h"
 using namespace rapidjson;
+
 
 #ifdef PRETTY_WRITER
 using CustomWriter = PrettyWriter<StringBuffer>;
@@ -225,6 +228,7 @@ struct StateRecorder::Impl
 	ScratchAllocator allocator;
 	ScratchAllocator temp_allocator;
 	DatabaseInterface *database_iface = nullptr;
+	ApplicationInfoFilter *application_info_filter = nullptr;
 
 	std::unordered_map<Hash, VkDescriptorSetLayoutCreateInfo *> descriptor_sets;
 	std::unordered_map<Hash, VkPipelineLayoutCreateInfo *> pipeline_layouts;
@@ -2534,6 +2538,11 @@ void StateRecorder::record_physical_device_features(const VkPhysicalDeviceFeatur
 	impl->application_feature_hash.physical_device_features_hash = Hashing::compute_hash_physical_device_features(*impl->physical_device_features);
 }
 
+void StateRecorder::set_application_info_filter(ApplicationInfoFilter *filter)
+{
+	impl->application_info_filter = filter;
+}
+
 const StateRecorderApplicationFeatureHash &StateRecorder::get_application_feature_hash() const
 {
 	return impl->application_feature_hash;
@@ -3129,6 +3138,8 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 	if (checksum)
 		payload_flags |= PAYLOAD_WRITE_COMPUTE_CHECKSUM_BIT;
 
+	bool write_database_entries = true;
+
 	// Start by preparing in the thread since we need to parse an archive potentially, and that might block a little bit.
 	if (database_iface)
 	{
@@ -3138,13 +3149,17 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 			LOGE("Failed to prepare database, will not dump data to database.\n");
 			database_iface = nullptr;
 		}
+
+		// Check here in the worker thread if we should write database entries for this application info.
+		if (application_info_filter)
+			write_database_entries = application_info_filter->test_application_info(application_info);
 	}
 
 	// Keep a single, pre-allocated buffer.
 	vector<uint8_t> blob;
 	blob.reserve(64 * 1024);
 
-	if (database_iface)
+	if (database_iface && write_database_entries)
 	{
 		assert(looping);
 		Hasher h;
@@ -3219,14 +3234,18 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 
 				if (database_iface)
 				{
-					if (register_application_link_hash(RESOURCE_SAMPLER, hash, blob))
-						need_flush = true;
-
-					if (!database_iface->has_entry(RESOURCE_SAMPLER, hash))
+					if (write_database_entries)
 					{
-						serialize_sampler(hash, *create_info, blob);
-						database_iface->write_entry(RESOURCE_SAMPLER, hash, blob.data(), blob.size(), payload_flags);
-						need_flush = true;
+						if (register_application_link_hash(RESOURCE_SAMPLER, hash, blob))
+							need_flush = true;
+
+						if (!database_iface->has_entry(RESOURCE_SAMPLER, hash))
+						{
+							serialize_sampler(hash, *create_info, blob);
+							database_iface->write_entry(RESOURCE_SAMPLER, hash, blob.data(), blob.size(),
+							                            payload_flags);
+							need_flush = true;
+						}
 					}
 				}
 				else
@@ -3251,14 +3270,18 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 
 				if (database_iface)
 				{
-					if (register_application_link_hash(RESOURCE_RENDER_PASS, hash, blob))
-						need_flush = true;
-
-					if (!database_iface->has_entry(RESOURCE_RENDER_PASS, hash))
+					if (write_database_entries)
 					{
-						serialize_render_pass(hash, *create_info, blob);
-						database_iface->write_entry(RESOURCE_RENDER_PASS, hash, blob.data(), blob.size(), payload_flags);
-						need_flush = true;
+						if (register_application_link_hash(RESOURCE_RENDER_PASS, hash, blob))
+							need_flush = true;
+
+						if (!database_iface->has_entry(RESOURCE_RENDER_PASS, hash))
+						{
+							serialize_render_pass(hash, *create_info, blob);
+							database_iface->write_entry(RESOURCE_RENDER_PASS, hash, blob.data(), blob.size(),
+							                            payload_flags);
+							need_flush = true;
+						}
 					}
 				}
 				else
@@ -3283,15 +3306,19 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 
 				if (database_iface)
 				{
-					if (register_application_link_hash(RESOURCE_SHADER_MODULE, hash, blob))
-						need_flush = true;
-
-					if (!database_iface->has_entry(RESOURCE_SHADER_MODULE, hash))
+					if (write_database_entries)
 					{
-						serialize_shader_module(hash, *create_info, blob, allocator);
-						database_iface->write_entry(RESOURCE_SHADER_MODULE, hash, blob.data(), blob.size(), payload_flags);
-						need_flush = true;
-						allocator.reset();
+						if (register_application_link_hash(RESOURCE_SHADER_MODULE, hash, blob))
+							need_flush = true;
+
+						if (!database_iface->has_entry(RESOURCE_SHADER_MODULE, hash))
+						{
+							serialize_shader_module(hash, *create_info, blob, allocator);
+							database_iface->write_entry(RESOURCE_SHADER_MODULE, hash, blob.data(), blob.size(),
+							                            payload_flags);
+							need_flush = true;
+							allocator.reset();
+						}
 					}
 				}
 				else
@@ -3319,14 +3346,18 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 
 				if (database_iface)
 				{
-					if (register_application_link_hash(RESOURCE_DESCRIPTOR_SET_LAYOUT, hash, blob))
-						need_flush = true;
-
-					if (!database_iface->has_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, hash))
+					if (write_database_entries)
 					{
-						serialize_descriptor_set_layout(hash, *create_info_copy, blob);
-						database_iface->write_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, hash, blob.data(), blob.size(), payload_flags);
-						need_flush = true;
+						if (register_application_link_hash(RESOURCE_DESCRIPTOR_SET_LAYOUT, hash, blob))
+							need_flush = true;
+
+						if (!database_iface->has_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, hash))
+						{
+							serialize_descriptor_set_layout(hash, *create_info_copy, blob);
+							database_iface->write_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, hash, blob.data(), blob.size(),
+							                            payload_flags);
+							need_flush = true;
+						}
 					}
 
 					// Don't need to keep copied data around, reset the allocator.
@@ -3354,14 +3385,18 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 
 				if (database_iface)
 				{
-					if (register_application_link_hash(RESOURCE_PIPELINE_LAYOUT, hash, blob))
-						need_flush = true;
-
-					if (!database_iface->has_entry(RESOURCE_PIPELINE_LAYOUT, hash))
+					if (write_database_entries)
 					{
-						serialize_pipeline_layout(hash, *create_info_copy, blob);
-						database_iface->write_entry(RESOURCE_PIPELINE_LAYOUT, hash, blob.data(), blob.size(), payload_flags);
-						need_flush = true;
+						if (register_application_link_hash(RESOURCE_PIPELINE_LAYOUT, hash, blob))
+							need_flush = true;
+
+						if (!database_iface->has_entry(RESOURCE_PIPELINE_LAYOUT, hash))
+						{
+							serialize_pipeline_layout(hash, *create_info_copy, blob);
+							database_iface->write_entry(RESOURCE_PIPELINE_LAYOUT, hash, blob.data(), blob.size(),
+							                            payload_flags);
+							need_flush = true;
+						}
 					}
 
 					// Don't need to keep copied data around, reset the allocator.
@@ -3389,14 +3424,18 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 
 				if (database_iface)
 				{
-					if (register_application_link_hash(RESOURCE_GRAPHICS_PIPELINE, hash, blob))
-						need_flush = true;
-
-					if (!database_iface->has_entry(RESOURCE_GRAPHICS_PIPELINE, hash))
+					if (write_database_entries)
 					{
-						serialize_graphics_pipeline(hash, *create_info_copy, blob);
-						database_iface->write_entry(RESOURCE_GRAPHICS_PIPELINE, hash, blob.data(), blob.size(), payload_flags);
-						need_flush = true;
+						if (register_application_link_hash(RESOURCE_GRAPHICS_PIPELINE, hash, blob))
+							need_flush = true;
+
+						if (!database_iface->has_entry(RESOURCE_GRAPHICS_PIPELINE, hash))
+						{
+							serialize_graphics_pipeline(hash, *create_info_copy, blob);
+							database_iface->write_entry(RESOURCE_GRAPHICS_PIPELINE, hash, blob.data(), blob.size(),
+							                            payload_flags);
+							need_flush = true;
+						}
 					}
 
 					// Don't need to keep copied data around, reset the allocator.
@@ -3424,14 +3463,18 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 
 				if (database_iface)
 				{
-					if (register_application_link_hash(RESOURCE_COMPUTE_PIPELINE, hash, blob))
-						need_flush = true;
-
-					if (!database_iface->has_entry(RESOURCE_COMPUTE_PIPELINE, hash))
+					if (write_database_entries)
 					{
-						serialize_compute_pipeline(hash, *create_info_copy, blob);
-						database_iface->write_entry(RESOURCE_COMPUTE_PIPELINE, hash, blob.data(), blob.size(), payload_flags);
-						need_flush = true;
+						if (register_application_link_hash(RESOURCE_COMPUTE_PIPELINE, hash, blob))
+							need_flush = true;
+
+						if (!database_iface->has_entry(RESOURCE_COMPUTE_PIPELINE, hash))
+						{
+							serialize_compute_pipeline(hash, *create_info_copy, blob);
+							database_iface->write_entry(RESOURCE_COMPUTE_PIPELINE, hash, blob.data(), blob.size(),
+							                            payload_flags);
+							need_flush = true;
+						}
 					}
 
 					// Don't need to keep copied data around, reset the allocator.

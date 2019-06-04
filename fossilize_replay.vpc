@@ -87,6 +87,7 @@ $Project "fossilize_replay"
 	$Folder "fossilize"
 	{
 		$File ".\fossilize.cpp"
+		$File ".\fossilize_application_filter.cpp"
 		$File ".\fossilize_db.cpp"
 		$File ".\fossilize_external_replayer.cpp"
 		$File ".\path.cpp"

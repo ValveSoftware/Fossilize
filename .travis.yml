@@ -8,11 +8,6 @@ matrix:
   include:
     - os: linux
       dist: trusty
-      compiler: gcc
-      env:
-        - GENERATOR="Unix Makefiles"
-    - os: linux
-      dist: trusty
       compiler: clang
       env:
         - GENERATOR="Unix Makefiles"
