@@ -3358,10 +3358,10 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 							                            payload_flags);
 							need_flush = true;
 						}
-
-						// Don't need to keep copied data around, reset the allocator.
-						allocator.reset();
 					}
+
+					// Don't need to keep copied data around, reset the allocator.
+					allocator.reset();
 				}
 				else
 				{
@@ -3397,10 +3397,10 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 							                            payload_flags);
 							need_flush = true;
 						}
-
-						// Don't need to keep copied data around, reset the allocator.
-						allocator.reset();
 					}
+
+					// Don't need to keep copied data around, reset the allocator.
+					allocator.reset();
 				}
 				else
 				{
@@ -3436,10 +3436,10 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 							                            payload_flags);
 							need_flush = true;
 						}
-
-						// Don't need to keep copied data around, reset the allocator.
-						allocator.reset();
 					}
+
+					// Don't need to keep copied data around, reset the allocator.
+					allocator.reset();
 				}
 				else
 				{
@@ -3475,10 +3475,10 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 							                            payload_flags);
 							need_flush = true;
 						}
-
-						// Don't need to keep copied data around, reset the allocator.
-						allocator.reset();
 					}
+
+					// Don't need to keep copied data around, reset the allocator.
+					allocator.reset();
 				}
 				else
 				{
