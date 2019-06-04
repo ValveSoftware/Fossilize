@@ -21,6 +21,7 @@
  */
 
 #include "fossilize_application_filter.hpp"
+#include "layer/utils.hpp"
 #include "vulkan.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -63,6 +64,12 @@ R"delim(
 
 	Fossilize::ApplicationInfoFilter filter;
 	filter.parse_async(".__test_appinfo.json");
+
+	if (!filter.check_success())
+	{
+		LOGE("Parsing did not complete successfully.\n");
+		return EXIT_FAILURE;
+	}
 
 	VkApplicationInfo appinfo = { VK_STRUCTURE_TYPE_APPLICATION_INFO };
 

@@ -63,7 +63,15 @@ struct ApplicationInfoFilter::Impl
 	void parse_async(const char *path);
 	bool test_application_info(const VkApplicationInfo *info);
 	bool parse(const std::string &path);
+	bool check_success();
 };
+
+bool ApplicationInfoFilter::Impl::check_success()
+{
+	if (task.valid())
+		task.wait();
+	return parsing_success;
+}
 
 bool ApplicationInfoFilter::Impl::test_application_info(const VkApplicationInfo *info)
 {
@@ -97,7 +105,7 @@ bool ApplicationInfoFilter::Impl::test_application_info(const VkApplicationInfo 
 	if (info->pApplicationName)
 	{
 		auto itr = application_infos.find(info->pApplicationName);
-		if (itr != end(application_infos))
+		if (itr != application_infos.end())
 		{
 			if (info->applicationVersion < itr->second.minimum_application_version)
 			{
@@ -119,7 +127,7 @@ bool ApplicationInfoFilter::Impl::test_application_info(const VkApplicationInfo 
 	if (info->pEngineName)
 	{
 		auto itr = engine_infos.find(info->pEngineName);
-		if (itr != end(application_infos))
+		if (itr != engine_infos.end())
 		{
 			if (info->engineVersion < itr->second.minimum_engine_version)
 			{
@@ -315,6 +323,11 @@ void ApplicationInfoFilter::parse_async(const char *path)
 bool ApplicationInfoFilter::test_application_info(const VkApplicationInfo *info)
 {
 	return impl->test_application_info(info);
+}
+
+bool ApplicationInfoFilter::check_success()
+{
+	return impl->check_success();
 }
 
 ApplicationInfoFilter::~ApplicationInfoFilter()

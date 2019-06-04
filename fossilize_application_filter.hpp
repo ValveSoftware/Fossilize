@@ -40,6 +40,9 @@ public:
 	// Called by layer when an instance is created.
 	void parse_async(const char *path);
 
+	// Checks if we were successful in parsing the JSON file.
+	bool check_success();
+
 	// Tests if application should be recorded.
 	// Blocks until parsing is complete. Called by recording thread when preparing for recording.
 	bool test_application_info(const VkApplicationInfo *info);
