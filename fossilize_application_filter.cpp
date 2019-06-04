@@ -123,15 +123,15 @@ bool ApplicationInfoFilter::Impl::test_application_info(const VkApplicationInfo 
 		{
 			if (info->engineVersion < itr->second.minimum_engine_version)
 			{
-				LOGI("engineVersion %u is too low for pApplicationName %s. Skipping.\n",
-				     info->engineVersion, info->pApplicationName);
+				LOGI("engineVersion %u is too low for pEngineName %s. Skipping.\n",
+				     info->engineVersion, info->pEngineName);
 				return false;
 			}
 
 			if (info->apiVersion < itr->second.minimum_api_version)
 			{
-				LOGI("apiVersion %u is too low for pApplicationName %s. Skipping.\n",
-				     info->apiVersion, info->pApplicationName);
+				LOGI("apiVersion %u is too low for pEngineName %s. Skipping.\n",
+				     info->apiVersion, info->pEngineName);
 				return false;
 			}
 		}
@@ -218,16 +218,16 @@ static unsigned default_get_member_uint(const Value &value, const char *member, 
 
 static void add_blacklists(std::unordered_set<std::string> &output, const Value *blacklist)
 {
-	if (!blacklist->IsObject())
-		throw std::logic_error("Not an object.");
+	if (!blacklist->IsArray())
+		throw std::logic_error("Not an array.");
 
-	for (auto itr = blacklist->MemberBegin(); itr != blacklist->MemberEnd(); ++itr)
+	for (auto itr = blacklist->Begin(); itr != blacklist->End(); ++itr)
 	{
-		if (!itr->value.IsString())
+		if (!itr->IsString())
 			throw std::logic_error("Not a string.");
 
-		const char *str = itr->value.GetString();
-		output.insert(std::string(str, str + itr->value.GetStringLength()));
+		const char *str = itr->GetString();
+		output.insert(std::string(str, str + itr->GetStringLength()));
 	}
 }
 

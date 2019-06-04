@@ -10,6 +10,12 @@ target_compile_options(varint-test PRIVATE ${FOSSILIZE_CXX_FLAGS})
 set_target_properties(varint-test PROPERTIES LINK_FLAGS "${FOSSILIZE_LINK_FLAGS}")
 add_test(NAME varint-system-test COMMAND varint-test)
 
+add_executable(application-info-filter-test application_info_filter_test.cpp)
+target_link_libraries(application-info-filter-test fossilize)
+target_compile_options(application-info-filter-test PRIVATE ${FOSSILIZE_CXX_FLAGS})
+set_target_properties(application-info-filter-test PROPERTIES LINK_FLAGS "${FOSSILIZE_LINK_FLAGS}")
+add_test(NAME application-info-filter-test COMMAND application-info-filter-test)
+
 add_executable(multi-instance-and-device-test multi_instance_and_device_test.cpp)
 target_link_libraries(multi-instance-and-device-test cli-utils fossilize)
 set_target_properties(multi-instance-and-device-test PROPERTIES LINK_FLAGS "${FOSSILIZE_LINK_FLAGS}")
