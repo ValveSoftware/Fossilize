@@ -236,17 +236,24 @@ bool VulkanDevice::init_device(const Options &opts)
 	}
 
 	api_version = target_api_version;
+	bool has_device_features2 = api_version >= VK_MAKE_VERSION(1, 1, 0);
 
 	// FIXME: There are arbitrary features we can request here from physical_device_features2.
-	VkPhysicalDeviceFeatures gpu_features = {};
-	vkGetPhysicalDeviceFeatures(gpu, &gpu_features);
+	VkPhysicalDeviceFeatures2 gpu_features2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+	VkPhysicalDeviceFeatures *gpu_features = &gpu_features2.features;
+	VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR stats_feature = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR };
+	gpu_features2.pNext = &stats_feature;
+	if (has_device_features2)
+		vkGetPhysicalDeviceFeatures2(gpu, &gpu_features2);
+	else
+		vkGetPhysicalDeviceFeatures(gpu, gpu_features);
 
 	// FIXME: Have some way to enable the right features that a repro-capture may want to use.
 	// FIXME: It is unlikely any feature other than robust access has any real impact on code-gen, but who knows.
-	if (gpu_features.robustBufferAccess && opts.features && opts.features->features.robustBufferAccess)
-		gpu_features.robustBufferAccess = VK_TRUE;
+	if (gpu_features->robustBufferAccess && opts.features && opts.features->features.robustBufferAccess)
+		gpu_features->robustBufferAccess = VK_TRUE;
 	else
-		gpu_features.robustBufferAccess = VK_FALSE;
+		gpu_features->robustBufferAccess = VK_FALSE;
 
 	// Just pick one graphics queue.
 	// FIXME: Does shader compilation depend on which queues we have enabled?
@@ -303,8 +310,8 @@ bool VulkanDevice::init_device(const Options &opts)
 	}) != end(active_device_extensions);
 
 	VkDeviceCreateInfo device_info = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
-	// FIXME: Use physical_device_features2.
-	device_info.pEnabledFeatures = &gpu_features;
+	device_info.pNext = has_device_features2 ? &gpu_features2 : nullptr;
+	device_info.pEnabledFeatures = has_device_features2 ? nullptr : gpu_features;
 	device_info.pQueueCreateInfos = &queue_info;
 	device_info.queueCreateInfoCount = 1;
 	device_info.enabledLayerCount = uint32_t(active_device_layers.size());
