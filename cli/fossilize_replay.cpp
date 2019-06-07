@@ -1321,8 +1321,12 @@ struct ThreadedReplayer : StateCreatorInterface
 
 				                 for (auto &item : deferred[memory_index])
 				                 {
-					                 resolve_shader_modules(item.info);
-					                 enqueue_pipeline(item.hash, item.info, item.pipeline, item.index + hash_offset + start_index, memory_index);
+					                 if (item.info)
+					                 {
+						                 resolve_shader_modules(item.info);
+						                 enqueue_pipeline(item.hash, item.info, item.pipeline,
+						                                  item.index + hash_offset + start_index, memory_index);
+					                 }
 				                 }
 			                 }});
 
@@ -1331,6 +1335,8 @@ struct ThreadedReplayer : StateCreatorInterface
 				                 // Figure out which of the parent pipelines we need.
 				                 for (auto &d : *derived)
 				                 {
+					                 if (!d.info)
+						                 continue;
 					                 Hash h = (Hash)d.info->basePipelineHandle;
 
 					                 // pipelines will have an entry if we called enqueue_pipeline() already for this hash,
@@ -1370,7 +1376,8 @@ struct ThreadedReplayer : StateCreatorInterface
 					                for (auto &parent : parents)
 					                {
 						                // If we enqueued something here, we have to wait for shader handles to resolve.
-						                enqueue_shader_modules(parent.second.info);
+						                if (parent.second.info)
+							                enqueue_shader_modules(parent.second.info);
 					                }
 
 					                if (opts.control_block)
@@ -1389,11 +1396,16 @@ struct ThreadedReplayer : StateCreatorInterface
 
 					                for (auto &parent : parents)
 					                {
-						                resolve_shader_modules(parent.second.info);
-						                assert((parent.second.info->flags & VK_PIPELINE_CREATE_DERIVATIVE_BIT) == 0);
-						                enqueue_pipeline(parent.second.hash, parent.second.info, parent.second.pipeline,
-						                                 parent.second.index + hash_offset + start_index,
-						                                 PARENT_PIPELINE_MEMORY_CONTEXT);
+						                if (parent.second.info)
+						                {
+							                resolve_shader_modules(parent.second.info);
+							                assert((parent.second.info->flags & VK_PIPELINE_CREATE_DERIVATIVE_BIT) ==
+							                       0);
+							                enqueue_pipeline(parent.second.hash, parent.second.info,
+							                                 parent.second.pipeline,
+							                                 parent.second.index + hash_offset + start_index,
+							                                 PARENT_PIPELINE_MEMORY_CONTEXT);
+						                }
 					                }
 
 					                parents.clear();
@@ -1410,8 +1422,13 @@ struct ThreadedReplayer : StateCreatorInterface
 				                 // Go over all pipelines. If there are no further dependencies to resolve, we can go ahead and queue them up.
 				                 // If an entry exists in pipelines, we have queued up that hash earlier, but it might not be done compiling yet.
 				                 auto itr = unstable_remove_if(begin(*derived), end(*derived), [&](const DerivedInfo &info) -> bool {
-					                 Hash hash = (Hash)info.info->basePipelineHandle;
-					                 return pipelines.count(hash) != 0;
+					                 if (info.info)
+					                 {
+						                 Hash hash = (Hash)info.info->basePipelineHandle;
+						                 return pipelines.count(hash) != 0;
+					                 }
+					                 else
+						                 return false;
 				                 });
 
 				                 // Wait for parent pipelines to complete.
@@ -1429,10 +1446,15 @@ struct ThreadedReplayer : StateCreatorInterface
 				                 // Now we can enqueue pipeline compilation with correct pipeline handles.
 				                 for (auto i = itr; i != end(*derived); ++i)
 				                 {
-					                 resolve_shader_modules(i->info);
-					                 auto base_itr = pipelines.find((Hash)i->info->basePipelineHandle);
-					                 i->info->basePipelineHandle = base_itr != end(pipelines) ? base_itr->second : VK_NULL_HANDLE;
-					                 enqueue_pipeline(i->hash, i->info, i->pipeline, i->index + hash_offset + start_index, memory_index);
+					                 if (i->info)
+					                 {
+						                 resolve_shader_modules(i->info);
+						                 auto base_itr = pipelines.find((Hash) i->info->basePipelineHandle);
+						                 i->info->basePipelineHandle =
+								                 base_itr != end(pipelines) ? base_itr->second : VK_NULL_HANDLE;
+						                 enqueue_pipeline(i->hash, i->info, i->pipeline,
+						                                  i->index + hash_offset + start_index, memory_index);
+					                 }
 				                 }
 
 				                 // It might be possible that we couldn't resolve some dependencies, log this.
@@ -1801,6 +1823,13 @@ static int run_normal_process(ThreadedReplayer &replayer, const string &db_path)
 				LOGE("StateReplayer threw exception parsing (tag: %s, hash: %s): %s\n",
 				     tag_names[tag], uint64_string(hash).c_str(), e.what());
 			}
+		}
+
+		if (tag == RESOURCE_APPLICATION_INFO)
+		{
+			// Just in case there was no application info in the database, we provide a dummy info,
+			// this makes sure the VkDevice is created.
+			replayer.set_application_info(0, nullptr, nullptr);
 		}
 
 		LOGI("Total binary size for %s: %llu (%llu compressed)\n", tag_names[tag],
