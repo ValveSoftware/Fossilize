@@ -324,6 +324,22 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 	if (options.null_device)
 		cmdline += " --null-device";
 
+	if (options.start_graphics_index != 0 || options.end_graphics_index != ~0u)
+	{
+		cmdline += " --graphics-pipeline-range ";
+		cmdline += std::to_string(options.start_graphics_index);
+		cmdline += " ";
+		cmdline += std::to_string(options.end_graphics_index);
+	}
+
+	if (options.start_compute_index != 0 || options.end_compute_index != ~0u)
+	{
+		cmdline += " --compute-pipeline-range ";
+		cmdline += std::to_string(options.start_compute_index);
+		cmdline += " ";
+		cmdline += std::to_string(options.end_compute_index);
+	}
+
 	STARTUPINFO si = {};
 	si.cb = sizeof(STARTUPINFO);
 	si.dwFlags = STARTF_USESTDHANDLES;

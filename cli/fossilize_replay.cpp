@@ -1881,6 +1881,10 @@ static int run_progress_process(const VulkanDevice::Options &device_opts,
 	opts.enable_validation = device_opts.enable_validation;
 	opts.ignore_derived_pipelines = replayer_opts.ignore_derived_pipelines;
 	opts.null_device = device_opts.null_device;
+	opts.start_graphics_index = replayer_opts.start_graphics_index;
+	opts.end_graphics_index = replayer_opts.end_graphics_index;
+	opts.start_compute_index = replayer_opts.start_compute_index;
+	opts.end_compute_index = replayer_opts.end_compute_index;
 
 	ExternalReplayer replayer;
 	if (!replayer.start(opts))
