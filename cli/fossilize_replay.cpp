@@ -30,7 +30,7 @@
 #include "fossilize_db.hpp"
 #include "fossilize_external_replayer.hpp"
 #include "fossilize_external_replayer_control_block.hpp"
-#include "fossilize_exception.hpp"
+#include "fossilize_errors.hpp"
 
 #include <cinttypes>
 #include <string>
@@ -361,24 +361,18 @@ struct ThreadedReplayer : StateCreatorInterface
 		per_thread.force_outside_range = work_item.force_outside_range;
 		per_thread.memory_context_index = work_item.memory_context_index;
 
-		try
-		{
-			replayer.parse(*this, global_database, buffer.data(), buffer.size());
-			if (work_item.tag == RESOURCE_SHADER_MODULE)
-			{
-				// No reason to retain memory in this allocator anymore.
-				replayer.get_allocator().reset();
+		if (!replayer.parse(*this, global_database, buffer.data(), buffer.size()))
+			LOGE("Failed to parse blob (tag: %d, hash: 0x%llx).\n", work_item.tag, static_cast<unsigned long long>(work_item.hash));
 
-				// Feed shader module statistics.
-				shader_module_total_size.fetch_add(json_size, std::memory_order_relaxed);
-				if (global_database->read_entry(work_item.tag, work_item.hash, &json_size, nullptr, PAYLOAD_READ_RAW_FOSSILIZE_DB_BIT))
-					shader_module_total_compressed_size.fetch_add(json_size, std::memory_order_relaxed);
-			}
-		}
-		catch (const std::exception &e)
+		if (work_item.tag == RESOURCE_SHADER_MODULE)
 		{
-			LOGE("StateReplayer threw exception parsing: %s\n", e.what());
-			return false;
+			// No reason to retain memory in this allocator anymore.
+			replayer.get_allocator().reset();
+
+			// Feed shader module statistics.
+			shader_module_total_size.fetch_add(json_size, std::memory_order_relaxed);
+			if (global_database->read_entry(work_item.tag, work_item.hash, &json_size, nullptr, PAYLOAD_READ_RAW_FOSSILIZE_DB_BIT))
+				shader_module_total_compressed_size.fetch_add(json_size, std::memory_order_relaxed);
 		}
 
 		return true;
@@ -1817,15 +1811,8 @@ static int run_normal_process(ThreadedReplayer &replayer, const string &db_path)
 				return EXIT_FAILURE;
 			}
 
-			try
-			{
-				state_replayer.parse(replayer, resolver.get(), state_json.data(), state_json.size());
-			}
-			catch (const exception &e)
-			{
-				LOGE("StateReplayer threw exception parsing (tag: %s, hash: %s): %s\n",
-				     tag_names[tag], uint64_string(hash).c_str(), e.what());
-			}
+			if (!state_replayer.parse(replayer, resolver.get(), state_json.data(), state_json.size()))
+				LOGE("Failed to parse blob (tag: %s, hash: %s).\n", tag_names[tag], uint64_string(hash).c_str());
 		}
 
 		if (tag == RESOURCE_APPLICATION_INFO)

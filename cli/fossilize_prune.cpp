@@ -347,17 +347,10 @@ int main(int argc, char *argv[])
 				return EXIT_FAILURE;
 			}
 
-			try
-			{
-				prune_replayer.has_application_info_for_blob = false;
-				prune_replayer.blob_belongs_to_application_info = false;
-				replayer.parse(prune_replayer, input_db.get(), state_json.data(), state_json.size());
-			}
-			catch (const exception &e)
-			{
-				LOGE("StateReplayer threw exception parsing (tag: %d, hash: 0x%llx): %s\n", tag,
-				     static_cast<unsigned long long>(hash), e.what());
-			}
+			prune_replayer.has_application_info_for_blob = false;
+			prune_replayer.blob_belongs_to_application_info = false;
+			if (!replayer.parse(prune_replayer, input_db.get(), state_json.data(), state_json.size()))
+				LOGE("Failed to parse blob (tag: %d, hash: 0x%llx).\n", tag, static_cast<unsigned long long>(hash));
 
 			if (tag == RESOURCE_APPLICATION_INFO)
 			{

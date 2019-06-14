@@ -31,10 +31,12 @@
 #include <cinttypes>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <stdlib.h>
+#include <string.h>
 
 #include "spirv-tools/libspirv.hpp"
-#include "spirv_glsl.hpp"
+#include "spirv_cross_c.h"
 
 template <typename T>
 static inline T fake_handle(uint64_t v)
@@ -309,52 +311,76 @@ static string disassemble_spirv_asm(const VkShaderModuleCreateInfo *create_info)
 
 static string disassemble_spirv_glsl(const VkShaderModuleCreateInfo *create_info, const char *entry, VkShaderStageFlagBits stage)
 {
-	try
+	spvc_context ctx;
+	if (spvc_context_create(&ctx) != SPVC_SUCCESS)
+		return "// Failed";
+
+	spvc_parsed_ir ir;
+	if (spvc_context_parse_spirv(ctx, create_info->pCode, create_info->codeSize / sizeof(uint32_t), &ir) != SPVC_SUCCESS)
 	{
-		spirv_cross::CompilerGLSL comp(create_info->pCode, create_info->codeSize / sizeof(uint32_t));
-		spirv_cross::CompilerGLSL::Options opts;
-		opts.version = 460;
-		opts.es = false;
-		opts.vulkan_semantics = true;
-		comp.set_common_options(opts);
-
-		switch (stage)
-		{
-		case VK_SHADER_STAGE_VERTEX_BIT:
-			comp.set_entry_point(entry, spv::ExecutionModelVertex);
-			break;
-
-		case VK_SHADER_STAGE_FRAGMENT_BIT:
-			comp.set_entry_point(entry, spv::ExecutionModelFragment);
-			break;
-
-		case VK_SHADER_STAGE_GEOMETRY_BIT:
-			comp.set_entry_point(entry, spv::ExecutionModelGeometry);
-			break;
-
-		case VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT:
-			comp.set_entry_point(entry, spv::ExecutionModelTessellationControl);
-			break;
-
-		case VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT:
-			comp.set_entry_point(entry, spv::ExecutionModelTessellationEvaluation);
-			break;
-
-		case VK_SHADER_STAGE_COMPUTE_BIT:
-			comp.set_entry_point(entry, spv::ExecutionModelGLCompute);
-			break;
-
-		default:
-			return "";
-		}
-
-		return comp.compile();
+		spvc_context_destroy(ctx);
+		return "// Failed";
 	}
-	catch (const std::exception &e)
+
+	spvc_compiler comp;
+	if (spvc_context_create_compiler(ctx, SPVC_BACKEND_GLSL, ir, SPVC_CAPTURE_MODE_TAKE_OWNERSHIP, &comp) != SPVC_SUCCESS)
 	{
-		LOGE("SPIRV-Cross threw exception %s.\n", e.what());
-		return e.what();
+		spvc_context_destroy(ctx);
+		return "// Failed";
 	}
+
+	spvc_compiler_options opts;
+	if (spvc_compiler_create_compiler_options(comp, &opts) != SPVC_SUCCESS)
+	{
+		spvc_context_destroy(ctx);
+		return "// Failed";
+	}
+
+	spvc_compiler_options_set_uint(opts, SPVC_COMPILER_OPTION_GLSL_VERSION, 460);
+	spvc_compiler_options_set_bool(opts, SPVC_COMPILER_OPTION_GLSL_ES, SPVC_FALSE);
+	spvc_compiler_options_set_bool(opts, SPVC_COMPILER_OPTION_GLSL_VULKAN_SEMANTICS, SPVC_TRUE);
+	spvc_compiler_install_compiler_options(comp, opts);
+
+	switch (stage)
+	{
+	case VK_SHADER_STAGE_VERTEX_BIT:
+		spvc_compiler_set_entry_point(comp, entry, SpvExecutionModelVertex);
+		break;
+
+	case VK_SHADER_STAGE_FRAGMENT_BIT:
+		spvc_compiler_set_entry_point(comp, entry, SpvExecutionModelFragment);
+		break;
+
+	case VK_SHADER_STAGE_GEOMETRY_BIT:
+		spvc_compiler_set_entry_point(comp, entry, SpvExecutionModelGeometry);
+		break;
+
+	case VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT:
+		spvc_compiler_set_entry_point(comp, entry, SpvExecutionModelTessellationControl);
+		break;
+
+	case VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT:
+		spvc_compiler_set_entry_point(comp, entry, SpvExecutionModelTessellationEvaluation);
+		break;
+
+	case VK_SHADER_STAGE_COMPUTE_BIT:
+		spvc_compiler_set_entry_point(comp, entry, SpvExecutionModelGLCompute);
+		break;
+
+	default:
+		return "// Failed";
+	}
+
+	const char *output;
+	if (spvc_compiler_compile(comp, &output) != SPVC_SUCCESS)
+	{
+		spvc_context_destroy(ctx);
+		return "// Failed";
+	}
+
+	std::string ret(output);
+	spvc_context_destroy(ctx);
+	return ret;
 }
 
 static string disassemble_spirv_amd(const VulkanDevice &device, VkPipeline pipeline, VkShaderStageFlagBits stage)
@@ -551,15 +577,8 @@ int main(int argc, char *argv[])
 				return EXIT_FAILURE;
 			}
 
-			try
-			{
-				state_replayer.parse(replayer, resolver.get(), state_json.data(), state_json.size());
-			}
-			catch (const exception &e)
-			{
-				LOGE("StateReplayer threw exception parsing (tag: %d, hash: 0x%llx): %s\n", tag,
-				     static_cast<unsigned long long>(hash), e.what());
-			}
+			if (!state_replayer.parse(replayer, resolver.get(), state_json.data(), state_json.size()))
+				LOGE("Failed to parse blob (tag: %d, hash: 0x%llx).\n", tag, static_cast<unsigned long long>(hash));
 		}
 		LOGI("Replayed tag: %s\n", tag_names[tag]);
 	}

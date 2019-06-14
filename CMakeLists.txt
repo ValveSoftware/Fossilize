@@ -4,18 +4,26 @@ set(CMAKE_C_STANDARD 99)
 project(Fossilize LANGUAGES CXX C)
 
 option(FOSSILIZE_MSVC_ANALYZE "Enable /analyze" OFF)
+option(FOSSILIZE_ENABLE_EXCEPTIONS "Compile Fossilize with exception support." OFF)
 
 if (CMAKE_COMPILER_IS_GNUCXX OR (${CMAKE_CXX_COMPILER_ID} MATCHES "Clang"))
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fvisibility=hidden")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fvisibility=hidden")
-    set(FOSSILIZE_CXX_FLAGS -Wall -Wextra -Wno-missing-field-initializers -Wno-empty-body -Wshadow)
+    if (NOT FOSSILIZE_ENABLE_EXCEPTIONS)
+        set(FOSSILIZE_EXCEPTION_FLAGS "-fno-exceptions")
+    else()
+        set(FOSSILIZE_EXCEPTION_FLAGS "")
+    endif()
+    set(FOSSILIZE_CXX_FLAGS -Wall -Wextra -Wunused-result -Wno-missing-field-initializers -Wno-empty-body -Wshadow ${FOSSILIZE_EXCEPTION_FLAGS})
 elseif (MSVC)
     if (FOSSILIZE_MSVC_ANALYZE)
-        set(ANALYZE_FLAGS "/analyze")
+        set(FOSSILIZE_ANALYZE_FLAGS "/analyze")
     else()
-        set(ANALYZE_FLAGS "")
+        set(FOSSILIZE_ANALYZE_FLAGS "")
     endif()
-    set(FOSSILIZE_CXX_FLAGS ${ANALYZE_FLAGS} /D_CRT_SECURE_NO_WARNINGS /D_SCL_SECURE_NO_WARNINGS /wd4267 /wd4244 /wd4309 /wd4005 /MP /DNOMINMAX)
+    # Disabling exceptions in MSVC without a ton of scary warnings is quite finicky.
+    # Don't bother. We can verify no exceptions are present with -fno-exceptions on GCC/Clang.
+    set(FOSSILIZE_CXX_FLAGS ${FOSSILIZE_ANALYZE_FLAGS} /D_CRT_SECURE_NO_WARNINGS /D_SCL_SECURE_NO_WARNINGS /wd4267 /wd4244 /wd4309 /wd4005 /MP /DNOMINMAX)
 endif()
 
 option(FOSSILIZE_SANITIZE_ADDRESS "Sanitize address" OFF)
@@ -43,7 +51,7 @@ endif()
 
 add_library(fossilize STATIC
         fossilize.hpp fossilize.cpp
-        fossilize_exception.hpp
+        fossilize_errors.hpp
         fossilize_application_filter.hpp fossilize_application_filter.cpp
         fossilize_types.hpp
         varint.cpp varint.hpp

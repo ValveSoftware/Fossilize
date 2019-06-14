@@ -35,7 +35,7 @@
 #include "path.hpp"
 #include "fossilize_db.hpp"
 #include "layer/utils.hpp"
-#include "fossilize_exception.hpp"
+#include "fossilize_errors.hpp"
 #include "fossilize_application_filter.hpp"
 
 #define RAPIDJSON_HAS_STDSTRING 1
@@ -55,8 +55,6 @@ using namespace std;
 
 namespace Fossilize
 {
-#define FOSSILIZE_THROW(x) throw ::Fossilize::Exception(x)
-#define FOSSILIZE_THROW_PNEXT(x, pnext) ::Fossilize::throw_pnext_chain(x, pnext)
 class Hasher
 {
 public:
@@ -149,7 +147,7 @@ static Value uint64_string(uint64_t value, Allocator &alloc)
 
 struct StateReplayer::Impl
 {
-	void parse(StateCreatorInterface &iface, DatabaseInterface *resolver, const void *buffer, size_t size);
+	bool parse(StateCreatorInterface &iface, DatabaseInterface *resolver, const void *buffer, size_t size) FOSSILIZE_WARN_UNUSED;
 	ScratchAllocator allocator;
 
 	std::unordered_map<Hash, VkSampler> replayed_samplers;
@@ -161,49 +159,50 @@ struct StateReplayer::Impl
 	std::unordered_map<Hash, VkPipeline> replayed_graphics_pipelines;
 
 	void copy_handle_references(const Impl &impl);
-	void parse_samplers(StateCreatorInterface &iface, const Value &samplers);
-	void parse_descriptor_set_layouts(StateCreatorInterface &iface, const Value &layouts);
-	void parse_pipeline_layouts(StateCreatorInterface &iface, const Value &layouts);
-	void parse_shader_modules(StateCreatorInterface &iface, const Value &modules, const uint8_t *varint, size_t varint_size);
-	void parse_render_passes(StateCreatorInterface &iface, const Value &passes);
-	void parse_compute_pipelines(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines);
-	void parse_graphics_pipelines(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines);
-	void parse_compute_pipeline(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines, const Value &member);
-	void parse_graphics_pipeline(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines, const Value &member);
-	void parse_application_info(StateCreatorInterface &iface, const Value &app_info, const Value &pdf_info);
-	void parse_application_info_link(StateCreatorInterface &iface, const Value &link);
-	VkPushConstantRange *parse_push_constant_ranges(const Value &ranges);
-	VkDescriptorSetLayout *parse_set_layouts(const Value &layouts);
-	VkDescriptorSetLayoutBinding *parse_descriptor_set_bindings(const Value &bindings);
-	VkSampler *parse_immutable_samplers(const Value &samplers);
-	VkAttachmentDescription *parse_render_pass_attachments(const Value &attachments);
-	VkSubpassDependency *parse_render_pass_dependencies(const Value &dependencies);
-	VkSubpassDescription *parse_render_pass_subpasses(const Value &subpass);
-	VkAttachmentReference *parse_attachment(const Value &value);
-	VkAttachmentReference *parse_attachments(const Value &attachments);
-	VkSpecializationInfo *parse_specialization_info(const Value &spec_info);
-	VkSpecializationMapEntry *parse_map_entries(const Value &map_entries);
-	VkViewport *parse_viewports(const Value &viewports);
-	VkRect2D *parse_scissors(const Value &scissors);
-	const void *parse_pnext_chain(const Value &pnext);
-	VkPipelineVertexInputStateCreateInfo *parse_vertex_input_state(const Value &state);
-	VkPipelineColorBlendStateCreateInfo *parse_color_blend_state(const Value &state);
-	VkPipelineDepthStencilStateCreateInfo *parse_depth_stencil_state(const Value &state);
-	VkPipelineRasterizationStateCreateInfo *parse_rasterization_state(const Value &state);
-	VkPipelineInputAssemblyStateCreateInfo *parse_input_assembly_state(const Value &state);
-	VkPipelineMultisampleStateCreateInfo *parse_multisample_state(const Value &state);
-	VkPipelineViewportStateCreateInfo *parse_viewport_state(const Value &state);
-	VkPipelineDynamicStateCreateInfo *parse_dynamic_state(const Value &state);
-	VkPipelineTessellationStateCreateInfo *parse_tessellation_state(const Value &state);
-	VkPipelineShaderStageCreateInfo *parse_stages(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &stages);
-	VkVertexInputAttributeDescription *parse_vertex_attributes(const Value &attributes);
-	VkVertexInputBindingDescription *parse_vertex_bindings(const Value &bindings);
-	VkPipelineColorBlendAttachmentState *parse_blend_attachments(const Value &attachments);
-	VkPipelineTessellationDomainOriginStateCreateInfo *parse_tessellation_domain_origin_state(const Value &state);
-	VkPipelineVertexInputDivisorStateCreateInfoEXT *parse_vertex_input_divisor_state(const Value &state);
-	VkPipelineRasterizationDepthClipStateCreateInfoEXT *parse_rasterization_depth_clip_state(const Value &state);
-	VkPipelineRasterizationStateStreamCreateInfoEXT *parse_rasterization_stream_state(const Value &state);
-	uint32_t *parse_uints(const Value &attachments);
+	bool parse_samplers(StateCreatorInterface &iface, const Value &samplers) FOSSILIZE_WARN_UNUSED;
+	bool parse_descriptor_set_layouts(StateCreatorInterface &iface, const Value &layouts) FOSSILIZE_WARN_UNUSED;
+	bool parse_pipeline_layouts(StateCreatorInterface &iface, const Value &layouts) FOSSILIZE_WARN_UNUSED;
+	bool parse_shader_modules(StateCreatorInterface &iface, const Value &modules, const uint8_t *varint, size_t varint_size) FOSSILIZE_WARN_UNUSED;
+	bool parse_render_passes(StateCreatorInterface &iface, const Value &passes) FOSSILIZE_WARN_UNUSED;
+	bool parse_compute_pipelines(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines) FOSSILIZE_WARN_UNUSED;
+	bool parse_graphics_pipelines(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines) FOSSILIZE_WARN_UNUSED;
+	bool parse_compute_pipeline(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines, const Value &member) FOSSILIZE_WARN_UNUSED;
+	bool parse_graphics_pipeline(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines, const Value &member) FOSSILIZE_WARN_UNUSED;
+	bool parse_application_info(StateCreatorInterface &iface, const Value &app_info, const Value &pdf_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_application_info_link(StateCreatorInterface &iface, const Value &link) FOSSILIZE_WARN_UNUSED;
+
+	bool parse_push_constant_ranges(const Value &ranges, const VkPushConstantRange **out_ranges) FOSSILIZE_WARN_UNUSED;
+	bool parse_set_layouts(const Value &layouts, const VkDescriptorSetLayout **out_layouts) FOSSILIZE_WARN_UNUSED;
+	bool parse_descriptor_set_bindings(const Value &bindings, const VkDescriptorSetLayoutBinding **out_bindings) FOSSILIZE_WARN_UNUSED;
+	bool parse_immutable_samplers(const Value &samplers, const VkSampler **out_sampler) FOSSILIZE_WARN_UNUSED;
+	bool parse_render_pass_attachments(const Value &attachments, const VkAttachmentDescription **out_attachments) FOSSILIZE_WARN_UNUSED;
+	bool parse_render_pass_dependencies(const Value &dependencies, const VkSubpassDependency **out_dependencies) FOSSILIZE_WARN_UNUSED;
+	bool parse_render_pass_subpasses(const Value &subpass, const VkSubpassDescription **out_descriptions) FOSSILIZE_WARN_UNUSED;
+	bool parse_attachment(const Value &value, const VkAttachmentReference **out_references) FOSSILIZE_WARN_UNUSED;
+	bool parse_attachments(const Value &attachments, const VkAttachmentReference **out_references) FOSSILIZE_WARN_UNUSED;
+	bool parse_specialization_info(const Value &spec_info, const VkSpecializationInfo **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_map_entries(const Value &map_entries, const VkSpecializationMapEntry **out_entries) FOSSILIZE_WARN_UNUSED;
+	bool parse_viewports(const Value &viewports, const VkViewport **out_viewports) FOSSILIZE_WARN_UNUSED;
+	bool parse_scissors(const Value &scissors, const VkRect2D **out_rects) FOSSILIZE_WARN_UNUSED;
+	bool parse_pnext_chain(const Value &pnext, const void **out_pnext) FOSSILIZE_WARN_UNUSED;
+	bool parse_vertex_input_state(const Value &state, const VkPipelineVertexInputStateCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_color_blend_state(const Value &state, const VkPipelineColorBlendStateCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_depth_stencil_state(const Value &state, const VkPipelineDepthStencilStateCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_rasterization_state(const Value &state, const VkPipelineRasterizationStateCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_input_assembly_state(const Value &state, const VkPipelineInputAssemblyStateCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_multisample_state(const Value &state, const VkPipelineMultisampleStateCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_viewport_state(const Value &state, const VkPipelineViewportStateCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_dynamic_state(const Value &state, const VkPipelineDynamicStateCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_tessellation_state(const Value &state, const VkPipelineTessellationStateCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_stages(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &stages, const VkPipelineShaderStageCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_vertex_attributes(const Value &attributes, const VkVertexInputAttributeDescription **out_desc) FOSSILIZE_WARN_UNUSED;
+	bool parse_vertex_bindings(const Value &bindings, const VkVertexInputBindingDescription **out_desc) FOSSILIZE_WARN_UNUSED;
+	bool parse_blend_attachments(const Value &attachments, const VkPipelineColorBlendAttachmentState **out_state) FOSSILIZE_WARN_UNUSED;
+	bool parse_tessellation_domain_origin_state(const Value &state, VkPipelineTessellationDomainOriginStateCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_vertex_input_divisor_state(const Value &state, VkPipelineVertexInputDivisorStateCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_rasterization_depth_clip_state(const Value &state, VkPipelineRasterizationDepthClipStateCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_rasterization_stream_state(const Value &state, VkPipelineRasterizationStateStreamCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_uints(const Value &attachments, const uint32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	const char *duplicate_string(const char *str, size_t len);
 	bool resolve_derivative_pipelines = true;
 	bool resolve_shader_modules = true;
@@ -250,56 +249,60 @@ struct StateRecorder::Impl
 	VkPhysicalDeviceFeatures2 *physical_device_features = nullptr;
 	StateRecorderApplicationFeatureHash application_feature_hash = {};
 
-	VkDescriptorSetLayoutCreateInfo *copy_descriptor_set_layout(const VkDescriptorSetLayoutCreateInfo *create_info, ScratchAllocator &alloc);
-	VkPipelineLayoutCreateInfo *copy_pipeline_layout(const VkPipelineLayoutCreateInfo *create_info, ScratchAllocator &alloc);
-	VkShaderModuleCreateInfo *copy_shader_module(const VkShaderModuleCreateInfo *create_info, ScratchAllocator &alloc);
-	VkGraphicsPipelineCreateInfo *copy_graphics_pipeline(const VkGraphicsPipelineCreateInfo *create_info, ScratchAllocator &alloc,
-	                                                     const VkPipeline *base_pipelines, uint32_t base_pipeline_count);
-	VkComputePipelineCreateInfo *copy_compute_pipeline(const VkComputePipelineCreateInfo *create_info, ScratchAllocator &alloc,
-	                                                   const VkPipeline *base_pipelines, uint32_t base_pipeline_count);
-	VkSamplerCreateInfo *copy_sampler(const VkSamplerCreateInfo *create_info, ScratchAllocator &alloc);
-	VkRenderPassCreateInfo *copy_render_pass(const VkRenderPassCreateInfo *create_info, ScratchAllocator &alloc);
-	VkApplicationInfo *copy_application_info(const VkApplicationInfo *app_info, ScratchAllocator &alloc);
-	VkPhysicalDeviceFeatures2 *copy_physical_device_features(const VkPhysicalDeviceFeatures2 *pdf, ScratchAllocator &alloc);
+	bool copy_descriptor_set_layout(const VkDescriptorSetLayoutCreateInfo *create_info, ScratchAllocator &alloc, VkDescriptorSetLayoutCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
+	bool copy_pipeline_layout(const VkPipelineLayoutCreateInfo *create_info, ScratchAllocator &alloc, VkPipelineLayoutCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
+	bool copy_shader_module(const VkShaderModuleCreateInfo *create_info, ScratchAllocator &alloc, VkShaderModuleCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
+	bool copy_graphics_pipeline(const VkGraphicsPipelineCreateInfo *create_info, ScratchAllocator &alloc,
+	                            const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
+	                            VkGraphicsPipelineCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
+	bool copy_compute_pipeline(const VkComputePipelineCreateInfo *create_info, ScratchAllocator &alloc,
+	                           const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
+	                           VkComputePipelineCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
+	bool copy_sampler(const VkSamplerCreateInfo *create_info, ScratchAllocator &alloc,
+	                  VkSamplerCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
+	bool copy_render_pass(const VkRenderPassCreateInfo *create_info, ScratchAllocator &alloc,
+	                      VkRenderPassCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
+	bool copy_application_info(const VkApplicationInfo *app_info, ScratchAllocator &alloc, VkApplicationInfo **out_info) FOSSILIZE_WARN_UNUSED;
+	bool copy_physical_device_features(const VkPhysicalDeviceFeatures2 *pdf, ScratchAllocator &alloc, VkPhysicalDeviceFeatures2 **out_features) FOSSILIZE_WARN_UNUSED;
 
-	VkSpecializationInfo *copy_specialization_info(const VkSpecializationInfo *info, ScratchAllocator &alloc);
+	bool copy_specialization_info(const VkSpecializationInfo *info, ScratchAllocator &alloc, const VkSpecializationInfo **out_info) FOSSILIZE_WARN_UNUSED;
 
 	void *copy_pnext_struct(const VkPipelineTessellationDomainOriginStateCreateInfo *create_info,
-	                        ScratchAllocator &alloc);
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPipelineVertexInputDivisorStateCreateInfoEXT *create_info,
-	                        ScratchAllocator &alloc);
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPipelineRasterizationDepthClipStateCreateInfoEXT *create_info,
-	                        ScratchAllocator &alloc);
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPipelineRasterizationStateStreamCreateInfoEXT *create_info,
-	                        ScratchAllocator &alloc);
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 
-	VkSampler remap_sampler_handle(VkSampler sampler) const;
-	VkDescriptorSetLayout remap_descriptor_set_layout_handle(VkDescriptorSetLayout layout) const;
-	VkPipelineLayout remap_pipeline_layout_handle(VkPipelineLayout layout) const;
-	VkRenderPass remap_render_pass_handle(VkRenderPass render_pass) const;
-	VkShaderModule remap_shader_module_handle(VkShaderModule shader_module) const;
-	VkPipeline remap_compute_pipeline_handle(VkPipeline pipeline) const;
-	VkPipeline remap_graphics_pipeline_handle(VkPipeline pipeline) const;
+	bool remap_sampler_handle(VkSampler sampler, VkSampler *out_sampler) const FOSSILIZE_WARN_UNUSED;
+	bool remap_descriptor_set_layout_handle(VkDescriptorSetLayout layout, VkDescriptorSetLayout *out_layout) const FOSSILIZE_WARN_UNUSED;
+	bool remap_pipeline_layout_handle(VkPipelineLayout layout, VkPipelineLayout *out_layout) const FOSSILIZE_WARN_UNUSED;
+	bool remap_render_pass_handle(VkRenderPass render_pass, VkRenderPass *out_render_pass) const FOSSILIZE_WARN_UNUSED;
+	bool remap_shader_module_handle(VkShaderModule shader_module, VkShaderModule *out_shader_module) const FOSSILIZE_WARN_UNUSED;
+	bool remap_compute_pipeline_handle(VkPipeline pipeline, VkPipeline *out_pipeline) const FOSSILIZE_WARN_UNUSED;
+	bool remap_graphics_pipeline_handle(VkPipeline pipeline, VkPipeline *out_pipeline) const FOSSILIZE_WARN_UNUSED;
 
-	void remap_descriptor_set_layout_ci(VkDescriptorSetLayoutCreateInfo *create_info);
-	void remap_pipeline_layout_ci(VkPipelineLayoutCreateInfo *create_info);
-	void remap_shader_module_ci(VkShaderModuleCreateInfo *create_info);
-	void remap_graphics_pipeline_ci(VkGraphicsPipelineCreateInfo *create_info);
-	void remap_compute_pipeline_ci(VkComputePipelineCreateInfo *create_info);
-	void remap_sampler_ci(VkSamplerCreateInfo *create_info);
-	void remap_render_pass_ci(VkRenderPassCreateInfo *create_info);
+	bool remap_descriptor_set_layout_ci(VkDescriptorSetLayoutCreateInfo *create_info) FOSSILIZE_WARN_UNUSED;
+	bool remap_pipeline_layout_ci(VkPipelineLayoutCreateInfo *create_info) FOSSILIZE_WARN_UNUSED;
+	bool remap_shader_module_ci(VkShaderModuleCreateInfo *create_info) FOSSILIZE_WARN_UNUSED;
+	bool remap_graphics_pipeline_ci(VkGraphicsPipelineCreateInfo *create_info) FOSSILIZE_WARN_UNUSED;
+	bool remap_compute_pipeline_ci(VkComputePipelineCreateInfo *create_info) FOSSILIZE_WARN_UNUSED;
+	bool remap_sampler_ci(VkSamplerCreateInfo *create_info) FOSSILIZE_WARN_UNUSED;
+	bool remap_render_pass_ci(VkRenderPassCreateInfo *create_info) FOSSILIZE_WARN_UNUSED;
 
-	void serialize_application_info(std::vector<uint8_t> &blob) const;
-	void serialize_application_blob_link(Hash hash, ResourceTag tag, std::vector<uint8_t> &blob) const;
+	bool serialize_application_info(std::vector<uint8_t> &blob) const FOSSILIZE_WARN_UNUSED;
+	bool serialize_application_blob_link(Hash hash, ResourceTag tag, std::vector<uint8_t> &blob) const FOSSILIZE_WARN_UNUSED;
 	Hash get_application_link_hash(ResourceTag tag, Hash hash) const;
-	bool register_application_link_hash(ResourceTag tag, Hash hash, std::vector<uint8_t> &blob) const;
-	void serialize_sampler(Hash hash, const VkSamplerCreateInfo &create_info, std::vector<uint8_t> &blob) const;
-	void serialize_descriptor_set_layout(Hash hash, const VkDescriptorSetLayoutCreateInfo &create_info, std::vector<uint8_t> &blob) const;
-	void serialize_pipeline_layout(Hash hash, const VkPipelineLayoutCreateInfo &create_info, std::vector<uint8_t> &blob) const;
-	void serialize_render_pass(Hash hash, const VkRenderPassCreateInfo &create_info, std::vector<uint8_t> &blob) const;
-	void serialize_shader_module(Hash hash, const VkShaderModuleCreateInfo &create_info, std::vector<uint8_t> &blob, ScratchAllocator &allocator) const;
-	void serialize_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo &create_info, std::vector<uint8_t> &blob) const;
-	void serialize_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo &create_info, std::vector<uint8_t> &blob) const;
+	bool register_application_link_hash(ResourceTag tag, Hash hash, std::vector<uint8_t> &blob) const FOSSILIZE_WARN_UNUSED;
+	bool serialize_sampler(Hash hash, const VkSamplerCreateInfo &create_info, std::vector<uint8_t> &blob) const FOSSILIZE_WARN_UNUSED;
+	bool serialize_descriptor_set_layout(Hash hash, const VkDescriptorSetLayoutCreateInfo &create_info, std::vector<uint8_t> &blob) const FOSSILIZE_WARN_UNUSED;
+	bool serialize_pipeline_layout(Hash hash, const VkPipelineLayoutCreateInfo &create_info, std::vector<uint8_t> &blob) const FOSSILIZE_WARN_UNUSED;
+	bool serialize_render_pass(Hash hash, const VkRenderPassCreateInfo &create_info, std::vector<uint8_t> &blob) const FOSSILIZE_WARN_UNUSED;
+	bool serialize_shader_module(Hash hash, const VkShaderModuleCreateInfo &create_info, std::vector<uint8_t> &blob, ScratchAllocator &allocator) const FOSSILIZE_WARN_UNUSED;
+	bool serialize_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo &create_info, std::vector<uint8_t> &blob) const FOSSILIZE_WARN_UNUSED;
+	bool serialize_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo &create_info, std::vector<uint8_t> &blob) const FOSSILIZE_WARN_UNUSED;
 
 	std::mutex record_lock;
 	std::condition_variable record_cv;
@@ -313,7 +316,7 @@ struct StateRecorder::Impl
 
 	template <typename T>
 	T *copy(const T *src, size_t count, ScratchAllocator &alloc);
-	const void *copy_pnext_chain(const void *pNext, ScratchAllocator &alloc);
+	bool copy_pnext_chain(const void *pNext, ScratchAllocator &alloc, const void **out_pnext) FOSSILIZE_WARN_UNUSED;
 };
 
 // reinterpret_cast does not work reliably on MSVC 2013 for Vulkan objects.
@@ -420,7 +423,7 @@ Hash compute_hash_sampler(const VkSamplerCreateInfo &sampler)
 	return h.get();
 }
 
-Hash compute_hash_descriptor_set_layout(const StateRecorder &recorder, const VkDescriptorSetLayoutCreateInfo &layout)
+bool compute_hash_descriptor_set_layout(const StateRecorder &recorder, const VkDescriptorSetLayoutCreateInfo &layout, Hash *out_hash)
 {
 	Hasher h;
 
@@ -439,14 +442,20 @@ Hash compute_hash_descriptor_set_layout(const StateRecorder &recorder, const VkD
 		    binding.descriptorType == VK_DESCRIPTOR_TYPE_SAMPLER))
 		{
 			for (uint32_t j = 0; j < binding.descriptorCount; j++)
-				h.u64(recorder.get_hash_for_sampler(binding.pImmutableSamplers[j]));
+			{
+				Hash hash;
+				if (!recorder.get_hash_for_sampler(binding.pImmutableSamplers[j], &hash))
+					return false;
+				h.u64(hash);
+			}
 		}
 	}
 
-	return h.get();
+	*out_hash = h.get();
+	return true;
 }
 
-Hash compute_hash_pipeline_layout(const StateRecorder &recorder, const VkPipelineLayoutCreateInfo &layout)
+bool compute_hash_pipeline_layout(const StateRecorder &recorder, const VkPipelineLayoutCreateInfo &layout, Hash *out_hash)
 {
 	Hasher h;
 
@@ -454,7 +463,12 @@ Hash compute_hash_pipeline_layout(const StateRecorder &recorder, const VkPipelin
 	for (uint32_t i = 0; i < layout.setLayoutCount; i++)
 	{
 		if (layout.pSetLayouts[i])
-			h.u64(recorder.get_hash_for_descriptor_set_layout(layout.pSetLayouts[i]));
+		{
+			Hash hash;
+			if (!recorder.get_hash_for_descriptor_set_layout(layout.pSetLayouts[i], &hash))
+				return false;
+			h.u64(hash);
+		}
 		else
 			h.u32(0);
 	}
@@ -470,7 +484,8 @@ Hash compute_hash_pipeline_layout(const StateRecorder &recorder, const VkPipelin
 
 	h.u32(layout.flags);
 
-	return h.get();
+	*out_hash = h.get();
+	return true;
 }
 
 Hash compute_hash_shader_module(const VkShaderModuleCreateInfo &create_info)
@@ -529,7 +544,7 @@ static void hash_pnext_struct(const StateRecorder &,
 	h.u32(create_info.rasterizationStream);
 }
 
-static void hash_pnext_chain(const StateRecorder &recorder, Hasher &h, const void *pNext)
+static bool hash_pnext_chain(const StateRecorder &recorder, Hasher &h, const void *pNext)
 {
 	while (pNext != nullptr)
 	{
@@ -555,28 +570,39 @@ static void hash_pnext_chain(const StateRecorder &recorder, Hasher &h, const voi
 			break;
 
 		default:
-			FOSSILIZE_THROW_PNEXT("Unsupported pNext found, cannot hash.", pNext);
-			break;
+			log_error_pnext_chain("Unsupported pNext found, cannot hash.", pNext);
+			return false;
 		}
 
 		pNext = pin->pNext;
 	}
+
+	return true;
 }
 
-Hash compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraphicsPipelineCreateInfo &create_info)
+bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraphicsPipelineCreateInfo &create_info, Hash *out_hash)
 {
 	Hasher h;
+	Hash hash;
 
 	h.u32(create_info.flags);
 
 	if (create_info.basePipelineHandle != VK_NULL_HANDLE)
 	{
-		h.u64(recorder.get_hash_for_graphics_pipeline_handle(create_info.basePipelineHandle));
+		if (!recorder.get_hash_for_graphics_pipeline_handle(create_info.basePipelineHandle, &hash))
+			return false;
+		h.u64(hash);
 		h.s32(create_info.basePipelineIndex);
 	}
 
-	h.u64(recorder.get_hash_for_pipeline_layout(create_info.layout));
-	h.u64(recorder.get_hash_for_render_pass(create_info.renderPass));
+	if (!recorder.get_hash_for_pipeline_layout(create_info.layout, &hash))
+		return false;
+	h.u64(hash);
+
+	if (!recorder.get_hash_for_render_pass(create_info.renderPass, &hash))
+		return false;
+	h.u64(hash);
+
 	h.u32(create_info.subpass);
 	h.u32(create_info.stageCount);
 
@@ -856,32 +882,47 @@ Hash compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 		h.u32(stage.flags);
 		h.string(stage.pName);
 		h.u32(stage.stage);
-		h.u64(recorder.get_hash_for_shader_module(stage.module));
+
+		if (!recorder.get_hash_for_shader_module(stage.module, &hash))
+			return false;
+		h.u64(hash);
+
 		if (stage.pSpecializationInfo)
 			hash_specialization_info(h, *stage.pSpecializationInfo);
 		else
 			h.u32(0);
 	}
 
-	return h.get();
+	*out_hash = h.get();
+	return true;
 }
 
-Hash compute_hash_compute_pipeline(const StateRecorder &recorder, const VkComputePipelineCreateInfo &create_info)
+bool compute_hash_compute_pipeline(const StateRecorder &recorder, const VkComputePipelineCreateInfo &create_info, Hash *out_hash)
 {
 	Hasher h;
+	Hash hash;
 
-	h.u64(recorder.get_hash_for_pipeline_layout(create_info.layout));
+	if (!recorder.get_hash_for_pipeline_layout(create_info.layout, &hash))
+		return false;
+	h.u64(hash);
+
 	h.u32(create_info.flags);
 
 	if (create_info.basePipelineHandle != VK_NULL_HANDLE)
 	{
-		h.u64(recorder.get_hash_for_compute_pipeline_handle(create_info.basePipelineHandle));
+		if (!recorder.get_hash_for_compute_pipeline_handle(create_info.basePipelineHandle, &hash))
+			return false;
+		h.u64(hash);
+
 		h.s32(create_info.basePipelineIndex);
 	}
 	else
 		h.u32(0);
 
-	h.u64(recorder.get_hash_for_shader_module(create_info.stage.module));
+	if (!recorder.get_hash_for_shader_module(create_info.stage.module, &hash))
+		return false;
+	h.u64(hash);
+
 	h.string(create_info.stage.pName);
 	h.u32(create_info.stage.flags);
 	h.u32(create_info.stage.stage);
@@ -891,7 +932,8 @@ Hash compute_hash_compute_pipeline(const StateRecorder &recorder, const VkComput
 	else
 		h.u32(0);
 
-	return h.get();
+	*out_hash = h.get();
+	return true;
 }
 
 static void hash_attachment(Hasher &h, const VkAttachmentDescription &att)
@@ -1068,7 +1110,7 @@ const char *StateReplayer::Impl::duplicate_string(const char *str, size_t len)
 	return c;
 }
 
-VkSampler *StateReplayer::Impl::parse_immutable_samplers(const Value &samplers)
+bool StateReplayer::Impl::parse_immutable_samplers(const Value &samplers, const VkSampler **out_sampler)
 {
 	auto *samps = allocator.allocate_n<VkSampler>(samplers.Size());
 	auto *ret = samps;
@@ -1079,13 +1121,17 @@ VkSampler *StateReplayer::Impl::parse_immutable_samplers(const Value &samplers)
 		{
 			auto sampler_itr = replayed_samplers.find(index);
 			if (sampler_itr == end(replayed_samplers))
-				throw_missing_resource("Immutable sampler", index);
+			{
+				log_missing_resource("Immutable sampler", index);
+				return false;
+			}
 			else
 				*samps = sampler_itr->second;
 		}
 	}
 
-	return ret;
+	*out_sampler = ret;
+	return true;
 }
 
 void StateRecorder::Impl::sync_thread()
@@ -1102,7 +1148,8 @@ StateRecorder::Impl::~Impl()
 	sync_thread();
 }
 
-VkDescriptorSetLayoutBinding *StateReplayer::Impl::parse_descriptor_set_bindings(const Value &bindings)
+bool StateReplayer::Impl::parse_descriptor_set_bindings(const Value &bindings,
+                                                        const VkDescriptorSetLayoutBinding **out_bindings)
 {
 	auto *set_bindings = allocator.allocate_n_cleared<VkDescriptorSetLayoutBinding>(bindings.Size());
 	auto *ret = set_bindings;
@@ -1114,12 +1161,15 @@ VkDescriptorSetLayoutBinding *StateReplayer::Impl::parse_descriptor_set_bindings
 		set_bindings->descriptorType = static_cast<VkDescriptorType>(b["descriptorType"].GetUint());
 		set_bindings->stageFlags = b["stageFlags"].GetUint();
 		if (b.HasMember("immutableSamplers"))
-			set_bindings->pImmutableSamplers = parse_immutable_samplers(b["immutableSamplers"]);
+			if (!parse_immutable_samplers(b["immutableSamplers"], &set_bindings->pImmutableSamplers))
+				return false;
 	}
-	return ret;
+
+	*out_bindings = ret;
+	return true;
 }
 
-VkPushConstantRange *StateReplayer::Impl::parse_push_constant_ranges(const Value &ranges)
+bool StateReplayer::Impl::parse_push_constant_ranges(const Value &ranges, const VkPushConstantRange **out_ranges)
 {
 	auto *infos = allocator.allocate_n_cleared<VkPushConstantRange>(ranges.Size());
 	auto *ret = infos;
@@ -1132,10 +1182,11 @@ VkPushConstantRange *StateReplayer::Impl::parse_push_constant_ranges(const Value
 		infos->size = obj["size"].GetUint();
 	}
 
-	return ret;
+	*out_ranges = ret;
+	return true;
 }
 
-VkDescriptorSetLayout *StateReplayer::Impl::parse_set_layouts(const Value &layouts)
+bool StateReplayer::Impl::parse_set_layouts(const Value &layouts, const VkDescriptorSetLayout **out_layout)
 {
 	auto *infos = allocator.allocate_n_cleared<VkDescriptorSetLayout>(layouts.Size());
 	auto *ret = infos;
@@ -1147,16 +1198,20 @@ VkDescriptorSetLayout *StateReplayer::Impl::parse_set_layouts(const Value &layou
 		{
 			auto set_itr = replayed_descriptor_set_layouts.find(index);
 			if (set_itr == end(replayed_descriptor_set_layouts))
-				throw_missing_resource("Descriptor set layout", index);
+			{
+				log_missing_resource("Descriptor set layout", index);
+				return false;
+			}
 			else
 				*infos = set_itr->second;
 		}
 	}
 
-	return ret;
+	*out_layout = ret;
+	return true;
 }
 
-void StateReplayer::Impl::parse_shader_modules(StateCreatorInterface &iface, const Value &modules,
+bool StateReplayer::Impl::parse_shader_modules(StateCreatorInterface &iface, const Value &modules,
                                                const uint8_t *varint, size_t varint_size)
 {
 	auto *infos = allocator.allocate_n_cleared<VkShaderModuleCreateInfo>(modules.MemberCount());
@@ -1180,22 +1235,34 @@ void StateReplayer::Impl::parse_shader_modules(StateCreatorInterface &iface, con
 			auto offset = obj["varintOffset"].GetUint64();
 			auto size = obj["varintSize"].GetUint64();
 			if (offset + size > varint_size)
-				FOSSILIZE_THROW("Binary varint buffer overflows payload.");
+			{
+				LOGE("Binary varint buffer overflows payload.\n");
+				return false;
+			}
+
 			if (!decode_varint(decoded, info.codeSize / 4, varint + offset, size))
-				FOSSILIZE_THROW("Invalid varint format.");
+			{
+				LOGE("Invalid varint format.\n");
+				return false;
+			}
+
 			info.pCode = decoded;
 		}
 		else
 			info.pCode = reinterpret_cast<uint32_t *>(decode_base64(allocator, obj["code"].GetString(), info.codeSize));
 
 		if (!iface.enqueue_create_shader_module(hash, &info, &replayed_shader_modules[hash]))
-			FOSSILIZE_THROW("Failed to create shader module.");
+		{
+			LOGE("Failed to create shader module.\n");
+			return false;
+		}
 	}
 
 	iface.notify_replayed_resources_for_type();
+	return true;
 }
 
-void StateReplayer::Impl::parse_pipeline_layouts(StateCreatorInterface &iface, const Value &layouts)
+bool StateReplayer::Impl::parse_pipeline_layouts(StateCreatorInterface &iface, const Value &layouts)
 {
 	auto *infos = allocator.allocate_n_cleared<VkPipelineLayoutCreateInfo>(layouts.MemberCount());
 
@@ -1214,23 +1281,29 @@ void StateReplayer::Impl::parse_pipeline_layouts(StateCreatorInterface &iface, c
 		if (obj.HasMember("pushConstantRanges"))
 		{
 			info.pushConstantRangeCount = obj["pushConstantRanges"].Size();
-			info.pPushConstantRanges = parse_push_constant_ranges(obj["pushConstantRanges"]);
+			if (!parse_push_constant_ranges(obj["pushConstantRanges"], &info.pPushConstantRanges))
+				return false;
 		}
 
 		if (obj.HasMember("setLayouts"))
 		{
 			info.setLayoutCount = obj["setLayouts"].Size();
-			info.pSetLayouts = parse_set_layouts(obj["setLayouts"]);
+			if (!parse_set_layouts(obj["setLayouts"], &info.pSetLayouts))
+				return false;
 		}
 
 		if (!iface.enqueue_create_pipeline_layout(hash, &info, &replayed_pipeline_layouts[hash]))
-			FOSSILIZE_THROW("Failed to create pipeline layout.");
+		{
+			LOGE("Failed to create pipeline layout.\n");
+			return false;
+		}
 	}
 
 	iface.notify_replayed_resources_for_type();
+	return true;
 }
 
-void StateReplayer::Impl::parse_descriptor_set_layouts(StateCreatorInterface &iface, const Value &layouts)
+bool StateReplayer::Impl::parse_descriptor_set_layouts(StateCreatorInterface &iface, const Value &layouts)
 {
 	auto *infos = allocator.allocate_n_cleared<VkDescriptorSetLayoutCreateInfo>(layouts.MemberCount());
 
@@ -1249,18 +1322,22 @@ void StateReplayer::Impl::parse_descriptor_set_layouts(StateCreatorInterface &if
 		{
 			auto &bindings = obj["bindings"];
 			info.bindingCount = bindings.Size();
-			auto *allocated_bindings = parse_descriptor_set_bindings(bindings);
-			info.pBindings = allocated_bindings;
+			if (!parse_descriptor_set_bindings(bindings, &info.pBindings))
+				return false;
 		}
 
 		if (!iface.enqueue_create_descriptor_set_layout(hash, &info, &replayed_descriptor_set_layouts[hash]))
-			FOSSILIZE_THROW("Failed to create descriptor set layout.");
+		{
+			LOGE("Failed to create descriptor set layout.\n");
+			return false;
+		}
 	}
 
 	iface.notify_replayed_resources_for_type();
+	return true;
 }
 
-void StateReplayer::Impl::parse_application_info(StateCreatorInterface &iface, const Value &app_info, const Value &pdf_info)
+bool StateReplayer::Impl::parse_application_info(StateCreatorInterface &iface, const Value &app_info, const Value &pdf_info)
 {
 	if (app_info.HasMember("apiVersion") && pdf_info.HasMember("robustBufferAccess"))
 	{
@@ -1302,18 +1379,21 @@ void StateReplayer::Impl::parse_application_info(StateCreatorInterface &iface, c
 						Hashing::compute_application_feature_hash(nullptr, nullptr));
 		iface.set_application_info(hash, nullptr, nullptr);
 	}
+
+	return true;
 }
 
-void StateReplayer::Impl::parse_application_info_link(StateCreatorInterface &iface, const Value &link)
+bool StateReplayer::Impl::parse_application_info_link(StateCreatorInterface &iface, const Value &link)
 {
 	Hash application_hash = string_to_uint64(link["application"].GetString());
 	auto tag = static_cast<ResourceTag>(link["tag"].GetInt());
 	Hash hash = string_to_uint64(link["hash"].GetString());
 	Hash link_hash = Hashing::compute_hash_application_info_link(application_hash, tag, hash);
 	iface.notify_application_info_link(link_hash, application_hash, tag, hash);
+	return true;
 }
 
-void StateReplayer::Impl::parse_samplers(StateCreatorInterface &iface, const Value &samplers)
+bool StateReplayer::Impl::parse_samplers(StateCreatorInterface &iface, const Value &samplers)
 {
 	auto *infos = allocator.allocate_n_cleared<VkSamplerCreateInfo>(samplers.MemberCount());
 
@@ -1345,13 +1425,17 @@ void StateReplayer::Impl::parse_samplers(StateCreatorInterface &iface, const Val
 		info.unnormalizedCoordinates = obj["unnormalizedCoordinates"].GetUint();
 
 		if (!iface.enqueue_create_sampler(hash, &info, &replayed_samplers[hash]))
-			FOSSILIZE_THROW("Failed to create sampler.");
+		{
+			LOGE("Failed to create sampler.\n");
+			return false;
+		}
 	}
 
 	iface.notify_replayed_resources_for_type();
+	return true;
 }
 
-VkAttachmentDescription *StateReplayer::Impl::parse_render_pass_attachments(const Value &attachments)
+bool StateReplayer::Impl::parse_render_pass_attachments(const Value &attachments, const VkAttachmentDescription **out_attachments)
 {
 	auto *infos = allocator.allocate_n_cleared<VkAttachmentDescription>(attachments.Size());
 	auto *ret = infos;
@@ -1370,10 +1454,11 @@ VkAttachmentDescription *StateReplayer::Impl::parse_render_pass_attachments(cons
 		infos->samples = static_cast<VkSampleCountFlagBits>(obj["samples"].GetUint());
 	}
 
-	return ret;
+	*out_attachments = ret;
+	return true;
 }
 
-VkSubpassDependency *StateReplayer::Impl::parse_render_pass_dependencies(const Value &dependencies)
+bool StateReplayer::Impl::parse_render_pass_dependencies(const Value &dependencies, const VkSubpassDependency **out_deps)
 {
 	auto *infos = allocator.allocate_n_cleared<VkSubpassDependency>(dependencies.Size());
 	auto *ret = infos;
@@ -1390,18 +1475,21 @@ VkSubpassDependency *StateReplayer::Impl::parse_render_pass_dependencies(const V
 		infos->dstSubpass = obj["dstSubpass"].GetUint();
 	}
 
-	return ret;
+	*out_deps = ret;
+	return true;
 }
 
-VkAttachmentReference *StateReplayer::Impl::parse_attachment(const Value &value)
+bool StateReplayer::Impl::parse_attachment(const Value &value, const VkAttachmentReference **out_reference)
 {
 	auto *ret = allocator.allocate_cleared<VkAttachmentReference>();
 	ret->attachment = value["attachment"].GetUint();
 	ret->layout = static_cast<VkImageLayout>(value["layout"].GetUint());
-	return ret;
+
+	*out_reference = ret;
+	return true;
 }
 
-VkAttachmentReference *StateReplayer::Impl::parse_attachments(const Value &attachments)
+bool StateReplayer::Impl::parse_attachments(const Value &attachments, const VkAttachmentReference **out_references)
 {
 	auto *refs = allocator.allocate_n_cleared<VkAttachmentReference>(attachments.Size());
 	auto *ret = refs;
@@ -1412,19 +1500,23 @@ VkAttachmentReference *StateReplayer::Impl::parse_attachments(const Value &attac
 		refs->attachment = value["attachment"].GetUint();
 		refs->layout = static_cast<VkImageLayout>(value["layout"].GetUint());
 	}
-	return ret;
+
+	*out_references = ret;
+	return true;
 }
 
-uint32_t *StateReplayer::Impl::parse_uints(const Value &uints)
+bool StateReplayer::Impl::parse_uints(const Value &uints, const uint32_t **out_uints)
 {
 	auto *u32s = allocator.allocate_n<uint32_t>(uints.Size());
 	auto *ret = u32s;
 	for (auto itr = uints.Begin(); itr != uints.End(); ++itr, u32s++)
 		*u32s = itr->GetUint();
-	return ret;
+
+	*out_uints = ret;
+	return true;
 }
 
-VkSubpassDescription *StateReplayer::Impl::parse_render_pass_subpasses(const Value &subpasses)
+bool StateReplayer::Impl::parse_render_pass_subpasses(const Value &subpasses, const VkSubpassDescription **out_subpasses)
 {
 	auto *infos = allocator.allocate_n_cleared<VkSubpassDescription>(subpasses.Size());
 	auto *ret = infos;
@@ -1436,34 +1528,40 @@ VkSubpassDescription *StateReplayer::Impl::parse_render_pass_subpasses(const Val
 		infos->pipelineBindPoint = static_cast<VkPipelineBindPoint>(obj["pipelineBindPoint"].GetUint());
 
 		if (obj.HasMember("depthStencilAttachment"))
-			infos->pDepthStencilAttachment = parse_attachment(obj["depthStencilAttachment"]);
+			if (!parse_attachment(obj["depthStencilAttachment"], &infos->pDepthStencilAttachment))
+				return false;
 
 		if (obj.HasMember("resolveAttachments"))
-			infos->pResolveAttachments = parse_attachments(obj["resolveAttachments"]);
+			if (!parse_attachments(obj["resolveAttachments"], &infos->pResolveAttachments))
+				return false;
 
 		if (obj.HasMember("inputAttachments"))
 		{
 			infos->inputAttachmentCount = obj["inputAttachments"].Size();
-			infos->pInputAttachments = parse_attachments(obj["inputAttachments"]);
+			if (!parse_attachments(obj["inputAttachments"], &infos->pInputAttachments))
+				return false;
 		}
 
 		if (obj.HasMember("colorAttachments"))
 		{
 			infos->colorAttachmentCount = obj["colorAttachments"].Size();
-			infos->pColorAttachments = parse_attachments(obj["colorAttachments"]);
+			if (!parse_attachments(obj["colorAttachments"], &infos->pColorAttachments))
+				return false;
 		}
 
 		if (obj.HasMember("preserveAttachments"))
 		{
 			infos->preserveAttachmentCount = obj["preserveAttachments"].Size();
-			infos->pPreserveAttachments = parse_uints(obj["preserveAttachments"]);
+			if (!parse_uints(obj["preserveAttachments"], &infos->pPreserveAttachments))
+				return false;
 		}
 	}
 
-	return ret;
+	*out_subpasses = ret;
+	return true;
 }
 
-void StateReplayer::Impl::parse_render_passes(StateCreatorInterface &iface, const Value &passes)
+bool StateReplayer::Impl::parse_render_passes(StateCreatorInterface &iface, const Value &passes)
 {
 	auto *infos = allocator.allocate_n_cleared<VkRenderPassCreateInfo>(passes.MemberCount());
 
@@ -1482,29 +1580,36 @@ void StateReplayer::Impl::parse_render_passes(StateCreatorInterface &iface, cons
 		if (obj.HasMember("attachments"))
 		{
 			info.attachmentCount = obj["attachments"].Size();
-			info.pAttachments = parse_render_pass_attachments(obj["attachments"]);
+			if (!parse_render_pass_attachments(obj["attachments"], &info.pAttachments))
+				return false;
 		}
 
 		if (obj.HasMember("dependencies"))
 		{
 			info.dependencyCount = obj["dependencies"].Size();
-			info.pDependencies = parse_render_pass_dependencies(obj["dependencies"]);
+			if (!parse_render_pass_dependencies(obj["dependencies"], &info.pDependencies))
+				return false;
 		}
 
 		if (obj.HasMember("subpasses"))
 		{
 			info.subpassCount = obj["subpasses"].Size();
-			info.pSubpasses = parse_render_pass_subpasses(obj["subpasses"]);
+			if (!parse_render_pass_subpasses(obj["subpasses"], &info.pSubpasses))
+				return false;
 		}
 
 		if (!iface.enqueue_create_render_pass(hash, &info, &replayed_render_passes[hash]))
-			FOSSILIZE_THROW("Failed to create render pass.");
+		{
+			LOGE("Failed to create render pass.\n");
+			return false;
+		}
 	}
 
 	iface.notify_replayed_resources_for_type();
+	return true;
 }
 
-VkSpecializationMapEntry *StateReplayer::Impl::parse_map_entries(const Value &map_entries)
+bool StateReplayer::Impl::parse_map_entries(const Value &map_entries, const VkSpecializationMapEntry **out_entries)
 {
 	auto *entries = allocator.allocate_n_cleared<VkSpecializationMapEntry>(map_entries.Size());
 	auto *ret = entries;
@@ -1517,10 +1622,11 @@ VkSpecializationMapEntry *StateReplayer::Impl::parse_map_entries(const Value &ma
 		entries->size = obj["size"].GetUint();
 	}
 
-	return ret;
+	*out_entries = ret;
+	return true;
 }
 
-VkSpecializationInfo *StateReplayer::Impl::parse_specialization_info(const Value &spec_info)
+bool StateReplayer::Impl::parse_specialization_info(const Value &spec_info, const VkSpecializationInfo **out_info)
 {
 	auto *spec = allocator.allocate_cleared<VkSpecializationInfo>();
 	spec->dataSize = spec_info["dataSize"].GetUint();
@@ -1528,17 +1634,20 @@ VkSpecializationInfo *StateReplayer::Impl::parse_specialization_info(const Value
 	if (spec_info.HasMember("mapEntries"))
 	{
 		spec->mapEntryCount = spec_info["mapEntries"].Size();
-		spec->pMapEntries = parse_map_entries(spec_info["mapEntries"]);
+		if (!parse_map_entries(spec_info["mapEntries"], &spec->pMapEntries))
+			return false;
 	}
-	return spec;
+
+	*out_info = spec;
+	return true;
 }
 
-void StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, DatabaseInterface *resolver,
+bool StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, DatabaseInterface *resolver,
                                                  const Value &pipelines, const Value &member)
 {
 	Hash hash = string_to_uint64(member.GetString());
 	if (replayed_compute_pipelines.count(hash))
-		return;
+		return true;
 
 	auto *info_allocated = allocator.allocate_cleared<VkComputePipelineCreateInfo>();
 	auto &obj = pipelines[member];
@@ -1557,7 +1666,8 @@ void StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, D
 		// If we don't have the pipeline, we might have it later in the array of graphics pipelines, queue up out of order.
 		if (pipeline_iter == replayed_compute_pipelines.end() && pipelines.HasMember(obj["basePipelineHandle"].GetString()))
 		{
-			parse_compute_pipeline(iface, resolver, pipelines, obj["basePipelineHandle"]);
+			if (!parse_compute_pipeline(iface, resolver, pipelines, obj["basePipelineHandle"]))
+				return false;
 			iface.sync_threads();
 			pipeline_iter = replayed_compute_pipelines.find(pipeline);
 		}
@@ -1569,7 +1679,8 @@ void StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, D
 			if (!resolver || !resolver->read_entry(RESOURCE_COMPUTE_PIPELINE, pipeline, &external_state_size, nullptr,
 			                                       PAYLOAD_READ_NO_FLAGS))
 			{
-				throw_missing_resource("Base pipeline", pipeline);
+				log_missing_resource("Base pipeline", pipeline);
+				return false;
 			}
 
 			vector<uint8_t> external_state(external_state_size);
@@ -1577,15 +1688,20 @@ void StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, D
 			if (!resolver->read_entry(RESOURCE_COMPUTE_PIPELINE, pipeline, &external_state_size, external_state.data(),
 			                          PAYLOAD_READ_NO_FLAGS))
 			{
-				throw_missing_resource("Base pipeline", pipeline);
+				log_missing_resource("Base pipeline", pipeline);
+				return false;
 			}
 
-			this->parse(iface, resolver, external_state.data(), external_state.size());
+			if (!this->parse(iface, resolver, external_state.data(), external_state.size()))
+				return false;
 			iface.sync_threads();
 
 			pipeline_iter = replayed_compute_pipelines.find(pipeline);
 			if (pipeline_iter == replayed_compute_pipelines.end())
-				throw_missing_resource("Base pipeline", pipeline);
+			{
+				log_missing_resource("Base pipeline", pipeline);
+				return false;
+			}
 		}
 		info.basePipelineHandle = pipeline_iter->second;
 	}
@@ -1597,7 +1713,10 @@ void StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, D
 	{
 		auto layout_itr = replayed_pipeline_layouts.find(layout);
 		if (layout_itr == end(replayed_pipeline_layouts))
-			throw_missing_resource("Pipeline layout", layout);
+		{
+			log_missing_resource("Pipeline layout", layout);
+			return false;
+		}
 		else
 			info.layout = layout_itr->second;
 	}
@@ -1616,7 +1735,8 @@ void StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, D
 			if (!resolver || !resolver->read_entry(RESOURCE_SHADER_MODULE, module, &external_state_size, nullptr,
 			                                       PAYLOAD_READ_NO_FLAGS))
 			{
-				throw_missing_resource("Shader module", module);
+				log_missing_resource("Shader module", module);
+				return false;
 			}
 
 			vector<uint8_t> external_state(external_state_size);
@@ -1624,14 +1744,20 @@ void StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, D
 			if (!resolver->read_entry(RESOURCE_SHADER_MODULE, module, &external_state_size, external_state.data(),
 			                          PAYLOAD_READ_NO_FLAGS))
 			{
-				throw_missing_resource("Shader module", module);
+				log_missing_resource("Shader module", module);
+				return false;
 			}
 
-			this->parse(iface, resolver, external_state.data(), external_state.size());
+			if (!this->parse(iface, resolver, external_state.data(), external_state.size()))
+				return false;
+
 			iface.sync_shader_modules();
 			module_iter = replayed_shader_modules.find(module);
 			if (module_iter == replayed_shader_modules.end())
-				throw_missing_resource("Shader module", module);
+			{
+				log_missing_resource("Shader module", module);
+				return false;
+			}
 		}
 		else
 			iface.sync_shader_modules();
@@ -1642,20 +1768,28 @@ void StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, D
 
 	info.stage.pName = duplicate_string(stage["name"].GetString(), stage["name"].GetStringLength());
 	if (stage.HasMember("specializationInfo"))
-		info.stage.pSpecializationInfo = parse_specialization_info(stage["specializationInfo"]);
+		if (!parse_specialization_info(stage["specializationInfo"], &info.stage.pSpecializationInfo))
+			return false;
 
 	if (!iface.enqueue_create_compute_pipeline(hash, &info, &replayed_compute_pipelines[hash]))
-		FOSSILIZE_THROW("Failed to create compute pipeline.");
+	{
+		LOGE("Failed to create compute pipeline.\n");
+		return false;
+	}
+
+	return true;
 }
 
-void StateReplayer::Impl::parse_compute_pipelines(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines)
+bool StateReplayer::Impl::parse_compute_pipelines(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines)
 {
 	for (auto itr = pipelines.MemberBegin(); itr != pipelines.MemberEnd(); ++itr)
-		parse_compute_pipeline(iface, resolver, pipelines, itr->name);
+		if (!parse_compute_pipeline(iface, resolver, pipelines, itr->name))
+			return false;
 	iface.notify_replayed_resources_for_type();
+	return true;
 }
 
-VkVertexInputAttributeDescription *StateReplayer::Impl::parse_vertex_attributes(const rapidjson::Value &attributes)
+bool StateReplayer::Impl::parse_vertex_attributes(const Value &attributes, const VkVertexInputAttributeDescription **out_desc)
 {
 	auto *attribs = allocator.allocate_n_cleared<VkVertexInputAttributeDescription>(attributes.Size());
 	auto *ret = attribs;
@@ -1669,10 +1803,11 @@ VkVertexInputAttributeDescription *StateReplayer::Impl::parse_vertex_attributes(
 		attribs->format = static_cast<VkFormat>(obj["format"].GetUint());
 	}
 
-	return ret;
+	*out_desc = ret;
+	return true;
 }
 
-VkVertexInputBindingDescription *StateReplayer::Impl::parse_vertex_bindings(const rapidjson::Value &bindings)
+bool StateReplayer::Impl::parse_vertex_bindings(const Value &bindings, const VkVertexInputBindingDescription **out_desc)
 {
 	auto *binds = allocator.allocate_n_cleared<VkVertexInputBindingDescription>(bindings.Size());
 	auto *ret = binds;
@@ -1685,10 +1820,11 @@ VkVertexInputBindingDescription *StateReplayer::Impl::parse_vertex_bindings(cons
 		binds->stride = obj["stride"].GetUint();
 	}
 
-	return ret;
+	*out_desc = ret;
+	return true;
 }
 
-VkPipelineVertexInputStateCreateInfo *StateReplayer::Impl::parse_vertex_input_state(const rapidjson::Value &vi)
+bool StateReplayer::Impl::parse_vertex_input_state(const Value &vi, const VkPipelineVertexInputStateCreateInfo **out_info)
 {
 	auto *state = allocator.allocate_cleared<VkPipelineVertexInputStateCreateInfo>();
 	state->sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
@@ -1697,22 +1833,26 @@ VkPipelineVertexInputStateCreateInfo *StateReplayer::Impl::parse_vertex_input_st
 	if (vi.HasMember("attributes"))
 	{
 		state->vertexAttributeDescriptionCount = vi["attributes"].Size();
-		state->pVertexAttributeDescriptions = parse_vertex_attributes(vi["attributes"]);
+		if (!parse_vertex_attributes(vi["attributes"], &state->pVertexAttributeDescriptions))
+			return false;
 	}
 
 	if (vi.HasMember("bindings"))
 	{
 		state->vertexBindingDescriptionCount = vi["bindings"].Size();
-		state->pVertexBindingDescriptions = parse_vertex_bindings(vi["bindings"]);
+		if (!parse_vertex_bindings(vi["bindings"], &state->pVertexBindingDescriptions))
+			return false;
 	}
 
 	if (vi.HasMember("pNext"))
-		state->pNext = parse_pnext_chain(vi["pNext"]);
+		if (!parse_pnext_chain(vi["pNext"], &state->pNext))
+			return false;
 
-	return state;
+	*out_info = state;
+	return true;
 }
 
-VkPipelineDepthStencilStateCreateInfo *StateReplayer::Impl::parse_depth_stencil_state(const rapidjson::Value &ds)
+bool StateReplayer::Impl::parse_depth_stencil_state(const Value &ds, const VkPipelineDepthStencilStateCreateInfo **out_info)
 {
 	auto *state = allocator.allocate_cleared<VkPipelineDepthStencilStateCreateInfo>();
 	state->sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
@@ -1740,10 +1880,11 @@ VkPipelineDepthStencilStateCreateInfo *StateReplayer::Impl::parse_depth_stencil_
 	state->back.reference = ds["back"]["reference"].GetUint();
 	state->back.writeMask = ds["back"]["writeMask"].GetUint();
 
-	return state;
+	*out_info = state;
+	return true;
 }
 
-VkPipelineRasterizationStateCreateInfo *StateReplayer::Impl::parse_rasterization_state(const rapidjson::Value &rs)
+bool StateReplayer::Impl::parse_rasterization_state(const Value &rs, const VkPipelineRasterizationStateCreateInfo **out_info)
 {
 	auto *state = allocator.allocate_cleared<VkPipelineRasterizationStateCreateInfo>();
 	state->sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
@@ -1761,12 +1902,14 @@ VkPipelineRasterizationStateCreateInfo *StateReplayer::Impl::parse_rasterization
 	state->frontFace = static_cast<VkFrontFace>(rs["frontFace"].GetUint());
 
 	if (rs.HasMember("pNext"))
-		state->pNext = parse_pnext_chain(rs["pNext"]);
+		if (!parse_pnext_chain(rs["pNext"], &state->pNext))
+			return false;
 
-	return state;
+	*out_info = state;
+	return true;
 }
 
-VkPipelineTessellationStateCreateInfo *StateReplayer::Impl::parse_tessellation_state(const rapidjson::Value &tess)
+bool StateReplayer::Impl::parse_tessellation_state(const Value &tess, const VkPipelineTessellationStateCreateInfo **out_info)
 {
 	auto *state = allocator.allocate_cleared<VkPipelineTessellationStateCreateInfo>();
 	state->sType = VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO;
@@ -1774,22 +1917,26 @@ VkPipelineTessellationStateCreateInfo *StateReplayer::Impl::parse_tessellation_s
 	state->patchControlPoints = tess["patchControlPoints"].GetUint();
 
 	if (tess.HasMember("pNext"))
-		state->pNext = parse_pnext_chain(tess["pNext"]);
+		if (!parse_pnext_chain(tess["pNext"], &state->pNext))
+			return false;
 
-	return state;
+	*out_info = state;
+	return true;
 }
 
-VkPipelineInputAssemblyStateCreateInfo *StateReplayer::Impl::parse_input_assembly_state(const rapidjson::Value &ia)
+bool StateReplayer::Impl::parse_input_assembly_state(const Value &ia, const VkPipelineInputAssemblyStateCreateInfo **out_info)
 {
 	auto *state = allocator.allocate_cleared<VkPipelineInputAssemblyStateCreateInfo>();
 	state->sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
 	state->flags = ia["flags"].GetUint();
 	state->primitiveRestartEnable = ia["primitiveRestartEnable"].GetUint();
 	state->topology = static_cast<VkPrimitiveTopology>(ia["topology"].GetUint());
-	return state;
+
+	*out_info = state;
+	return true;
 }
 
-VkPipelineColorBlendAttachmentState *StateReplayer::Impl::parse_blend_attachments(const rapidjson::Value &attachments)
+bool StateReplayer::Impl::parse_blend_attachments(const Value &attachments, const VkPipelineColorBlendAttachmentState **out_info)
 {
 	auto *att = allocator.allocate_n_cleared<VkPipelineColorBlendAttachmentState>(attachments.Size());
 	auto *ret = att;
@@ -1807,10 +1954,11 @@ VkPipelineColorBlendAttachmentState *StateReplayer::Impl::parse_blend_attachment
 		att->dstAlphaBlendFactor = static_cast<VkBlendFactor>(obj["dstAlphaBlendFactor"].GetUint());
 	}
 
-	return ret;
+	*out_info = ret;
+	return true;
 }
 
-VkPipelineColorBlendStateCreateInfo *StateReplayer::Impl::parse_color_blend_state(const rapidjson::Value &blend)
+bool StateReplayer::Impl::parse_color_blend_state(const Value &blend, const VkPipelineColorBlendStateCreateInfo **out_info)
 {
 	auto *state = allocator.allocate_cleared<VkPipelineColorBlendStateCreateInfo>();
 	state->sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
@@ -1824,13 +1972,15 @@ VkPipelineColorBlendStateCreateInfo *StateReplayer::Impl::parse_color_blend_stat
 	if (blend.HasMember("attachments"))
 	{
 		state->attachmentCount = blend["attachments"].Size();
-		state->pAttachments = parse_blend_attachments(blend["attachments"]);
+		if (!parse_blend_attachments(blend["attachments"], &state->pAttachments))
+			return false;
 	}
 
-	return state;
+	*out_info = state;
+	return true;
 }
 
-VkPipelineMultisampleStateCreateInfo *StateReplayer::Impl::parse_multisample_state(const rapidjson::Value &ms)
+bool StateReplayer::Impl::parse_multisample_state(const Value &ms, const VkPipelineMultisampleStateCreateInfo **out_info)
 {
 	auto *state = allocator.allocate_cleared<VkPipelineMultisampleStateCreateInfo>();
 
@@ -1840,15 +1990,19 @@ VkPipelineMultisampleStateCreateInfo *StateReplayer::Impl::parse_multisample_sta
 	state->alphaToCoverageEnable = ms["alphaToCoverageEnable"].GetUint();
 	state->alphaToOneEnable = ms["alphaToOneEnable"].GetUint();
 	state->minSampleShading = ms["minSampleShading"].GetFloat();
+
 	if (ms.HasMember("sampleMask"))
-		state->pSampleMask = parse_uints(ms["sampleMask"]);
+		if (!parse_uints(ms["sampleMask"], &state->pSampleMask))
+			return false;
+
 	state->sampleShadingEnable = ms["sampleShadingEnable"].GetUint();
 	state->rasterizationSamples = static_cast<VkSampleCountFlagBits>(ms["rasterizationSamples"].GetUint());
 
-	return state;
+	*out_info = state;
+	return true;
 }
 
-VkPipelineDynamicStateCreateInfo *StateReplayer::Impl::parse_dynamic_state(const rapidjson::Value &dyn)
+bool StateReplayer::Impl::parse_dynamic_state(const Value &dyn, const VkPipelineDynamicStateCreateInfo **out_info)
 {
 	auto *state = allocator.allocate_cleared<VkPipelineDynamicStateCreateInfo>();
 
@@ -1859,13 +2013,15 @@ VkPipelineDynamicStateCreateInfo *StateReplayer::Impl::parse_dynamic_state(const
 	{
 		state->dynamicStateCount = dyn["dynamicState"].Size();
 		static_assert(sizeof(VkDynamicState) == sizeof(uint32_t), "Enum size is not 32-bit.");
-		state->pDynamicStates = reinterpret_cast<VkDynamicState *>(parse_uints(dyn["dynamicState"]));
+		if (!parse_uints(dyn["dynamicState"], reinterpret_cast<const uint32_t **>(&state->pDynamicStates)))
+			return false;
 	}
 
-	return state;
+	*out_info = state;
+	return true;
 }
 
-VkViewport *StateReplayer::Impl::parse_viewports(const rapidjson::Value &viewports)
+bool StateReplayer::Impl::parse_viewports(const Value &viewports, const VkViewport **out_viewports)
 {
 	auto *vps = allocator.allocate_n_cleared<VkViewport>(viewports.Size());
 	auto *ret = vps;
@@ -1881,10 +2037,11 @@ VkViewport *StateReplayer::Impl::parse_viewports(const rapidjson::Value &viewpor
 		vps->maxDepth = obj["maxDepth"].GetFloat();
 	}
 
-	return ret;
+	*out_viewports = ret;
+	return true;
 }
 
-VkRect2D *StateReplayer::Impl::parse_scissors(const rapidjson::Value &scissors)
+bool StateReplayer::Impl::parse_scissors(const Value &scissors, const VkRect2D **out_rects)
 {
 	auto *sci = allocator.allocate_n_cleared<VkRect2D>(scissors.Size());
 	auto *ret = sci;
@@ -1898,10 +2055,11 @@ VkRect2D *StateReplayer::Impl::parse_scissors(const rapidjson::Value &scissors)
 		sci->extent.height = obj["height"].GetUint();
 	}
 
-	return ret;
+	*out_rects = ret;
+	return true;
 }
 
-VkPipelineViewportStateCreateInfo *StateReplayer::Impl::parse_viewport_state(const rapidjson::Value &vp)
+bool StateReplayer::Impl::parse_viewport_state(const Value &vp, const VkPipelineViewportStateCreateInfo **out_info)
 {
 	auto *state = allocator.allocate_cleared<VkPipelineViewportStateCreateInfo>();
 
@@ -1910,16 +2068,20 @@ VkPipelineViewportStateCreateInfo *StateReplayer::Impl::parse_viewport_state(con
 
 	state->scissorCount = vp["scissorCount"].GetUint();
 	if (vp.HasMember("scissors"))
-		state->pScissors = parse_scissors(vp["scissors"]);
+		if (!parse_scissors(vp["scissors"], &state->pScissors))
+			return false;
 
 	state->viewportCount = vp["viewportCount"].GetUint();
 	if (vp.HasMember("viewports"))
-		state->pViewports = parse_viewports(vp["viewports"]);
+		if (!parse_viewports(vp["viewports"], &state->pViewports))
+			return false;
 
-	return state;
+	*out_info = state;
+	return true;
 }
 
-VkPipelineShaderStageCreateInfo *StateReplayer::Impl::parse_stages(StateCreatorInterface &iface, DatabaseInterface *resolver, const rapidjson::Value &stages)
+bool StateReplayer::Impl::parse_stages(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &stages,
+                                       const VkPipelineShaderStageCreateInfo **out_info)
 {
 	auto *state = allocator.allocate_n_cleared<VkPipelineShaderStageCreateInfo>(stages.Size());
 	auto *ret = state;
@@ -1932,7 +2094,8 @@ VkPipelineShaderStageCreateInfo *StateReplayer::Impl::parse_stages(StateCreatorI
 		state->stage = static_cast<VkShaderStageFlagBits>(obj["stage"].GetUint());
 		state->pName = duplicate_string(obj["name"].GetString(), obj["name"].GetStringLength());
 		if (obj.HasMember("specializationInfo"))
-			state->pSpecializationInfo = parse_specialization_info(obj["specializationInfo"]);
+			if (!parse_specialization_info(obj["specializationInfo"], &state->pSpecializationInfo))
+				return false;
 
 		auto module = string_to_uint64(obj["module"].GetString());
 		if (module > 0 && resolve_shader_modules)
@@ -1944,7 +2107,8 @@ VkPipelineShaderStageCreateInfo *StateReplayer::Impl::parse_stages(StateCreatorI
 				if (!resolver || !resolver->read_entry(RESOURCE_SHADER_MODULE, module, &external_state_size, nullptr,
 				                                       PAYLOAD_READ_NO_FLAGS))
 				{
-					throw_missing_resource("Shader module", module);
+					log_missing_resource("Shader module", module);
+					return false;
 				}
 
 				vector<uint8_t> external_state(external_state_size);
@@ -1952,14 +2116,20 @@ VkPipelineShaderStageCreateInfo *StateReplayer::Impl::parse_stages(StateCreatorI
 				if (!resolver->read_entry(RESOURCE_SHADER_MODULE, module, &external_state_size, external_state.data(),
 				                          PAYLOAD_READ_NO_FLAGS))
 				{
-					throw_missing_resource("Shader module", module);
+					log_missing_resource("Shader module", module);
+					return false;
 				}
 
-				this->parse(iface, resolver, external_state.data(), external_state.size());
+				if (!this->parse(iface, resolver, external_state.data(), external_state.size()))
+					return false;
+
 				iface.sync_shader_modules();
 				module_iter = replayed_shader_modules.find(module);
 				if (module_iter == replayed_shader_modules.end())
-					throw_missing_resource("Shader module", module);
+				{
+					log_missing_resource("Shader module", module);
+					return false;
+				}
 			}
 			else
 				iface.sync_shader_modules();
@@ -1970,14 +2140,15 @@ VkPipelineShaderStageCreateInfo *StateReplayer::Impl::parse_stages(StateCreatorI
 			state->module = api_object_cast<VkShaderModule>(module);
 	}
 
-	return ret;
+	*out_info = ret;
+	return true;
 }
 
-void StateReplayer::Impl::parse_graphics_pipeline(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines, const Value &member)
+bool StateReplayer::Impl::parse_graphics_pipeline(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines, const Value &member)
 {
 	Hash hash = string_to_uint64(member.GetString());
 	if (replayed_graphics_pipelines.count(hash))
-		return;
+		return true;
 
 	auto *info_allocated = allocator.allocate_cleared<VkGraphicsPipelineCreateInfo>();
 	auto &obj = pipelines[member];
@@ -1996,7 +2167,8 @@ void StateReplayer::Impl::parse_graphics_pipeline(StateCreatorInterface &iface, 
 		// If we don't have the pipeline, we might have it later in the array of graphics pipelines, queue up out of order.
 		if (pipeline_iter == replayed_graphics_pipelines.end() && pipelines.HasMember(obj["basePipelineHandle"].GetString()))
 		{
-			parse_graphics_pipeline(iface, resolver, pipelines, obj["basePipelineHandle"]);
+			if (!parse_graphics_pipeline(iface, resolver, pipelines, obj["basePipelineHandle"]))
+				return false;
 			iface.sync_threads();
 			pipeline_iter = replayed_graphics_pipelines.find(pipeline);
 		}
@@ -2008,7 +2180,8 @@ void StateReplayer::Impl::parse_graphics_pipeline(StateCreatorInterface &iface, 
 			if (!resolver || !resolver->read_entry(RESOURCE_GRAPHICS_PIPELINE, pipeline, &external_state_size, nullptr,
 			                                       PAYLOAD_READ_NO_FLAGS))
 			{
-				throw_missing_resource("Base pipeline", pipeline);
+				log_missing_resource("Base pipeline", pipeline);
+				return false;
 			}
 
 			vector<uint8_t> external_state(external_state_size);
@@ -2016,14 +2189,20 @@ void StateReplayer::Impl::parse_graphics_pipeline(StateCreatorInterface &iface, 
 			if (!resolver->read_entry(RESOURCE_GRAPHICS_PIPELINE, pipeline, &external_state_size, external_state.data(),
 			                          PAYLOAD_READ_NO_FLAGS))
 			{
-				throw_missing_resource("Base pipeline", pipeline);
+				log_missing_resource("Base pipeline", pipeline);
+				return false;
 			}
 
-			this->parse(iface, resolver, external_state.data(), external_state.size());
+			if (!this->parse(iface, resolver, external_state.data(), external_state.size()))
+				return false;
+
 			iface.sync_threads();
 			pipeline_iter = replayed_graphics_pipelines.find(pipeline);
 			if (pipeline_iter == replayed_graphics_pipelines.end())
-				throw_missing_resource("Base pipeline", pipeline);
+			{
+				log_missing_resource("Base pipeline", pipeline);
+				return false;
+			}
 		}
 		info.basePipelineHandle = pipeline_iter->second;
 	}
@@ -2035,7 +2214,10 @@ void StateReplayer::Impl::parse_graphics_pipeline(StateCreatorInterface &iface, 
 	{
 		auto layout_itr = replayed_pipeline_layouts.find(layout);
 		if (layout_itr == end(replayed_pipeline_layouts))
-			throw_missing_resource("Pipeline layout", layout);
+		{
+			log_missing_resource("Pipeline layout", layout);
+			return false;
+		}
 		else
 			info.layout = layout_itr->second;
 	}
@@ -2045,7 +2227,10 @@ void StateReplayer::Impl::parse_graphics_pipeline(StateCreatorInterface &iface, 
 	{
 		auto rp_itr = replayed_render_passes.find(render_pass);
 		if (rp_itr == end(replayed_render_passes))
-			throw_missing_resource("Render pass", render_pass);
+		{
+			log_missing_resource("Render pass", render_pass);
+			return false;
+		}
 		else
 			info.renderPass = rp_itr->second;
 	}
@@ -2055,51 +2240,73 @@ void StateReplayer::Impl::parse_graphics_pipeline(StateCreatorInterface &iface, 
 	if (obj.HasMember("stages"))
 	{
 		info.stageCount = obj["stages"].Size();
-		info.pStages = parse_stages(iface, resolver, obj["stages"]);
+		if (!parse_stages(iface, resolver, obj["stages"], &info.pStages))
+			return false;
 	}
 
 	if (obj.HasMember("rasterizationState"))
-		info.pRasterizationState = parse_rasterization_state(obj["rasterizationState"]);
+		if (!parse_rasterization_state(obj["rasterizationState"], &info.pRasterizationState))
+			return false;
+
 	if (obj.HasMember("tessellationState"))
-		info.pTessellationState = parse_tessellation_state(obj["tessellationState"]);
+		if (!parse_tessellation_state(obj["tessellationState"], &info.pTessellationState))
+			return false;
+
 	if (obj.HasMember("colorBlendState"))
-		info.pColorBlendState = parse_color_blend_state(obj["colorBlendState"]);
+		if (!parse_color_blend_state(obj["colorBlendState"], &info.pColorBlendState))
+			return false;
+
 	if (obj.HasMember("depthStencilState"))
-		info.pDepthStencilState = parse_depth_stencil_state(obj["depthStencilState"]);
+		if (!parse_depth_stencil_state(obj["depthStencilState"], &info.pDepthStencilState))
+			return false;
+
 	if (obj.HasMember("dynamicState"))
-		info.pDynamicState = parse_dynamic_state(obj["dynamicState"]);
+		if (!parse_dynamic_state(obj["dynamicState"], &info.pDynamicState))
+			return false;
+
 	if (obj.HasMember("viewportState"))
-		info.pViewportState = parse_viewport_state(obj["viewportState"]);
+		if (!parse_viewport_state(obj["viewportState"], &info.pViewportState))
+			return false;
+
 	if (obj.HasMember("multisampleState"))
-		info.pMultisampleState = parse_multisample_state(obj["multisampleState"]);
+		 if (!parse_multisample_state(obj["multisampleState"], &info.pMultisampleState))
+		 	return false;
+
 	if (obj.HasMember("inputAssemblyState"))
-		info.pInputAssemblyState = parse_input_assembly_state(obj["inputAssemblyState"]);
+		if (!parse_input_assembly_state(obj["inputAssemblyState"], &info.pInputAssemblyState))
+			return false;
+
 	if (obj.HasMember("vertexInputState"))
-		info.pVertexInputState = parse_vertex_input_state(obj["vertexInputState"]);
+		if (!parse_vertex_input_state(obj["vertexInputState"], &info.pVertexInputState))
+			return false;
 
 	if (!iface.enqueue_create_graphics_pipeline(hash, &info, &replayed_graphics_pipelines[hash]))
-		FOSSILIZE_THROW("Failed to create graphics pipeline.");
+	{
+		LOGE("Failed to create graphics pipeline.");
+		return false;
+	}
+
+	return true;
 }
 
-void StateReplayer::Impl::parse_graphics_pipelines(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines)
+bool StateReplayer::Impl::parse_graphics_pipelines(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines)
 {
 	for (auto itr = pipelines.MemberBegin(); itr != pipelines.MemberEnd(); ++itr)
-		parse_graphics_pipeline(iface, resolver, pipelines, itr->name);
+		if (!parse_graphics_pipeline(iface, resolver, pipelines, itr->name))
+			return false;
 	iface.notify_replayed_resources_for_type();
+	return true;
 }
 
-VkPipelineTessellationDomainOriginStateCreateInfo *
-StateReplayer::Impl::parse_tessellation_domain_origin_state(const Value &state)
+bool StateReplayer::Impl::parse_tessellation_domain_origin_state(const Value &state, VkPipelineTessellationDomainOriginStateCreateInfo **out_info)
 {
 	auto *info = allocator.allocate_cleared<VkPipelineTessellationDomainOriginStateCreateInfo>();
-
 	info->domainOrigin = static_cast<VkTessellationDomainOrigin>(state["domainOrigin"].GetUint());
-
-	return info;
+	*out_info = info;
+	return true;
 }
 
-VkPipelineVertexInputDivisorStateCreateInfoEXT *
-StateReplayer::Impl::parse_vertex_input_divisor_state(const Value &state)
+bool StateReplayer::Impl::parse_vertex_input_divisor_state(const Value &state, VkPipelineVertexInputDivisorStateCreateInfoEXT **out_info)
 {
 	auto *info = allocator.allocate_cleared<VkPipelineVertexInputDivisorStateCreateInfoEXT>();
 	info->vertexBindingDivisorCount = state["vertexBindingDivisorCount"].GetUint();
@@ -2118,32 +2325,33 @@ StateReplayer::Impl::parse_vertex_input_divisor_state(const Value &state)
 		}
 	}
 
-	return info;
+	*out_info = info;
+	return true;
 }
 
-VkPipelineRasterizationDepthClipStateCreateInfoEXT *
-StateReplayer::Impl::parse_rasterization_depth_clip_state(const Value &state)
+bool StateReplayer::Impl::parse_rasterization_depth_clip_state(const Value &state, VkPipelineRasterizationDepthClipStateCreateInfoEXT **out_info)
 {
 	auto *info = allocator.allocate_cleared<VkPipelineRasterizationDepthClipStateCreateInfoEXT>();
 
 	info->flags = state["flags"].GetUint();
 	info->depthClipEnable = state["depthClipEnable"].GetUint();
 
-	return info;
+	*out_info = info;
+	return true;
 }
 
-VkPipelineRasterizationStateStreamCreateInfoEXT *
-StateReplayer::Impl::parse_rasterization_stream_state(const Value &state)
+bool StateReplayer::Impl::parse_rasterization_stream_state(const Value &state, VkPipelineRasterizationStateStreamCreateInfoEXT **out_info)
 {
 	auto *info = allocator.allocate_cleared<VkPipelineRasterizationStateStreamCreateInfoEXT>();
 
 	info->flags = state["flags"].GetUint();
 	info->rasterizationStream = state["rasterizationStream"].GetUint();
 
-	return info;
+	*out_info = info;
+	return true;
 }
 
-const void *StateReplayer::Impl::parse_pnext_chain(const Value &pnext)
+bool StateReplayer::Impl::parse_pnext_chain(const Value &pnext, const void **outpNext)
 {
 	VkBaseInStructure *ret = nullptr;
 	VkBaseInStructure *chain = nullptr;
@@ -2158,34 +2366,43 @@ const void *StateReplayer::Impl::parse_pnext_chain(const Value &pnext)
 		{
 		case VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_DOMAIN_ORIGIN_STATE_CREATE_INFO:
 		{
-			auto *info = parse_tessellation_domain_origin_state(next);
+			VkPipelineTessellationDomainOriginStateCreateInfo *info = nullptr;
+			if (!parse_tessellation_domain_origin_state(next, &info))
+				return false;
 			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
 			break;
 		}
 
 		case VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_DIVISOR_STATE_CREATE_INFO_EXT:
 		{
-			auto *info = parse_vertex_input_divisor_state(next);
+			VkPipelineVertexInputDivisorStateCreateInfoEXT *info = nullptr;
+			if (!parse_vertex_input_divisor_state(next, &info))
+				return false;
 			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
 			break;
 		}
 
 		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_DEPTH_CLIP_STATE_CREATE_INFO_EXT:
 		{
-			auto *info = parse_rasterization_depth_clip_state(next);
+			VkPipelineRasterizationDepthClipStateCreateInfoEXT *info = nullptr;
+			if (!parse_rasterization_depth_clip_state(next, &info))
+				return false;
 			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
 			break;
 		}
 
 		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_STREAM_CREATE_INFO_EXT:
 		{
-			auto *info = parse_rasterization_stream_state(next);
+			VkPipelineRasterizationStateStreamCreateInfoEXT *info = nullptr;
+			if (!parse_rasterization_stream_state(next, &info))
+				return false;
 			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
 			break;
 		}
 
 		default:
-			FOSSILIZE_THROW(std::string("Failed to parse pNext chain for sType: ") + std::to_string(sType));
+			LOGE("Failed to parse pNext chain for sType: %d\n", int(sType));
+			return false;
 		}
 
 		new_struct->sType = sType;
@@ -2203,7 +2420,8 @@ const void *StateReplayer::Impl::parse_pnext_chain(const Value &pnext)
 		}
 	}
 
-	return ret;
+	*outpNext = ret;
+	return true;
 }
 
 StateReplayer::StateReplayer()
@@ -2221,9 +2439,9 @@ ScratchAllocator &StateReplayer::get_allocator()
 	return impl->allocator;
 }
 
-void StateReplayer::parse(StateCreatorInterface &iface, DatabaseInterface *resolver, const void *buffer, size_t size)
+bool StateReplayer::parse(StateCreatorInterface &iface, DatabaseInterface *resolver, const void *buffer, size_t size)
 {
-	impl->parse(iface, resolver, buffer, size);
+	return impl->parse(iface, resolver, buffer, size);
 }
 
 void StateReplayer::set_resolve_derivative_pipeline_handles(bool enable)
@@ -2252,7 +2470,7 @@ void StateReplayer::Impl::copy_handle_references(const StateReplayer::Impl &othe
 	replayed_graphics_pipelines = other.replayed_graphics_pipelines;
 }
 
-void StateReplayer::Impl::parse(StateCreatorInterface &iface, DatabaseInterface *resolver, const void *buffer_, size_t total_size)
+bool StateReplayer::Impl::parse(StateCreatorInterface &iface, DatabaseInterface *resolver, const void *buffer_, size_t total_size)
 {
 	// All data after a string terminating '\0' is considered binary payload
 	// which can be read for various purposes (SPIR-V varint for example).
@@ -2275,42 +2493,56 @@ void StateReplayer::Impl::parse(StateCreatorInterface &iface, DatabaseInterface 
 	{
 		auto error = doc.GetParseError();
 		LOGE("Got parse error: %d\n", int(error));
-		FOSSILIZE_THROW("JSON parse error.");
+		return false;
 	}
 
 	int version = doc["version"].GetInt();
 	if (version > FOSSILIZE_FORMAT_VERSION || version < FOSSILIZE_FORMAT_MIN_COMPAT_VERSION)
-		FOSSILIZE_THROW("JSON version mismatches.");
+	{
+		LOGE("JSON version mismatches.");
+		return false;
+	}
 
 	if (doc.HasMember("applicationInfo") && doc.HasMember("physicalDeviceFeatures"))
-		parse_application_info(iface, doc["applicationInfo"], doc["physicalDeviceFeatures"]);
+		if (!parse_application_info(iface, doc["applicationInfo"], doc["physicalDeviceFeatures"]))
+			return false;
 
 	if (doc.HasMember("application"))
 		iface.set_current_application_info(string_to_uint64(doc["application"].GetString()));
 
 	if (doc.HasMember("link"))
-		parse_application_info_link(iface, doc["link"]);
+		if (!parse_application_info_link(iface, doc["link"]))
+			return false;
 
 	if (doc.HasMember("shaderModules"))
-		parse_shader_modules(iface, doc["shaderModules"], varint_buffer, varint_size);
+		if (!parse_shader_modules(iface, doc["shaderModules"], varint_buffer, varint_size))
+			return false;
 
 	if (doc.HasMember("samplers"))
-		parse_samplers(iface, doc["samplers"]);
+		if (!parse_samplers(iface, doc["samplers"]))
+			return false;
 
 	if (doc.HasMember("setLayouts"))
-		parse_descriptor_set_layouts(iface, doc["setLayouts"]);
+		if (!parse_descriptor_set_layouts(iface, doc["setLayouts"]))
+			return false;
 
 	if (doc.HasMember("pipelineLayouts"))
-		parse_pipeline_layouts(iface, doc["pipelineLayouts"]);
+		if (!parse_pipeline_layouts(iface, doc["pipelineLayouts"]))
+			return false;
 
 	if (doc.HasMember("renderPasses"))
-		parse_render_passes(iface, doc["renderPasses"]);
+		if (!parse_render_passes(iface, doc["renderPasses"]))
+			return false;
 
 	if (doc.HasMember("computePipelines"))
-		parse_compute_pipelines(iface, resolver, doc["computePipelines"]);
+		if (!parse_compute_pipelines(iface, resolver, doc["computePipelines"]))
+			return false;
 
 	if (doc.HasMember("graphicsPipelines"))
-		parse_graphics_pipelines(iface, resolver, doc["graphicsPipelines"]);
+		if (!parse_graphics_pipelines(iface, resolver, doc["graphicsPipelines"]))
+			return false;
+
+	return true;
 }
 
 template <typename T>
@@ -2361,7 +2593,7 @@ void *StateRecorder::Impl::copy_pnext_struct(
 	return copy(create_info, 1, alloc);
 }
 
-const void *StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &alloc)
+bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &alloc, const void **out_pnext)
 {
 	VkBaseInStructure new_pnext = {};
 	const VkBaseInStructure **ppNext = &new_pnext.pNext;
@@ -2401,8 +2633,8 @@ const void *StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllo
 		}
 
 		default:
-			FOSSILIZE_THROW_PNEXT("Cannot copy unknown pNext sType.", pNext);
-			break;
+			LOGE("Cannot copy unknown pNext sType: %d.\n", int(pin->sType));
+			return false;
 		}
 
 		pNext = pin->pNext;
@@ -2410,7 +2642,8 @@ const void *StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllo
 		*ppNext = nullptr;
 	}
 
-	return new_pnext.pNext;
+	*out_pnext = new_pnext.pNext;
+	return true;
 }
 
 struct ScratchAllocator::Impl
@@ -2521,21 +2754,29 @@ void StateRecorder::set_database_enable_compression(bool enable)
 	impl->compression = enable;
 }
 
-void StateRecorder::record_application_info(const VkApplicationInfo &info)
+bool StateRecorder::record_application_info(const VkApplicationInfo &info)
 {
 	if (info.pNext)
-		FOSSILIZE_THROW_PNEXT("pNext in VkApplicationInfo not supported.", info.pNext);
+	{
+		log_error_pnext_chain("pNext in VkApplicationInfo not supported.", info.pNext);
+		return false;
+	}
+
 	std::lock_guard<std::mutex> lock(impl->record_lock);
-	impl->application_info = impl->copy_application_info(&info, impl->allocator);
+	if (!impl->copy_application_info(&info, impl->allocator, &impl->application_info))
+		return false;
 	impl->application_feature_hash.application_info_hash = Hashing::compute_hash_application_info(*impl->application_info);
+	return true;
 }
 
-void StateRecorder::record_physical_device_features(const VkPhysicalDeviceFeatures2 &device_features)
+bool StateRecorder::record_physical_device_features(const VkPhysicalDeviceFeatures2 &device_features)
 {
 	// We just ignore pNext, but it's okay to keep it. We will not need to serialize it for now.
 	std::lock_guard<std::mutex> lock(impl->record_lock);
-	impl->physical_device_features = impl->copy_physical_device_features(&device_features, impl->allocator);
+	if (!impl->copy_physical_device_features(&device_features, impl->allocator, &impl->physical_device_features))
+		return false;
 	impl->application_feature_hash.physical_device_features_hash = Hashing::compute_hash_physical_device_features(*impl->physical_device_features);
+	return true;
 }
 
 void StateRecorder::set_application_info_filter(ApplicationInfoFilter *filter)
@@ -2548,143 +2789,194 @@ const StateRecorderApplicationFeatureHash &StateRecorder::get_application_featur
 	return impl->application_feature_hash;
 }
 
-void StateRecorder::record_physical_device_features(const VkPhysicalDeviceFeatures &device_features)
+bool StateRecorder::record_physical_device_features(const VkPhysicalDeviceFeatures &device_features)
 {
 	VkPhysicalDeviceFeatures2 features = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
 	features.features = device_features;
-	record_physical_device_features(features);
+	return record_physical_device_features(features);
 }
 
-void StateRecorder::record_sampler(VkSampler sampler, const VkSamplerCreateInfo &create_info, Hash custom_hash)
+bool StateRecorder::record_sampler(VkSampler sampler, const VkSamplerCreateInfo &create_info, Hash custom_hash)
 {
 	{
 		if (create_info.pNext)
-			FOSSILIZE_THROW_PNEXT("pNext in VkSamplerCreateInfo not supported.", create_info.pNext);
+		{
+			log_error_pnext_chain("pNext in VkSamplerCreateInfo not supported.", create_info.pNext);
+			return false;
+		}
 		std::lock_guard<std::mutex> lock(impl->record_lock);
-		impl->record_queue.push({api_object_cast<uint64_t>(sampler),
-		                         reinterpret_cast<void *>(impl->copy_sampler(&create_info, impl->temp_allocator)),
-		                         custom_hash});
+
+		VkSamplerCreateInfo *new_info = nullptr;
+		if (!impl->copy_sampler(&create_info, impl->temp_allocator, &new_info))
+			return false;
+
+		impl->record_queue.push({api_object_cast<uint64_t>(sampler), new_info, custom_hash});
 		impl->record_cv.notify_one();
 	}
 
 	// Thread is not running, drain the queue ourselves.
 	if (!impl->worker_thread.joinable())
 		impl->record_task(this, false);
+
+	return true;
 }
 
-void StateRecorder::record_descriptor_set_layout(VkDescriptorSetLayout set_layout, const VkDescriptorSetLayoutCreateInfo &create_info,
+bool StateRecorder::record_descriptor_set_layout(VkDescriptorSetLayout set_layout, const VkDescriptorSetLayoutCreateInfo &create_info,
                                                  Hash custom_hash)
 {
 	{
+		if (create_info.pNext)
+		{
+			log_error_pnext_chain("pNext in VkDescriptorSetLayoutCreateInfo not supported.", create_info.pNext);
+			return false;
+		}
 		std::lock_guard<std::mutex> lock(impl->record_lock);
-		impl->record_queue.push({api_object_cast<uint64_t>(set_layout),
-		                         reinterpret_cast<void *>(impl->copy_descriptor_set_layout(&create_info,
-		                                                                                   impl->temp_allocator)),
-		                                                                                   custom_hash});
+
+		VkDescriptorSetLayoutCreateInfo *new_info = nullptr;
+		if (!impl->copy_descriptor_set_layout(&create_info, impl->temp_allocator, &new_info))
+			return false;
+
+		impl->record_queue.push({api_object_cast<uint64_t>(set_layout), new_info, custom_hash});
 		impl->record_cv.notify_one();
 	}
 
 	// Thread is not running, drain the queue ourselves.
 	if (!impl->worker_thread.joinable())
 		impl->record_task(this, false);
+
+	return true;
 }
 
-void StateRecorder::record_pipeline_layout(VkPipelineLayout pipeline_layout, const VkPipelineLayoutCreateInfo &create_info,
+bool StateRecorder::record_pipeline_layout(VkPipelineLayout pipeline_layout, const VkPipelineLayoutCreateInfo &create_info,
                                            Hash custom_hash)
 {
 	{
+		if (create_info.pNext)
+		{
+			log_error_pnext_chain("pNext in VkPipelineLayoutCreateInfo not supported.", create_info.pNext);
+			return false;
+		}
 		std::lock_guard<std::mutex> lock(impl->record_lock);
-		impl->record_queue.push({api_object_cast<uint64_t>(pipeline_layout),
-		                         reinterpret_cast<void *>(impl->copy_pipeline_layout(&create_info,
-		                                                                             impl->temp_allocator)),
-		                                                                             custom_hash});
+
+		VkPipelineLayoutCreateInfo *new_info = nullptr;
+		if (!impl->copy_pipeline_layout(&create_info, impl->temp_allocator, &new_info))
+			return false;
+
+		impl->record_queue.push({api_object_cast<uint64_t>(pipeline_layout), new_info, custom_hash});
 		impl->record_cv.notify_one();
 	}
 
 	// Thread is not running, drain the queue ourselves.
 	if (!impl->worker_thread.joinable())
 		impl->record_task(this, false);
+
+	return true;
 }
 
-void StateRecorder::record_graphics_pipeline(VkPipeline pipeline, const VkGraphicsPipelineCreateInfo &create_info,
+bool StateRecorder::record_graphics_pipeline(VkPipeline pipeline, const VkGraphicsPipelineCreateInfo &create_info,
                                              const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
                                              Hash custom_hash)
 {
 	{
 		if (create_info.pNext)
-			FOSSILIZE_THROW_PNEXT("pNext in VkGraphicsPipelineCreateInfo not supported.", create_info.pNext);
+		{
+			log_error_pnext_chain("pNext in VkGraphicsPipelineCreateInfo not supported.", create_info.pNext);
+			return false;
+		}
 		std::lock_guard<std::mutex> lock(impl->record_lock);
-		impl->record_queue.push({api_object_cast<uint64_t>(pipeline),
-		                         reinterpret_cast<void *>(impl->copy_graphics_pipeline(&create_info,
-		                                                                               impl->temp_allocator,
-		                                                                               base_pipelines,
-		                                                                               base_pipeline_count)),
-		                                                                               custom_hash});
+
+		VkGraphicsPipelineCreateInfo *new_info = nullptr;
+		if (!impl->copy_graphics_pipeline(&create_info, impl->temp_allocator, base_pipelines, base_pipeline_count, &new_info))
+			return false;
+
+		impl->record_queue.push({api_object_cast<uint64_t>(pipeline), new_info, custom_hash});
 		impl->record_cv.notify_one();
 	}
 
 	// Thread is not running, drain the queue ourselves.
 	if (!impl->worker_thread.joinable())
 		impl->record_task(this, false);
+
+	return true;
 }
 
-void StateRecorder::record_compute_pipeline(VkPipeline pipeline, const VkComputePipelineCreateInfo &create_info,
+bool StateRecorder::record_compute_pipeline(VkPipeline pipeline, const VkComputePipelineCreateInfo &create_info,
                                             const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
                                             Hash custom_hash)
 {
 	{
 		if (create_info.pNext)
-			FOSSILIZE_THROW_PNEXT("pNext in VkComputePipelineCreateInfo not supported.", create_info.pNext);
+		{
+			log_error_pnext_chain("pNext in VkComputePipelineCreateInfo not supported.", create_info.pNext);
+			return false;
+		}
 		std::lock_guard<std::mutex> lock(impl->record_lock);
-		impl->record_queue.push({api_object_cast<uint64_t>(pipeline),
-		                         reinterpret_cast<void *>(impl->copy_compute_pipeline(&create_info,
-		                                                                              impl->temp_allocator,
-		                                                                              base_pipelines,
-		                                                                              base_pipeline_count)),
-		                                                                              custom_hash});
+
+		VkComputePipelineCreateInfo *new_info = nullptr;
+		if (!impl->copy_compute_pipeline(&create_info, impl->temp_allocator, base_pipelines, base_pipeline_count, &new_info))
+			return false;
+
+		impl->record_queue.push({api_object_cast<uint64_t>(pipeline), new_info, custom_hash});
 		impl->record_cv.notify_one();
 	}
 
 	// Thread is not running, drain the queue ourselves.
 	if (!impl->worker_thread.joinable())
 		impl->record_task(this, false);
+
+	return true;
 }
 
-void StateRecorder::record_render_pass(VkRenderPass render_pass, const VkRenderPassCreateInfo &create_info,
+bool StateRecorder::record_render_pass(VkRenderPass render_pass, const VkRenderPassCreateInfo &create_info,
                                        Hash custom_hash)
 {
 	{
 		if (create_info.pNext)
-			FOSSILIZE_THROW_PNEXT("pNext in VkRenderPassCreateInfo not supported.", create_info.pNext);
+		{
+			log_error_pnext_chain("pNext in VkRenderPassCreateInfo not supported.", create_info.pNext);
+			return false;
+		}
 		std::lock_guard<std::mutex> lock(impl->record_lock);
-		impl->record_queue.push({api_object_cast<uint64_t>(render_pass),
-		                         reinterpret_cast<void *>(impl->copy_render_pass(&create_info, impl->temp_allocator)),
-		                         custom_hash});
+
+		VkRenderPassCreateInfo *new_info = nullptr;
+		if (!impl->copy_render_pass(&create_info, impl->temp_allocator, &new_info))
+			return false;
+
+		impl->record_queue.push({api_object_cast<uint64_t>(render_pass), new_info, custom_hash});
 		impl->record_cv.notify_one();
 	}
 
 	// Thread is not running, drain the queue ourselves.
 	if (!impl->worker_thread.joinable())
 		impl->record_task(this, false);
+
+	return true;
 }
 
-void StateRecorder::record_shader_module(VkShaderModule module, const VkShaderModuleCreateInfo &create_info,
+bool StateRecorder::record_shader_module(VkShaderModule module, const VkShaderModuleCreateInfo &create_info,
                                          Hash custom_hash)
 {
 	{
 		if (create_info.pNext)
-			FOSSILIZE_THROW_PNEXT("pNext in VkShaderModuleCreateInfo not supported.", create_info.pNext);
+		{
+			log_error_pnext_chain("pNext in VkShaderModuleCreateInfo not supported.", create_info.pNext);
+			return false;
+		}
 		std::lock_guard<std::mutex> lock(impl->record_lock);
-		impl->record_queue.push({api_object_cast<uint64_t>(module),
-		                         reinterpret_cast<void *>(impl->copy_shader_module(&create_info,
-		                                                                           impl->temp_allocator)),
-		                                                                           custom_hash});
+
+		VkShaderModuleCreateInfo *new_info = nullptr;
+		if (!impl->copy_shader_module(&create_info, impl->temp_allocator, &new_info))
+			return false;
+
+		impl->record_queue.push({api_object_cast<uint64_t>(module), new_info, custom_hash});
 		impl->record_cv.notify_one();
 	}
 
 	// Thread is not running, drain the queue ourselves.
 	if (!impl->worker_thread.joinable())
 		impl->record_task(this, false);
+
+	return true;
 }
 
 void StateRecorder::Impl::record_end()
@@ -2695,91 +2987,148 @@ void StateRecorder::Impl::record_end()
 	record_cv.notify_one();
 }
 
-Hash StateRecorder::get_hash_for_compute_pipeline_handle(VkPipeline pipeline) const
+bool StateRecorder::get_hash_for_compute_pipeline_handle(VkPipeline pipeline, Hash *hash) const
 {
 	auto itr = impl->compute_pipeline_to_hash.find(pipeline);
 	if (itr == end(impl->compute_pipeline_to_hash))
-		FOSSILIZE_THROW("Handle is not registered.");
+	{
+		LOGE("Handle is not registered.\n");
+		return false;
+	}
 	else
-		return itr->second;
+	{
+		*hash = itr->second;
+		return true;
+	}
 }
 
-Hash StateRecorder::get_hash_for_graphics_pipeline_handle(VkPipeline pipeline) const
+bool StateRecorder::get_hash_for_graphics_pipeline_handle(VkPipeline pipeline, Hash *hash) const
 {
 	auto itr = impl->graphics_pipeline_to_hash.find(pipeline);
 	if (itr == end(impl->graphics_pipeline_to_hash))
-		FOSSILIZE_THROW("Handle is not registered.");
+	{
+		LOGE("Handle is not registered.\n");
+		return false;
+	}
 	else
-		return itr->second;
+	{
+		*hash = itr->second;
+		return true;
+	}
 }
 
-Hash StateRecorder::get_hash_for_sampler(VkSampler sampler) const
+bool StateRecorder::get_hash_for_sampler(VkSampler sampler, Hash *hash) const
 {
 	auto itr = impl->sampler_to_hash.find(sampler);
 	if (itr == end(impl->sampler_to_hash))
-		FOSSILIZE_THROW("Handle is not registered.");
+	{
+		LOGE("Handle is not registered.\n");
+		return false;
+	}
 	else
-		return itr->second;
+	{
+		*hash = itr->second;
+		return true;
+	}
 }
 
-Hash StateRecorder::get_hash_for_shader_module(VkShaderModule module) const
+bool StateRecorder::get_hash_for_shader_module(VkShaderModule module, Hash *hash) const
 {
 	auto itr = impl->shader_module_to_hash.find(module);
 	if (itr == end(impl->shader_module_to_hash))
-		FOSSILIZE_THROW("Handle is not registered.");
+	{
+		LOGE("Handle is not registered.\n");
+		return false;
+	}
 	else
-		return itr->second;
+	{
+		*hash = itr->second;
+		return true;
+	}
 }
 
-Hash StateRecorder::get_hash_for_pipeline_layout(VkPipelineLayout layout) const
+bool StateRecorder::get_hash_for_pipeline_layout(VkPipelineLayout layout, Hash *hash) const
 {
 	auto itr = impl->pipeline_layout_to_hash.find(layout);
 	if (itr == end(impl->pipeline_layout_to_hash))
-		FOSSILIZE_THROW("Handle is not registered.");
+	{
+		LOGE("Handle is not registered.\n");
+		return false;
+	}
 	else
-		return itr->second;
+	{
+		*hash = itr->second;
+		return true;
+	}
 }
 
-Hash StateRecorder::get_hash_for_descriptor_set_layout(VkDescriptorSetLayout layout) const
+bool StateRecorder::get_hash_for_descriptor_set_layout(VkDescriptorSetLayout layout, Hash *hash) const
 {
 	auto itr = impl->descriptor_set_layout_to_hash.find(layout);
 	if (itr == end(impl->descriptor_set_layout_to_hash))
-		FOSSILIZE_THROW("Handle is not registered.");
+	{
+		LOGE("Handle is not registered.\n");
+		return false;
+	}
 	else
-		return itr->second;
+	{
+		*hash = itr->second;
+		return true;
+	}
 }
 
-Hash StateRecorder::get_hash_for_render_pass(VkRenderPass render_pass) const
+bool StateRecorder::get_hash_for_render_pass(VkRenderPass render_pass, Hash *hash) const
 {
 	auto itr = impl->render_pass_to_hash.find(render_pass);
 	if (itr == end(impl->render_pass_to_hash))
-		FOSSILIZE_THROW("Handle is not registered.");
+	{
+		LOGE("Handle is not registered.\n");
+		return false;
+	}
 	else
-		return itr->second;
+	{
+		*hash = itr->second;
+		return true;
+	}
 }
 
-VkShaderModuleCreateInfo *StateRecorder::Impl::copy_shader_module(const VkShaderModuleCreateInfo *create_info, ScratchAllocator &alloc)
+bool StateRecorder::Impl::copy_shader_module(const VkShaderModuleCreateInfo *create_info, ScratchAllocator &alloc,
+                                             VkShaderModuleCreateInfo **out_create_info)
 {
+	if (create_info->pNext)
+		return false;
+
 	auto *info = copy(create_info, 1, alloc);
 	info->pCode = copy(info->pCode, info->codeSize / sizeof(uint32_t), alloc);
-	return info;
+
+	*out_create_info = info;
+	return true;
 }
 
-VkSamplerCreateInfo *StateRecorder::Impl::copy_sampler(const VkSamplerCreateInfo *create_info, ScratchAllocator &alloc)
+bool StateRecorder::Impl::copy_sampler(const VkSamplerCreateInfo *create_info, ScratchAllocator &alloc,
+                                       VkSamplerCreateInfo **out_create_info)
 {
-	return copy(create_info, 1, alloc);
+	if (create_info->pNext)
+		return false;
+
+	*out_create_info = copy(create_info, 1, alloc);
+	return true;
 }
 
-VkPhysicalDeviceFeatures2 *StateRecorder::Impl::copy_physical_device_features(const VkPhysicalDeviceFeatures2 *pdf,
-                                                                              ScratchAllocator &alloc)
+bool StateRecorder::Impl::copy_physical_device_features(const VkPhysicalDeviceFeatures2 *pdf,
+                                                        ScratchAllocator &alloc,
+                                                        VkPhysicalDeviceFeatures2 **out_pdf)
 {
 	// Ignore pNext. We don't need to serialize it.
 	auto *features = copy(pdf, 1, alloc);
 	features->pNext = nullptr;
-	return features;
+
+	*out_pdf = features;
+	return true;
 }
 
-VkApplicationInfo *StateRecorder::Impl::copy_application_info(const VkApplicationInfo *app_info, ScratchAllocator &alloc)
+bool StateRecorder::Impl::copy_application_info(const VkApplicationInfo *app_info, ScratchAllocator &alloc,
+                                                VkApplicationInfo **out_app_info)
 {
 	auto *app = copy(app_info, 1, alloc);
 	if (app->pEngineName)
@@ -2787,12 +3136,17 @@ VkApplicationInfo *StateRecorder::Impl::copy_application_info(const VkApplicatio
 	if (app->pApplicationName)
 		app->pApplicationName = copy(app->pApplicationName, strlen(app->pApplicationName) + 1, alloc);
 
-	return app;
+	*out_app_info = app;
+	return true;
 }
 
-VkDescriptorSetLayoutCreateInfo *StateRecorder::Impl::copy_descriptor_set_layout(
-	const VkDescriptorSetLayoutCreateInfo *create_info, ScratchAllocator &alloc)
+bool StateRecorder::Impl::copy_descriptor_set_layout(
+	const VkDescriptorSetLayoutCreateInfo *create_info, ScratchAllocator &alloc,
+	VkDescriptorSetLayoutCreateInfo **out_create_info)
 {
+	if (create_info->pNext)
+		return false;
+
 	auto *info = copy(create_info, 1, alloc);
 	info->pBindings = copy(info->pBindings, info->bindingCount, alloc);
 
@@ -2807,27 +3161,38 @@ VkDescriptorSetLayoutCreateInfo *StateRecorder::Impl::copy_descriptor_set_layout
 		}
 	}
 
-	return info;
+	*out_create_info = info;
+	return true;
 }
 
-VkPipelineLayoutCreateInfo *StateRecorder::Impl::copy_pipeline_layout(const VkPipelineLayoutCreateInfo *create_info, ScratchAllocator &alloc)
+bool StateRecorder::Impl::copy_pipeline_layout(const VkPipelineLayoutCreateInfo *create_info, ScratchAllocator &alloc,
+                                               VkPipelineLayoutCreateInfo **out_create_info)
 {
+	if (create_info->pNext)
+		return false;
+
 	auto *info = copy(create_info, 1, alloc);
 	info->pPushConstantRanges = copy(info->pPushConstantRanges, info->pushConstantRangeCount, alloc);
 	info->pSetLayouts = copy(info->pSetLayouts, info->setLayoutCount, alloc);
-	return info;
+
+	*out_create_info = info;
+	return true;
 }
 
-VkSpecializationInfo *StateRecorder::Impl::copy_specialization_info(const VkSpecializationInfo *info, ScratchAllocator &alloc)
+bool StateRecorder::Impl::copy_specialization_info(const VkSpecializationInfo *info, ScratchAllocator &alloc,
+                                                   const VkSpecializationInfo **out_info)
 {
 	auto *ret = copy(info, 1, alloc);
 	ret->pMapEntries = copy(ret->pMapEntries, ret->mapEntryCount, alloc);
 	ret->pData = copy(static_cast<const uint8_t *>(ret->pData), ret->dataSize, alloc);
-	return ret;
+
+	*out_info = ret;
+	return true;
 }
 
-VkComputePipelineCreateInfo *StateRecorder::Impl::copy_compute_pipeline(const VkComputePipelineCreateInfo *create_info, ScratchAllocator &alloc,
-                                                                        const VkPipeline *base_pipelines, uint32_t base_pipeline_count)
+bool StateRecorder::Impl::copy_compute_pipeline(const VkComputePipelineCreateInfo *create_info, ScratchAllocator &alloc,
+                                                const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
+                                                VkComputePipelineCreateInfo **out_create_info)
 {
 	auto *info = copy(create_info, 1, alloc);
 
@@ -2840,7 +3205,10 @@ VkComputePipelineCreateInfo *StateRecorder::Impl::copy_compute_pipeline(const Vk
 		    info->basePipelineIndex >= 0)
 		{
 			if (uint32_t(info->basePipelineIndex) >= base_pipeline_count)
-				FOSSILIZE_THROW("Base pipeline index is out of range.");
+			{
+				LOGE("Base pipeline index is out of range.\n");
+				return false;
+			}
 
 			info->basePipelineHandle = base_pipelines[info->basePipelineIndex];
 			info->basePipelineIndex = -1;
@@ -2848,15 +3216,23 @@ VkComputePipelineCreateInfo *StateRecorder::Impl::copy_compute_pipeline(const Vk
 	}
 
 	if (info->stage.pSpecializationInfo)
-		info->stage.pSpecializationInfo = copy_specialization_info(info->stage.pSpecializationInfo, alloc);
+		if (!copy_specialization_info(info->stage.pSpecializationInfo, alloc, &info->stage.pSpecializationInfo))
+			return false;
+
 	if (info->stage.pNext)
-		FOSSILIZE_THROW_PNEXT("pNext in VkPipelineShaderStageCreateInfo not supported.", info->stage.pNext);
+	{
+		log_error_pnext_chain("pNext in VkPipelineShaderStageCreateInfo not supported.", info->stage.pNext);
+		return false;
+	}
+
 	info->stage.pName = copy(info->stage.pName, strlen(info->stage.pName) + 1, alloc);
-	return info;
+	*out_create_info = info;
+	return true;
 }
 
-VkGraphicsPipelineCreateInfo *StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateInfo *create_info, ScratchAllocator &alloc,
-                                                                          const VkPipeline *base_pipelines, uint32_t base_pipeline_count)
+bool StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateInfo *create_info, ScratchAllocator &alloc,
+                                                 const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
+                                                 VkGraphicsPipelineCreateInfo **out_create_info)
 {
 	auto *info = copy(create_info, 1, alloc);
 
@@ -2869,7 +3245,10 @@ VkGraphicsPipelineCreateInfo *StateRecorder::Impl::copy_graphics_pipeline(const 
 		    info->basePipelineIndex >= 0)
 		{
 			if (uint32_t(info->basePipelineIndex) >= base_pipeline_count)
-				FOSSILIZE_THROW("Base pipeline index is out of range.");
+			{
+				LOGE("Base pipeline index is out of range.\n");
+				return false;
+			}
 
 			info->basePipelineHandle = base_pipelines[info->basePipelineIndex];
 			info->basePipelineIndex = -1;
@@ -2880,63 +3259,100 @@ VkGraphicsPipelineCreateInfo *StateRecorder::Impl::copy_graphics_pipeline(const 
 	if (info->pTessellationState)
 	{
 		info->pTessellationState = copy(info->pTessellationState, 1, alloc);
-		const_cast<VkPipelineTessellationStateCreateInfo *>(info->pTessellationState)->pNext =
-				copy_pnext_chain(info->pTessellationState->pNext, alloc);
+
+		const void *pNext = nullptr;
+		if (!copy_pnext_chain(info->pTessellationState->pNext, alloc, &pNext))
+			return false;
+		const_cast<VkPipelineTessellationStateCreateInfo *>(info->pTessellationState)->pNext = pNext;
 	}
 
 	if (info->pColorBlendState)
 	{
 		if (info->pColorBlendState->pNext)
-			FOSSILIZE_THROW_PNEXT("pNext in VkPipelineColorBlendStateCreateInfo not supported.", info->pColorBlendState->pNext);
+		{
+			log_error_pnext_chain("pNext in VkPipelineColorBlendStateCreateInfo not supported.",
+			                      info->pColorBlendState->pNext);
+			return false;
+		}
 		info->pColorBlendState = copy(info->pColorBlendState, 1, alloc);
 	}
 
 	if (info->pVertexInputState)
 	{
 		info->pVertexInputState = copy(info->pVertexInputState, 1, alloc);
-		const_cast<VkPipelineVertexInputStateCreateInfo *>(info->pVertexInputState)->pNext =
-				copy_pnext_chain(info->pVertexInputState->pNext, alloc);
+
+		const void *pNext = nullptr;
+		if (!copy_pnext_chain(info->pVertexInputState->pNext, alloc, &pNext))
+			return false;
+
+		const_cast<VkPipelineVertexInputStateCreateInfo *>(info->pVertexInputState)->pNext = pNext;
 	}
 
 	if (info->pMultisampleState)
 	{
 		if (info->pMultisampleState->pNext)
-			FOSSILIZE_THROW_PNEXT("pNext in VkPipelineMultisampleStateCreateInfo not supported.", info->pMultisampleState->pNext);
+		{
+			log_error_pnext_chain("pNext in VkPipelineMultisampleStateCreateInfo not supported.",
+			                      info->pMultisampleState->pNext);
+			return false;
+		}
 		info->pMultisampleState = copy(info->pMultisampleState, 1, alloc);
 	}
 
 	if (info->pViewportState)
 	{
 		if (info->pViewportState->pNext)
-			FOSSILIZE_THROW_PNEXT("pNext in VkPipelineViewportStateCreateInfo not supported.", info->pViewportState->pNext);
+		{
+			log_error_pnext_chain("pNext in VkPipelineViewportStateCreateInfo not supported.",
+			                      info->pViewportState->pNext);
+			return false;
+		}
 		info->pViewportState = copy(info->pViewportState, 1, alloc);
 	}
 
 	if (info->pInputAssemblyState)
 	{
 		if (info->pInputAssemblyState->pNext)
-			FOSSILIZE_THROW_PNEXT("pNext in VkPipelineInputAssemblyStateCreateInfo not supported.", info->pInputAssemblyState->pNext);
+		{
+			log_error_pnext_chain("pNext in VkPipelineInputAssemblyStateCreateInfo not supported.",
+			                      info->pInputAssemblyState->pNext);
+			return false;
+		}
 		info->pInputAssemblyState = copy(info->pInputAssemblyState, 1, alloc);
 	}
 
 	if (info->pDepthStencilState)
 	{
 		if (info->pDepthStencilState->pNext)
-			FOSSILIZE_THROW_PNEXT("pNext in VkPipelineDepthStencilStateCreateInfo not supported.", info->pDepthStencilState->pNext);
+		{
+			log_error_pnext_chain("pNext in VkPipelineDepthStencilStateCreateInfo not supported.",
+			                      info->pDepthStencilState->pNext);
+			return false;
+		}
 		info->pDepthStencilState = copy(info->pDepthStencilState, 1, alloc);
 	}
 
 	if (info->pRasterizationState)
 	{
 		info->pRasterizationState = copy(info->pRasterizationState, 1, alloc);
-		const_cast<VkPipelineRasterizationStateCreateInfo *>(info->pRasterizationState)->pNext =
-				copy_pnext_chain(info->pRasterizationState->pNext, alloc);
+		if (!info->pRasterizationState)
+			return false;
+
+		const void *pNext = nullptr;
+		if (!copy_pnext_chain(info->pRasterizationState->pNext, alloc, &pNext))
+			return false;
+
+		const_cast<VkPipelineRasterizationStateCreateInfo *>(info->pRasterizationState)->pNext = pNext;
 	}
 
 	if (info->pDynamicState)
 	{
 		if (info->pDynamicState->pNext)
-			FOSSILIZE_THROW_PNEXT("pNext in VkPipelineDynamicStateCreateInfo not supported.", info->pDynamicState->pNext);
+		{
+			log_error_pnext_chain("pNext in VkPipelineDynamicStateCreateInfo not supported.",
+			                      info->pDynamicState->pNext);
+			return false;
+		}
 		info->pDynamicState = copy(info->pDynamicState, 1, alloc);
 	}
 
@@ -2944,10 +3360,15 @@ VkGraphicsPipelineCreateInfo *StateRecorder::Impl::copy_graphics_pipeline(const 
 	{
 		auto &stage = const_cast<VkPipelineShaderStageCreateInfo &>(info->pStages[i]);
 		if (stage.pNext)
-			FOSSILIZE_THROW_PNEXT("pNext in VkPipelineShaderStageCreateInfo not supported.", stage.pNext);
+		{
+			log_error_pnext_chain("pNext in VkPipelineShaderStageCreateInfo not supported.", stage.pNext);
+			return false;
+		}
+
 		stage.pName = copy(stage.pName, strlen(stage.pName) + 1, alloc);
 		if (stage.pSpecializationInfo)
-			stage.pSpecializationInfo = copy_specialization_info(stage.pSpecializationInfo, alloc);
+			if (!copy_specialization_info(stage.pSpecializationInfo, alloc, &stage.pSpecializationInfo))
+				return false;
 	}
 
 	if (info->pColorBlendState)
@@ -2985,10 +3406,12 @@ VkGraphicsPipelineCreateInfo *StateRecorder::Impl::copy_graphics_pipeline(const 
 				copy(info->pDynamicState->pDynamicStates, info->pDynamicState->dynamicStateCount, alloc);
 	}
 
-	return info;
+	*out_create_info = info;
+	return true;
 }
 
-VkRenderPassCreateInfo *StateRecorder::Impl::copy_render_pass(const VkRenderPassCreateInfo *create_info, ScratchAllocator &alloc)
+bool StateRecorder::Impl::copy_render_pass(const VkRenderPassCreateInfo *create_info, ScratchAllocator &alloc,
+                                           VkRenderPassCreateInfo **out_create_info)
 {
 	auto *info = copy(create_info, 1, alloc);
 	info->pAttachments = copy(info->pAttachments, info->attachmentCount, alloc);
@@ -3010,66 +3433,117 @@ VkRenderPassCreateInfo *StateRecorder::Impl::copy_render_pass(const VkRenderPass
 			sub.pPreserveAttachments = copy(sub.pPreserveAttachments, sub.preserveAttachmentCount, alloc);
 	}
 
-	return info;
+	*out_create_info = info;
+	return true;
 }
 
-VkSampler StateRecorder::Impl::remap_sampler_handle(VkSampler sampler) const
+bool StateRecorder::Impl::remap_sampler_handle(VkSampler sampler, VkSampler *out_sampler) const
 {
 	auto itr = sampler_to_hash.find(sampler);
 	if (itr == end(sampler_to_hash))
-		FOSSILIZE_THROW("Cannot find sampler in hashmap.");
-	return api_object_cast<VkSampler>(uint64_t(itr->second));
+	{
+		LOGE("Cannot find sampler in hashmap.\n");
+		return false;
+	}
+	else
+	{
+		*out_sampler = api_object_cast<VkSampler>(uint64_t(itr->second));
+		return true;
+	}
 }
 
-VkDescriptorSetLayout StateRecorder::Impl::remap_descriptor_set_layout_handle(VkDescriptorSetLayout layout) const
+bool StateRecorder::Impl::remap_descriptor_set_layout_handle(VkDescriptorSetLayout layout,
+                                                             VkDescriptorSetLayout *out_layout) const
 {
 	auto itr = descriptor_set_layout_to_hash.find(layout);
 	if (itr == end(descriptor_set_layout_to_hash))
-		FOSSILIZE_THROW("Cannot find descriptor set layout in hashmap.");
-	return api_object_cast<VkDescriptorSetLayout>(uint64_t(itr->second));
+	{
+		LOGE("Cannot find descriptor set layout in hashmap.\n");
+		return false;
+	}
+	else
+	{
+		*out_layout = api_object_cast<VkDescriptorSetLayout>(uint64_t(itr->second));
+		return true;
+	}
 }
 
-VkPipelineLayout StateRecorder::Impl::remap_pipeline_layout_handle(VkPipelineLayout layout) const
+bool StateRecorder::Impl::remap_pipeline_layout_handle(VkPipelineLayout layout, VkPipelineLayout *out_layout) const
 {
 	auto itr = pipeline_layout_to_hash.find(layout);
 	if (itr == end(pipeline_layout_to_hash))
-		FOSSILIZE_THROW("Cannot find pipeline layout in hashmap.");
-	return api_object_cast<VkPipelineLayout>(uint64_t(itr->second));
+	{
+		LOGE("Cannot find pipeline layout in hashmap.\n");
+		return false;
+	}
+	else
+	{
+		*out_layout = api_object_cast<VkPipelineLayout>(uint64_t(itr->second));
+		return true;
+	}
 }
 
-VkShaderModule StateRecorder::Impl::remap_shader_module_handle(VkShaderModule module) const
+bool StateRecorder::Impl::remap_shader_module_handle(VkShaderModule module, VkShaderModule *out_module) const
 {
 	auto itr = shader_module_to_hash.find(module);
 	if (itr == end(shader_module_to_hash))
-		FOSSILIZE_THROW("Cannot find shader module in hashmap.");
-	return api_object_cast<VkShaderModule>(uint64_t(itr->second));
+	{
+		LOGE("Cannot find shader module in hashmap.\n");
+		return false;
+	}
+	else
+	{
+		*out_module = api_object_cast<VkShaderModule>(uint64_t(itr->second));
+		return true;
+	}
 }
 
-VkRenderPass StateRecorder::Impl::remap_render_pass_handle(VkRenderPass render_pass) const
+bool StateRecorder::Impl::remap_render_pass_handle(VkRenderPass render_pass, VkRenderPass *out_render_pass) const
 {
 	auto itr = render_pass_to_hash.find(render_pass);
 	if (itr == end(render_pass_to_hash))
-		FOSSILIZE_THROW("Cannot find render pass in hashmap.");
-	return api_object_cast<VkRenderPass>(uint64_t(itr->second));
+	{
+		LOGE("Cannot find render pass in hashmap.\n");
+		return false;
+	}
+	else
+	{
+		*out_render_pass = api_object_cast<VkRenderPass>(uint64_t(itr->second));
+		return true;
+	}
 }
 
-VkPipeline StateRecorder::Impl::remap_graphics_pipeline_handle(VkPipeline pipeline) const
+bool StateRecorder::Impl::remap_graphics_pipeline_handle(VkPipeline pipeline, VkPipeline *out_pipeline) const
 {
 	auto itr = graphics_pipeline_to_hash.find(pipeline);
 	if (itr == end(graphics_pipeline_to_hash))
-		FOSSILIZE_THROW("Cannot find graphics pipeline in hashmap.");
-	return api_object_cast<VkPipeline>(uint64_t(itr->second));
+	{
+		LOGE("Cannot find graphics pipeline in hashmap.\n");
+		return false;
+	}
+	else
+	{
+		*out_pipeline = api_object_cast<VkPipeline>(uint64_t(itr->second));
+		return true;
+	}
 }
 
-VkPipeline StateRecorder::Impl::remap_compute_pipeline_handle(VkPipeline pipeline) const
+bool StateRecorder::Impl::remap_compute_pipeline_handle(VkPipeline pipeline, VkPipeline *out_pipeline) const
 {
 	auto itr = compute_pipeline_to_hash.find(pipeline);
 	if (itr == end(compute_pipeline_to_hash))
-		FOSSILIZE_THROW("Cannot find compute pipeline in hashmap.");
-	return api_object_cast<VkPipeline>(uint64_t(itr->second));
+	{
+		LOGE("Cannot find compute pipeline in hashmap.\n");
+		return false;
+	}
+	else
+	{
+		*out_pipeline = api_object_cast<VkPipeline>(uint64_t(itr->second));
+		return true;
+	}
 }
 
-void StateRecorder::Impl::remap_descriptor_set_layout_ci(VkDescriptorSetLayoutCreateInfo *info)
+bool StateRecorder::Impl::remap_descriptor_set_layout_ci(VkDescriptorSetLayoutCreateInfo *info)
 {
 	for (uint32_t i = 0; i < info->bindingCount; i++)
 	{
@@ -3080,54 +3554,75 @@ void StateRecorder::Impl::remap_descriptor_set_layout_ci(VkDescriptorSetLayoutCr
 		{
 			auto *immutable_samplers = const_cast<VkSampler *>(b.pImmutableSamplers);
 			for (uint32_t j = 0; j < b.descriptorCount; j++)
-				immutable_samplers[j] = remap_sampler_handle(immutable_samplers[j]);
+				if (!remap_sampler_handle(immutable_samplers[j], &immutable_samplers[j]))
+					return false;
 		}
 	}
+
+	return true;
 }
 
-void StateRecorder::Impl::remap_pipeline_layout_ci(VkPipelineLayoutCreateInfo *info)
+bool StateRecorder::Impl::remap_pipeline_layout_ci(VkPipelineLayoutCreateInfo *info)
 {
 	for (uint32_t i = 0; i < info->setLayoutCount; i++)
-		const_cast<VkDescriptorSetLayout *>(info->pSetLayouts)[i] = remap_descriptor_set_layout_handle(info->pSetLayouts[i]);
+		if (!remap_descriptor_set_layout_handle(info->pSetLayouts[i], &const_cast<VkDescriptorSetLayout *>(info->pSetLayouts)[i]))
+			return false;
+
+	return true;
 }
 
-void StateRecorder::Impl::remap_shader_module_ci(VkShaderModuleCreateInfo *)
+bool StateRecorder::Impl::remap_shader_module_ci(VkShaderModuleCreateInfo *)
 {
 	// nothing to do
+	return true;
 }
 
-void StateRecorder::Impl::remap_graphics_pipeline_ci(VkGraphicsPipelineCreateInfo *info)
+bool StateRecorder::Impl::remap_graphics_pipeline_ci(VkGraphicsPipelineCreateInfo *info)
 {
-	info->renderPass = remap_render_pass_handle(info->renderPass);
-	info->layout = remap_pipeline_layout_handle(info->layout);
+	if (!remap_render_pass_handle(info->renderPass, &info->renderPass))
+		return false;
+	if (!remap_pipeline_layout_handle(info->layout, &info->layout))
+		return false;
+
 	if (info->basePipelineHandle != VK_NULL_HANDLE)
-		info->basePipelineHandle = remap_graphics_pipeline_handle(info->basePipelineHandle);
+		if (!remap_graphics_pipeline_handle(info->basePipelineHandle, &info->basePipelineHandle))
+			return false;
 
 	for (uint32_t i = 0; i < info->stageCount; i++)
 	{
 		auto &stage = const_cast<VkPipelineShaderStageCreateInfo &>(info->pStages[i]);
-		stage.module = remap_shader_module_handle(stage.module);
+		if (!remap_shader_module_handle(stage.module, &stage.module))
+			return false;
 	}
+
+	return true;
 }
 
-void StateRecorder::Impl::remap_compute_pipeline_ci(VkComputePipelineCreateInfo *info)
+bool StateRecorder::Impl::remap_compute_pipeline_ci(VkComputePipelineCreateInfo *info)
 {
-	info->stage.module = remap_shader_module_handle(info->stage.module);
+	if (!remap_shader_module_handle(info->stage.module, &info->stage.module))
+		return false;
 
 	if (info->basePipelineHandle != VK_NULL_HANDLE)
-		info->basePipelineHandle = remap_compute_pipeline_handle(info->basePipelineHandle);
+		if (!remap_compute_pipeline_handle(info->basePipelineHandle, &info->basePipelineHandle))
+			return false;
 
-	info->layout = remap_pipeline_layout_handle(info->layout);
+	if (!remap_pipeline_layout_handle(info->layout, &info->layout))
+		return false;
+
+	return true;
 }
 
-void StateRecorder::Impl::remap_sampler_ci(VkSamplerCreateInfo *)
+bool StateRecorder::Impl::remap_sampler_ci(VkSamplerCreateInfo *)
 {
 	// nothing to do
+	return true;
 }
 
-void StateRecorder::Impl::remap_render_pass_ci(VkRenderPassCreateInfo *)
+bool StateRecorder::Impl::remap_render_pass_ci(VkRenderPassCreateInfo *)
 {
 	// nothing to do
+	return true;
 }
 
 void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
@@ -3164,8 +3659,10 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 		assert(looping);
 		Hasher h;
 		Hashing::hash_application_feature_info(h, application_feature_hash);
-		serialize_application_info(blob);
-		database_iface->write_entry(RESOURCE_APPLICATION_INFO, h.get(), blob.data(), blob.size(), payload_flags);
+		if (serialize_application_info(blob))
+			database_iface->write_entry(RESOURCE_APPLICATION_INFO, h.get(), blob.data(), blob.size(), payload_flags);
+		else
+			LOGE("Failed to serialize application info.\n");
 	}
 
 	bool need_flush = false;
@@ -3220,281 +3717,312 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 		if (!record_item.create_info)
 			break;
 
-		try
+		switch (reinterpret_cast<VkBaseInStructure *>(record_item.create_info)->sType)
 		{
-			switch (reinterpret_cast<VkBaseInStructure *>(record_item.create_info)->sType)
-			{
-			case VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO:
-			{
-				auto *create_info = reinterpret_cast<VkSamplerCreateInfo *>(record_item.create_info);
-				auto hash = record_item.custom_hash;
-				if (hash == 0)
-					hash = Hashing::compute_hash_sampler(*create_info);
-				sampler_to_hash[api_object_cast<VkSampler>(record_item.handle)] = hash;
+		case VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO:
+		{
+			auto *create_info = reinterpret_cast<VkSamplerCreateInfo *>(record_item.create_info);
+			auto hash = record_item.custom_hash;
+			if (hash == 0)
+				hash = Hashing::compute_hash_sampler(*create_info);
+			sampler_to_hash[api_object_cast<VkSampler>(record_item.handle)] = hash;
 
-				if (database_iface)
+			if (database_iface)
+			{
+				if (write_database_entries)
 				{
-					if (write_database_entries)
-					{
-						if (register_application_link_hash(RESOURCE_SAMPLER, hash, blob))
-							need_flush = true;
+					if (register_application_link_hash(RESOURCE_SAMPLER, hash, blob))
+						need_flush = true;
 
-						if (!database_iface->has_entry(RESOURCE_SAMPLER, hash))
+					if (!database_iface->has_entry(RESOURCE_SAMPLER, hash))
+					{
+						if (serialize_sampler(hash, *create_info, blob))
 						{
-							serialize_sampler(hash, *create_info, blob);
 							database_iface->write_entry(RESOURCE_SAMPLER, hash, blob.data(), blob.size(),
 							                            payload_flags);
 							need_flush = true;
 						}
 					}
 				}
-				else
-				{
-					// Retain for combined serialize() later.
-					if (!samplers.count(hash))
-					{
-						auto create_info_copy = copy_sampler(create_info, allocator);
-						samplers[hash] = create_info_copy;
-					}
-				}
-				break;
 			}
-
-			case VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO:
+			else
 			{
-				auto *create_info = reinterpret_cast<VkRenderPassCreateInfo *>(record_item.create_info);
-				auto hash = record_item.custom_hash;
-				if (hash == 0)
-					hash = Hashing::compute_hash_render_pass(*create_info);
-				render_pass_to_hash[api_object_cast<VkRenderPass>(record_item.handle)] = hash;
-
-				if (database_iface)
+				// Retain for combined serialize() later.
+				if (!samplers.count(hash))
 				{
-					if (write_database_entries)
-					{
-						if (register_application_link_hash(RESOURCE_RENDER_PASS, hash, blob))
-							need_flush = true;
+					VkSamplerCreateInfo *create_info_copy = nullptr;
+					if (copy_sampler(create_info, allocator, &create_info_copy))
+						samplers[hash] = create_info_copy;
+				}
+			}
+			break;
+		}
 
-						if (!database_iface->has_entry(RESOURCE_RENDER_PASS, hash))
+		case VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO:
+		{
+			auto *create_info = reinterpret_cast<VkRenderPassCreateInfo *>(record_item.create_info);
+			auto hash = record_item.custom_hash;
+			if (hash == 0)
+				hash = Hashing::compute_hash_render_pass(*create_info);
+			render_pass_to_hash[api_object_cast<VkRenderPass>(record_item.handle)] = hash;
+
+			if (database_iface)
+			{
+				if (write_database_entries)
+				{
+					if (register_application_link_hash(RESOURCE_RENDER_PASS, hash, blob))
+						need_flush = true;
+
+					if (!database_iface->has_entry(RESOURCE_RENDER_PASS, hash))
+					{
+						if (serialize_render_pass(hash, *create_info, blob))
 						{
-							serialize_render_pass(hash, *create_info, blob);
 							database_iface->write_entry(RESOURCE_RENDER_PASS, hash, blob.data(), blob.size(),
 							                            payload_flags);
 							need_flush = true;
 						}
 					}
 				}
-				else
-				{
-					// Retain for combined serialize() later.
-					if (!render_passes.count(hash))
-					{
-						auto create_info_copy = copy_render_pass(create_info, allocator);
-						render_passes[hash] = create_info_copy;
-					}
-				}
-				break;
 			}
-
-			case VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO:
+			else
 			{
-				auto *create_info = reinterpret_cast<VkShaderModuleCreateInfo *>(record_item.create_info);
-				auto hash = record_item.custom_hash;
-				if (hash == 0)
-					hash = Hashing::compute_hash_shader_module(*create_info);
-				shader_module_to_hash[api_object_cast<VkShaderModule>(record_item.handle)] = hash;
-
-				if (database_iface)
+				// Retain for combined serialize() later.
+				if (!render_passes.count(hash))
 				{
-					if (write_database_entries)
-					{
-						if (register_application_link_hash(RESOURCE_SHADER_MODULE, hash, blob))
-							need_flush = true;
+					VkRenderPassCreateInfo *create_info_copy = nullptr;
+					if (copy_render_pass(create_info, allocator, &create_info_copy))
+						render_passes[hash] = create_info_copy;
+				}
+			}
+			break;
+		}
 
-						if (!database_iface->has_entry(RESOURCE_SHADER_MODULE, hash))
+		case VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO:
+		{
+			auto *create_info = reinterpret_cast<VkShaderModuleCreateInfo *>(record_item.create_info);
+			auto hash = record_item.custom_hash;
+			if (hash == 0)
+				hash = Hashing::compute_hash_shader_module(*create_info);
+			shader_module_to_hash[api_object_cast<VkShaderModule>(record_item.handle)] = hash;
+
+			if (database_iface)
+			{
+				if (write_database_entries)
+				{
+					if (register_application_link_hash(RESOURCE_SHADER_MODULE, hash, blob))
+						need_flush = true;
+
+					if (!database_iface->has_entry(RESOURCE_SHADER_MODULE, hash))
+					{
+						if (serialize_shader_module(hash, *create_info, blob, allocator))
 						{
-							serialize_shader_module(hash, *create_info, blob, allocator);
 							database_iface->write_entry(RESOURCE_SHADER_MODULE, hash, blob.data(), blob.size(),
 							                            payload_flags);
 							need_flush = true;
-							allocator.reset();
 						}
+						allocator.reset();
 					}
 				}
-				else
-				{
-					// Retain for combined serialize() later.
-					if (!shader_modules.count(hash))
-					{
-						auto create_info_copy = copy_shader_module(create_info, allocator);
-						shader_modules[hash] = create_info_copy;
-					}
-				}
-				break;
 			}
-
-			case VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO:
+			else
 			{
-				auto *create_info = reinterpret_cast<VkDescriptorSetLayoutCreateInfo *>(record_item.create_info);
-				auto hash = record_item.custom_hash;
-				if (hash == 0)
-					hash = Hashing::compute_hash_descriptor_set_layout(*recorder, *create_info);
-				descriptor_set_layout_to_hash[api_object_cast<VkDescriptorSetLayout>(record_item.handle)] = hash;
-
-				auto create_info_copy = copy_descriptor_set_layout(create_info, allocator);
-				remap_descriptor_set_layout_ci(create_info_copy);
-
-				if (database_iface)
+				// Retain for combined serialize() later.
+				if (!shader_modules.count(hash))
 				{
-					if (write_database_entries)
-					{
-						if (register_application_link_hash(RESOURCE_DESCRIPTOR_SET_LAYOUT, hash, blob))
-							need_flush = true;
+					VkShaderModuleCreateInfo *create_info_copy = nullptr;
+					if (copy_shader_module(create_info, allocator, &create_info_copy))
+						shader_modules[hash] = create_info_copy;
+				}
+			}
+			break;
+		}
 
-						if (!database_iface->has_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, hash))
+		case VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO:
+		{
+			auto *create_info = reinterpret_cast<VkDescriptorSetLayoutCreateInfo *>(record_item.create_info);
+			auto hash = record_item.custom_hash;
+			if (hash == 0)
+				if (!Hashing::compute_hash_descriptor_set_layout(*recorder, *create_info, &hash))
+					break;
+
+			VkDescriptorSetLayoutCreateInfo *create_info_copy = nullptr;
+			if (!copy_descriptor_set_layout(create_info, allocator, &create_info_copy))
+				break;
+			if (!remap_descriptor_set_layout_ci(create_info_copy))
+				break;
+
+			descriptor_set_layout_to_hash[api_object_cast<VkDescriptorSetLayout>(record_item.handle)] = hash;
+
+			if (database_iface)
+			{
+				if (write_database_entries)
+				{
+					if (register_application_link_hash(RESOURCE_DESCRIPTOR_SET_LAYOUT, hash, blob))
+						need_flush = true;
+
+					if (!database_iface->has_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, hash))
+					{
+						if (serialize_descriptor_set_layout(hash, *create_info_copy, blob))
 						{
-							serialize_descriptor_set_layout(hash, *create_info_copy, blob);
 							database_iface->write_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, hash, blob.data(), blob.size(),
 							                            payload_flags);
 							need_flush = true;
 						}
 					}
+				}
 
-					// Don't need to keep copied data around, reset the allocator.
-					allocator.reset();
-				}
-				else
-				{
-					// Retain for combined serialize() later.
-					if (!descriptor_sets.count(hash))
-						descriptor_sets[hash] = create_info_copy;
-				}
-				break;
+				// Don't need to keep copied data around, reset the allocator.
+				allocator.reset();
 			}
-
-			case VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO:
+			else
 			{
-				auto *create_info = reinterpret_cast<VkPipelineLayoutCreateInfo *>(record_item.create_info);
-				auto hash = record_item.custom_hash;
-				if (hash == 0)
-					hash = Hashing::compute_hash_pipeline_layout(*recorder, *create_info);
-				pipeline_layout_to_hash[api_object_cast<VkPipelineLayout>(record_item.handle)] = hash;
 
-				auto create_info_copy = copy_pipeline_layout(create_info, allocator);
-				remap_pipeline_layout_ci(create_info_copy);
+				// Retain for combined serialize() later.
+				if (!descriptor_sets.count(hash))
+					descriptor_sets[hash] = create_info_copy;
+			}
+			break;
+		}
 
-				if (database_iface)
+		case VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO:
+		{
+			auto *create_info = reinterpret_cast<VkPipelineLayoutCreateInfo *>(record_item.create_info);
+			auto hash = record_item.custom_hash;
+			if (hash == 0)
+				if (!Hashing::compute_hash_pipeline_layout(*recorder, *create_info, &hash))
+					break;
+
+			VkPipelineLayoutCreateInfo *create_info_copy = nullptr;
+			if (!copy_pipeline_layout(create_info, allocator, &create_info_copy))
+				break;
+			if (!remap_pipeline_layout_ci(create_info_copy))
+				break;
+
+			pipeline_layout_to_hash[api_object_cast<VkPipelineLayout>(record_item.handle)] = hash;
+
+			if (database_iface)
+			{
+				if (write_database_entries)
 				{
-					if (write_database_entries)
-					{
-						if (register_application_link_hash(RESOURCE_PIPELINE_LAYOUT, hash, blob))
-							need_flush = true;
+					if (register_application_link_hash(RESOURCE_PIPELINE_LAYOUT, hash, blob))
+						need_flush = true;
 
-						if (!database_iface->has_entry(RESOURCE_PIPELINE_LAYOUT, hash))
+					if (!database_iface->has_entry(RESOURCE_PIPELINE_LAYOUT, hash))
+					{
+						if (serialize_pipeline_layout(hash, *create_info_copy, blob))
 						{
-							serialize_pipeline_layout(hash, *create_info_copy, blob);
 							database_iface->write_entry(RESOURCE_PIPELINE_LAYOUT, hash, blob.data(), blob.size(),
 							                            payload_flags);
 							need_flush = true;
 						}
 					}
+				}
 
-					// Don't need to keep copied data around, reset the allocator.
-					allocator.reset();
-				}
-				else
-				{
-					// Retain for combined serialize() later.
-					if (!pipeline_layouts.count(hash))
-						pipeline_layouts[hash] = create_info_copy;
-				}
-				break;
+				// Don't need to keep copied data around, reset the allocator.
+				allocator.reset();
 			}
-
-			case VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO:
+			else
 			{
-				auto *create_info = reinterpret_cast<VkGraphicsPipelineCreateInfo *>(record_item.create_info);
-				auto hash = record_item.custom_hash;
-				if (hash == 0)
-					hash = Hashing::compute_hash_graphics_pipeline(*recorder, *create_info);
-				graphics_pipeline_to_hash[api_object_cast<VkPipeline>(record_item.handle)] = hash;
+				// Retain for combined serialize() later.
+				if (!pipeline_layouts.count(hash))
+					pipeline_layouts[hash] = create_info_copy;
+			}
+			break;
+		}
 
-				auto create_info_copy = copy_graphics_pipeline(create_info, allocator, nullptr, 0);
-				remap_graphics_pipeline_ci(create_info_copy);
+		case VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO:
+		{
+			auto *create_info = reinterpret_cast<VkGraphicsPipelineCreateInfo *>(record_item.create_info);
+			auto hash = record_item.custom_hash;
+			if (hash == 0)
+				if (!Hashing::compute_hash_graphics_pipeline(*recorder, *create_info, &hash))
+					break;
 
-				if (database_iface)
+			VkGraphicsPipelineCreateInfo *create_info_copy = nullptr;
+			if (!copy_graphics_pipeline(create_info, allocator, nullptr, 0, &create_info_copy))
+				break;
+			if (!remap_graphics_pipeline_ci(create_info_copy))
+				break;
+
+			graphics_pipeline_to_hash[api_object_cast<VkPipeline>(record_item.handle)] = hash;
+
+			if (database_iface)
+			{
+				if (write_database_entries)
 				{
-					if (write_database_entries)
-					{
-						if (register_application_link_hash(RESOURCE_GRAPHICS_PIPELINE, hash, blob))
-							need_flush = true;
+					if (register_application_link_hash(RESOURCE_GRAPHICS_PIPELINE, hash, blob))
+						need_flush = true;
 
-						if (!database_iface->has_entry(RESOURCE_GRAPHICS_PIPELINE, hash))
+					if (!database_iface->has_entry(RESOURCE_GRAPHICS_PIPELINE, hash))
+					{
+						if (serialize_graphics_pipeline(hash, *create_info_copy, blob))
 						{
-							serialize_graphics_pipeline(hash, *create_info_copy, blob);
 							database_iface->write_entry(RESOURCE_GRAPHICS_PIPELINE, hash, blob.data(), blob.size(),
 							                            payload_flags);
 							need_flush = true;
 						}
 					}
+				}
 
-					// Don't need to keep copied data around, reset the allocator.
-					allocator.reset();
-				}
-				else
-				{
-					// Retain for combined serialize() later.
-					if (!graphics_pipelines.count(hash))
-						graphics_pipelines[hash] = create_info_copy;
-				}
-				break;
+				// Don't need to keep copied data around, reset the allocator.
+				allocator.reset();
 			}
-
-			case VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO:
+			else
 			{
-				auto *create_info = reinterpret_cast<VkComputePipelineCreateInfo *>(record_item.create_info);
-				auto hash = record_item.custom_hash;
-				if (hash == 0)
-					hash = Hashing::compute_hash_compute_pipeline(*recorder, *create_info);
-				compute_pipeline_to_hash[api_object_cast<VkPipeline>(record_item.handle)] = hash;
+				// Retain for combined serialize() later.
+				if (!graphics_pipelines.count(hash))
+					graphics_pipelines[hash] = create_info_copy;
+			}
+			break;
+		}
 
-				auto create_info_copy = copy_compute_pipeline(create_info, allocator, nullptr, 0);
-				remap_compute_pipeline_ci(create_info_copy);
+		case VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO:
+		{
+			auto *create_info = reinterpret_cast<VkComputePipelineCreateInfo *>(record_item.create_info);
+			auto hash = record_item.custom_hash;
+			if (hash == 0)
+				if (!Hashing::compute_hash_compute_pipeline(*recorder, *create_info, &hash))
+					break;
 
-				if (database_iface)
+			VkComputePipelineCreateInfo *create_info_copy = nullptr;
+			if (!copy_compute_pipeline(create_info, allocator, nullptr, 0, &create_info_copy))
+				break;
+			if (!remap_compute_pipeline_ci(create_info_copy))
+				break;
+
+			compute_pipeline_to_hash[api_object_cast<VkPipeline>(record_item.handle)] = hash;
+
+			if (database_iface)
+			{
+				if (write_database_entries)
 				{
-					if (write_database_entries)
-					{
-						if (register_application_link_hash(RESOURCE_COMPUTE_PIPELINE, hash, blob))
-							need_flush = true;
+					if (register_application_link_hash(RESOURCE_COMPUTE_PIPELINE, hash, blob))
+						need_flush = true;
 
-						if (!database_iface->has_entry(RESOURCE_COMPUTE_PIPELINE, hash))
+					if (!database_iface->has_entry(RESOURCE_COMPUTE_PIPELINE, hash))
+					{
+						if (serialize_compute_pipeline(hash, *create_info_copy, blob))
 						{
-							serialize_compute_pipeline(hash, *create_info_copy, blob);
 							database_iface->write_entry(RESOURCE_COMPUTE_PIPELINE, hash, blob.data(), blob.size(),
 							                            payload_flags);
 							need_flush = true;
 						}
 					}
+				}
 
-					// Don't need to keep copied data around, reset the allocator.
-					allocator.reset();
-				}
-				else
-				{
-					// Retain for combined serialize() later.
-					if (!compute_pipelines.count(hash))
-						compute_pipelines[hash] = create_info_copy;
-				}
-				break;
+				// Don't need to keep copied data around, reset the allocator.
+				allocator.reset();
 			}
-			default:
-				break;
+			else
+			{
+				// Retain for combined serialize() later.
+				if (!compute_pipelines.count(hash))
+					compute_pipelines[hash] = create_info_copy;
 			}
+			break;
 		}
-		catch (const std::exception &e)
-		{
-			LOGE("%s\n", e.what());
+		default:
+			break;
 		}
 	}
 
@@ -3560,7 +4088,7 @@ static std::string encode_base64(const void *data_, size_t size)
 }
 
 template <typename Allocator>
-static Value json_value(const VkSamplerCreateInfo& sampler, Allocator& alloc)
+static bool json_value(const VkSamplerCreateInfo& sampler, Allocator& alloc, Value *out_value)
 {
 	Value s(kObjectType);
 	s.AddMember("flags", sampler.flags, alloc);
@@ -3579,11 +4107,13 @@ static Value json_value(const VkSamplerCreateInfo& sampler, Allocator& alloc)
 	s.AddMember("mipLodBias", sampler.mipLodBias, alloc);
 	s.AddMember("minLod", sampler.minLod, alloc);
 	s.AddMember("maxLod", sampler.maxLod, alloc);
-	return s;
+
+	*out_value = s;
+	return true;
 }
 
 template <typename Allocator>
-static Value json_value(const VkDescriptorSetLayoutCreateInfo& layout, Allocator& alloc)
+static bool json_value(const VkDescriptorSetLayoutCreateInfo& layout, Allocator& alloc, Value *out_value)
 {
 	Value l(kObjectType);
 	l.AddMember("flags", layout.flags, alloc);
@@ -3607,11 +4137,13 @@ static Value json_value(const VkDescriptorSetLayoutCreateInfo& layout, Allocator
 		bindings.PushBack(binding, alloc);
 	}
 	l.AddMember("bindings", bindings, alloc);
-	return l;
+
+	*out_value = l;
+	return true;
 }
 
 template <typename Allocator>
-static Value json_value(const VkPipelineLayoutCreateInfo& layout, Allocator& alloc)
+static bool json_value(const VkPipelineLayoutCreateInfo& layout, Allocator& alloc, Value *out_value)
 {
 	Value p(kObjectType);
 	p.AddMember("flags", layout.flags, alloc);
@@ -3630,21 +4162,25 @@ static Value json_value(const VkPipelineLayoutCreateInfo& layout, Allocator& all
 	for (uint32_t i = 0; i < layout.setLayoutCount; i++)
 		set_layouts.PushBack(uint64_string(api_object_cast<uint64_t>(layout.pSetLayouts[i]), alloc), alloc);
 	p.AddMember("setLayouts", set_layouts, alloc);
-	return p;
+
+	*out_value = p;
+	return true;
 }
 
 template <typename Allocator>
-static Value json_value(const VkShaderModuleCreateInfo& module, Allocator& alloc)
+static bool json_value(const VkShaderModuleCreateInfo& module, Allocator& alloc, Value *out_value)
 {
 	Value m(kObjectType);
 	m.AddMember("flags", module.flags, alloc);
 	m.AddMember("codeSize", uint64_t(module.codeSize), alloc);
 	m.AddMember("code", encode_base64(module.pCode, module.codeSize), alloc);
-	return m;
+
+	*out_value = m;
+	return true;
 }
 
 template <typename Allocator>
-static Value json_value(const VkRenderPassCreateInfo& pass, Allocator& alloc)
+static bool json_value(const VkRenderPassCreateInfo& pass, Allocator& alloc, Value *out_value)
 {
 	Value json_object(kObjectType);
 	json_object.AddMember("flags", pass.flags, alloc);
@@ -3761,11 +4297,13 @@ static Value json_value(const VkRenderPassCreateInfo& pass, Allocator& alloc)
 		subpasses.PushBack(p, alloc);
 	}
 	json_object.AddMember("subpasses", subpasses, alloc);
-	return json_object;
+
+	*out_value = json_object;
+	return true;
 }
 
 template <typename Allocator>
-static Value json_value(const VkComputePipelineCreateInfo& pipe, Allocator& alloc)
+static bool json_value(const VkComputePipelineCreateInfo& pipe, Allocator& alloc, Value *out_value)
 {
 	Value p(kObjectType);
 	p.AddMember("flags", pipe.flags, alloc);
@@ -3798,20 +4336,24 @@ static Value json_value(const VkComputePipelineCreateInfo& pipe, Allocator& allo
 		stage.AddMember("specializationInfo", spec, alloc);
 	}
 	p.AddMember("stage", stage, alloc);
-	return p;
+
+	*out_value = p;
+	return true;
 }
 
 template <typename Allocator>
-static Value json_value(const VkPipelineTessellationDomainOriginStateCreateInfo &create_info, Allocator &alloc)
+static bool json_value(const VkPipelineTessellationDomainOriginStateCreateInfo &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
 	value.AddMember("sType", create_info.sType, alloc);
 	value.AddMember("domainOrigin", create_info.domainOrigin, alloc);
-	return value;
+
+	*out_value = value;
+	return true;
 }
 
 template <typename Allocator>
-static Value json_value(const VkPipelineVertexInputDivisorStateCreateInfoEXT &create_info, Allocator &alloc)
+static bool json_value(const VkPipelineVertexInputDivisorStateCreateInfoEXT &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
 	value.AddMember("sType", create_info.sType, alloc);
@@ -3830,31 +4372,36 @@ static Value json_value(const VkPipelineVertexInputDivisorStateCreateInfoEXT &cr
 		value.AddMember("vertexBindingDivisors", divisors, alloc);
 	}
 
-	return value;
+	*out_value = value;
+	return true;
 }
 
 template <typename Allocator>
-static Value json_value(const VkPipelineRasterizationDepthClipStateCreateInfoEXT &create_info, Allocator &alloc)
+static bool json_value(const VkPipelineRasterizationDepthClipStateCreateInfoEXT &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
 	value.AddMember("sType", create_info.sType, alloc);
 	value.AddMember("flags", create_info.flags, alloc);
 	value.AddMember("depthClipEnable", create_info.depthClipEnable, alloc);
-	return value;
+
+	*out_value = value;
+	return true;
 }
 
 template <typename Allocator>
-static Value json_value(const VkPipelineRasterizationStateStreamCreateInfoEXT &create_info, Allocator &alloc)
+static bool json_value(const VkPipelineRasterizationStateStreamCreateInfoEXT &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
 	value.AddMember("sType", create_info.sType, alloc);
 	value.AddMember("flags", create_info.flags, alloc);
 	value.AddMember("rasterizationStream", create_info.rasterizationStream, alloc);
-	return value;
+
+	*out_value = value;
+	return true;
 }
 
 template <typename Allocator>
-static Value pnext_chain_json_value(const void *pNext, Allocator &alloc)
+static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *out_value)
 {
 	Value nexts(kArrayType);
 
@@ -3865,39 +4412,40 @@ static Value pnext_chain_json_value(const void *pNext, Allocator &alloc)
 		switch (pin->sType)
 		{
 		case VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_DOMAIN_ORIGIN_STATE_CREATE_INFO:
-			next = json_value(*static_cast<const VkPipelineTessellationDomainOriginStateCreateInfo *>(pNext),
-			                  alloc);
+			if (!json_value(*static_cast<const VkPipelineTessellationDomainOriginStateCreateInfo *>(pNext), alloc, &next))
+				return false;
 			break;
 
 		case VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_DIVISOR_STATE_CREATE_INFO_EXT:
-			next = json_value(*static_cast<const VkPipelineVertexInputDivisorStateCreateInfoEXT *>(pNext),
-			                  alloc);
+			if (!json_value(*static_cast<const VkPipelineVertexInputDivisorStateCreateInfoEXT *>(pNext), alloc, &next))
+				return false;
 			break;
 
 		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_DEPTH_CLIP_STATE_CREATE_INFO_EXT:
-			next = json_value(*static_cast<const VkPipelineRasterizationDepthClipStateCreateInfoEXT *>(pNext),
-			                  alloc);
+			if (!json_value(*static_cast<const VkPipelineRasterizationDepthClipStateCreateInfoEXT *>(pNext), alloc, &next))
+				return false;
 			break;
 
 		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_STREAM_CREATE_INFO_EXT:
-			next = json_value(*static_cast<const VkPipelineRasterizationStateStreamCreateInfoEXT *>(pNext),
-			                  alloc);
+			if (!json_value(*static_cast<const VkPipelineRasterizationStateStreamCreateInfoEXT *>(pNext), alloc, &next))
+				return false;
 			break;
 
 		default:
-			FOSSILIZE_THROW_PNEXT("Unsupported pNext found, cannot hash sType.", pNext);
-			break;
+			log_error_pnext_chain("Unsupported pNext found, cannot hash sType.", pNext);
+			return false;
 		}
 
 		nexts.PushBack(next, alloc);
 		pNext = pin->pNext;
 	}
 
-	return nexts;
+	*out_value = nexts;
+	return true;
 }
 
 template <typename Allocator>
-static Value json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& alloc)
+static bool json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& alloc, Value *out_value)
 {
 	Value p(kObjectType);
 	p.AddMember("flags", pipe.flags, alloc);
@@ -3915,7 +4463,9 @@ static Value json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& all
 
 		if (pipe.pTessellationState->pNext)
 		{
-			Value nexts = pnext_chain_json_value(pipe.pTessellationState->pNext, alloc);
+			Value nexts;
+			if (!pnext_chain_json_value(pipe.pTessellationState->pNext, alloc, &nexts))
+				return false;
 			tess.AddMember("pNext", nexts, alloc);
 		}
 
@@ -3988,7 +4538,9 @@ static Value json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& all
 
 		if (pipe.pVertexInputState->pNext)
 		{
-			Value nexts = pnext_chain_json_value(pipe.pVertexInputState->pNext, alloc);
+			Value nexts;
+			if (!pnext_chain_json_value(pipe.pVertexInputState->pNext, alloc, &nexts))
+				return false;
 			vi.AddMember("pNext", nexts, alloc);
 		}
 
@@ -4012,7 +4564,9 @@ static Value json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& all
 
 		if (pipe.pRasterizationState->pNext)
 		{
-			Value nexts = pnext_chain_json_value(pipe.pRasterizationState->pNext, alloc);
+			Value nexts;
+			if (!pnext_chain_json_value(pipe.pRasterizationState->pNext, alloc, &nexts))
+				return false;
 			rs.AddMember("pNext", nexts, alloc);
 		}
 
@@ -4159,7 +4713,9 @@ static Value json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& all
 		stages.PushBack(stage, alloc);
 	}
 	p.AddMember("stages", stages, alloc);
-	return p;
+
+	*out_value = p;
+	return true;
 }
 
 template <typename AllocType>
@@ -4182,7 +4738,7 @@ static void serialize_physical_device_features_inline(Value &value, const VkPhys
 	value.AddMember("robustBufferAccess", features.features.robustBufferAccess, alloc);
 }
 
-void StateRecorder::Impl::serialize_application_info(vector<uint8_t> &blob) const
+bool StateRecorder::Impl::serialize_application_info(vector<uint8_t> &blob) const
 {
 	Document doc;
 	doc.SetObject();
@@ -4205,6 +4761,7 @@ void StateRecorder::Impl::serialize_application_info(vector<uint8_t> &blob) cons
 
 	blob.resize(buffer.GetSize());
 	memcpy(blob.data(), buffer.GetString(), buffer.GetSize());
+	return true;
 }
 
 Hash StateRecorder::Impl::get_application_link_hash(ResourceTag tag, Hash hash) const
@@ -4221,7 +4778,8 @@ bool StateRecorder::Impl::register_application_link_hash(ResourceTag tag, Hash h
 	Hash link_hash = get_application_link_hash(tag, hash);
 	if (!database_iface->has_entry(RESOURCE_APPLICATION_BLOB_LINK, link_hash))
 	{
-		serialize_application_blob_link(hash, tag, blob);
+		if (!serialize_application_blob_link(hash, tag, blob))
+			return false;
 		database_iface->write_entry(RESOURCE_APPLICATION_BLOB_LINK, link_hash, blob.data(), blob.size(), payload_flags);
 		return true;
 	}
@@ -4229,7 +4787,7 @@ bool StateRecorder::Impl::register_application_link_hash(ResourceTag tag, Hash h
 		return false;
 }
 
-void StateRecorder::Impl::serialize_application_blob_link(Hash hash, ResourceTag tag, vector<uint8_t> &blob) const
+bool StateRecorder::Impl::serialize_application_blob_link(Hash hash, ResourceTag tag, vector<uint8_t> &blob) const
 {
 	Document doc;
 	doc.SetObject();
@@ -4253,16 +4811,21 @@ void StateRecorder::Impl::serialize_application_blob_link(Hash hash, ResourceTag
 
 	blob.resize(buffer.GetSize());
 	memcpy(blob.data(), buffer.GetString(), buffer.GetSize());
+	return true;
 }
 
-void StateRecorder::Impl::serialize_sampler(Hash hash, const VkSamplerCreateInfo &create_info, vector<uint8_t> &blob) const
+bool StateRecorder::Impl::serialize_sampler(Hash hash, const VkSamplerCreateInfo &create_info, vector<uint8_t> &blob) const
 {
 	Document doc;
 	doc.SetObject();
 	auto &alloc = doc.GetAllocator();
 
+	Value value;
+	if (!json_value(create_info, alloc, &value))
+		return false;
+
 	Value serialized_samplers(kObjectType);
-	serialized_samplers.AddMember(uint64_string(hash, alloc), json_value(create_info, alloc), alloc);
+	serialized_samplers.AddMember(uint64_string(hash, alloc), value, alloc);
 
 	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
 	doc.AddMember("samplers", serialized_samplers, alloc);
@@ -4273,17 +4836,22 @@ void StateRecorder::Impl::serialize_sampler(Hash hash, const VkSamplerCreateInfo
 
 	blob.resize(buffer.GetSize());
 	memcpy(blob.data(), buffer.GetString(), buffer.GetSize());
+	return true;
 }
 
-void StateRecorder::Impl::serialize_descriptor_set_layout(Hash hash, const VkDescriptorSetLayoutCreateInfo &create_info,
+bool StateRecorder::Impl::serialize_descriptor_set_layout(Hash hash, const VkDescriptorSetLayoutCreateInfo &create_info,
                                                           vector<uint8_t> &blob) const
 {
 	Document doc;
 	doc.SetObject();
 	auto &alloc = doc.GetAllocator();
 
+	Value value;
+	if (!json_value(create_info, alloc, &value))
+		return false;
+
 	Value layouts(kObjectType);
-	layouts.AddMember(uint64_string(hash, alloc), json_value(create_info, alloc), alloc);
+	layouts.AddMember(uint64_string(hash, alloc), value, alloc);
 
 	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
 	doc.AddMember("setLayouts", layouts, alloc);
@@ -4294,17 +4862,22 @@ void StateRecorder::Impl::serialize_descriptor_set_layout(Hash hash, const VkDes
 
 	blob.resize(buffer.GetSize());
 	memcpy(blob.data(), buffer.GetString(), buffer.GetSize());
+	return true;
 }
 
-void StateRecorder::Impl::serialize_pipeline_layout(Hash hash, const VkPipelineLayoutCreateInfo &create_info,
+bool StateRecorder::Impl::serialize_pipeline_layout(Hash hash, const VkPipelineLayoutCreateInfo &create_info,
                                                     vector<uint8_t> &blob) const
 {
 	Document doc;
 	doc.SetObject();
 	auto &alloc = doc.GetAllocator();
 
+	Value value;
+	if (!json_value(create_info, alloc, &value))
+		return false;
+
 	Value layouts(kObjectType);
-	layouts.AddMember(uint64_string(hash, alloc), json_value(create_info, alloc), alloc);
+	layouts.AddMember(uint64_string(hash, alloc), value, alloc);
 
 	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
 	doc.AddMember("pipelineLayouts", layouts, alloc);
@@ -4315,16 +4888,21 @@ void StateRecorder::Impl::serialize_pipeline_layout(Hash hash, const VkPipelineL
 
 	blob.resize(buffer.GetSize());
 	memcpy(blob.data(), buffer.GetString(), buffer.GetSize());
+	return true;
 }
 
-void StateRecorder::Impl::serialize_render_pass(Hash hash, const VkRenderPassCreateInfo &create_info, vector<uint8_t> &blob) const
+bool StateRecorder::Impl::serialize_render_pass(Hash hash, const VkRenderPassCreateInfo &create_info, vector<uint8_t> &blob) const
 {
 	Document doc;
 	doc.SetObject();
 	auto &alloc = doc.GetAllocator();
 
+	Value value;
+	if (!json_value(create_info, alloc, &value))
+		return false;
+
 	Value serialized_render_passes(kObjectType);
-	serialized_render_passes.AddMember(uint64_string(hash, alloc), json_value(create_info, alloc), alloc);
+	serialized_render_passes.AddMember(uint64_string(hash, alloc), value, alloc);
 
 	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
 	doc.AddMember("renderPasses", serialized_render_passes, alloc);
@@ -4335,16 +4913,21 @@ void StateRecorder::Impl::serialize_render_pass(Hash hash, const VkRenderPassCre
 
 	blob.resize(buffer.GetSize());
 	memcpy(blob.data(), buffer.GetString(), buffer.GetSize());
+	return true;
 }
 
-void StateRecorder::Impl::serialize_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo &create_info, vector<uint8_t> &blob) const
+bool StateRecorder::Impl::serialize_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo &create_info, vector<uint8_t> &blob) const
 {
 	Document doc;
 	doc.SetObject();
 	auto &alloc = doc.GetAllocator();
 
+	Value value;
+	if (!json_value(create_info, alloc, &value))
+		return false;
+
 	Value serialized_graphics_pipelines(kObjectType);
-	serialized_graphics_pipelines.AddMember(uint64_string(hash, alloc), json_value(create_info, alloc), alloc);
+	serialized_graphics_pipelines.AddMember(uint64_string(hash, alloc), value, alloc);
 
 	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
 	doc.AddMember("graphicsPipelines", serialized_graphics_pipelines, alloc);
@@ -4355,16 +4938,21 @@ void StateRecorder::Impl::serialize_graphics_pipeline(Hash hash, const VkGraphic
 
 	blob.resize(buffer.GetSize());
 	memcpy(blob.data(), buffer.GetString(), buffer.GetSize());
+	return true;
 }
 
-void StateRecorder::Impl::serialize_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo &create_info, vector<uint8_t> &blob) const
+bool StateRecorder::Impl::serialize_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo &create_info, vector<uint8_t> &blob) const
 {
 	Document doc;
 	doc.SetObject();
 	auto &alloc = doc.GetAllocator();
 
+	Value value;
+	if (!json_value(create_info, alloc, &value))
+		return false;
+
 	Value serialized_compute_pipelines(kObjectType);
-	serialized_compute_pipelines.AddMember(uint64_string(hash, alloc), json_value(create_info, alloc), alloc);
+	serialized_compute_pipelines.AddMember(uint64_string(hash, alloc), value, alloc);
 
 	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
 	doc.AddMember("computePipelines", serialized_compute_pipelines, alloc);
@@ -4375,9 +4963,10 @@ void StateRecorder::Impl::serialize_compute_pipeline(Hash hash, const VkComputeP
 
 	blob.resize(buffer.GetSize());
 	memcpy(blob.data(), buffer.GetString(), buffer.GetSize());
+	return true;
 }
 
-void StateRecorder::Impl::serialize_shader_module(Hash hash, const VkShaderModuleCreateInfo &create_info,
+bool StateRecorder::Impl::serialize_shader_module(Hash hash, const VkShaderModuleCreateInfo &create_info,
                                                   vector<uint8_t> &blob, ScratchAllocator &blob_allocator) const
 {
 	Document doc;
@@ -4410,6 +4999,7 @@ void StateRecorder::Impl::serialize_shader_module(Hash hash, const VkShaderModul
 	memcpy(blob.data(), buffer.GetString(), buffer.GetSize());
 	blob[buffer.GetSize()] = '\0';
 	memcpy(blob.data() + buffer.GetSize() + 1, encoded, size);
+	return true;
 }
 
 bool StateRecorder::serialize(uint8_t **serialized_data, size_t *serialized_size)
@@ -4427,6 +5017,8 @@ bool StateRecorder::serialize(uint8_t **serialized_data, size_t *serialized_size
 
 	Value app_info(kObjectType);
 	Value pdf_info(kObjectType);
+	Value value;
+
 	if (impl->application_info)
 		serialize_application_info_inline(app_info, *impl->application_info, alloc);
 	if (impl->physical_device_features)
@@ -4438,56 +5030,63 @@ bool StateRecorder::serialize(uint8_t **serialized_data, size_t *serialized_size
 	Value samplers(kObjectType);
 	for (auto &sampler : impl->samplers)
 	{
-		auto s = json_value(*sampler.second, alloc);
-		samplers.AddMember(uint64_string(sampler.first, alloc), s, alloc);
+		if (!json_value(*sampler.second, alloc, &value))
+			return false;
+		samplers.AddMember(uint64_string(sampler.first, alloc), value, alloc);
 	}
 	doc.AddMember("samplers", samplers, alloc);
 
 	Value set_layouts(kObjectType);
 	for (auto &layout : impl->descriptor_sets)
 	{
-		auto l = json_value(*layout.second, alloc);
-		set_layouts.AddMember(uint64_string(layout.first, alloc), l, alloc);
+		if (!json_value(*layout.second, alloc, &value))
+			return false;
+		set_layouts.AddMember(uint64_string(layout.first, alloc), value, alloc);
 	}
 	doc.AddMember("setLayouts", set_layouts, alloc);
 
 	Value pipeline_layouts(kObjectType);
 	for (auto &layout : impl->pipeline_layouts)
 	{
-		auto p = json_value(*layout.second, alloc);
-		pipeline_layouts.AddMember(uint64_string(layout.first, alloc), p, alloc);
+		if (!json_value(*layout.second, alloc, &value))
+			return false;
+		pipeline_layouts.AddMember(uint64_string(layout.first, alloc), value, alloc);
 	}
 	doc.AddMember("pipelineLayouts", pipeline_layouts, alloc);
 
 	Value shader_modules(kObjectType);
 	for (auto &module : impl->shader_modules)
 	{
-		auto m = json_value(*module.second, alloc);
-		shader_modules.AddMember(uint64_string(module.first, alloc), m, alloc);
+		if (!json_value(*module.second, alloc, &value))
+			return false;
+		shader_modules.AddMember(uint64_string(module.first, alloc), value, alloc);
 	}
 	doc.AddMember("shaderModules", shader_modules, alloc);
 
 	Value render_passes(kObjectType);
 	for (auto &pass : impl->render_passes)
 	{
-		auto p = json_value(*pass.second, alloc);
-		render_passes.AddMember(uint64_string(pass.first, alloc), p, alloc);
+		if (!json_value(*pass.second, alloc, &value))
+			return false;
+		render_passes.AddMember(uint64_string(pass.first, alloc), value, alloc);
 	}
 	doc.AddMember("renderPasses", render_passes, alloc);
 
 	Value compute_pipelines(kObjectType);
 	for (auto &pipe : impl->compute_pipelines)
 	{
-		auto p = json_value(*pipe.second, alloc);
-		compute_pipelines.AddMember(uint64_string(pipe.first, alloc), p, alloc);
+		if (!json_value(*pipe.second, alloc, &value))
+			return false;
+		compute_pipelines.AddMember(uint64_string(pipe.first, alloc), value, alloc);
 	}
 	doc.AddMember("computePipelines", compute_pipelines, alloc);
 
 	Value graphics_pipelines(kObjectType);
 	for (auto &pipe : impl->graphics_pipelines)
 	{
-		auto p = json_value(*pipe.second, alloc);
-		graphics_pipelines.AddMember(uint64_string(pipe.first, alloc), p, alloc);
+		if (!json_value(*pipe.second, alloc, &value))
+			return false;
+		graphics_pipelines.AddMember(uint64_string(pipe.first, alloc), value, alloc);
 	}
 	doc.AddMember("graphicsPipelines", graphics_pipelines, alloc);
 

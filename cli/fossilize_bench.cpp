@@ -54,7 +54,8 @@ static void bench_recorder(const char *path, bool compressed, bool checksum)
 		VkShaderModuleCreateInfo info = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
 		info.codeSize = dummy_spirv.size() * sizeof(uint32_t);
 		info.pCode = dummy_spirv.data();
-		recorder.record_shader_module((VkShaderModule)uint64_t(i + 1), info);
+		if (!recorder.record_shader_module((VkShaderModule)uint64_t(i + 1), info))
+			abort();
 	}
 
 	for (unsigned i = 0; i < 10000; i++)
@@ -64,7 +65,8 @@ static void bench_recorder(const char *path, bool compressed, bool checksum)
 		sampler.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
 		sampler.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
 		sampler.minLod = float(i);
-		recorder.record_sampler((VkSampler)uint64_t(i + 1), sampler);
+		if (!recorder.record_sampler((VkSampler)uint64_t(i + 1), sampler))
+			abort();
 	}
 
 	for (unsigned i = 0; i < 10000; i++)
@@ -80,7 +82,8 @@ static void bench_recorder(const char *path, bool compressed, bool checksum)
 			bindings[j].stageFlags = VK_SHADER_STAGE_ALL;
 		}
 		info.pBindings = bindings;
-		recorder.record_descriptor_set_layout((VkDescriptorSetLayout)uint64_t(i + 1), info);
+		if (!recorder.record_descriptor_set_layout((VkDescriptorSetLayout)uint64_t(i + 1), info))
+			abort();
 	}
 
 	for (unsigned i = 0; i < 9000; i++)
@@ -94,7 +97,8 @@ static void bench_recorder(const char *path, bool compressed, bool checksum)
 		};
 		info.pSetLayouts = set_layouts;
 		info.setLayoutCount = 4;
-		recorder.record_pipeline_layout((VkPipelineLayout)uint64_t(i + 1), info);
+		if (!recorder.record_pipeline_layout((VkPipelineLayout)uint64_t(i + 1), info))
+			abort();
 	}
 
 	std::uniform_int_distribution<int> format_dist(0, 15);
@@ -137,7 +141,8 @@ static void bench_recorder(const char *path, bool compressed, bool checksum)
 		subpass.pColorAttachments = colors;
 		info.pSubpasses = &subpass;
 
-		recorder.record_render_pass((VkRenderPass)uint64_t(i + 1), info);
+		if (!recorder.record_render_pass((VkRenderPass)uint64_t(i + 1), info))
+			abort();
 	}
 
 	for (unsigned i = 0; i < 100000; i++)
@@ -181,7 +186,8 @@ static void bench_recorder(const char *path, bool compressed, bool checksum)
 		VkPipelineViewportStateCreateInfo vp = { VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
 		info.pViewportState = &vp;
 
-		recorder.record_graphics_pipeline((VkPipeline)uint64_t(i + 1), info, nullptr, 0);
+		if (!recorder.record_graphics_pipeline((VkPipeline)uint64_t(i + 1), info, nullptr, 0))
+			abort();
 	}
 }
 
@@ -279,14 +285,8 @@ static bool dummy_replay_archive(const char *path)
 				return EXIT_FAILURE;
 			}
 
-			try
-			{
-				state_replayer.parse(replayer, nullptr, state_json.data(), state_json.size());
-			}
-			catch (const std::exception &e)
-			{
-				LOGE("StateReplayer threw exception parsing (tag: %d, hash: 0x%llx): %s\n", tag, static_cast<unsigned long long>(hash), e.what());
-			}
+			if (!state_replayer.parse(replayer, nullptr, state_json.data(), state_json.size()))
+				LOGE("Failed to parse blob (tag: %d, hash: 0x%llx).\n", tag, static_cast<unsigned long long>(hash));
 		}
 	}
 

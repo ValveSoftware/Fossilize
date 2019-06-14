@@ -123,18 +123,20 @@ static thread_local const VkComputePipelineCreateInfo *tls_compute_create_info =
 static thread_local const VkGraphicsPipelineCreateInfo *tls_graphics_create_info = nullptr;
 static thread_local StateRecorder *tls_recorder = nullptr;
 
-static void emergencyRecord()
+static bool emergencyRecord()
 {
 	if (tls_recorder)
 	{
 		if (tls_graphics_create_info)
-			tls_recorder->record_graphics_pipeline(VK_NULL_HANDLE, *tls_graphics_create_info, nullptr, 0);
+			return tls_recorder->record_graphics_pipeline(VK_NULL_HANDLE, *tls_graphics_create_info, nullptr, 0);
 		if (tls_compute_create_info)
-			tls_recorder->record_compute_pipeline(VK_NULL_HANDLE, *tls_compute_create_info, nullptr, 0);
+			return tls_recorder->record_compute_pipeline(VK_NULL_HANDLE, *tls_compute_create_info, nullptr, 0);
 
 		// Flush out the recording thread.
 		tls_recorder->tear_down_recording_thread();
 	}
+
+	return false;
 }
 
 #ifdef _WIN32
@@ -288,9 +290,11 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkApplicationInfo *appI
 	recorder->set_database_enable_checksum(true);
 	recorder->set_application_info_filter(entry.filter.get());
 	if (appInfo)
-		recorder->record_application_info(*appInfo);
+		if (!recorder->record_application_info(*appInfo))
+			LOGE("Failed to record application info.\n");
 	if (features)
-		recorder->record_physical_device_features(*features);
+		if (!recorder->record_physical_device_features(*features))
+			LOGE("Failed to record physical device features.\n");
 	recorder->init_recording_thread(entry.interface.get());
 
 	return recorder;

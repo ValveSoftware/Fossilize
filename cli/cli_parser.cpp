@@ -35,43 +35,36 @@ CLIParser::CLIParser(CLICallbacks cbs_, int argc_, char *argv_[])
 
 bool CLIParser::parse()
 {
-	try
+	while (argc && !ended_state)
 	{
-		while (argc && !ended_state)
-		{
-			const char *next = *argv++;
-			argc--;
+		const char *next = *argv++;
+		argc--;
 
-			if (*next != '-' && cbs.default_handler)
+		if (*next != '-' && cbs.default_handler)
+		{
+			cbs.default_handler(next);
+		}
+		else
+		{
+			auto itr = cbs.callbacks.find(next);
+			if (itr == ::end(cbs.callbacks))
 			{
-				cbs.default_handler(next);
+				if (unknown_argument_is_default)
+					cbs.default_handler(next);
+				else
+				{
+					LOGE("Invalid argument.\n");
+					if (cbs.error_handler)
+						cbs.error_handler();
+					return false;
+				}
 			}
 			else
-			{
-				auto itr = cbs.callbacks.find(next);
-				if (itr == ::end(cbs.callbacks))
-				{
-					if (unknown_argument_is_default)
-						cbs.default_handler(next);
-					else
-						throw std::invalid_argument("Invalid argument");
-				}
-				else
-					itr->second(*this);
-			}
+				itr->second(*this);
 		}
+	}
 
-		return true;
-	}
-	catch (const std::exception &e)
-	{
-		LOGE("Failed to parse arguments: %s\n", e.what());
-		if (cbs.error_handler)
-		{
-			cbs.error_handler();
-		}
-		return false;
-	}
+	return true;
 }
 
 void CLIParser::end()
@@ -83,13 +76,15 @@ unsigned CLIParser::next_uint()
 {
 	if (!argc)
 	{
-		throw invalid_argument("Tried to parse uint, but nothing left in arguments");
+		LOGE("Tried to parse uint, but nothing left in arguments.\n");
+		exit(EXIT_FAILURE);
 	}
 
 	auto val = stoul(*argv);
 	if (val > numeric_limits<unsigned>::max())
 	{
-		throw invalid_argument("next_uint() out of range");
+		LOGE("next_uint() out of range.\n");
+		exit(EXIT_FAILURE);
 	}
 
 	argc--;
@@ -102,7 +97,8 @@ double CLIParser::next_double()
 {
 	if (!argc)
 	{
-		throw invalid_argument("Tried to parse double, but nothing left in arguments");
+		LOGE("Tried to parse double, but nothing left in arguments.\n");
+		exit(EXIT_FAILURE);
 	}
 
 	double val = stod(*argv);
@@ -117,7 +113,8 @@ const char *CLIParser::next_string()
 {
 	if (!argc)
 	{
-		throw invalid_argument("Tried to parse string, but nothing left in arguments");
+		LOGE("Tried to parse string, but nothing left in arguments.\n");
+		exit(EXIT_FAILURE);
 	}
 
 	const char *ret = *argv;
