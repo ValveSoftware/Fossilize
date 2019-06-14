@@ -300,8 +300,11 @@ struct ThreadedReplayer : StateCreatorInterface
 	{
 		thread_initialized_count = 0;
 		per_thread_data.resize(num_worker_threads + 1);
-		for (auto &d : per_thread_data)
+
+		// Make sure main thread sees degenerate current_*_index. Any crash in main thread is fatal.
+		for (unsigned i = 0; i < num_worker_threads; i++)
 		{
+			auto &d = per_thread_data[i + 1];
 			d.current_graphics_index = opts.start_graphics_index;
 			d.current_compute_index = opts.start_compute_index;
 		}
