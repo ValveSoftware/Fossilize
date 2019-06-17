@@ -27,7 +27,6 @@
 #include <condition_variable>
 #include <future>
 #include <vector>
-#include <stdexcept>
 #include <unordered_set>
 #include <unordered_map>
 #include <stdio.h>

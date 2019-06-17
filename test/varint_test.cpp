@@ -23,7 +23,6 @@
 #include "fossilize.hpp"
 #include "varint.hpp"
 #include <string.h>
-#include <stdexcept>
 #include <random>
 #include <vector>
 

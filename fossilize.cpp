@@ -26,7 +26,6 @@
 #include <thread>
 #include <stddef.h>
 #include "fossilize.hpp"
-#include <stdexcept>
 #include <algorithm>
 #include <unordered_map>
 #include <queue>

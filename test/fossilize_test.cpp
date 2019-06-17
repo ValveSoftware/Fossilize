@@ -24,7 +24,6 @@
 #include "fossilize_db.hpp"
 #include "fossilize_external_replayer.hpp"
 #include <string.h>
-#include <stdexcept>
 #include <memory>
 #include <vector>
 #include <string>
