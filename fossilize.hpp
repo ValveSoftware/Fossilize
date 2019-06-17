@@ -26,6 +26,12 @@
 #include <stddef.h>
 #include "fossilize_types.hpp"
 
+#if defined(__GNUC__)
+#define FOSSILIZE_WARN_UNUSED __attribute__((warn_unused_result))
+#else
+#define FOSSILIZE_WARN_UNUSED
+#endif
+
 namespace Fossilize
 {
 class DatabaseInterface;
@@ -134,7 +140,7 @@ class StateReplayer
 public:
 	StateReplayer();
 	~StateReplayer();
-	void parse(StateCreatorInterface &iface, DatabaseInterface *database, const void *buffer, size_t size);
+	bool parse(StateCreatorInterface &iface, DatabaseInterface *database, const void *buffer, size_t size) FOSSILIZE_WARN_UNUSED;
 
 	// Default is true. If true, the replayer will make sure the derivative pipeline handles provided to
 	// the API is a correct VkPipeline. If false, pipelines with VK_PIPELINE_CREATE_DERIVATIVE_BIT will have its basePipelineHandle
@@ -181,41 +187,41 @@ public:
 	// These methods should only be called at the very beginning of the application lifetime.
 	// It will affect the hash of all create info structures.
 	// These are never recorded in a thread, so it's safe to query the application/feature hash right after calling these methods.
-	void record_application_info(const VkApplicationInfo &info);
+	bool record_application_info(const VkApplicationInfo &info) FOSSILIZE_WARN_UNUSED;
 
 	// TODO: create_device which can capture which features/exts are used to create the device.
 	// This can be relevant when using more exotic features.
-	void record_physical_device_features(const VkPhysicalDeviceFeatures2 &device_features);
-	void record_physical_device_features(const VkPhysicalDeviceFeatures &device_features);
+	bool record_physical_device_features(const VkPhysicalDeviceFeatures2 &device_features) FOSSILIZE_WARN_UNUSED;
+	bool record_physical_device_features(const VkPhysicalDeviceFeatures &device_features) FOSSILIZE_WARN_UNUSED;
 	void set_application_info_filter(ApplicationInfoFilter *filter);
 
 	const StateRecorderApplicationFeatureHash &get_application_feature_hash() const;
 
-	void record_descriptor_set_layout(VkDescriptorSetLayout set_layout, const VkDescriptorSetLayoutCreateInfo &layout_info,
-	                                  Hash custom_hash = 0);
-	void record_pipeline_layout(VkPipelineLayout pipeline_layout, const VkPipelineLayoutCreateInfo &layout_info,
-	                            Hash custom_hash = 0);
-	void record_shader_module(VkShaderModule module, const VkShaderModuleCreateInfo &create_info,
-	                          Hash custom_hash = 0);
-	void record_graphics_pipeline(VkPipeline pipeline, const VkGraphicsPipelineCreateInfo &create_info,
+	bool record_descriptor_set_layout(VkDescriptorSetLayout set_layout, const VkDescriptorSetLayoutCreateInfo &layout_info,
+	                                  Hash custom_hash = 0) FOSSILIZE_WARN_UNUSED;
+	bool record_pipeline_layout(VkPipelineLayout pipeline_layout, const VkPipelineLayoutCreateInfo &layout_info,
+	                            Hash custom_hash = 0) FOSSILIZE_WARN_UNUSED;
+	bool record_shader_module(VkShaderModule module, const VkShaderModuleCreateInfo &create_info,
+	                          Hash custom_hash = 0) FOSSILIZE_WARN_UNUSED;
+	bool record_graphics_pipeline(VkPipeline pipeline, const VkGraphicsPipelineCreateInfo &create_info,
 	                              const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
-	                              Hash custom_hash = 0);
-	void record_compute_pipeline(VkPipeline pipeline, const VkComputePipelineCreateInfo &create_info,
+	                              Hash custom_hash = 0) FOSSILIZE_WARN_UNUSED;
+	bool record_compute_pipeline(VkPipeline pipeline, const VkComputePipelineCreateInfo &create_info,
 	                             const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
-	                             Hash custom_hash = 0);
-	void record_render_pass(VkRenderPass render_pass, const VkRenderPassCreateInfo &create_info,
-	                        Hash custom_hash = 0);
-	void record_sampler(VkSampler sampler, const VkSamplerCreateInfo &create_info,
-	                    Hash custom_hash = 0);
+	                             Hash custom_hash = 0) FOSSILIZE_WARN_UNUSED;
+	bool record_render_pass(VkRenderPass render_pass, const VkRenderPassCreateInfo &create_info,
+	                        Hash custom_hash = 0) FOSSILIZE_WARN_UNUSED;
+	bool record_sampler(VkSampler sampler, const VkSamplerCreateInfo &create_info,
+	                    Hash custom_hash = 0) FOSSILIZE_WARN_UNUSED;
 
 	// Used by hashing functions in Hashing namespace. Should be considered an implementation detail.
-	Hash get_hash_for_descriptor_set_layout(VkDescriptorSetLayout layout) const;
-	Hash get_hash_for_pipeline_layout(VkPipelineLayout layout) const;
-	Hash get_hash_for_shader_module(VkShaderModule module) const;
-	Hash get_hash_for_graphics_pipeline_handle(VkPipeline pipeline) const;
-	Hash get_hash_for_compute_pipeline_handle(VkPipeline pipeline) const;
-	Hash get_hash_for_render_pass(VkRenderPass render_pass) const;
-	Hash get_hash_for_sampler(VkSampler sampler) const;
+	bool get_hash_for_descriptor_set_layout(VkDescriptorSetLayout layout, Hash *hash) const FOSSILIZE_WARN_UNUSED;
+	bool get_hash_for_pipeline_layout(VkPipelineLayout layout, Hash *hash) const FOSSILIZE_WARN_UNUSED;
+	bool get_hash_for_shader_module(VkShaderModule module, Hash *hash) const FOSSILIZE_WARN_UNUSED;
+	bool get_hash_for_graphics_pipeline_handle(VkPipeline pipeline, Hash *hash) const FOSSILIZE_WARN_UNUSED;
+	bool get_hash_for_compute_pipeline_handle(VkPipeline pipeline, Hash *hash) const FOSSILIZE_WARN_UNUSED;
+	bool get_hash_for_render_pass(VkRenderPass render_pass, Hash *hash) const FOSSILIZE_WARN_UNUSED;
+	bool get_hash_for_sampler(VkSampler sampler, Hash *hash) const FOSSILIZE_WARN_UNUSED;
 
 	// If database is non-null, serialize cannot not be called later, as the implementation will not retain
 	// memory for the create info structs, but rather rely on the database interface to make objects persist.
@@ -233,7 +239,7 @@ public:
 	// The result is a monolithic JSON document which contains all recorded state.
 	// Free with free_serialized() to make sure alloc/frees happens in same module.
 	// This is the "legacy" way of doing things. Ideally, use the DatabaseInterface.
-	bool serialize(uint8_t **serialized, size_t *serialized_size);
+	bool serialize(uint8_t **serialized, size_t *serialized_size) FOSSILIZE_WARN_UNUSED;
 	static void free_serialized(uint8_t *serialized);
 
 	// Stops the recording thread and joins with it.
@@ -266,10 +272,10 @@ Hash compute_hash_render_pass(const VkRenderPassCreateInfo &create_info);
 // If you are recording in threaded mode, these must only be called from the recording thread,
 // as the dependent objects might not have been recorded yet, and thus the mapping of dependent objects is unknown.
 // If you need to use these for whatever reason, you cannot use StateRecorder in the threaded mode.
-Hash compute_hash_descriptor_set_layout(const StateRecorder &recorder, const VkDescriptorSetLayoutCreateInfo &layout);
-Hash compute_hash_pipeline_layout(const StateRecorder &recorder, const VkPipelineLayoutCreateInfo &layout);
-Hash compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraphicsPipelineCreateInfo &create_info);
-Hash compute_hash_compute_pipeline(const StateRecorder &recorder, const VkComputePipelineCreateInfo &create_info);
+bool compute_hash_descriptor_set_layout(const StateRecorder &recorder, const VkDescriptorSetLayoutCreateInfo &layout, Hash *hash) FOSSILIZE_WARN_UNUSED;
+bool compute_hash_pipeline_layout(const StateRecorder &recorder, const VkPipelineLayoutCreateInfo &layout, Hash *hash) FOSSILIZE_WARN_UNUSED;
+bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraphicsPipelineCreateInfo &create_info, Hash *hash) FOSSILIZE_WARN_UNUSED;
+bool compute_hash_compute_pipeline(const StateRecorder &recorder, const VkComputePipelineCreateInfo &create_info, Hash *hash) FOSSILIZE_WARN_UNUSED;
 }
 
 }

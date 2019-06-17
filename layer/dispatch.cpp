@@ -154,19 +154,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelinesNormal(Device *laye
 
 	for (uint32_t i = 0; i < createInfoCount; i++)
 	{
-		try
-		{
-			// Record methods may throw on unexpected input. We cannot propagate this error up.
-			layer->getRecorder().record_graphics_pipeline(pPipelines[i], pCreateInfos[i], pPipelines, createInfoCount);
-		}
-		catch (const std::exception &e)
-		{
-			LOGE("Failed to record graphics pipeline: %s\n", e.what());
-		}
+		if (!layer->getRecorder().record_graphics_pipeline(pPipelines[i], pCreateInfos[i], pPipelines, createInfoCount))
+			LOGE("Recording graphics pipeline failed.\n");
 	}
 
 	return VK_SUCCESS;
 }
+
 #ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
 static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelinesParanoid(Device *layer,
                                                                       VkDevice device, VkPipelineCache pipelineCache,
@@ -195,15 +189,8 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelinesParanoid(Device *la
 		Instance::completedPipelineCompilation();
 
 		// Record failing pipelines for repro.
-		try
-		{
-			// Record methods may throw on unexpected input. We cannot propagate this error up.
-			layer->getRecorder().record_graphics_pipeline(res == VK_SUCCESS ? pPipelines[i] : VK_NULL_HANDLE, info, nullptr, 0);
-		}
-		catch (const std::exception &e)
-		{
-			LOGE("Failed to record graphics pipeline: %s\n", e.what());
-		}
+		if (!layer->getRecorder().record_graphics_pipeline(res == VK_SUCCESS ? pPipelines[i] : VK_NULL_HANDLE, info, nullptr, 0))
+			LOGE("Failed to record graphics pipeline.\n");
 
 		if (res != VK_SUCCESS)
 		{
@@ -251,15 +238,8 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelinesNormal(Device *layer
 
 	for (uint32_t i = 0; i < createInfoCount; i++)
 	{
-		try
-		{
-			// Record methods may throw on unexpected input. We cannot propagate this error up.
-			layer->getRecorder().record_compute_pipeline(pPipelines[i], pCreateInfos[i], pPipelines, createInfoCount);
-		}
-		catch (const std::exception &e)
-		{
-			LOGE("Failed to record compute pipeline: %s\n", e.what());
-		}
+		if (!layer->getRecorder().record_compute_pipeline(pPipelines[i], pCreateInfos[i], pPipelines, createInfoCount))
+			LOGE("Failed to record compute pipeline.\n");
 	}
 
 	return VK_SUCCESS;
@@ -293,15 +273,8 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelinesParanoid(Device *lay
 		Instance::completedPipelineCompilation();
 
 		// Record failing pipelines for repro.
-		try
-		{
-			// Record methods may throw on unexpected input. We cannot propagate this error up.
-			layer->getRecorder().record_compute_pipeline(res == VK_SUCCESS ? pPipelines[i] : VK_NULL_HANDLE, info, nullptr, 0);
-		}
-		catch (const std::exception &e)
-		{
-			LOGE("Failed to record compute pipeline: %s\n", e.what());
-		}
+		if (!layer->getRecorder().record_compute_pipeline(res == VK_SUCCESS ? pPipelines[i] : VK_NULL_HANDLE, info, nullptr, 0))
+			LOGE("Failed to record compute pipeline.\n");
 
 		if (res != VK_SUCCESS)
 		{
@@ -346,15 +319,8 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(VkDevice device,
 
 	if (result == VK_SUCCESS)
 	{
-		try
-		{
-			// Record methods may throw on unexpected input. We cannot propagate this error up.
-			layer->getRecorder().record_pipeline_layout(*pLayout, *pCreateInfo);
-		}
-		catch (const std::exception &e)
-		{
-			LOGE("Failed to record pipeline layout: %s\n", e.what());
-		}
+		if (!layer->getRecorder().record_pipeline_layout(*pLayout, *pCreateInfo))
+			LOGE("Failed to record pipeline layout.\n");
 	}
 	return result;
 }
@@ -370,15 +336,8 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(VkDevice device,
 
 	if (result == VK_SUCCESS)
 	{
-		try
-		{
-			// Record methods may throw on unexpected input. We cannot propagate this error up.
-			layer->getRecorder().record_descriptor_set_layout(*pSetLayout, *pCreateInfo);
-		}
-		catch (const std::exception &e)
-		{
-			LOGE("Failed to record descriptor set layout: %s\n", e.what());
-		}
+		if (!layer->getRecorder().record_descriptor_set_layout(*pSetLayout, *pCreateInfo))
+			LOGE("Failed to record descriptor set layout.\n");
 	}
 	return result;
 }
@@ -421,15 +380,8 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateSampler(VkDevice device, const VkSam
 
 	if (res == VK_SUCCESS)
 	{
-		try
-		{
-			// Record methods may throw on unexpected input. We cannot propagate this error up.
-			layer->getRecorder().record_sampler(*pSampler, *pCreateInfo);
-		}
-		catch (const std::exception &e)
-		{
-			LOGE("Failed to record sampler: %s\n", e.what());
-		}
+		if (!layer->getRecorder().record_sampler(*pSampler, *pCreateInfo))
+			LOGE("Failed to record sampler.\n");
 	}
 
 	return res;
@@ -447,15 +399,8 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateShaderModule(VkDevice device, const 
 
 	if (res == VK_SUCCESS)
 	{
-		try
-		{
-			// Record methods may throw on unexpected input. We cannot propagate this error up.
-			layer->getRecorder().record_shader_module(*pShaderModule, *pCreateInfo);
-		}
-		catch (const std::exception &e)
-		{
-			LOGE("Failed to record shader module: %s\n", e.what());
-		}
+		if (!layer->getRecorder().record_shader_module(*pShaderModule, *pCreateInfo))
+			LOGE("Failed to record shader module.\n");
 	}
 
 	return res;
@@ -470,15 +415,8 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass(VkDevice device, const Vk
 
 	if (res == VK_SUCCESS)
 	{
-		try
-		{
-			// Record methods may throw on unexpected input. We cannot propagate this error up.
-			layer->getRecorder().record_render_pass(*pRenderPass, *pCreateInfo);
-		}
-		catch (const std::exception &e)
-		{
-			LOGE("Failed to record render pass: %s\n", e.what());
-		}
+		if (!layer->getRecorder().record_render_pass(*pRenderPass, *pCreateInfo))
+			LOGE("Failed to record render pass.\n");
 	}
 	return res;
 }

@@ -176,12 +176,16 @@ static std::vector<char> read_file(const char *path)
 	return buffer;
 }
 
-static const Value &get_safe_member(const Value &value, const char *member)
+static const Value *get_safe_member(const Value &value, const char *member)
 {
 	auto memb = value.FindMember(member);
 	if (memb == value.MemberEnd())
-		throw std::logic_error("Member not found.");
-	return memb->value;
+	{
+		LOGE("Member not found.\n");
+		return nullptr;
+	}
+	else
+		return &memb->value;
 }
 
 static const Value *maybe_get_member(const Value &value, const char *member)
@@ -193,25 +197,35 @@ static const Value *maybe_get_member(const Value &value, const char *member)
 		return &memb->value;
 }
 
-static std::string get_safe_member_string(const Value &value, const char *member)
+static bool get_safe_member_string(const Value &value, const char *member, std::string &out_value)
 {
-	auto &memb = get_safe_member(value, member);
-	if (memb.IsString())
+	auto *memb = get_safe_member(value, member);
+	if (memb && memb->IsString())
 	{
-		const char *str = memb.GetString();
-		return std::string(str, str + memb.GetStringLength());
+		const char *str = memb->GetString();
+		out_value = std::string(str, str + memb->GetStringLength());
+		return true;
 	}
 	else
-		throw std::logic_error("Not a string.");
+	{
+		LOGE("Not a string.\n");
+		return false;
+	}
 }
 
-static int get_safe_member_int(const Value &value, const char *member)
+static bool get_safe_member_int(const Value &value, const char *member, int &out_value)
 {
-	auto &memb = get_safe_member(value, member);
-	if (memb.IsInt())
-		return memb.GetInt();
+	auto *memb = get_safe_member(value, member);
+	if (memb && memb->IsInt())
+	{
+		out_value = memb->GetInt();
+		return true;
+	}
 	else
-		throw std::logic_error("Not an int.");
+	{
+		LOGE("Not an int.\n");
+		return false;
+	}
 }
 
 static unsigned default_get_member_uint(const Value &value, const char *member, unsigned default_value = 0)
@@ -220,34 +234,48 @@ static unsigned default_get_member_uint(const Value &value, const char *member, 
 	if (!memb)
 		return default_value;
 	if (!memb->IsUint())
-		throw std::logic_error("Object is not uint.");
+		return default_value;
 	return memb->GetUint();
 }
 
-static void add_blacklists(std::unordered_set<std::string> &output, const Value *blacklist)
+static bool add_blacklists(std::unordered_set<std::string> &output, const Value *blacklist)
 {
 	if (!blacklist->IsArray())
-		throw std::logic_error("Not an array.");
+	{
+		LOGE("Not an array.\n");
+		return false;
+	}
 
 	for (auto itr = blacklist->Begin(); itr != blacklist->End(); ++itr)
 	{
 		if (!itr->IsString())
-			throw std::logic_error("Not a string.");
+		{
+			LOGE("Not a string.\n");
+			return false;
+		}
 
 		const char *str = itr->GetString();
 		output.insert(std::string(str, str + itr->GetStringLength()));
 	}
+
+	return true;
 }
 
-static void add_application_filters(std::unordered_map<std::string, AppInfo> &output, const Value *filters)
+static bool add_application_filters(std::unordered_map<std::string, AppInfo> &output, const Value *filters)
 {
 	if (!filters->IsObject())
-		throw std::logic_error("Not an object.");
+	{
+		LOGE("Not an object.\n");
+		return false;
+	}
 
 	for (auto itr = filters->MemberBegin(); itr != filters->MemberEnd(); ++itr)
 	{
 		if (!itr->value.IsObject())
-			throw std::logic_error("Not an object.");
+		{
+			LOGE("Not an object.\n");
+			return false;
+		}
 
 		AppInfo info;
 
@@ -257,6 +285,8 @@ static void add_application_filters(std::unordered_map<std::string, AppInfo> &ou
 		info.minimum_application_version = default_get_member_uint(value, "minimumApplicationVersion");
 		output[itr->name.GetString()] = info;
 	}
+
+	return true;
 }
 
 bool ApplicationInfoFilter::Impl::parse(const std::string &path)
@@ -268,24 +298,31 @@ bool ApplicationInfoFilter::Impl::parse(const std::string &path)
 	if (doc.HasParseError())
 		return false;
 
-	if (get_safe_member_string(doc, "asset") != "FossilizeApplicationInfoFilter")
+	std::string json_str;
+	int json_int;
+
+	if (!get_safe_member_string(doc, "asset", json_str) || json_str != "FossilizeApplicationInfoFilter")
 		return false;
-	if (get_safe_member_int(doc, "version") != FOSSILIZE_APPLICATION_INFO_FILTER_VERSION)
+	if (!get_safe_member_int(doc, "version", json_int) || json_int != FOSSILIZE_APPLICATION_INFO_FILTER_VERSION)
 		return false;
 
 	auto *blacklist = maybe_get_member(doc, "blacklistedApplicationNames");
 	if (blacklist)
-		add_blacklists(blacklisted_application_names, blacklist);
+		if (!add_blacklists(blacklisted_application_names, blacklist))
+			return false;
 	blacklist = maybe_get_member(doc, "blacklistedEngineNames");
 	if (blacklist)
-		add_blacklists(blacklisted_engine_names, blacklist);
+		if (!add_blacklists(blacklisted_engine_names, blacklist))
+			return false;
 
 	auto *filters = maybe_get_member(doc, "applicationFilters");
 	if (filters)
-		add_application_filters(application_infos, filters);
+		if (!add_application_filters(application_infos, filters))
+			return false;
 	filters = maybe_get_member(doc, "engineFilters");
 	if (filters)
-		add_application_filters(engine_infos, filters);
+		if (!add_application_filters(engine_infos, filters))
+			return false;
 
 	return true;
 }
@@ -294,17 +331,7 @@ void ApplicationInfoFilter::Impl::parse_async(const char *path_)
 {
 	std::string path = path_;
 	task = std::async(std::launch::async, [this, path]() {
-		bool ret;
-		try
-		{
-			ret = parse(path);
-		}
-		catch (const std::exception &e)
-		{
-			LOGE("Caught exception in ApplicationInfoFilter::Impl::parse_async(): %s\n", e.what());
-			ret = false;
-		}
-
+		bool ret = parse(path);
 		parsing_success = ret;
 		parsing_done = true;
 	});

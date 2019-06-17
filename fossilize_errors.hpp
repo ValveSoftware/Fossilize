@@ -35,30 +35,7 @@
 
 namespace Fossilize
 {
-// TODO: Do we want to get rid of this?
-class Exception : public std::exception
-{
-public:
-	explicit Exception(const char *what_)
-		: msg(what_)
-	{
-	}
-
-	explicit Exception(std::string what_) FOSSILIZE_NOEXCEPT
-		: msg(std::move(what_))
-	{
-	}
-
-	const char *what() const FOSSILIZE_NOEXCEPT override
-	{
-		return msg.c_str();
-	}
-
-private:
-	std::string msg;
-};
-
-static inline void throw_pnext_chain(std::string what, const void *pNext)
+static inline void log_error_pnext_chain(std::string what, const void *pNext)
 {
 	what += " (pNext->sType chain: [";
 	while (pNext != nullptr)
@@ -70,7 +47,7 @@ static inline void throw_pnext_chain(std::string what, const void *pNext)
 			what += ", ";
 	}
 	what += "])";
-	throw Exception(std::move(what));
+	LOGE("Error: %s\n", what.c_str());
 }
 
 static inline std::string uint64_string(uint64_t value)
@@ -80,7 +57,7 @@ static inline std::string uint64_string(uint64_t value)
 	return str;
 }
 
-static inline void throw_missing_resource(const char *type, Hash hash)
+static inline void log_missing_resource(const char *type, Hash hash)
 {
 	std::string buffer;
 	buffer += "Referenced ";
@@ -88,8 +65,7 @@ static inline void throw_missing_resource(const char *type, Hash hash)
 	buffer += " ";
 	buffer += uint64_string(hash);
 	buffer += ", but it does not exist.";
-	throw Exception(std::move(buffer));
+	LOGE("Error: %s\n", buffer.data());
 }
-
 }
 

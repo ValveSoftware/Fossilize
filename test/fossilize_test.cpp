@@ -54,9 +54,11 @@ struct ReplayInterface : StateCreatorInterface
 		feature_hash = hash;
 
 		if (info)
-			recorder.record_application_info(*info);
+			if (!recorder.record_application_info(*info))
+				abort();
 		if (features)
-			recorder.record_physical_device_features(*features);
+			if (!recorder.record_physical_device_features(*features))
+				abort();
 	}
 
 	bool enqueue_create_sampler(Hash hash, const VkSamplerCreateInfo *create_info, VkSampler *sampler) override
@@ -66,30 +68,31 @@ struct ReplayInterface : StateCreatorInterface
 			return false;
 
 		*sampler = fake_handle<VkSampler>(hash);
-		recorder.record_sampler(*sampler, *create_info);
-		return true;
+		return recorder.record_sampler(*sampler, *create_info);
 	}
 
 	bool enqueue_create_descriptor_set_layout(Hash hash, const VkDescriptorSetLayoutCreateInfo *create_info, VkDescriptorSetLayout *layout) override
 	{
-		Hash recorded_hash = Hashing::compute_hash_descriptor_set_layout(recorder, *create_info);
+		Hash recorded_hash;
+		if (!Hashing::compute_hash_descriptor_set_layout(recorder, *create_info, &recorded_hash))
+			return false;
 		if (recorded_hash != hash)
 			return false;
 
 		*layout = fake_handle<VkDescriptorSetLayout>(hash);
-		recorder.record_descriptor_set_layout(*layout, *create_info);
-		return true;
+		return recorder.record_descriptor_set_layout(*layout, *create_info);
 	}
 
 	bool enqueue_create_pipeline_layout(Hash hash, const VkPipelineLayoutCreateInfo *create_info, VkPipelineLayout *layout) override
 	{
-		Hash recorded_hash = Hashing::compute_hash_pipeline_layout(recorder, *create_info);
+		Hash recorded_hash;
+		if (!Hashing::compute_hash_pipeline_layout(recorder, *create_info, &recorded_hash))
+			return false;
 		if (recorded_hash != hash)
 			return false;
 
 		*layout = fake_handle<VkPipelineLayout>(hash);
-		recorder.record_pipeline_layout(*layout, *create_info);
-		return true;
+		return recorder.record_pipeline_layout(*layout, *create_info);
 	}
 
 	bool enqueue_create_shader_module(Hash hash, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module) override
@@ -99,8 +102,7 @@ struct ReplayInterface : StateCreatorInterface
 			return false;
 
 		*module = fake_handle<VkShaderModule>(hash);
-		recorder.record_shader_module(*module, *create_info);
-		return true;
+		return recorder.record_shader_module(*module, *create_info);
 	}
 
 	bool enqueue_create_render_pass(Hash hash, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass) override
@@ -110,30 +112,31 @@ struct ReplayInterface : StateCreatorInterface
 			return false;
 
 		*render_pass = fake_handle<VkRenderPass>(hash);
-		recorder.record_render_pass(*render_pass, *create_info);
-		return true;
+		return recorder.record_render_pass(*render_pass, *create_info);
 	}
 
 	bool enqueue_create_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
-		Hash recorded_hash = Hashing::compute_hash_compute_pipeline(recorder, *create_info);
+		Hash recorded_hash;
+		if (!Hashing::compute_hash_compute_pipeline(recorder, *create_info, &recorded_hash))
+			return false;
 		if (recorded_hash != hash)
 			return false;
 
 		*pipeline = fake_handle<VkPipeline>(hash);
-		recorder.record_compute_pipeline(*pipeline, *create_info, nullptr, 0);
-		return true;
+		return recorder.record_compute_pipeline(*pipeline, *create_info, nullptr, 0);
 	}
 
 	bool enqueue_create_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
-		Hash recorded_hash = Hashing::compute_hash_graphics_pipeline(recorder, *create_info);
+		Hash recorded_hash;
+		if (!Hashing::compute_hash_graphics_pipeline(recorder, *create_info, &recorded_hash))
+			return false;
 		if (recorded_hash != hash)
 			return false;
 
 		*pipeline = fake_handle<VkPipeline>(hash);
-		recorder.record_graphics_pipeline(*pipeline, *create_info, nullptr, 0);
-		return true;
+		return recorder.record_graphics_pipeline(*pipeline, *create_info, nullptr, 0);
 	}
 };
 
@@ -155,24 +158,26 @@ static void record_samplers(StateRecorder &recorder)
 	sampler.magFilter = VK_FILTER_NEAREST;
 	sampler.minLod = 10.0f;
 	sampler.maxLod = 20.0f;
-	recorder.record_sampler(fake_handle<VkSampler>(100), sampler);
+	if (!recorder.record_sampler(fake_handle<VkSampler>(100), sampler))
+		abort();
 	sampler.minLod = 11.0f;
-	recorder.record_sampler(fake_handle<VkSampler>(101), sampler);
+	if (!recorder.record_sampler(fake_handle<VkSampler>(101), sampler))
+		abort();
 
 	// Intentionally trip an error.
-	try
+	VkSamplerYcbcrConversionCreateInfo ycbcr = {VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_CREATE_INFO};
+	VkSamplerYcbcrConversionCreateInfo reduction = {VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO_EXT};
+	sampler.pNext = &ycbcr;
+	ycbcr.pNext = &reduction;
+	bool ret = recorder.record_sampler(fake_handle<VkSampler>(102), sampler);
+	if (ret)
 	{
-		VkSamplerYcbcrConversionCreateInfo ycbcr = {VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_CREATE_INFO};
-		VkSamplerYcbcrConversionCreateInfo reduction = {VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO_EXT};
-		sampler.pNext = &ycbcr;
-		ycbcr.pNext = &reduction;
-		recorder.record_sampler(fake_handle<VkSampler>(102), sampler);
 		// Should not reach here.
 		exit(1);
 	}
-	catch (const std::exception &e)
+	else
 	{
-		LOGE("=== Intentional error for testing: %s ===\n", e.what());
+		LOGE("=== Tripped intentional error for testing ===\n");
 	}
 }
 
@@ -202,11 +207,13 @@ static void record_set_layouts(StateRecorder &recorder)
 	bindings[2].descriptorCount = 3;
 	bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 	bindings[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-	recorder.record_descriptor_set_layout(fake_handle<VkDescriptorSetLayout>(1000), layout);
+	if (!recorder.record_descriptor_set_layout(fake_handle<VkDescriptorSetLayout>(1000), layout))
+		abort();
 
 	layout.bindingCount = 2;
 	layout.pBindings = bindings + 1;
-	recorder.record_descriptor_set_layout(fake_handle<VkDescriptorSetLayout>(1001), layout);
+	if (!recorder.record_descriptor_set_layout(fake_handle<VkDescriptorSetLayout>(1001), layout))
+		abort();
 }
 
 static void record_pipeline_layouts(StateRecorder &recorder)
@@ -230,15 +237,18 @@ static void record_pipeline_layouts(StateRecorder &recorder)
 	};
 	layout.pushConstantRangeCount = 2;
 	layout.pPushConstantRanges = ranges;
-	recorder.record_pipeline_layout(fake_handle<VkPipelineLayout>(10000), layout);
+	if (!recorder.record_pipeline_layout(fake_handle<VkPipelineLayout>(10000), layout))
+		abort();
 
 	VkPipelineLayoutCreateInfo layout2 = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
-	recorder.record_pipeline_layout(fake_handle<VkPipelineLayout>(10001), layout2);
+	if (!recorder.record_pipeline_layout(fake_handle<VkPipelineLayout>(10001), layout2))
+		abort();
 
 	VkPipelineLayoutCreateInfo layout3 = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
 	layout3.setLayoutCount = 2;
 	layout3.pSetLayouts = set_layouts1;
-	recorder.record_pipeline_layout(fake_handle<VkPipelineLayout>(10002), layout3);
+	if (!recorder.record_pipeline_layout(fake_handle<VkPipelineLayout>(10002), layout3))
+		abort();
 }
 
 static void record_shader_modules(StateRecorder &recorder)
@@ -248,12 +258,14 @@ static void record_shader_modules(StateRecorder &recorder)
 	info.pCode = code;
 	info.codeSize = sizeof(code);
 
-	recorder.record_shader_module(fake_handle<VkShaderModule>(5000), info);
+	if (!recorder.record_shader_module(fake_handle<VkShaderModule>(5000), info))
+		abort();
 
 	static const uint32_t code2[] = { 0xabba1337, 0xbabba100, 0xdeadbeef, 0xcafebabe };
 	info.pCode = code2;
 	info.codeSize = sizeof(code2);
-	recorder.record_shader_module(fake_handle<VkShaderModule>(5001), info);
+	if (!recorder.record_shader_module(fake_handle<VkShaderModule>(5001), info))
+		abort();
 }
 
 static void record_render_passes(StateRecorder &recorder)
@@ -314,10 +326,12 @@ static void record_render_passes(StateRecorder &recorder)
 	pass.pSubpasses = subpasses;
 	pass.dependencyCount = 0;
 	pass.pDependencies = deps;
-	recorder.record_render_pass(fake_handle<VkRenderPass>(30000), pass);
+	if (!recorder.record_render_pass(fake_handle<VkRenderPass>(30000), pass))
+		abort();
 
 	pass.dependencyCount = 0;
-	recorder.record_render_pass(fake_handle<VkRenderPass>(30001), pass);
+	if (!recorder.record_render_pass(fake_handle<VkRenderPass>(30001), pass))
+		abort();
 }
 
 static void record_compute_pipelines(StateRecorder &recorder)
@@ -341,12 +355,14 @@ static void record_compute_pipelines(StateRecorder &recorder)
 	pipe.stage.pSpecializationInfo = &spec;
 	pipe.layout = fake_handle<VkPipelineLayout>(10001);
 
-	recorder.record_compute_pipeline(fake_handle<VkPipeline>(80000), pipe, nullptr, 0);
+	if (!recorder.record_compute_pipeline(fake_handle<VkPipeline>(80000), pipe, nullptr, 0))
+		abort();
 
 	//pipe.basePipelineHandle = fake_handle<VkPipeline>(80000);
 	pipe.basePipelineIndex = 10;
 	pipe.stage.pSpecializationInfo = nullptr;
-	recorder.record_compute_pipeline(fake_handle<VkPipeline>(80001), pipe, nullptr, 0);
+	if (!recorder.record_compute_pipeline(fake_handle<VkPipeline>(80001), pipe, nullptr, 0))
+		abort();
 }
 
 static void record_graphics_pipelines(StateRecorder &recorder)
@@ -528,13 +544,15 @@ static void record_graphics_pipelines(StateRecorder &recorder)
 	pipe.pRasterizationState = &rs;
 	pipe.pInputAssemblyState = &ia;
 
-	recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100000), pipe, nullptr, 0);
+	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100000), pipe, nullptr, 0))
+		abort();
 
 	vp.viewportCount = 0;
 	vp.scissorCount = 0;
 	pipe.basePipelineHandle = fake_handle<VkPipeline>(100000);
 	pipe.basePipelineIndex = 200;
-	recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100001), pipe, nullptr, 0);
+	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100001), pipe, nullptr, 0))
+		abort();
 }
 
 static bool test_database()
@@ -862,51 +880,46 @@ int main()
 	if (!test_database())
 		return EXIT_FAILURE;
 
-	try
+	std::vector<uint8_t> res;
 	{
-		std::vector<uint8_t> res;
-		{
-			StateRecorder recorder;
+		StateRecorder recorder;
 
-			VkApplicationInfo app_info = { VK_STRUCTURE_TYPE_APPLICATION_INFO };
-			app_info.pEngineName = "test";
-			app_info.pApplicationName = "testy";
-			app_info.engineVersion = 1234;
-			app_info.applicationVersion = 123515;
-			app_info.apiVersion = VK_API_VERSION_1_1;
-			recorder.record_application_info(app_info);
+		VkApplicationInfo app_info = { VK_STRUCTURE_TYPE_APPLICATION_INFO };
+		app_info.pEngineName = "test";
+		app_info.pApplicationName = "testy";
+		app_info.engineVersion = 1234;
+		app_info.applicationVersion = 123515;
+		app_info.apiVersion = VK_API_VERSION_1_1;
+		if (!recorder.record_application_info(app_info))
+			abort();
 
-			VkPhysicalDeviceFeatures2 features = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
-			recorder.record_physical_device_features(features);
+		VkPhysicalDeviceFeatures2 features = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+		if (!recorder.record_physical_device_features(features))
+			abort();
 
-			record_samplers(recorder);
-			record_set_layouts(recorder);
-			record_pipeline_layouts(recorder);
-			record_shader_modules(recorder);
-			record_render_passes(recorder);
-			record_compute_pipelines(recorder);
-			record_graphics_pipelines(recorder);
+		record_samplers(recorder);
+		record_set_layouts(recorder);
+		record_pipeline_layouts(recorder);
+		record_shader_modules(recorder);
+		record_render_passes(recorder);
+		record_compute_pipelines(recorder);
+		record_graphics_pipelines(recorder);
 
-			uint8_t *serialized;
-			size_t serialized_size;
-			if (!recorder.serialize(&serialized, &serialized_size))
-				return EXIT_FAILURE;
-			res = std::vector<uint8_t>(serialized, serialized + serialized_size);
-			StateRecorder::free_serialized(serialized);
-		}
-
-		StateReplayer replayer;
-		ReplayInterface iface;
-
-		std::string serialized(res.begin(), res.end());
-		LOGI("Serialized:\n%s\n", serialized.c_str());
-
-		replayer.parse(iface, nullptr, res.data(), res.size());
-		return EXIT_SUCCESS;
+		uint8_t *serialized;
+		size_t serialized_size;
+		if (!recorder.serialize(&serialized, &serialized_size))
+			return EXIT_FAILURE;
+		res = std::vector<uint8_t>(serialized, serialized + serialized_size);
+		StateRecorder::free_serialized(serialized);
 	}
-	catch (const std::exception &e)
-	{
-		fprintf(stderr, "Error: %s\n", e.what());
+
+	StateReplayer replayer;
+	ReplayInterface iface;
+
+	std::string serialized(res.begin(), res.end());
+	LOGI("Serialized:\n%s\n", serialized.c_str());
+
+	if (!replayer.parse(iface, nullptr, res.data(), res.size()))
 		return EXIT_FAILURE;
-	}
+	return EXIT_SUCCESS;
 }

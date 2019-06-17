@@ -60,9 +60,11 @@ struct RehashReplayer : StateCreatorInterface
 		else if (!has_set_application_info && (!should_filter_application_hash || hash == filter_application_hash))
 		{
 			if (info)
-				recorder->record_application_info(*info);
+				if (!recorder->record_application_info(*info))
+					LOGE("Failed to record application info.\n");
 			if (features)
-				recorder->record_physical_device_features(*features);
+				if (!recorder->record_physical_device_features(*features))
+					LOGE("Failed to record physical device features.\n");
 			has_set_application_info = true;
 		}
 	}
@@ -70,50 +72,43 @@ struct RehashReplayer : StateCreatorInterface
 	bool enqueue_create_sampler(Hash hash, const VkSamplerCreateInfo *create_info, VkSampler *sampler) override
 	{
 		*sampler = fake_handle<VkSampler>(hash);
-		recorder->record_sampler(*sampler, *create_info);
-		return true;
+		return recorder->record_sampler(*sampler, *create_info);
 	}
 
 	bool enqueue_create_descriptor_set_layout(Hash hash, const VkDescriptorSetLayoutCreateInfo *create_info, VkDescriptorSetLayout *layout) override
 	{
 		*layout = fake_handle<VkDescriptorSetLayout>(hash);
-		recorder->record_descriptor_set_layout(*layout, *create_info);
-		return true;
+		return recorder->record_descriptor_set_layout(*layout, *create_info);
 	}
 
 	bool enqueue_create_pipeline_layout(Hash hash, const VkPipelineLayoutCreateInfo *create_info, VkPipelineLayout *layout) override
 	{
 		*layout = fake_handle<VkPipelineLayout>(hash);
-		recorder->record_pipeline_layout(*layout, *create_info);
-		return true;
+		return recorder->record_pipeline_layout(*layout, *create_info);
 	}
 
 	bool enqueue_create_shader_module(Hash hash, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module) override
 	{
 		*module = fake_handle<VkShaderModule>(hash);
-		recorder->record_shader_module(*module, *create_info);
-		return true;
+		return recorder->record_shader_module(*module, *create_info);
 	}
 
 	bool enqueue_create_render_pass(Hash hash, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass) override
 	{
 		*render_pass = fake_handle<VkRenderPass>(hash);
-		recorder->record_render_pass(*render_pass, *create_info);
-		return true;
+		return recorder->record_render_pass(*render_pass, *create_info);
 	}
 
 	bool enqueue_create_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
 		*pipeline = fake_handle<VkPipeline>(hash);
-		recorder->record_compute_pipeline(*pipeline, *create_info, nullptr, 0);
-		return true;
+		return recorder->record_compute_pipeline(*pipeline, *create_info, nullptr, 0);
 	}
 
 	bool enqueue_create_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
 		*pipeline = fake_handle<VkPipeline>(hash);
-		recorder->record_graphics_pipeline(*pipeline, *create_info, nullptr, 0);
-		return true;
+		return recorder->record_graphics_pipeline(*pipeline, *create_info, nullptr, 0);
 	}
 };
 
@@ -215,15 +210,8 @@ int main(int argc, char *argv[])
 				return EXIT_FAILURE;
 			}
 
-			try
-			{
-				replayer.parse(rehash_replayer, input_db.get(), state_json.data(), state_json.size());
-			}
-			catch (const exception &e)
-			{
-				LOGE("StateReplayer threw exception parsing (tag: %d, hash: 0x%llx): %s\n", tag,
-				     static_cast<unsigned long long>(hash), e.what());
-			}
+			if (!replayer.parse(rehash_replayer, input_db.get(), state_json.data(), state_json.size()))
+				LOGE("Failed to parse blob (tag: %d, hash: 0x%llx).\n", tag, static_cast<unsigned long long>(hash));
 		}
 
 		if (tag == RESOURCE_APPLICATION_INFO)

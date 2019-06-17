@@ -84,36 +84,29 @@ Each SPIR-V word takes from 1 to 5 bytes with this scheme.
 
 void create_state()
 {
-    try
-    {
-        Fossilize::StateRecorder recorder;
-        // TODO here: Add way to capture which extensions/physical device features were used to deal with exotic things
-        // which require extensions when making repro cases.
+    Fossilize::StateRecorder recorder;
+    // TODO here: Add way to capture which extensions/physical device features were used to deal with exotic things
+    // which require extensions when making repro cases.
 
-        VkDescriptorSetLayoutCreateInfo info = {
-            VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
-        };
+    VkDescriptorSetLayoutCreateInfo info = {
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
+    };
 
-        // Fill in stuff.
-        vkCreateDescriptorSetLayout(..., &layout);
+    // Fill in stuff.
+    vkCreateDescriptorSetLayout(..., &layout);
 
-        // Records the descriptor set layout.
-        recorder.record_descriptor_set_layout(layout, info);
+    // Records the descriptor set layout.
+    bool success = recorder.record_descriptor_set_layout(layout, info);
 
-        // Do the same for render passes, pipelines, shader modules, samplers (if using immutable samplers) as necessary.
+    // Do the same for render passes, pipelines, shader modules, samplers (if using immutable samplers) as necessary.
 
-        // This method gives you a standalone JSON file which contains everything.
-        // The alternative is using init_recording_thread() to set up a database backend.
-        uint8_t *serialized;
-        size_t size;
-        recorder.serialize(&serialized, &size);
-        save_to_disk(serialized, size);
-        recorder.free_serialized(serialized);
-    }
-    catch (const std::exception &e)
-    {
-        // Can throw exception on API misuse.
-    }
+    // This method gives you a standalone JSON file which contains everything.
+    // The alternative is using init_recording_thread() to set up a database backend.
+    uint8_t *serialized;
+    size_t size;
+    recorder.serialize(&serialized, &size);
+    save_to_disk(serialized, size);
+    recorder.free_serialized(serialized);
 }
 ```
 
@@ -159,16 +152,9 @@ struct Device : Fossilize::StateCreatorInterface
 
 void replay_state(Device &device)
 {
-    try
-    {
-        Fossilize::Replayer replayer;
-        replayer.parse(device, nullptr, serialized_state, serialized_state_size);
-        // Now internal hashmaps are warmed up, and all pipelines have been created.
-    }
-    catch (const std::exception &e)
-    {
-        // Can throw exception on API misuse.
-    }
+    Fossilize::Replayer replayer;
+    bool success = replayer.parse(device, nullptr, serialized_state, serialized_state_size);
+    // Now internal hashmaps are warmed up, and all pipelines have been created.
 }
 ```
 
