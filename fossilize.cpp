@@ -544,6 +544,8 @@ static void hash_pnext_struct(const StateRecorder &,
 	h.u32(create_info.rasterizationStream);
 }
 
+static bool hash_pnext_chain(const StateRecorder &recorder, Hasher &h, const void *pNext) FOSSILIZE_WARN_UNUSED;
+
 static bool hash_pnext_chain(const StateRecorder &recorder, Hasher &h, const void *pNext)
 {
 	while (pNext != nullptr)
@@ -656,6 +658,9 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 				break;
 			}
 		}
+
+		if (!hash_pnext_chain(recorder, h, state.pNext))
+			return false;
 	}
 	else
 		h.u32(0);
@@ -704,6 +709,9 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 				h.u32(ds.back.writeMask);
 			}
 		}
+
+		if (!hash_pnext_chain(recorder, h, ds.pNext))
+			return false;
 	}
 	else
 		h.u32(0);
@@ -714,6 +722,9 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 		h.u32(ia.flags);
 		h.u32(ia.primitiveRestartEnable);
 		h.u32(ia.topology);
+
+		if (!hash_pnext_chain(recorder, h, ia.pNext))
+			return false;
 	}
 	else
 		h.u32(0);
@@ -738,6 +749,9 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 
 		if (!dynamic_line_width)
 			h.f32(rs.lineWidth);
+
+		if (!hash_pnext_chain(recorder, h, rs.pNext))
+			return false;
 	}
 	else
 		h.u32(0);
@@ -759,6 +773,9 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 		}
 		else
 			h.u32(0);
+
+		if (!hash_pnext_chain(recorder, h, ms.pNext))
+			return false;
 	}
 
 	if (create_info.pViewportState)
@@ -790,6 +807,9 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 				h.f32(vp.pViewports[i].maxDepth);
 			}
 		}
+
+		if (!hash_pnext_chain(recorder, h, vp.pNext))
+			return false;
 	}
 	else
 		h.u32(0);
@@ -816,7 +836,8 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 			h.u32(vi.pVertexBindingDescriptions[i].stride);
 		}
 
-		hash_pnext_chain(recorder, h, vi.pNext);
+		if (!hash_pnext_chain(recorder, h, vi.pNext))
+			return false;
 	}
 	else
 		h.u32(0);
@@ -863,6 +884,9 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 		if (need_blend_constants && !dynamic_blend_constants)
 			for (auto &blend_const : b.blendConstants)
 				h.f32(blend_const);
+
+		if (!hash_pnext_chain(recorder, h, b.pNext))
+			return false;
 	}
 	else
 		h.u32(0);
@@ -872,6 +896,9 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 		auto &tess = *create_info.pTessellationState;
 		h.u32(tess.flags);
 		h.u32(tess.patchControlPoints);
+
+		if (!hash_pnext_chain(recorder, h, tess.pNext))
+			return false;
 	}
 	else
 		h.u32(0);
@@ -891,6 +918,9 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 			hash_specialization_info(h, *stage.pSpecializationInfo);
 		else
 			h.u32(0);
+
+		if (!hash_pnext_chain(recorder, h, stage.pNext))
+			return false;
 	}
 
 	*out_hash = h.get();
