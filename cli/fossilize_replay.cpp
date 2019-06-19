@@ -163,6 +163,21 @@ BidirectionalItr unstable_remove_if(BidirectionalItr first, BidirectionalItr las
 	return first;
 }
 
+static unique_ptr<DatabaseInterface> create_database(const vector<const char *> &databases)
+{
+	unique_ptr<DatabaseInterface> resolver;
+	if (databases.size() == 1)
+	{
+		resolver.reset(create_database(databases.front(), DatabaseMode::ReadOnly));
+	}
+	else
+	{
+		resolver.reset(create_concurrent_database(nullptr, DatabaseMode::ReadOnly,
+		                                          databases.data(), databases.size()));
+	}
+	return resolver;
+}
+
 namespace Global
 {
 static thread_local unsigned worker_thread_index;
@@ -1644,7 +1659,7 @@ static void log_faulty_modules(ExternalReplayer &replayer)
 
 static int run_progress_process(const VulkanDevice::Options &,
                                 const ThreadedReplayer::Options &replayer_opts,
-                                const string &db_path, int timeout)
+                                const vector<const char *> &databases, int timeout)
 {
 	ExternalReplayer::Options opts = {};
 	opts.on_disk_pipeline_cache = replayer_opts.on_disk_pipeline_cache_path.empty() ?
@@ -1652,7 +1667,8 @@ static int run_progress_process(const VulkanDevice::Options &,
 	opts.pipeline_cache = replayer_opts.pipeline_cache;
 	opts.num_threads = replayer_opts.num_threads;
 	opts.quiet = true;
-	opts.database = db_path.c_str();
+	opts.databases = databases.data();
+	opts.num_databases = databases.size();
 	opts.external_replayer_path = nullptr;
 	opts.inherit_process_group = true;
 	opts.spirv_validate = replayer_opts.spirv_validate;
@@ -1717,11 +1733,12 @@ static int run_progress_process(const VulkanDevice::Options &,
 }
 #endif
 
-static int run_normal_process(ThreadedReplayer &replayer, const string &db_path)
+static int run_normal_process(ThreadedReplayer &replayer, const vector<const char *> &databases)
 {
 	auto start_time = chrono::steady_clock::now();
 	auto start_create_archive = chrono::steady_clock::now();
-	auto resolver = unique_ptr<DatabaseInterface>(create_database(db_path.c_str(), DatabaseMode::ReadOnly));
+	auto resolver = create_database(databases);
+
 	auto end_create_archive = chrono::steady_clock::now();
 
 	auto start_prepare = chrono::steady_clock::now();
@@ -2002,7 +2019,7 @@ static int run_normal_process(ThreadedReplayer &replayer, const string &db_path)
 
 int main(int argc, char *argv[])
 {
-	string db_path;
+	vector<const char *> databases;
 	VulkanDevice::Options opts;
 	ThreadedReplayer::Options replayer_opts;
 
@@ -2022,7 +2039,7 @@ int main(int argc, char *argv[])
 #endif
 
 	CLICallbacks cbs;
-	cbs.default_handler = [&](const char *arg) { db_path = arg; };
+	cbs.default_handler = [&](const char *arg) { databases.push_back(arg); };
 	cbs.add("--help", [](CLIParser &parser) { print_help(); parser.end(); });
 	cbs.add("--device-index", [&](CLIParser &parser) { opts.device_index = parser.next_uint(); });
 	cbs.add("--enable-validation", [&](CLIParser &) { opts.enable_validation = true; });
@@ -2063,7 +2080,7 @@ int main(int argc, char *argv[])
 	if (parser.is_ended_state())
 		return EXIT_SUCCESS;
 
-	if (db_path.empty())
+	if (databases.empty())
 	{
 		LOGE("No path to serialized state provided.\n");
 		print_help();
@@ -2095,29 +2112,29 @@ int main(int argc, char *argv[])
 #ifndef NO_ROBUST_REPLAYER
 	if (progress)
 	{
-		ret = run_progress_process(opts, replayer_opts, db_path, timeout);
+		ret = run_progress_process(opts, replayer_opts, databases, timeout);
 	}
 	else if (master_process)
 	{
 #ifdef _WIN32
-		ret = run_master_process(opts, replayer_opts, db_path, quiet_slave, shm_name, shm_mutex_name);
+		ret = run_master_process(opts, replayer_opts, databases, quiet_slave, shm_name, shm_mutex_name);
 #else
-		ret = run_master_process(opts, replayer_opts, db_path, quiet_slave, shmem_fd);
+		ret = run_master_process(opts, replayer_opts, databases, quiet_slave, shmem_fd);
 #endif
 	}
 	else if (slave_process)
 	{
 #ifdef _WIN32
-		ret = run_slave_process(opts, replayer_opts, db_path, shm_name, shm_mutex_name);
+		ret = run_slave_process(opts, replayer_opts, databases, shm_name, shm_mutex_name);
 #else
-		ret = run_slave_process(opts, replayer_opts, db_path);
+		ret = run_slave_process(opts, replayer_opts, databases);
 #endif
 	}
 	else
 #endif
 	{
 		ThreadedReplayer replayer(opts, replayer_opts);
-		ret = run_normal_process(replayer, db_path);
+		ret = run_normal_process(replayer, databases);
 	}
 
 	return ret;

@@ -246,11 +246,15 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 		cmdline += options.external_replayer_path;
 	else
 		cmdline += Path::get_executable_path();
+	cmdline += "\"";
 
-	cmdline += "\" ";
-	cmdline += "\"";
-	cmdline += options.database;
-	cmdline += "\"";
+	for (unsigned i = 0; i < options.num_databases; i++)
+	{
+		cmdline += " \"";
+		cmdline += options.databases[i];
+		cmdline += "\"";
+	}
+
 	cmdline += " --master-process";
 	if (options.quiet)
 		cmdline += " --quiet-slave";

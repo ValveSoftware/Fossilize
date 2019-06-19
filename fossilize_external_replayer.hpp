@@ -36,8 +36,11 @@ public:
 		// May be null, in which case the calling process must be fossilize-replay itself.
 		const char *external_replayer_path;
 
-		// Path to a Fossilize database to be replayed.
-		const char *database;
+		// Paths to one or more Fossilize database to be replayed.
+		// Multiple paths may be used here in which case the replayer will treat
+		// the database as a union of all the databases in "databases".
+		const char * const *databases;
+		unsigned num_databases;
 
 		// Path to an on-disk pipeline cache. Maps to --on-disk-pipeline-cache.
 		const char *on_disk_pipeline_cache;

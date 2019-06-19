@@ -56,14 +56,14 @@ static bool write_all(int fd, const char *str)
 
 static int run_slave_process(const VulkanDevice::Options &opts,
                              const ThreadedReplayer::Options &replayer_opts,
-                             const string &db_path);
+                             const vector<const char *> &databases);
 
 namespace Global
 {
 static unordered_set<Hash> faulty_spirv_modules;
 static unsigned active_processes;
 static ThreadedReplayer::Options base_replayer_options;
-static string db_path;
+static vector<const char *> databases;
 static sigset_t old_mask;
 static int signal_fd;
 static int epoll_fd;
@@ -333,7 +333,7 @@ bool ProcessProgress::start_child_process()
 			copy_opts.on_disk_pipeline_cache_path += std::to_string(index);
 		}
 
-		exit(run_slave_process(Global::device_options, copy_opts, Global::db_path));
+		exit(run_slave_process(Global::device_options, copy_opts, Global::databases));
 	}
 	else
 		return false;
@@ -341,13 +341,13 @@ bool ProcessProgress::start_child_process()
 
 static int run_master_process(const VulkanDevice::Options &opts,
                               const ThreadedReplayer::Options &replayer_opts,
-                              const string &db_path,
+                              const vector<const char *> &databases,
                               bool quiet_slave, int shmem_fd)
 {
 	Global::quiet_slave = quiet_slave;
 	Global::device_options = opts;
 	Global::base_replayer_options = replayer_opts;
-	Global::db_path = db_path;
+	Global::databases = databases;
 	unsigned processes = replayer_opts.num_threads;
 	Global::base_replayer_options.num_threads = 1;
 
@@ -385,22 +385,25 @@ static int run_master_process(const VulkanDevice::Options &opts,
 	size_t num_graphics_pipelines;
 	size_t num_compute_pipelines;
 	{
-		auto db = unique_ptr<DatabaseInterface>(create_database(db_path.c_str(), DatabaseMode::ReadOnly));
+		auto db = create_database(databases);
 		if (!db->prepare())
 		{
-			LOGE("Failed to parse database %s.\n", db_path.c_str());
+			for (auto &path : databases)
+				LOGE("Failed to parse database %s.\n", path);
 			return EXIT_FAILURE;
 		}
 
 		if (!db->get_hash_list_for_resource_tag(RESOURCE_GRAPHICS_PIPELINE, &num_graphics_pipelines, nullptr))
 		{
-			LOGE("Failed to parse database %s.\n", db_path.c_str());
+			for (auto &path : databases)
+				LOGE("Failed to parse database %s.\n", path);
 			return EXIT_FAILURE;
 		}
 
 		if (!db->get_hash_list_for_resource_tag(RESOURCE_COMPUTE_PIPELINE, &num_compute_pipelines, nullptr))
 		{
-			LOGE("Failed to parse database %s.\n", db_path.c_str());
+			for (auto &path : databases)
+				LOGE("Failed to parse database %s.\n", path);
 			return EXIT_FAILURE;
 		}
 	}
@@ -642,7 +645,7 @@ static void thread_callback(void *)
 
 static int run_slave_process(const VulkanDevice::Options &opts,
                              const ThreadedReplayer::Options &replayer_opts,
-                             const string &db_path)
+                             const vector<const char *> &databases)
 {
 	// Just in case the driver crashed due to stack overflow,
 	// provide an alternate stack where we can clean up "safely".
@@ -708,7 +711,7 @@ static int run_slave_process(const VulkanDevice::Options &opts,
 	if (pthread_sigmask(SIG_BLOCK, &mask, &old_mask) < 0)
 		return EXIT_FAILURE;
 
-	int ret = run_normal_process(replayer, db_path);
+	int ret = run_normal_process(replayer, databases);
 	global_replayer = nullptr;
 
 	// Cannot reliably handle these signals if they occur during teardown of the process.

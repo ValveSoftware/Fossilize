@@ -296,7 +296,10 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 			argv.push_back(options.external_replayer_path);
 		else
 			argv.push_back(self_path.c_str());
-		argv.push_back(options.database);
+
+		for (unsigned i = 0; i < options.num_databases; i++)
+			argv.push_back(options.databases[i]);
+
 		argv.push_back("--master-process");
 		if (options.quiet)
 			argv.push_back("--quiet-slave");
