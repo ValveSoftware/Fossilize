@@ -54,7 +54,7 @@ namespace Global
 static unordered_set<Hash> faulty_spirv_modules;
 static unsigned active_processes;
 static ThreadedReplayer::Options base_replayer_options;
-static string db_path;
+static vector<const char *> databases;
 static VulkanDevice::Options device_options;
 static bool quiet_slave;
 static SharedControlBlock *control_block;
@@ -313,13 +313,18 @@ bool ProcessProgress::start_child_process()
 	std::string cmdline;
 	cmdline += "\"";
 	cmdline += filename;
-	cmdline += "\" ";
 	cmdline += "\"";
-	cmdline += Global::db_path;
-	cmdline += "\" ";
-	cmdline += "--slave-process ";
-	cmdline += "--num-threads 1 ";
-	cmdline += "--graphics-pipeline-range ";
+
+	for (auto &path : Global::databases)
+	{
+		cmdline += " \"";
+		cmdline += path;
+		cmdline += "\"";
+	}
+
+	cmdline += " --slave-process";
+	cmdline += " --num-threads 1";
+	cmdline += " --graphics-pipeline-range ";
 	cmdline += to_string(start_graphics_index);
 	cmdline += " ";
 	cmdline += to_string(end_graphics_index);
@@ -532,13 +537,13 @@ static bool open_shm(const char *shm_path, const char *shm_mutex_path)
 
 static int run_master_process(const VulkanDevice::Options &opts,
                               const ThreadedReplayer::Options &replayer_opts,
-                              const string &db_path,
+                              const vector<const char *> &databases,
                               bool quiet_slave, const char *shm_name, const char *shm_mutex_name)
 {
 	Global::quiet_slave = quiet_slave;
 	Global::device_options = opts;
 	Global::base_replayer_options = replayer_opts;
-	Global::db_path = db_path;
+	Global::databases = databases;
 	unsigned processes = replayer_opts.num_threads;
 	Global::base_replayer_options.num_threads = 1;
 	Global::shm_name = shm_name;
@@ -572,22 +577,25 @@ static int run_master_process(const VulkanDevice::Options &opts,
 	size_t num_graphics_pipelines;
 	size_t num_compute_pipelines;
 	{
-		auto db = unique_ptr<DatabaseInterface>(create_database(db_path.c_str(), DatabaseMode::ReadOnly));
+		auto db = create_database(databases);
 		if (!db->prepare())
 		{
-			LOGE("Failed to parse database %s.\n", db_path.c_str());
+			for (auto &path : databases)
+				LOGE("Failed to parse database %s.\n", path);
 			return EXIT_FAILURE;
 		}
 
 		if (!db->get_hash_list_for_resource_tag(RESOURCE_GRAPHICS_PIPELINE, &num_graphics_pipelines, nullptr))
 		{
-			LOGE("Failed to parse database %s.\n", db_path.c_str());
+			for (auto &path : databases)
+				LOGE("Failed to parse database %s.\n", path);
 			return EXIT_FAILURE;
 		}
 
 		if (!db->get_hash_list_for_resource_tag(RESOURCE_COMPUTE_PIPELINE, &num_compute_pipelines, nullptr))
 		{
-			LOGE("Failed to parse database %s.\n", db_path.c_str());
+			for (auto &path : databases)
+				LOGE("Failed to parse database %s.\n", path);
 			return EXIT_FAILURE;
 		}
 	}
@@ -763,7 +771,7 @@ static void abort_handler(int)
 
 static int run_slave_process(const VulkanDevice::Options &opts,
                              const ThreadedReplayer::Options &replayer_opts,
-                             const string &db_path, const char *shm_name, const char *shm_mutex_name)
+                             const vector<const char *> &databases, const char *shm_name, const char *shm_mutex_name)
 {
 	if (shm_name && shm_mutex_name && !open_shm(shm_name, shm_mutex_name))
 	{
@@ -815,7 +823,7 @@ static int run_slave_process(const VulkanDevice::Options &opts,
 	signal(SIGABRT, abort_handler);
 
 	global_replayer = &replayer;
-	int code = run_normal_process(replayer, db_path);
+	int code = run_normal_process(replayer, databases);
 	global_replayer = nullptr;
 
 	// Do not try to catch errors in teardown. Crashes here should never happen, and if they do,
