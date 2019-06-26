@@ -333,6 +333,9 @@ bool ProcessProgress::start_child_process()
 	cmdline += " ";
 	cmdline += to_string(end_compute_index);
 
+	cmdline += " --device-index ";
+	cmdline += std::to_string(Global::device_options.device_index);
+
 	if (Global::shm_name)
 	{
 		cmdline += " --shm-name ";

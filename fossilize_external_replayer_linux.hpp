@@ -324,6 +324,11 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 			argv.push_back(options.on_disk_pipeline_cache);
 		}
 
+		argv.push_back("--device-index");
+		char index_name[16];
+		sprintf(index_name, "%u", options.device_index);
+		argv.push_back(index_name);
+
 		argv.push_back(nullptr);
 
 		if (options.quiet)

@@ -282,6 +282,9 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 		cmdline += "\"";
 	}
 
+	cmdline += " --device-index ";
+	cmdline += std::to_string(options.device_index);
+
 	STARTUPINFO si = {};
 	si.cb = sizeof(STARTUPINFO);
 	si.dwFlags = STARTF_USESTDHANDLES;
