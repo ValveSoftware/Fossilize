@@ -351,6 +351,9 @@ bool ProcessProgress::start_child_process()
 	cmdline += " --device-index ";
 	cmdline += std::to_string(Global::device_options.device_index);
 
+	if (Global::device_options.enable_validation)
+		cmdline += " --enable-validation";
+
 	if (Global::shm_name)
 	{
 		cmdline += " --shm-name ";
