@@ -315,6 +315,9 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 	cmdline += " --device-index ";
 	cmdline += std::to_string(options.device_index);
 
+	if (options.enable_validation)
+		cmdline += " --enable-validation";
+
 	STARTUPINFO si = {};
 	si.cb = sizeof(STARTUPINFO);
 	si.dwFlags = STARTF_USESTDHANDLES;
