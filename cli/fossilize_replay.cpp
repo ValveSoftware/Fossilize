@@ -1657,7 +1657,7 @@ static void log_faulty_modules(ExternalReplayer &replayer)
 		LOGI("Detected faulty SPIR-V module: %llx\n", static_cast<unsigned long long>(h));
 }
 
-static int run_progress_process(const VulkanDevice::Options &,
+static int run_progress_process(const VulkanDevice::Options &device_opts,
                                 const ThreadedReplayer::Options &replayer_opts,
                                 const vector<const char *> &databases, int timeout)
 {
@@ -1672,6 +1672,7 @@ static int run_progress_process(const VulkanDevice::Options &,
 	opts.external_replayer_path = nullptr;
 	opts.inherit_process_group = true;
 	opts.spirv_validate = replayer_opts.spirv_validate;
+	opts.device_index = device_opts.device_index;
 
 	ExternalReplayer replayer;
 	if (!replayer.start(opts))

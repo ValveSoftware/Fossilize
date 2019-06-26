@@ -48,6 +48,9 @@ public:
 		// Maps to --num-threads. If 0, no argument for --num-threads is passed.
 		unsigned num_threads;
 
+		// Maps to --device-index.
+		unsigned device_index;
+
 		// Maps to --pipeline-cache
 		bool pipeline_cache;
 
