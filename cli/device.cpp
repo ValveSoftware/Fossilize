@@ -69,6 +69,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(VkDebugReportFlagsEXT flags
 	{
 		LOGE("[Layer]: Error: %s: %s\n", pLayerPrefix, pMessage);
 	}
+#if 0
 	else if (flags & VK_DEBUG_REPORT_WARNING_BIT_EXT)
 	{
 		LOGE("[Layer]: Warning: %s: %s\n", pLayerPrefix, pMessage);
@@ -81,6 +82,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(VkDebugReportFlagsEXT flags
 	{
 		LOGI("[Layer]: Information: %s: %s\n", pLayerPrefix, pMessage);
 	}
+#endif
 
 	return VK_FALSE;
 }
