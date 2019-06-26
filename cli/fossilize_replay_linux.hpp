@@ -119,7 +119,7 @@ void ProcessProgress::parse(const char *cmd)
 		else
 			LOGE("Failed to creater timerfd. Cannot support timeout for process.\n");
 	}
-	else if (strncmp(cmd, "GRAPHICS_VALERR", 15) == 0 || strncmp(cmd, "COMPUTE_VALERR", 14) == 0)
+	else if (strncmp(cmd, "GRAPHICS_VERR", 13) == 0 || strncmp(cmd, "COMPUTE_VERR", 12) == 0)
 	{
 		if (Global::control_block)
 		{
@@ -603,15 +603,14 @@ static void validation_error_cb(ThreadedReplayer *replayer)
 
 	if (per_thread.current_graphics_pipeline)
 	{
-		sprintf(buffer, "GRAPHICS_VALERR %llx\n",
+		sprintf(buffer, "GRAPHICS_VERR %llx\n",
 		        static_cast<unsigned long long>(per_thread.current_graphics_pipeline));
 		write_all(crash_fd, buffer);
 	}
-	LOGI("Meep!\n");
 
 	if (per_thread.current_compute_pipeline)
 	{
-		sprintf(buffer, "COMPUTE_VALERR %llx\n",
+		sprintf(buffer, "COMPUTE_VERR %llx\n",
 		        static_cast<unsigned long long>(per_thread.current_compute_pipeline));
 		write_all(crash_fd, buffer);
 	}

@@ -47,6 +47,8 @@ struct ExternalReplayer::Impl
 	size_t shm_block_size = 0;
 	DWORD exit_code = 0;
 	std::unordered_set<Hash> faulty_spirv_modules;
+	std::unordered_set<Hash> graphics_failed_validation;
+	std::unordered_set<Hash> compute_failed_validation;
 
 	bool start(const ExternalReplayer::Options &options);
 	ExternalReplayer::PollResult poll_progress(Progress &progress);
@@ -56,7 +58,10 @@ struct ExternalReplayer::Impl
 	bool kill();
 
 	void parse_message(const char *msg);
-	bool get_faulty_spirv_modules(size_t *count, Hash *hashes);
+	bool get_faulty_spirv_modules(size_t *count, Hash *hashes) const;
+	bool get_graphics_failed_validation(size_t *count, Hash *hashes) const;
+	bool get_compute_failed_validation(size_t *count, Hash *hashes) const;
+	bool get_failed(const std::unordered_set<Hash> &failed, size_t *count, Hash *hashes) const;
 };
 
 ExternalReplayer::Impl::~Impl()
@@ -124,6 +129,16 @@ void ExternalReplayer::Impl::parse_message(const char *msg)
 		auto hash = strtoull(msg + 6, nullptr, 16);
 		faulty_spirv_modules.insert(hash);
 	}
+	else if (strncmp(msg, "GRAPHICS_VERR", 13) == 0)
+	{
+		auto hash = strtoull(msg + 13, nullptr, 16);
+		graphics_failed_validation.insert(hash);
+	}
+	else if (strncmp(msg, "COMPUTE_VERR", 12) == 0)
+	{
+		auto hash = strtoull(msg + 12, nullptr, 16);
+		compute_failed_validation.insert(hash);
+	}
 }
 
 bool ExternalReplayer::Impl::is_process_complete(int *return_status)
@@ -182,22 +197,37 @@ bool ExternalReplayer::Impl::kill()
 	return TerminateProcess(process, 1);
 }
 
-bool ExternalReplayer::Impl::get_faulty_spirv_modules(size_t *count, Hash *hashes)
+bool ExternalReplayer::Impl::get_failed(const std::unordered_set<Hash> &failed, size_t *count, Hash *hashes) const
 {
 	if (hashes)
 	{
-		if (*count != faulty_spirv_modules.size())
+		if (*count != failed.size())
 			return false;
 
-		for (auto &mod : faulty_spirv_modules)
+		for (auto &mod : failed)
 			*hashes++ = mod;
 		return true;
 	}
 	else
 	{
-		*count = faulty_spirv_modules.size();
+		*count = failed.size();
 		return true;
 	}
+}
+
+bool ExternalReplayer::Impl::get_faulty_spirv_modules(size_t *count, Hash *hashes) const
+{
+	return get_failed(faulty_spirv_modules, count, hashes);
+}
+
+bool ExternalReplayer::Impl::get_graphics_failed_validation(size_t *count, Hash *hashes) const
+{
+	return get_failed(graphics_failed_validation, count, hashes);
+}
+
+bool ExternalReplayer::Impl::get_compute_failed_validation(size_t *count, Hash *hashes) const
+{
+	return get_failed(compute_failed_validation, count, hashes);
 }
 
 bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)

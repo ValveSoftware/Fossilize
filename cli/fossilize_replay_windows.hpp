@@ -128,6 +128,21 @@ void ProcessProgress::parse(const char *cmd)
 		else
 			LOGE("Failed to create waitable timer.\n");
 	}
+	else if (strncmp(cmd, "GRAPHICS_VERR", 13) == 0 || strncmp(cmd, "COMPUTE_VERR", 12) == 0)
+	{
+		if (Global::control_block)
+		{
+			// Just forward the message.
+			char buffer[ControlBlockMessageSize] = {};
+			strcpy(buffer, cmd);
+
+			if (WaitForSingleObject(Global::shared_mutex, INFINITE) == WAIT_OBJECT_0)
+			{
+				shared_control_block_write(Global::control_block, buffer, sizeof(buffer));
+				ReleaseMutex(Global::shared_mutex);
+			}
+		}
+	}
 	else if (strncmp(cmd, "GRAPHICS", 8) == 0)
 		graphics_progress = int(strtol(cmd + 8, nullptr, 0));
 	else if (strncmp(cmd, "COMPUTE", 7) == 0)
@@ -721,6 +736,26 @@ static int run_master_process(const VulkanDevice::Options &opts,
 static ThreadedReplayer *global_replayer = nullptr;
 static HANDLE crash_handle;
 
+static void validation_error_cb(ThreadedReplayer *replayer)
+{
+	auto &per_thread = replayer->get_per_thread_data();
+	char buffer[32];
+
+	if (per_thread.current_graphics_pipeline)
+	{
+		sprintf(buffer, "GRAPHICS_VERR %llx\n",
+		        static_cast<unsigned long long>(per_thread.current_graphics_pipeline));
+		write_all(crash_handle, buffer);
+	}
+
+	if (per_thread.current_compute_pipeline)
+	{
+		sprintf(buffer, "COMPUTE_VERR %llx\n",
+		        static_cast<unsigned long long>(per_thread.current_compute_pipeline));
+		write_all(crash_handle, buffer);
+	}
+}
+
 static LONG WINAPI crash_handler(_EXCEPTION_POINTERS *)
 {
 	// stderr is reserved for generic logging.
@@ -737,24 +772,25 @@ static LONG WINAPI crash_handler(_EXCEPTION_POINTERS *)
 
 	if (global_replayer)
 	{
+		auto &per_thread = global_replayer->get_per_thread_data();
 		char buffer[32];
 
 		// Report to parent process which VkShaderModule's might have contributed to our untimely death.
 		// This allows a new process to ignore these modules.
-		for (unsigned i = 0; i < global_replayer->num_failed_module_hashes; i++)
+		for (unsigned i = 0; i < per_thread.num_failed_module_hashes; i++)
 		{
 			sprintf(buffer, "MODULE %llx\n",
-					static_cast<unsigned long long>(global_replayer->failed_module_hashes[i]));
+					static_cast<unsigned long long>(per_thread.failed_module_hashes[i]));
 			if (!write_all(crash_handle, buffer))
 				ExitProcess(2);
 		}
 
 		// Report where we stopped, so we can continue.
-		sprintf(buffer, "GRAPHICS %u\n", global_replayer->get_per_thread_data().current_graphics_index);
+		sprintf(buffer, "GRAPHICS %u\n", per_thread.current_graphics_index);
 		if (!write_all(crash_handle, buffer))
 			ExitProcess(2);
 
-		sprintf(buffer, "COMPUTE %u\n", global_replayer->get_per_thread_data().current_compute_index);
+		sprintf(buffer, "COMPUTE %u\n", per_thread.current_compute_index);
 		if (!write_all(crash_handle, buffer))
 			ExitProcess(2);
 
@@ -784,6 +820,7 @@ static int run_slave_process(const VulkanDevice::Options &opts,
 
 	auto tmp_opts = replayer_opts;
 	tmp_opts.control_block = Global::control_block;
+	tmp_opts.on_validation_error_callback = validation_error_cb;
 	ThreadedReplayer replayer(opts, tmp_opts);
 	replayer.robustness = true;
 

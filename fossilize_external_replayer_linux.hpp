@@ -146,14 +146,14 @@ void ExternalReplayer::Impl::parse_message(const char *msg)
 		auto hash = strtoull(msg + 6, nullptr, 16);
 		faulty_spirv_modules.insert(hash);
 	}
-	else if (strncmp(msg, "GRAPHICS_VALERR", 15) == 0)
+	else if (strncmp(msg, "GRAPHICS_VERR", 13) == 0)
 	{
-		auto hash = strtoull(msg + 15, nullptr, 16);
+		auto hash = strtoull(msg + 13, nullptr, 16);
 		graphics_failed_validation.insert(hash);
 	}
-	else if (strncmp(msg, "COMPUTE_VALERR", 14) == 0)
+	else if (strncmp(msg, "COMPUTE_VERR", 12) == 0)
 	{
-		auto hash = strtoull(msg + 14, nullptr, 16);
+		auto hash = strtoull(msg + 12, nullptr, 16);
 		compute_failed_validation.insert(hash);
 	}
 }
