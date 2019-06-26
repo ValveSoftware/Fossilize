@@ -66,6 +66,9 @@ public:
 		// Validates all SPIR-V with spirv-val before replaying.
 		// Modules which fail to validate will not be used.
 		bool spirv_validate;
+
+		// Enable full validation layers.
+		bool enable_validation;
 	};
 
 	ExternalReplayer();
@@ -98,7 +101,11 @@ public:
 
 	// As the replayer is progressing, it might find SPIR-V modules which might have contributed to a crash.
 	// This allows the caller to later investigate what these modules are doing.
-	bool get_faulty_spirv_modules(size_t *num_hashes, Hash *hashes);
+	bool get_faulty_spirv_modules(size_t *num_hashes, Hash *hashes) const;
+
+	// If validation is enabled, gets a list of all pipelines which failed validation.
+	bool get_graphics_failed_validation(size_t *num_hashes, Hash *hashes) const;
+	bool get_compute_failed_validation(size_t *num_hashes, Hash *hashes) const;
 
 	enum class PollResult : unsigned
 	{

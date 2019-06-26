@@ -72,8 +72,18 @@ bool ExternalReplayer::is_process_complete(int *return_status)
 	return impl->is_process_complete(return_status);
 }
 
-bool ExternalReplayer::get_faulty_spirv_modules(size_t *num_hashes, Hash *hashes)
+bool ExternalReplayer::get_faulty_spirv_modules(size_t *num_hashes, Hash *hashes) const
 {
 	return impl->get_faulty_spirv_modules(num_hashes, hashes);
+}
+
+bool ExternalReplayer::get_graphics_failed_validation(size_t *num_hashes, Hash *hashes) const
+{
+	return impl->get_graphics_failed_validation(num_hashes, hashes);
+}
+
+bool ExternalReplayer::get_compute_failed_validation(size_t *num_hashes, Hash *hashes) const
+{
+	return impl->get_compute_failed_validation(num_hashes, hashes);
 }
 }
