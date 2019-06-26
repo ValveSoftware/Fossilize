@@ -1678,6 +1678,8 @@ static void log_faulty_modules(ExternalReplayer &replayer)
 	if (!replayer.get_faulty_spirv_modules(&count, hashes.data()))
 		return;
 
+	sort(begin(hashes), end(hashes));
+
 	for (auto &h : hashes)
 		LOGI("Detected faulty SPIR-V module: %016llx\n", static_cast<unsigned long long>(h));
 }
@@ -1691,6 +1693,8 @@ static void log_faulty_graphics(ExternalReplayer &replayer)
 	if (!replayer.get_graphics_failed_validation(&count, hashes.data()))
 		return;
 
+	sort(begin(hashes), end(hashes));
+
 	for (auto &h : hashes)
 		LOGI("Graphics pipeline failed validation: %016llx\n", static_cast<unsigned long long>(h));
 }
@@ -1703,6 +1707,8 @@ static void log_faulty_compute(ExternalReplayer &replayer)
 	vector<Hash> hashes(count);
 	if (!replayer.get_compute_failed_validation(&count, hashes.data()))
 		return;
+
+	sort(begin(hashes), end(hashes));
 
 	for (auto &h : hashes)
 		LOGI("Compute pipeline failed validation: %016llx\n", static_cast<unsigned long long>(h));
