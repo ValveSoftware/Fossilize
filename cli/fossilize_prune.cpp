@@ -21,6 +21,7 @@
  */
 
 #include "fossilize_db.hpp"
+#include <stdlib.h>
 #include <memory>
 #include <vector>
 #include <unordered_set>
@@ -33,7 +34,14 @@ using namespace std;
 
 static void print_help()
 {
-	LOGI("Usage: fossilize-prune [--input-db path] [--output-db path] [--filter-application hash] [--filter-graphics hash] [--filter-compute hash] [--skip-application-info-links]\n");
+	LOGI("Usage: fossilize-prune\n"
+	     "\t[--input-db path]\n"
+	     "\t[--output-db path]\n"
+	     "\t[--filter-application hash]\n"
+	     "\t[--filter-graphics hash]\n"
+	     "\t[--filter-compute hash]\n"
+	     "\t[--filter-module hash]\n"
+	     "\t[--skip-application-info-links]\n");
 }
 
 template <typename T>
@@ -53,6 +61,7 @@ struct PruneReplayer : StateCreatorInterface
 	unordered_set<Hash> accessed_compute_pipelines;
 	unordered_set<Hash> filter_graphics;
 	unordered_set<Hash> filter_compute;
+	unordered_set<Hash> filter_modules;
 
 	unordered_map<Hash, const VkDescriptorSetLayoutCreateInfo *> descriptor_sets;
 	unordered_map<Hash, const VkPipelineLayoutCreateInfo *> pipeline_layouts;
@@ -193,15 +202,28 @@ struct PruneReplayer : StateCreatorInterface
 		return blob_belongs_to_application_info || !should_filter_application_hash || filtered_blob_hashes[tag].count(hash);
 	}
 
+	bool filter_shader_module(Hash hash) const
+	{
+		if (filter_modules.empty())
+			return true;
+
+		return filter_modules.count(hash);
+	}
+
 	bool enqueue_create_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
 		*pipeline = fake_handle<VkPipeline>(hash);
 
 		if (filter_object(RESOURCE_COMPUTE_PIPELINE, hash))
 		{
-			access_pipeline_layout((Hash) create_info->layout);
-			accessed_shader_modules.insert((Hash) create_info->stage.module);
-			accessed_compute_pipelines.insert(hash);
+			bool allow_pipeline = filter_shader_module((Hash)create_info->stage.module);
+
+			if (allow_pipeline)
+			{
+				access_pipeline_layout((Hash) create_info->layout);
+				accessed_shader_modules.insert((Hash) create_info->stage.module);
+				accessed_compute_pipelines.insert(hash);
+			}
 		}
 		return true;
 	}
@@ -212,11 +234,24 @@ struct PruneReplayer : StateCreatorInterface
 
 		if (filter_object(RESOURCE_GRAPHICS_PIPELINE, hash))
 		{
-			access_pipeline_layout((Hash) create_info->layout);
-			accessed_render_passes.insert((Hash) create_info->renderPass);
-			for (uint32_t stage = 0; stage < create_info->stageCount; stage++)
-				accessed_shader_modules.insert((Hash) create_info->pStages[stage].module);
-			accessed_graphics_pipelines.insert(hash);
+			bool allow_pipeline = false;
+			for (uint32_t i = 0; i < create_info->stageCount; i++)
+			{
+				if (filter_shader_module((Hash) create_info->pStages[i].module))
+				{
+					allow_pipeline = true;
+					break;
+				}
+			}
+
+			if (allow_pipeline)
+			{
+				access_pipeline_layout((Hash) create_info->layout);
+				accessed_render_passes.insert((Hash) create_info->renderPass);
+				for (uint32_t stage = 0; stage < create_info->stageCount; stage++)
+					accessed_shader_modules.insert((Hash) create_info->pStages[stage].module);
+				accessed_graphics_pipelines.insert(hash);
+			}
 		}
 		return true;
 	}
@@ -255,6 +290,7 @@ int main(int argc, char *argv[])
 
 	unordered_set<Hash> filter_graphics;
 	unordered_set<Hash> filter_compute;
+	unordered_set<Hash> filter_modules;
 
 	cbs.add("--help", [](CLIParser &parser) { print_help(); parser.end(); });
 	cbs.add("--input-db", [&](CLIParser &parser) { input_db_path = parser.next_string(); });
@@ -268,6 +304,9 @@ int main(int argc, char *argv[])
 	});
 	cbs.add("--filter-compute", [&](CLIParser &parser) {
 		filter_compute.insert(strtoull(parser.next_string(), nullptr, 16));
+	});
+	cbs.add("--filter-module", [&](CLIParser &parser) {
+		filter_modules.insert(strtoull(parser.next_string(), nullptr, 16));
 	});
 	cbs.add("--skip-application-info-links", [&](CLIParser &) {
 		skip_application_info_links = true;
@@ -314,6 +353,7 @@ int main(int argc, char *argv[])
 
 	prune_replayer.filter_graphics = move(filter_graphics);
 	prune_replayer.filter_compute = move(filter_compute);
+	prune_replayer.filter_modules = move(filter_modules);
 	prune_replayer.skip_application_info_links = skip_application_info_links;
 
 	static const ResourceTag playback_order[] = {
