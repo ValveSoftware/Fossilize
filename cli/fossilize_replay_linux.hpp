@@ -119,6 +119,19 @@ void ProcessProgress::parse(const char *cmd)
 		else
 			LOGE("Failed to creater timerfd. Cannot support timeout for process.\n");
 	}
+	else if (strncmp(cmd, "GRAPHICS_VALERR", 15) == 0 || strncmp(cmd, "COMPUTE_VALERR", 14) == 0)
+	{
+		if (Global::control_block)
+		{
+			// Just forward the message.
+			char buffer[ControlBlockMessageSize] = {};
+			strcpy(buffer, cmd);
+
+			futex_wrapper_lock(&Global::control_block->futex_lock);
+			shared_control_block_write(Global::control_block, buffer, sizeof(buffer));
+			futex_wrapper_unlock(&Global::control_block->futex_lock);
+		}
+	}
 	else if (strncmp(cmd, "GRAPHICS", 8) == 0)
 		graphics_progress = int(strtol(cmd + 8, nullptr, 0));
 	else if (strncmp(cmd, "COMPUTE", 7) == 0)
@@ -583,6 +596,27 @@ static ThreadedReplayer *global_replayer = nullptr;
 static int crash_fd;
 static stack_t alt_stack;
 
+static void validation_error_cb(ThreadedReplayer *replayer)
+{
+	auto &per_thread = replayer->get_per_thread_data();
+	char buffer[64];
+
+	if (per_thread.current_graphics_pipeline)
+	{
+		sprintf(buffer, "GRAPHICS_VALERR %llx\n",
+		        static_cast<unsigned long long>(per_thread.current_graphics_pipeline));
+		write_all(crash_fd, buffer);
+	}
+	LOGI("Meep!\n");
+
+	if (per_thread.current_compute_pipeline)
+	{
+		sprintf(buffer, "COMPUTE_VALERR %llx\n",
+		        static_cast<unsigned long long>(per_thread.current_compute_pipeline));
+		write_all(crash_fd, buffer);
+	}
+}
+
 static void crash_handler(int)
 {
 	// stderr is reserved for generic logging.
@@ -599,24 +633,25 @@ static void crash_handler(int)
 
 	if (global_replayer)
 	{
+		auto &per_thread = global_replayer->get_per_thread_data();
 		char buffer[64];
 
 		// Report to parent process which VkShaderModule's might have contributed to our untimely death.
 		// This allows a new process to ignore these modules.
-		for (unsigned i = 0; i < global_replayer->num_failed_module_hashes; i++)
+		for (unsigned i = 0; i < per_thread.num_failed_module_hashes; i++)
 		{
 			sprintf(buffer, "MODULE %llx\n",
-					static_cast<unsigned long long>(global_replayer->failed_module_hashes[i]));
+					static_cast<unsigned long long>(per_thread.failed_module_hashes[i]));
 			if (!write_all(crash_fd, buffer))
 				_exit(2);
 		}
 
 		// Report where we stopped, so we can continue.
-		sprintf(buffer, "GRAPHICS %d\n", global_replayer->get_per_thread_data().current_graphics_index);
+		sprintf(buffer, "GRAPHICS %d\n", per_thread.current_graphics_index);
 		if (!write_all(crash_fd, buffer))
 			_exit(2);
 
-		sprintf(buffer, "COMPUTE %d\n", global_replayer->get_per_thread_data().current_compute_index);
+		sprintf(buffer, "COMPUTE %d\n", per_thread.current_compute_index);
 		if (!write_all(crash_fd, buffer))
 			_exit(2);
 
@@ -658,6 +693,7 @@ static int run_slave_process(const VulkanDevice::Options &opts,
 
 	auto tmp_opts = replayer_opts;
 	tmp_opts.on_thread_callback = thread_callback;
+	tmp_opts.on_validation_error_callback = validation_error_cb;
 	ThreadedReplayer replayer(opts, tmp_opts);
 	replayer.robustness = true;
 

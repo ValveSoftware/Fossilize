@@ -59,11 +59,17 @@ public:
 		return api_version;
 	}
 
+	void set_validation_error_callback(void (*callback)(void *), void *userdata);
+	void notify_validation_error();
+
 private:
 	VkInstance instance = VK_NULL_HANDLE;
 	VkPhysicalDevice gpu = VK_NULL_HANDLE;
 	VkDevice device = VK_NULL_HANDLE;
 	VkDebugReportCallbackEXT callback = VK_NULL_HANDLE;
 	uint32_t api_version = 0;
+
+	void (*validation_callback)(void *) = nullptr;
+	void *validation_callback_userdata = nullptr;
 };
 }

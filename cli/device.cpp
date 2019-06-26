@@ -63,26 +63,14 @@ static bool filter_extension(const char *ext, bool need_disasm)
 static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(VkDebugReportFlagsEXT flags,
                                                      VkDebugReportObjectTypeEXT, uint64_t,
                                                      size_t, int32_t, const char *pLayerPrefix,
-                                                     const char *pMessage, void *)
+                                                     const char *pMessage, void *pUserData)
 {
 	if (flags & VK_DEBUG_REPORT_ERROR_BIT_EXT)
 	{
 		LOGE("[Layer]: Error: %s: %s\n", pLayerPrefix, pMessage);
+		VulkanDevice *device = static_cast<VulkanDevice *>(pUserData);
+		device->notify_validation_error();
 	}
-#if 0
-	else if (flags & VK_DEBUG_REPORT_WARNING_BIT_EXT)
-	{
-		LOGE("[Layer]: Warning: %s: %s\n", pLayerPrefix, pMessage);
-	}
-	else if (flags & VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT)
-	{
-		LOGE("[Layer]: Performance warning: %s: %s\n", pLayerPrefix, pMessage);
-	}
-	else
-	{
-		LOGI("[Layer]: Information: %s: %s\n", pLayerPrefix, pMessage);
-	}
-#endif
 
 	return VK_FALSE;
 }
@@ -174,9 +162,8 @@ bool VulkanDevice::init_device(const Options &opts)
 	{
 		VkDebugReportCallbackCreateInfoEXT cb_info = { VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT };
 		cb_info.pfnCallback = debug_callback;
-		cb_info.flags = VK_DEBUG_REPORT_ERROR_BIT_EXT |
-		                VK_DEBUG_REPORT_WARNING_BIT_EXT |
-		                VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT;
+		cb_info.flags = VK_DEBUG_REPORT_ERROR_BIT_EXT;
+		cb_info.pUserData = this;
 
 		if (vkCreateDebugReportCallbackEXT(instance, &cb_info, nullptr, &callback) != VK_SUCCESS)
 			return false;
@@ -340,5 +327,17 @@ VulkanDevice::~VulkanDevice()
 		vkDestroyDebugReportCallbackEXT(instance, callback, nullptr);
 	if (instance)
 		vkDestroyInstance(instance, nullptr);
+}
+
+void VulkanDevice::set_validation_error_callback(void (*cb)(void *), void *userdata)
+{
+	validation_callback = cb;
+	validation_callback_userdata = userdata;
+}
+
+void VulkanDevice::notify_validation_error()
+{
+	if (validation_callback)
+		validation_callback(validation_callback_userdata);
 }
 }

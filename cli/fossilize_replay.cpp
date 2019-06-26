@@ -197,6 +197,8 @@ struct EnqueuedWork
 	std::function<void()> func;
 };
 
+static void on_validation_error(void *userdata);
+
 struct ThreadedReplayer : StateCreatorInterface
 {
 	struct Options
@@ -222,6 +224,7 @@ struct ThreadedReplayer : StateCreatorInterface
 
 		void (*on_thread_callback)(void *userdata) = nullptr;
 		void *on_thread_callback_userdata = nullptr;
+		void (*on_validation_error_callback)(ThreadedReplayer *) = nullptr;
 	};
 
 	struct DeferredGraphicsInfo
@@ -280,10 +283,13 @@ struct ThreadedReplayer : StateCreatorInterface
 		unsigned current_graphics_index = ~0u;
 		unsigned current_compute_index = ~0u;
 		unsigned memory_context_index = 0;
-		bool force_outside_range = false;
 
-		// Make sure each per-thread data lands in its own cache line to avoid false sharing.
-		uint8_t _padding[64 - 4 * sizeof(unsigned) - sizeof(StateReplayer *) - sizeof(bool)];
+		Hash current_graphics_pipeline = 0;
+		Hash current_compute_pipeline = 0;
+		Hash failed_module_hashes[16] = {};
+		unsigned num_failed_module_hashes = 0;
+
+		bool force_outside_range = false;
 	};
 
 	ThreadedReplayer(const VulkanDevice::Options &device_opts_, const Options &opts_)
@@ -304,6 +310,7 @@ struct ThreadedReplayer : StateCreatorInterface
 
 		shader_module_total_compressed_size.store(0);
 		shader_module_total_size.store(0);
+		per_thread_data.resize(num_worker_threads + 1);
 	}
 
 	PerThreadData &get_per_thread_data()
@@ -314,7 +321,6 @@ struct ThreadedReplayer : StateCreatorInterface
 	void start_worker_threads()
 	{
 		thread_initialized_count = 0;
-		per_thread_data.resize(num_worker_threads + 1);
 
 		// Make sure main thread sees degenerate current_*_index. Any crash in main thread is fatal.
 		for (unsigned i = 0; i < num_worker_threads; i++)
@@ -399,7 +405,10 @@ struct ThreadedReplayer : StateCreatorInterface
 		{
 		case RESOURCE_GRAPHICS_PIPELINE:
 		{
-			get_per_thread_data().current_graphics_index = work_item.index + 1;
+			auto &per_thread = get_per_thread_data();
+			per_thread.current_graphics_index = work_item.index + 1;
+			per_thread.current_graphics_pipeline = work_item.hash;
+			per_thread.current_compute_pipeline = 0;
 
 			// Make sure to iterate the index so main thread and worker threads
 			// have a coherent idea of replayer state.
@@ -412,11 +421,11 @@ struct ThreadedReplayer : StateCreatorInterface
 
 			if (robustness)
 			{
-				num_failed_module_hashes = work_item.create_info.graphics_create_info->stageCount;
+				per_thread.num_failed_module_hashes = work_item.create_info.graphics_create_info->stageCount;
 				for (unsigned i = 0; i < work_item.create_info.graphics_create_info->stageCount; i++)
 				{
 					VkShaderModule module = work_item.create_info.graphics_create_info->pStages[i].module;
-					failed_module_hashes[i] = shader_module_to_hash[module];
+					per_thread.failed_module_hashes[i] = shader_module_to_hash[module];
 				}
 			}
 
@@ -474,12 +483,18 @@ struct ThreadedReplayer : StateCreatorInterface
 					     static_cast<unsigned long long>(work_item.hash));
 				}
 			}
+
+			per_thread.current_graphics_pipeline = 0;
+			per_thread.current_compute_pipeline = 0;
 			break;
 		}
 
 		case RESOURCE_COMPUTE_PIPELINE:
 		{
-			get_per_thread_data().current_compute_index = work_item.index + 1;
+			auto &per_thread = get_per_thread_data();
+			per_thread.current_compute_index = work_item.index + 1;
+			per_thread.current_compute_pipeline = work_item.hash;
+			per_thread.current_graphics_pipeline = 0;
 
 			// Make sure to iterate the index so main thread and worker threads
 			// have a coherent idea of replayer state.
@@ -492,9 +507,9 @@ struct ThreadedReplayer : StateCreatorInterface
 
 			if (robustness)
 			{
-				num_failed_module_hashes = 1;
+				per_thread.num_failed_module_hashes = 1;
 				VkShaderModule module = work_item.create_info.compute_create_info->stage.module;
-				failed_module_hashes[0] = shader_module_to_hash[module];
+				per_thread.failed_module_hashes[0] = shader_module_to_hash[module];
 			}
 
 			if ((work_item.create_info.compute_create_info->flags & VK_PIPELINE_CREATE_DERIVATIVE_BIT) != 0)
@@ -551,6 +566,9 @@ struct ThreadedReplayer : StateCreatorInterface
 					     static_cast<unsigned long long>(work_item.hash));
 				}
 			}
+
+			per_thread.current_compute_pipeline = 0;
+			per_thread.current_graphics_pipeline = 0;
 			break;
 		}
 
@@ -780,6 +798,8 @@ struct ThreadedReplayer : StateCreatorInterface
 				LOGE("Failed to create Vulkan device, bailing ...\n");
 				exit(EXIT_FAILURE);
 			}
+
+			device->set_validation_error_callback(on_validation_error, this);
 
 			if (opts.pipeline_cache)
 			{
@@ -1582,13 +1602,18 @@ struct ThreadedReplayer : StateCreatorInterface
 	VulkanDevice::Options device_opts;
 
 	// Crash recovery.
-	Hash failed_module_hashes[6] = {};
-	unsigned num_failed_module_hashes = 0;
 	bool robustness = false;
 
 	const StateReplayer *global_replayer = nullptr;
 	DatabaseInterface *global_database = nullptr;
 };
+
+static void on_validation_error(void *userdata)
+{
+	auto *replayer = static_cast<ThreadedReplayer *>(userdata);
+	if (replayer->opts.on_validation_error_callback)
+		replayer->opts.on_validation_error_callback(replayer);
+}
 
 static void print_help()
 {
@@ -1654,7 +1679,33 @@ static void log_faulty_modules(ExternalReplayer &replayer)
 		return;
 
 	for (auto &h : hashes)
-		LOGI("Detected faulty SPIR-V module: %llx\n", static_cast<unsigned long long>(h));
+		LOGI("Detected faulty SPIR-V module: %016llx\n", static_cast<unsigned long long>(h));
+}
+
+static void log_faulty_graphics(ExternalReplayer &replayer)
+{
+	size_t count;
+	if (!replayer.get_graphics_failed_validation(&count, nullptr))
+		return;
+	vector<Hash> hashes(count);
+	if (!replayer.get_graphics_failed_validation(&count, hashes.data()))
+		return;
+
+	for (auto &h : hashes)
+		LOGI("Graphics pipeline failed validation: %016llx\n", static_cast<unsigned long long>(h));
+}
+
+static void log_faulty_compute(ExternalReplayer &replayer)
+{
+	size_t count;
+	if (!replayer.get_compute_failed_validation(&count, nullptr))
+		return;
+	vector<Hash> hashes(count);
+	if (!replayer.get_compute_failed_validation(&count, hashes.data()))
+		return;
+
+	for (auto &h : hashes)
+		LOGI("Compute pipeline failed validation: %016llx\n", static_cast<unsigned long long>(h));
 }
 
 static int run_progress_process(const VulkanDevice::Options &device_opts,
@@ -1673,6 +1724,7 @@ static int run_progress_process(const VulkanDevice::Options &device_opts,
 	opts.inherit_process_group = true;
 	opts.spirv_validate = replayer_opts.spirv_validate;
 	opts.device_index = device_opts.device_index;
+	opts.enable_validation = device_opts.enable_validation;
 
 	ExternalReplayer replayer;
 	if (!replayer.start(opts))
@@ -1707,6 +1759,8 @@ static int run_progress_process(const VulkanDevice::Options &device_opts,
 			if (result != ExternalReplayer::PollResult::ResultNotReady)
 				log_progress(progress);
 			log_faulty_modules(replayer);
+			log_faulty_graphics(replayer);
+			log_faulty_compute(replayer);
 			return replayer.wait();
 		}
 
