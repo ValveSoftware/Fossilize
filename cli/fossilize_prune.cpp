@@ -41,6 +41,9 @@ static void print_help()
 	     "\t[--filter-graphics hash]\n"
 	     "\t[--filter-compute hash]\n"
 	     "\t[--filter-module hash]\n"
+	     "\t[--skip-graphics hash]\n"
+	     "\t[--skip-compute hash]\n"
+	     "\t[--skip-module hash]\n"
 	     "\t[--skip-application-info-links]\n");
 }
 
@@ -62,6 +65,9 @@ struct PruneReplayer : StateCreatorInterface
 	unordered_set<Hash> filter_graphics;
 	unordered_set<Hash> filter_compute;
 	unordered_set<Hash> filter_modules;
+	unordered_set<Hash> banned_graphics;
+	unordered_set<Hash> banned_compute;
+	unordered_set<Hash> banned_modules;
 
 	unordered_map<Hash, const VkDescriptorSetLayoutCreateInfo *> descriptor_sets;
 	unordered_map<Hash, const VkPipelineLayoutCreateInfo *> pipeline_layouts;
@@ -190,24 +196,30 @@ struct PruneReplayer : StateCreatorInterface
 		bool hash_filtering = !(filter_compute.empty() && filter_graphics.empty());
 		if (tag == RESOURCE_COMPUTE_PIPELINE)
 		{
+			if (banned_compute.count(hash))
+				return false;
 			if (hash_filtering && !filter_compute.count(hash))
 				return false;
 		}
 		else if (tag == RESOURCE_GRAPHICS_PIPELINE)
 		{
+			if (banned_graphics.count(hash))
+				return false;
 			if (hash_filtering && !filter_graphics.count(hash))
 				return false;
 		}
 
-		return blob_belongs_to_application_info || !should_filter_application_hash || filtered_blob_hashes[tag].count(hash);
+		return blob_belongs_to_application_info || !should_filter_application_hash || (filtered_blob_hashes[tag].count(hash) != 0);
 	}
 
 	bool filter_shader_module(Hash hash) const
 	{
+		if (banned_modules.count(hash))
+			return false;
 		if (filter_modules.empty())
 			return true;
 
-		return filter_modules.count(hash);
+		return filter_modules.count(hash) != 0;
 	}
 
 	bool enqueue_create_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) override
@@ -240,6 +252,16 @@ struct PruneReplayer : StateCreatorInterface
 				if (filter_shader_module((Hash) create_info->pStages[i].module))
 				{
 					allow_pipeline = true;
+					break;
+				}
+			}
+
+			// Need to test this as well, if there is at least one banned module used, we don't allow the pipeline.
+			for (uint32_t i = 0; i < create_info->stageCount; i++)
+			{
+				if (banned_modules.count((Hash) create_info->pStages[i].module))
+				{
+					allow_pipeline = false;
 					break;
 				}
 			}
@@ -292,6 +314,10 @@ int main(int argc, char *argv[])
 	unordered_set<Hash> filter_compute;
 	unordered_set<Hash> filter_modules;
 
+	unordered_set<Hash> banned_graphics;
+	unordered_set<Hash> banned_compute;
+	unordered_set<Hash> banned_modules;
+
 	cbs.add("--help", [](CLIParser &parser) { print_help(); parser.end(); });
 	cbs.add("--input-db", [&](CLIParser &parser) { input_db_path = parser.next_string(); });
 	cbs.add("--output-db", [&](CLIParser &parser) { output_db_path = parser.next_string(); });
@@ -307,6 +333,15 @@ int main(int argc, char *argv[])
 	});
 	cbs.add("--filter-module", [&](CLIParser &parser) {
 		filter_modules.insert(strtoull(parser.next_string(), nullptr, 16));
+	});
+	cbs.add("--skip-graphics", [&](CLIParser &parser) {
+		banned_graphics.insert(strtoull(parser.next_string(), nullptr, 16));
+	});
+	cbs.add("--skip-compute", [&](CLIParser &parser) {
+		banned_compute.insert(strtoull(parser.next_string(), nullptr, 16));
+	});
+	cbs.add("--skip-module", [&](CLIParser &parser) {
+		banned_modules.insert(strtoull(parser.next_string(), nullptr, 16));
 	});
 	cbs.add("--skip-application-info-links", [&](CLIParser &) {
 		skip_application_info_links = true;
@@ -354,6 +389,9 @@ int main(int argc, char *argv[])
 	prune_replayer.filter_graphics = move(filter_graphics);
 	prune_replayer.filter_compute = move(filter_compute);
 	prune_replayer.filter_modules = move(filter_modules);
+	prune_replayer.banned_graphics = move(banned_graphics);
+	prune_replayer.banned_compute = move(banned_compute);
+	prune_replayer.banned_modules = move(banned_modules);
 	prune_replayer.skip_application_info_links = skip_application_info_links;
 
 	static const ResourceTag playback_order[] = {
