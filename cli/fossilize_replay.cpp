@@ -1696,7 +1696,12 @@ static void log_faulty_graphics(ExternalReplayer &replayer)
 	sort(begin(hashes), end(hashes));
 
 	for (auto &h : hashes)
+	{
 		LOGI("Graphics pipeline failed validation: %016llx\n", static_cast<unsigned long long>(h));
+
+		// Ad-hoc hack to test automatic pruning ideas ...
+		//printf("--skip-graphics %016llx ", static_cast<unsigned long long>(h));
+	}
 }
 
 static void log_faulty_compute(ExternalReplayer &replayer)
@@ -1711,7 +1716,12 @@ static void log_faulty_compute(ExternalReplayer &replayer)
 	sort(begin(hashes), end(hashes));
 
 	for (auto &h : hashes)
+	{
 		LOGI("Compute pipeline failed validation: %016llx\n", static_cast<unsigned long long>(h));
+
+		// Ad-hoc hack to test automatic pruning ideas ...
+		//printf("--skip-compute %016llx ", static_cast<unsigned long long>(h));
+	}
 }
 
 static int run_progress_process(const VulkanDevice::Options &device_opts,
@@ -1786,6 +1796,8 @@ static int run_progress_process(const VulkanDevice::Options &device_opts,
 			if (result == ExternalReplayer::PollResult::Complete)
 			{
 				log_faulty_modules(replayer);
+				log_faulty_graphics(replayer);
+				log_faulty_compute(replayer);
 				return replayer.wait();
 			}
 			break;
