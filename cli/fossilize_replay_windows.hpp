@@ -386,6 +386,9 @@ bool ProcessProgress::start_child_process()
 		// We're supposed to populate the driver caches here first and foremost.
 	}
 
+	cmdline += " --shader-cache-size ";
+	cmdline += std::to_string(Global::base_replayer_options.shader_cache_size);
+
 	// Create custom named pipes which can be inherited by our child processes.
 	SECURITY_ATTRIBUTES attrs = {};
 	attrs.bInheritHandle = TRUE;
@@ -566,9 +569,12 @@ static int run_master_process(const VulkanDevice::Options &opts,
 	Global::base_replayer_options = replayer_opts;
 	Global::databases = databases;
 	unsigned processes = replayer_opts.num_threads;
-	Global::base_replayer_options.num_threads = 1;
 	Global::shm_name = shm_name;
 	Global::shm_mutex_name = shm_mutex_name;
+
+	// Split shader cache overhead across all processes.
+	Global::base_replayer_options.shader_cache_size_mb /= max(Global::base_replayer_options.num_threads, 1u);
+	Global::base_replayer_options.num_threads = 1;
 
 	Global::job_handle = CreateJobObjectA(nullptr, nullptr);
 	if (!Global::job_handle)

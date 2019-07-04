@@ -31,6 +31,7 @@
 #include "fossilize_external_replayer.hpp"
 #include "fossilize_external_replayer_control_block.hpp"
 #include "fossilize_errors.hpp"
+#include "util/object_cache.hpp"
 
 #include <cinttypes>
 #include <string>
@@ -213,6 +214,8 @@ struct ThreadedReplayer : StateCreatorInterface
 		// VALVE: --loop option for testing performance
 		unsigned loop_count = 1;
 
+		unsigned shader_cache_size_mb = 256;
+
 		// Carve out a range of which pipelines to replay.
 		// Used for multi-process replays where each process gets its own slice to churn through.
 		unsigned start_graphics_index = 0;
@@ -311,6 +314,15 @@ struct ThreadedReplayer : StateCreatorInterface
 		shader_module_total_compressed_size.store(0);
 		shader_module_total_size.store(0);
 		per_thread_data.resize(num_worker_threads + 1);
+
+		// Could potentially overflow on 32-bit.
+		size_t target_size;
+		if (opts.shader_cache_size_mb <= (SIZE_MAX / (1024 * 1024)))
+			target_size = size_t(opts.shader_cache_size_mb) * 1024 * 1024;
+		else
+			target_size = SIZE_MAX;
+
+		shader_modules.set_target_size(target_size);
 	}
 
 	PerThreadData &get_per_thread_data()
@@ -714,9 +726,6 @@ struct ThreadedReplayer : StateCreatorInterface
 		for (auto &pipeline_layout : pipeline_layouts)
 			if (pipeline_layout.second)
 				vkDestroyPipelineLayout(device->get_device(), pipeline_layout.second, nullptr);
-		for (auto &shader_module : shader_modules)
-			if (shader_module.second)
-				vkDestroyShaderModule(device->get_device(), shader_module.second, nullptr);
 		for (auto &render_pass : render_passes)
 			if (render_pass.second)
 				vkDestroyRenderPass(device->get_device(), render_pass.second, nullptr);
@@ -726,6 +735,11 @@ struct ThreadedReplayer : StateCreatorInterface
 		for (auto &pipeline : graphics_pipelines)
 			if (pipeline.second)
 				vkDestroyPipeline(device->get_device(), pipeline.second, nullptr);
+
+		shader_modules.delete_cache([this](Hash, VkShaderModule module) {
+			if (module != VK_NULL_HANDLE)
+				vkDestroyShaderModule(device->get_device(), module, nullptr);
+		});
 	}
 
 	bool validate_pipeline_cache_header(const vector<uint8_t> &blob)
@@ -917,11 +931,12 @@ struct ThreadedReplayer : StateCreatorInterface
 
 	bool enqueue_create_shader_module(Hash hash, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module) override
 	{
+		*module = VK_NULL_HANDLE;
 		if (masked_shader_modules.count(hash))
 		{
-			*module = VK_NULL_HANDLE;
 			lock_guard<mutex> lock(internal_enqueue_mutex);
-			shader_modules[hash] = VK_NULL_HANDLE;
+			//LOGI("Inserting shader module %016llx.\n", static_cast<unsigned long long>(hash));
+			shader_modules.insert_object(hash, *module, 1);
 			return true;
 		}
 
@@ -945,7 +960,8 @@ struct ThreadedReplayer : StateCreatorInterface
 				LOGE("Failed to validate SPIR-V module: %0" PRIX64 "\n", hash);
 				*module = VK_NULL_HANDLE;
 				lock_guard<mutex> lock(internal_enqueue_mutex);
-				shader_modules[hash] = VK_NULL_HANDLE;
+				//LOGI("Inserting shader module %016llx.\n", static_cast<unsigned long long>(hash));
+				shader_modules.insert_object(hash, VK_NULL_HANDLE, 1);
 				shader_module_count.fetch_add(1, std::memory_order_relaxed);
 
 				if (opts.control_block)
@@ -956,18 +972,12 @@ struct ThreadedReplayer : StateCreatorInterface
 		}
 #endif
 
-		VkShaderModule *hash_map_entry;
-		{
-			lock_guard<mutex> lock(internal_enqueue_mutex);
-			hash_map_entry = &shader_modules[hash];
-		}
-
 		for (unsigned i = 0; i < loop_count; i++)
 		{
 			// Avoid leak.
-			if (*hash_map_entry != VK_NULL_HANDLE)
-				vkDestroyShaderModule(device->get_device(), *hash_map_entry, nullptr);
-			*hash_map_entry = VK_NULL_HANDLE;
+			if (*module != VK_NULL_HANDLE)
+				vkDestroyShaderModule(device->get_device(), *module, nullptr);
+			*module = VK_NULL_HANDLE;
 
 			auto start_time = chrono::steady_clock::now();
 			if (vkCreateShaderModule(device->get_device(), create_info, nullptr, module) == VK_SUCCESS)
@@ -976,7 +986,6 @@ struct ThreadedReplayer : StateCreatorInterface
 				auto duration_ns = chrono::duration_cast<chrono::nanoseconds>(end_time - start_time).count();
 				shader_module_ns.fetch_add(duration_ns, std::memory_order_relaxed);
 				shader_module_count.fetch_add(1, std::memory_order_relaxed);
-				*hash_map_entry = *module;
 
 				if (robustness)
 				{
@@ -992,6 +1001,12 @@ struct ThreadedReplayer : StateCreatorInterface
 				LOGE("Failed to create shader module for hash 0x%llx.\n",
 				     static_cast<unsigned long long>(hash));
 			}
+		}
+
+		{
+			lock_guard<mutex> lock(internal_enqueue_mutex);
+			//LOGI("Inserting shader module %016llx.\n", static_cast<unsigned long long>(hash));
+			shader_modules.insert_object(hash, *module, create_info->codeSize);
 		}
 
 		return true;
@@ -1167,10 +1182,14 @@ struct ThreadedReplayer : StateCreatorInterface
 			work_item.memory_context_index = SHADER_MODULE_MEMORY_CONTEXT;
 			enqueue_work_item(work_item);
 			enqueued_shader_modules.insert(shader_module_hash);
+			//LOGI("Queueing up shader module: %016llx.\n", static_cast<unsigned long long>((Hash) shader_module_hash));
 			return true;
 		}
 		else
+		{
+			//LOGI("Not queueing up shader module: %016llx.\n", static_cast<unsigned long long>((Hash) shader_module_hash));
 			return false;
+		}
 	}
 
 	bool enqueue_shader_modules(const VkGraphicsPipelineCreateInfo *info)
@@ -1192,15 +1211,25 @@ struct ThreadedReplayer : StateCreatorInterface
 	{
 		for (uint32_t i = 0; i < info->stageCount; i++)
 		{
-			const_cast<VkPipelineShaderStageCreateInfo *>(info->pStages)[i].module =
-					shader_modules[(Hash) info->pStages[i].module];
+			auto result = shader_modules.find_object((Hash) info->pStages[i].module);
+			if (!result.second)
+			{
+				LOGE("Could not find shader module %016llx in cache.\n",
+				     static_cast<unsigned long long>((Hash) info->pStages[i].module));
+			}
+			const_cast<VkPipelineShaderStageCreateInfo *>(info->pStages)[i].module = result.first;
 		}
 	}
 
 	void resolve_shader_modules(VkComputePipelineCreateInfo *info)
 	{
-		const_cast<VkComputePipelineCreateInfo*>(info)->stage.module =
-				shader_modules[(Hash) info->stage.module];
+		auto result = shader_modules.find_object((Hash) info->stage.module);
+		if (!result.second)
+		{
+			LOGE("Could not find shader module %016llx in cache.\n",
+			     static_cast<unsigned long long>((Hash) info->stage.module));
+		}
+		const_cast<VkComputePipelineCreateInfo*>(info)->stage.module = result.first;
 	}
 
 	template <typename DerivedInfo>
@@ -1251,7 +1280,8 @@ struct ThreadedReplayer : StateCreatorInterface
 			ENQUEUE_OUT_OF_RANGE_PARENT_PIPELINES = 3,
 			ENQUEUE_SHADER_MODULE_SECONDARY_OFFSET = 4,
 			ENQUEUE_DERIVED_PIPELINES_OFFSET = 5,
-			PASS_COUNT = 6
+			MAINTAIN_SHADER_MODULE_LRU_CACHE = 6,
+			PASS_COUNT = 7
 		};
 
 		auto outside_range_hashes = make_shared<unordered_set<Hash>>();
@@ -1267,6 +1297,7 @@ struct ThreadedReplayer : StateCreatorInterface
 		// - ...
 		// - Pass 6, chunk 0 (reclaim memory for context 0)
 		// - Pass 6, chunk 1 (reclaim memory for context 1)
+		// - Pass 7, sync point
 		// - Pass 0, chunk 2 (context 0)
 		// - Pass 1, chunk 3 (context 1)
 
@@ -1506,6 +1537,32 @@ struct ThreadedReplayer : StateCreatorInterface
 				                 }
 			                 }});
 
+			if (memory_index == 0)
+			{
+				work.push_back({ get_order_index(MAINTAIN_SHADER_MODULE_LRU_CACHE),
+				                 [this]() {
+					                 for (unsigned i = 0; i < NUM_PIPELINE_MEMORY_CONTEXTS; i++)
+						                 sync_worker_memory_context(i);
+
+					                 // Now all worker threads are drained, so we can maintain the shader module LRU cache.
+					                 shader_modules.prune_cache([this](Hash hash, VkShaderModule module) {
+						                 assert(enqueued_shader_modules.count((VkShaderModule) hash) != 0);
+						                 //LOGI("Removing shader module %016llx.\n", static_cast<unsigned long long>(hash));
+						                 enqueued_shader_modules.erase((VkShaderModule) hash);
+						                 if (module != VK_NULL_HANDLE)
+							                 vkDestroyShaderModule(device->get_device(), module, nullptr);
+					                 });
+
+					                 // Need to forget that we have seen an object before so we can replay the same object multiple times.
+					                 for (auto &per_thread : per_thread_data)
+						                 if (per_thread.per_thread_replayers)
+							                 per_thread.per_thread_replayers[SHADER_MODULE_MEMORY_CONTEXT].forget_handle_references();
+
+					                 assert(enqueued_shader_modules.empty());
+					                 assert(shader_modules.get_current_object_count() == 0);
+				                 }});
+			}
+
 			memory_index = (memory_index + 1) % NUM_PIPELINE_MEMORY_CONTEXTS;
 		}
 	}
@@ -1540,7 +1597,9 @@ struct ThreadedReplayer : StateCreatorInterface
 	std::unordered_map<Hash, VkSampler> samplers;
 	std::unordered_map<Hash, VkDescriptorSetLayout> layouts;
 	std::unordered_map<Hash, VkPipelineLayout> pipeline_layouts;
-	std::unordered_map<Hash, VkShaderModule> shader_modules;
+
+	ObjectCache<VkShaderModule> shader_modules;
+
 	std::unordered_map<Hash, VkRenderPass> render_passes;
 	std::unordered_map<Hash, VkPipeline> compute_pipelines;
 	std::unordered_map<Hash, VkPipeline> graphics_pipelines;
@@ -1649,6 +1708,7 @@ static void print_help()
 	     "\t[--on-disk-pipeline-cache <path>]\n"
 	     "\t[--graphics-pipeline-range <start> <end>]\n"
 	     "\t[--compute-pipeline-range <start> <end>]\n"
+	     "\t[--shader-cache-size <value (MiB)>]\n"
 	     EXTRA_OPTIONS
 	     "\t<Database>\n");
 }
@@ -1966,6 +2026,7 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 			compute_start_index = start_index;
 		}
 
+		assert(hashes);
 		hashes->resize(resource_hash_count);
 
 		if (!resolver->get_hash_list_for_resource_tag(tag, &resource_hash_count, hashes->data()))
@@ -2033,7 +2094,7 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 		replayer.samplers.size() +
 		replayer.layouts.size() +
 		replayer.pipeline_layouts.size() +
-		replayer.shader_modules.size() +
+		replayer.shader_modules.get_current_object_count() +
 		replayer.render_passes.size() +
 		replayer.compute_pipelines.size() +
 		replayer.graphics_pipelines.size();
@@ -2070,7 +2131,7 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 	LOGI("  samplers:              %7lu\n", (unsigned long)replayer.samplers.size());
 	LOGI("  descriptor set layouts:%7lu\n", (unsigned long)replayer.layouts.size());
 	LOGI("  pipeline layouts:      %7lu\n", (unsigned long)replayer.pipeline_layouts.size());
-	LOGI("  shader modules:        %7lu\n", (unsigned long)replayer.shader_modules.size());
+	LOGI("  shader modules:        %7lu\n", (unsigned long)replayer.shader_modules.get_current_object_count());
 	LOGI("  render passes:         %7lu\n", (unsigned long)replayer.render_passes.size());
 	LOGI("  compute pipelines:     %7lu\n", (unsigned long)replayer.compute_pipelines.size());
 	LOGI("  graphics pipelines:    %7lu\n", (unsigned long)replayer.graphics_pipelines.size());
@@ -2144,6 +2205,8 @@ int main(int argc, char *argv[])
 	cbs.add("--shmem-fd", [&](CLIParser &parser) { shmem_fd = parser.next_uint(); });
 #endif
 #endif
+
+	cbs.add("--shader-cache-size", [&](CLIParser &parser) { replayer_opts.shader_cache_size_mb = parser.next_uint(); });
 
 	cbs.error_handler = [] { print_help(); };
 

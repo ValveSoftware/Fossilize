@@ -56,6 +56,7 @@ add_library(fossilize STATIC
         fossilize_types.hpp
         varint.cpp varint.hpp
         fossilize_db.cpp fossilize_db.hpp
+        util/intrusive_list.hpp util/object_pool.hpp util/object_cache.hpp
         path.hpp path.cpp)
 set_target_properties(fossilize PROPERTIES POSITION_INDEPENDENT_CODE ON)
 

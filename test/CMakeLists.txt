@@ -20,6 +20,11 @@ add_executable(multi-instance-and-device-test multi_instance_and_device_test.cpp
 target_link_libraries(multi-instance-and-device-test cli-utils fossilize)
 set_target_properties(multi-instance-and-device-test PROPERTIES LINK_FLAGS "${FOSSILIZE_LINK_FLAGS}")
 
+add_executable(object-cache-test object_cache_test.cpp)
+target_link_libraries(object-cache-test fossilize)
+set_target_properties(object-cache-test PROPERTIES LINK_FLAGS "${FOSSILIZE_LINK_FLAGS}")
+add_test(NAME object-cache-test COMMAND object-cache-test)
+
 if (NOT WIN32)
     add_executable(futex-test futex_test.cpp)
     target_link_libraries(futex-test fossilize -pthread)

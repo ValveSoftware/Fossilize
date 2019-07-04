@@ -156,6 +156,8 @@ public:
 	// Lets other StateReplayers have the same references to objects.
 	void copy_handle_references(const StateReplayer &replayer);
 
+	void forget_handle_references();
+
 	ScratchAllocator &get_allocator();
 
 	// Disable copies (and moves).
