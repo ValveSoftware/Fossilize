@@ -307,6 +307,7 @@ struct ThreadedReplayer : StateCreatorInterface
 		graphics_pipeline_count.store(0);
 		compute_pipeline_count.store(0);
 		shader_module_count.store(0);
+		shader_module_evicted_count.store(0);
 		thread_total_ns.store(0);
 		total_idle_ns.store(0);
 		total_peak_memory.store(0);
@@ -1551,15 +1552,14 @@ struct ThreadedReplayer : StateCreatorInterface
 						                 enqueued_shader_modules.erase((VkShaderModule) hash);
 						                 if (module != VK_NULL_HANDLE)
 							                 vkDestroyShaderModule(device->get_device(), module, nullptr);
+
+						                 shader_module_evicted_count.fetch_add(1, std::memory_order_relaxed);
 					                 });
 
 					                 // Need to forget that we have seen an object before so we can replay the same object multiple times.
 					                 for (auto &per_thread : per_thread_data)
 						                 if (per_thread.per_thread_replayers)
 							                 per_thread.per_thread_replayers[SHADER_MODULE_MEMORY_CONTEXT].forget_handle_references();
-
-					                 assert(enqueued_shader_modules.empty());
-					                 assert(shader_modules.get_current_object_count() == 0);
 				                 }});
 			}
 
@@ -1648,6 +1648,7 @@ struct ThreadedReplayer : StateCreatorInterface
 	std::atomic<std::uint32_t> graphics_pipeline_count;
 	std::atomic<std::uint32_t> compute_pipeline_count;
 	std::atomic<std::uint32_t> shader_module_count;
+	std::atomic<std::uint32_t> shader_module_evicted_count;
 
 	std::atomic<std::uint64_t> shader_module_total_size;
 	std::atomic<std::uint64_t> shader_module_total_compressed_size;
@@ -2110,6 +2111,9 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 	     replayer.shader_module_count.load(),
 	     replayer.shader_module_ns.load() * 1e-9);
 
+	LOGI("Shader cache evicted %u shader modules in total\n",
+	     replayer.shader_module_evicted_count.load());
+
 	LOGI("Playing back %u graphics pipelines took %.3f s (accumulated time)\n",
 	     replayer.graphics_pipeline_count.load(),
 	     replayer.graphics_pipeline_ns.load() * 1e-9);
@@ -2131,7 +2135,6 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 	LOGI("  samplers:              %7lu\n", (unsigned long)replayer.samplers.size());
 	LOGI("  descriptor set layouts:%7lu\n", (unsigned long)replayer.layouts.size());
 	LOGI("  pipeline layouts:      %7lu\n", (unsigned long)replayer.pipeline_layouts.size());
-	LOGI("  shader modules:        %7lu\n", (unsigned long)replayer.shader_modules.get_current_object_count());
 	LOGI("  render passes:         %7lu\n", (unsigned long)replayer.render_passes.size());
 	LOGI("  compute pipelines:     %7lu\n", (unsigned long)replayer.compute_pipelines.size());
 	LOGI("  graphics pipelines:    %7lu\n", (unsigned long)replayer.graphics_pipelines.size());
