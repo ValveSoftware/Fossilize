@@ -357,6 +357,9 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 		if (options.enable_validation)
 			argv.push_back("--enable-validation");
 
+		if (options.ignore_derived_pipelines)
+			argv.push_back("--ignore-derived-pipelines");
+
 		argv.push_back("--device-index");
 		char index_name[16];
 		sprintf(index_name, "%u", options.device_index);

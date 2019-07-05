@@ -318,6 +318,9 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 	if (options.enable_validation)
 		cmdline += " --enable-validation";
 
+	if (options.ignore_derived_pipelines)
+		cmdline += " --ignore-derived-pipelines";
+
 	STARTUPINFO si = {};
 	si.cb = sizeof(STARTUPINFO);
 	si.dwFlags = STARTF_USESTDHANDLES;

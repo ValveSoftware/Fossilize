@@ -69,6 +69,10 @@ public:
 
 		// Enable full validation layers.
 		bool enable_validation;
+
+		// Ignores derived pipelines, reduces memory consumption when replaying.
+		// Only useful if the driver in question ignores use of derived pipelines when hashing pipelines internally.
+		bool ignore_derived_pipelines;
 	};
 
 	ExternalReplayer();

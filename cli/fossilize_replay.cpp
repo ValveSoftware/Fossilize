@@ -206,6 +206,7 @@ struct ThreadedReplayer : StateCreatorInterface
 	{
 		bool pipeline_cache = false;
 		bool spirv_validate = false;
+		bool ignore_derived_pipelines = false;
 		string on_disk_pipeline_cache_path;
 
 		// VALVE: Add multi-threaded pipeline creation
@@ -1035,6 +1036,13 @@ struct ThreadedReplayer : StateCreatorInterface
 			info->basePipelineHandle = VK_NULL_HANDLE;
 			info->basePipelineIndex = 0;
 		}
+		else if (opts.ignore_derived_pipelines)
+		{
+			auto *info = const_cast<VkComputePipelineCreateInfo *>(create_info);
+			info->flags &= ~VK_PIPELINE_CREATE_DERIVATIVE_BIT;
+			info->basePipelineHandle = VK_NULL_HANDLE;
+			info->basePipelineIndex = 0;
+		}
 
 		auto &per_thread = get_per_thread_data();
 		unsigned index = per_thread.current_parse_index;
@@ -1070,7 +1078,6 @@ struct ThreadedReplayer : StateCreatorInterface
 		if (derived && create_info->basePipelineHandle == VK_NULL_HANDLE)
 			LOGE("Creating a derived pipeline with NULL handle.\n");
 
-
 		// It has never been observed that an application uses multiple layers of derived pipelines.
 		// Rather than trying to replay with arbitrary layers of derived-ness - which may or may not have any impact on caching -
 		// We force these pipelines to be non-derived.
@@ -1081,6 +1088,13 @@ struct ThreadedReplayer : StateCreatorInterface
 		if (parent && derived)
 		{
 			LOGE("A parent pipeline is also a derived pipeline. Avoid potential deep dependency chains in replay by forcing the pipeline to be non-derived.\n");
+			auto *info = const_cast<VkGraphicsPipelineCreateInfo *>(create_info);
+			info->flags &= ~VK_PIPELINE_CREATE_DERIVATIVE_BIT;
+			info->basePipelineHandle = VK_NULL_HANDLE;
+			info->basePipelineIndex = 0;
+		}
+		else if (opts.ignore_derived_pipelines)
+		{
 			auto *info = const_cast<VkGraphicsPipelineCreateInfo *>(create_info);
 			info->flags &= ~VK_PIPELINE_CREATE_DERIVATIVE_BIT;
 			info->basePipelineHandle = VK_NULL_HANDLE;
@@ -1708,6 +1722,7 @@ static void print_help()
 	     "\t[--graphics-pipeline-range <start> <end>]\n"
 	     "\t[--compute-pipeline-range <start> <end>]\n"
 	     "\t[--shader-cache-size <value (MiB)>]\n"
+	     "\t[--ignore-derived-pipelines]\n"
 	     EXTRA_OPTIONS
 	     "\t<Database>\n");
 }
@@ -1800,6 +1815,7 @@ static int run_progress_process(const VulkanDevice::Options &device_opts,
 	opts.spirv_validate = replayer_opts.spirv_validate;
 	opts.device_index = device_opts.device_index;
 	opts.enable_validation = device_opts.enable_validation;
+	opts.ignore_derived_pipelines = replayer_opts.ignore_derived_pipelines;
 
 	ExternalReplayer replayer;
 	if (!replayer.start(opts))
@@ -2208,6 +2224,7 @@ int main(int argc, char *argv[])
 #endif
 
 	cbs.add("--shader-cache-size", [&](CLIParser &parser) { replayer_opts.shader_cache_size_mb = parser.next_uint(); });
+	cbs.add("--ignore-derived-pipelines", [&](CLIParser &) { replayer_opts.ignore_derived_pipelines = true; });
 
 	cbs.error_handler = [] { print_help(); };
 
