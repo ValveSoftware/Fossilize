@@ -476,7 +476,7 @@ struct ThreadedReplayer : StateCreatorInterface
 				feedback.pPipelineStageCreationFeedbacks = feedbacks;
 				feedback.pPipelineCreationFeedback = &primary_feedback;
 
-				if (device->pipeline_feedback_enabled())
+				if (opts.pipeline_cache && device->pipeline_feedback_enabled())
 					const_cast<VkGraphicsPipelineCreateInfo *>(work_item.create_info.graphics_create_info)->pNext = &feedback;
 
 				if (vkCreateGraphicsPipelines(device->get_device(), pipeline_cache, 1, work_item.create_info.graphics_create_info,
@@ -503,9 +503,23 @@ struct ThreadedReplayer : StateCreatorInterface
 					if (opts.control_block && i == 0)
 						opts.control_block->successful_graphics.fetch_add(1, std::memory_order_relaxed);
 
-					if (i == 0 && (primary_feedback.flags & VK_PIPELINE_CREATION_FEEDBACK_VALID_BIT_EXT) != 0)
+					if (opts.pipeline_cache && i == 0 && (primary_feedback.flags & VK_PIPELINE_CREATION_FEEDBACK_VALID_BIT_EXT) != 0)
 					{
 						bool cache_hit = (primary_feedback.flags & VK_PIPELINE_CREATION_FEEDBACK_APPLICATION_PIPELINE_CACHE_HIT_BIT_EXT) != 0;
+
+						// Check per-stage feedback.
+						if (!cache_hit)
+						{
+							cache_hit = true;
+							for (uint32_t j = 0; j < feedback.pipelineStageCreationFeedbackCount; j++)
+							{
+								bool valid = (feedbacks[j].flags & VK_PIPELINE_CREATION_FEEDBACK_VALID_BIT_EXT) != 0;
+								bool hit = (feedbacks[j].flags & VK_PIPELINE_CREATION_FEEDBACK_APPLICATION_PIPELINE_CACHE_HIT_BIT_EXT) != 0;
+								if (!valid || !hit)
+									cache_hit = false;
+							}
+						}
+
 						if (cache_hit)
 							pipeline_cache_hits.fetch_add(1, std::memory_order_relaxed);
 						else
@@ -576,7 +590,7 @@ struct ThreadedReplayer : StateCreatorInterface
 				feedback.pPipelineStageCreationFeedbacks = &feedbacks;
 				feedback.pPipelineCreationFeedback = &primary_feedback;
 
-				if (device->pipeline_feedback_enabled())
+				if (opts.pipeline_cache && device->pipeline_feedback_enabled())
 					const_cast<VkComputePipelineCreateInfo *>(work_item.create_info.compute_create_info)->pNext = &feedback;
 
 				if (vkCreateComputePipelines(device->get_device(), pipeline_cache, 1,
@@ -604,9 +618,17 @@ struct ThreadedReplayer : StateCreatorInterface
 					if (opts.control_block && i == 0)
 						opts.control_block->successful_compute.fetch_add(1, std::memory_order_relaxed);
 
-					if (i == 0 && (primary_feedback.flags & VK_PIPELINE_CREATION_FEEDBACK_VALID_BIT_EXT) != 0)
+					if (opts.pipeline_cache && i == 0 && (primary_feedback.flags & VK_PIPELINE_CREATION_FEEDBACK_VALID_BIT_EXT) != 0)
 					{
 						bool cache_hit = (primary_feedback.flags & VK_PIPELINE_CREATION_FEEDBACK_APPLICATION_PIPELINE_CACHE_HIT_BIT_EXT) != 0;
+
+						if (!cache_hit)
+						{
+							bool valid = (feedbacks.flags & VK_PIPELINE_CREATION_FEEDBACK_VALID_BIT_EXT) != 0;
+							bool hit = (feedbacks.flags & VK_PIPELINE_CREATION_FEEDBACK_APPLICATION_PIPELINE_CACHE_HIT_BIT_EXT) != 0;
+							cache_hit = valid && hit;
+						}
+
 						if (cache_hit)
 							pipeline_cache_hits.fetch_add(1, std::memory_order_relaxed);
 						else
@@ -2162,7 +2184,7 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 	LOGI("Opening archive took %ld ms:\n", elapsed_ms_read_archive);
 	LOGI("Parsing archive took %ld ms:\n", elapsed_ms_prepare);
 
-	if (replayer.device->pipeline_feedback_enabled())
+	if (replayer.opts.pipeline_cache && replayer.device->pipeline_feedback_enabled())
 	{
 		LOGI("Pipeline cache hits reported: %u\n", replayer.pipeline_cache_hits.load());
 		LOGI("Pipeline cache misses reported: %u\n", replayer.pipeline_cache_misses.load());
