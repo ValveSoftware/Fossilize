@@ -69,7 +69,6 @@ public:
 	}
 
 protected:
-#ifndef OBJECT_POOL_DEBUG
 	std::vector<T *> vacants;
 
 	struct MallocDeleter
@@ -81,6 +80,5 @@ protected:
 	};
 
 	std::vector<std::unique_ptr<T, MallocDeleter>> memory;
-#endif
 };
 }
