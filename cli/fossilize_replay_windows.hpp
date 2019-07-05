@@ -387,7 +387,7 @@ bool ProcessProgress::start_child_process()
 	}
 
 	cmdline += " --shader-cache-size ";
-	cmdline += std::to_string(Global::base_replayer_options.shader_cache_size);
+	cmdline += std::to_string(Global::base_replayer_options.shader_cache_size_mb);
 
 	// Create custom named pipes which can be inherited by our child processes.
 	SECURITY_ATTRIBUTES attrs = {};
