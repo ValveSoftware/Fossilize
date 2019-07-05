@@ -312,6 +312,8 @@ struct ThreadedReplayer : StateCreatorInterface
 		thread_total_ns.store(0);
 		total_idle_ns.store(0);
 		total_peak_memory.store(0);
+		pipeline_cache_hits.store(0);
+		pipeline_cache_misses.store(0);
 
 		shader_module_total_compressed_size.store(0);
 		shader_module_total_size.store(0);
@@ -467,6 +469,16 @@ struct ThreadedReplayer : StateCreatorInterface
 				spurious_crash();
 #endif
 
+				VkPipelineCreationFeedbackEXT feedbacks[16] = {};
+				VkPipelineCreationFeedbackEXT primary_feedback = {};
+				VkPipelineCreationFeedbackCreateInfoEXT feedback = { VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO_EXT };
+				feedback.pipelineStageCreationFeedbackCount = work_item.create_info.graphics_create_info->stageCount;
+				feedback.pPipelineStageCreationFeedbacks = feedbacks;
+				feedback.pPipelineCreationFeedback = &primary_feedback;
+
+				if (device->pipeline_feedback_enabled())
+					const_cast<VkGraphicsPipelineCreateInfo *>(work_item.create_info.graphics_create_info)->pNext = &feedback;
+
 				if (vkCreateGraphicsPipelines(device->get_device(), pipeline_cache, 1, work_item.create_info.graphics_create_info,
 				                              nullptr, work_item.output.pipeline) == VK_SUCCESS)
 				{
@@ -490,6 +502,15 @@ struct ThreadedReplayer : StateCreatorInterface
 
 					if (opts.control_block && i == 0)
 						opts.control_block->successful_graphics.fetch_add(1, std::memory_order_relaxed);
+
+					if (i == 0 && (primary_feedback.flags & VK_PIPELINE_CREATION_FEEDBACK_VALID_BIT_EXT) != 0)
+					{
+						bool cache_hit = (primary_feedback.flags & VK_PIPELINE_CREATION_FEEDBACK_APPLICATION_PIPELINE_CACHE_HIT_BIT_EXT) != 0;
+						if (cache_hit)
+							pipeline_cache_hits.fetch_add(1, std::memory_order_relaxed);
+						else
+							pipeline_cache_misses.fetch_add(1, std::memory_order_relaxed);
+					}
 				}
 				else
 				{
@@ -548,6 +569,15 @@ struct ThreadedReplayer : StateCreatorInterface
 #ifdef SIMULATE_UNSTABLE_DRIVER
 				spurious_crash();
 #endif
+				VkPipelineCreationFeedbackEXT feedbacks = {};
+				VkPipelineCreationFeedbackEXT primary_feedback = {};
+				VkPipelineCreationFeedbackCreateInfoEXT feedback = { VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO_EXT };
+				feedback.pipelineStageCreationFeedbackCount = 1;
+				feedback.pPipelineStageCreationFeedbacks = &feedbacks;
+				feedback.pPipelineCreationFeedback = &primary_feedback;
+
+				if (device->pipeline_feedback_enabled())
+					const_cast<VkComputePipelineCreateInfo *>(work_item.create_info.compute_create_info)->pNext = &feedback;
 
 				if (vkCreateComputePipelines(device->get_device(), pipeline_cache, 1,
 				                             work_item.create_info.compute_create_info,
@@ -573,6 +603,15 @@ struct ThreadedReplayer : StateCreatorInterface
 
 					if (opts.control_block && i == 0)
 						opts.control_block->successful_compute.fetch_add(1, std::memory_order_relaxed);
+
+					if (i == 0 && (primary_feedback.flags & VK_PIPELINE_CREATION_FEEDBACK_VALID_BIT_EXT) != 0)
+					{
+						bool cache_hit = (primary_feedback.flags & VK_PIPELINE_CREATION_FEEDBACK_APPLICATION_PIPELINE_CACHE_HIT_BIT_EXT) != 0;
+						if (cache_hit)
+							pipeline_cache_hits.fetch_add(1, std::memory_order_relaxed);
+						else
+							pipeline_cache_misses.fetch_add(1, std::memory_order_relaxed);
+					}
 				}
 				else
 				{
@@ -1661,6 +1700,8 @@ struct ThreadedReplayer : StateCreatorInterface
 	std::atomic<std::uint32_t> compute_pipeline_count;
 	std::atomic<std::uint32_t> shader_module_count;
 	std::atomic<std::uint32_t> shader_module_evicted_count;
+	std::atomic<std::uint32_t> pipeline_cache_hits;
+	std::atomic<std::uint32_t> pipeline_cache_misses;
 
 	std::atomic<std::uint64_t> shader_module_total_size;
 	std::atomic<std::uint64_t> shader_module_total_compressed_size;
@@ -2120,6 +2161,12 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 
 	LOGI("Opening archive took %ld ms:\n", elapsed_ms_read_archive);
 	LOGI("Parsing archive took %ld ms:\n", elapsed_ms_prepare);
+
+	if (replayer.device->pipeline_feedback_enabled())
+	{
+		LOGI("Pipeline cache hits reported: %u\n", replayer.pipeline_cache_hits.load());
+		LOGI("Pipeline cache misses reported: %u\n", replayer.pipeline_cache_misses.load());
+	}
 
 	LOGI("Playing back %u shader modules took %.3f s (accumulated time)\n",
 	     replayer.shader_module_count.load(),

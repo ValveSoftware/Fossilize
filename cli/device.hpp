@@ -62,6 +62,11 @@ public:
 	void set_validation_error_callback(void (*callback)(void *), void *userdata);
 	void notify_validation_error();
 
+	bool pipeline_feedback_enabled() const
+	{
+		return supports_pipeline_feedback;
+	}
+
 private:
 	VkInstance instance = VK_NULL_HANDLE;
 	VkPhysicalDevice gpu = VK_NULL_HANDLE;
@@ -71,5 +76,6 @@ private:
 
 	void (*validation_callback)(void *) = nullptr;
 	void *validation_callback_userdata = nullptr;
+	bool supports_pipeline_feedback = false;
 };
 }

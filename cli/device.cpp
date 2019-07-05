@@ -292,6 +292,10 @@ bool VulkanDevice::init_device(const Options &opts)
 			active_device_extensions.push_back(ext.extensionName);
 	}
 
+	supports_pipeline_feedback = find_if(begin(active_device_extensions), end(active_device_extensions), [](const char *ext) {
+		return strcmp(ext, VK_EXT_PIPELINE_CREATION_FEEDBACK_EXTENSION_NAME) == 0;
+	}) != end(active_device_extensions);
+
 	VkDeviceCreateInfo device_info = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
 	// FIXME: Use physical_device_features2.
 	device_info.pEnabledFeatures = &gpu_features;
