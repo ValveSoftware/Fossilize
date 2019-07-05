@@ -1276,12 +1276,12 @@ struct ThreadedReplayer : StateCreatorInterface
 		enum PassOrder
 		{
 			PARSE_ENQUEUE_OFFSET = 0,
-			ENQUEUE_SHADER_MODULES_PRIMARY_OFFSET = 1,
-			RESOLVE_SHADER_MODULE_AND_ENQUEUE_PIPELINES_PRIMARY_OFFSET = 2,
-			ENQUEUE_OUT_OF_RANGE_PARENT_PIPELINES = 3,
-			ENQUEUE_SHADER_MODULE_SECONDARY_OFFSET = 4,
-			ENQUEUE_DERIVED_PIPELINES_OFFSET = 5,
-			MAINTAIN_SHADER_MODULE_LRU_CACHE = 6,
+			MAINTAIN_SHADER_MODULE_LRU_CACHE = 1,
+			ENQUEUE_SHADER_MODULES_PRIMARY_OFFSET = 2,
+			RESOLVE_SHADER_MODULE_AND_ENQUEUE_PIPELINES_PRIMARY_OFFSET = 3,
+			ENQUEUE_OUT_OF_RANGE_PARENT_PIPELINES = 4,
+			ENQUEUE_SHADER_MODULE_SECONDARY_OFFSET = 5,
+			ENQUEUE_DERIVED_PIPELINES_OFFSET = 6,
 			PASS_COUNT = 7
 		};
 
@@ -1357,6 +1357,29 @@ struct ThreadedReplayer : StateCreatorInterface
 					                 }
 				                 }
 			                 }});
+
+			if (memory_index == 0)
+			{
+				work.push_back({ get_order_index(MAINTAIN_SHADER_MODULE_LRU_CACHE),
+				                 [this]() {
+					                 // Now all worker threads are drained for any work which needs shader modules,
+					                 // so we can maintain the shader module LRU cache while we're parsing new pipelines in parallel.
+					                 shader_modules.prune_cache([this](Hash hash, VkShaderModule module) {
+						                 assert(enqueued_shader_modules.count((VkShaderModule) hash) != 0);
+						                 //LOGI("Removing shader module %016llx.\n", static_cast<unsigned long long>(hash));
+						                 enqueued_shader_modules.erase((VkShaderModule) hash);
+						                 if (module != VK_NULL_HANDLE)
+							                 vkDestroyShaderModule(device->get_device(), module, nullptr);
+
+						                 shader_module_evicted_count.fetch_add(1, std::memory_order_relaxed);
+					                 });
+
+					                 // Need to forget that we have seen an object before so we can replay the same object multiple times.
+					                 for (auto &per_thread : per_thread_data)
+						                 if (per_thread.per_thread_replayers)
+							                 per_thread.per_thread_replayers[SHADER_MODULE_MEMORY_CONTEXT].forget_handle_references();
+				                 }});
+			}
 
 			work.push_back({ get_order_index(ENQUEUE_SHADER_MODULES_PRIMARY_OFFSET),
 			                 [this, derived, deferred, memory_index]() {
@@ -1537,31 +1560,6 @@ struct ThreadedReplayer : StateCreatorInterface
 					                 }
 				                 }
 			                 }});
-
-			if (memory_index == 0)
-			{
-				work.push_back({ get_order_index(MAINTAIN_SHADER_MODULE_LRU_CACHE),
-				                 [this]() {
-					                 for (unsigned i = 0; i < NUM_PIPELINE_MEMORY_CONTEXTS; i++)
-						                 sync_worker_memory_context(i);
-
-					                 // Now all worker threads are drained, so we can maintain the shader module LRU cache.
-					                 shader_modules.prune_cache([this](Hash hash, VkShaderModule module) {
-						                 assert(enqueued_shader_modules.count((VkShaderModule) hash) != 0);
-						                 //LOGI("Removing shader module %016llx.\n", static_cast<unsigned long long>(hash));
-						                 enqueued_shader_modules.erase((VkShaderModule) hash);
-						                 if (module != VK_NULL_HANDLE)
-							                 vkDestroyShaderModule(device->get_device(), module, nullptr);
-
-						                 shader_module_evicted_count.fetch_add(1, std::memory_order_relaxed);
-					                 });
-
-					                 // Need to forget that we have seen an object before so we can replay the same object multiple times.
-					                 for (auto &per_thread : per_thread_data)
-						                 if (per_thread.per_thread_replayers)
-							                 per_thread.per_thread_replayers[SHADER_MODULE_MEMORY_CONTEXT].forget_handle_references();
-				                 }});
-			}
 
 			memory_index = (memory_index + 1) % NUM_PIPELINE_MEMORY_CONTEXTS;
 		}
