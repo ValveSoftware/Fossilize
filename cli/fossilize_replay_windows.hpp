@@ -900,3 +900,8 @@ static int run_slave_process(const VulkanDevice::Options &opts,
 
 	return code;
 }
+
+static void log_process_memory()
+{
+
+}

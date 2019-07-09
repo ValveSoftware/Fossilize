@@ -775,3 +775,21 @@ static int run_slave_process(const VulkanDevice::Options &opts,
 
 	return ret;
 }
+
+static void log_process_memory()
+{
+	char path[1024];
+	sprintf(path, "/proc/%d/status", getpid());
+	FILE *file = fopen(path, "r");
+	if (!file)
+	{
+		LOGE("Failed to log process memory.\n");
+		return;
+	}
+
+	char line_buffer[1024];
+	while (fgets(line_buffer, sizeof(line_buffer), file))
+		fprintf(stderr, "%s", line_buffer);
+
+	fclose(file);
+}

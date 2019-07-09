@@ -488,7 +488,7 @@ struct ThreadedReplayer : StateCreatorInterface
 					graphics_pipeline_ns.fetch_add(duration_ns, std::memory_order_relaxed);
 					graphics_pipeline_count.fetch_add(1, std::memory_order_relaxed);
 
-					if ((work_item.create_info.graphics_create_info->flags & VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT) != 0)
+					if (!opts.ignore_derived_pipelines && (work_item.create_info.graphics_create_info->flags & VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT) != 0)
 					{
 						*work_item.hash_map_entry.pipeline = *work_item.output.pipeline;
 					}
@@ -603,7 +603,7 @@ struct ThreadedReplayer : StateCreatorInterface
 					compute_pipeline_ns.fetch_add(duration_ns, std::memory_order_relaxed);
 					compute_pipeline_count.fetch_add(1, std::memory_order_relaxed);
 
-					if ((work_item.create_info.compute_create_info->flags & VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT) != 0)
+					if (!opts.ignore_derived_pipelines && (work_item.create_info.compute_create_info->flags & VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT) != 0)
 					{
 						*work_item.hash_map_entry.pipeline = *work_item.output.pipeline;
 					}
@@ -1786,6 +1786,7 @@ static void print_help()
 	     "\t[--compute-pipeline-range <start> <end>]\n"
 	     "\t[--shader-cache-size <value (MiB)>]\n"
 	     "\t[--ignore-derived-pipelines]\n"
+	     "\t[--log-memory]\n"
 	     EXTRA_OPTIONS
 	     "\t<Database>\n");
 }
@@ -1943,6 +1944,8 @@ static int run_progress_process(const VulkanDevice::Options &device_opts,
 	}
 }
 #endif
+
+static void log_process_memory();
 
 static int run_normal_process(ThreadedReplayer &replayer, const vector<const char *> &databases)
 {
@@ -2258,6 +2261,8 @@ int main(int argc, char *argv[])
 #endif
 #endif
 
+	bool log_memory = false;
+
 	CLICallbacks cbs;
 	cbs.default_handler = [&](const char *arg) { databases.push_back(arg); };
 	cbs.add("--help", [](CLIParser &parser) { print_help(); parser.end(); });
@@ -2294,6 +2299,7 @@ int main(int argc, char *argv[])
 
 	cbs.add("--shader-cache-size", [&](CLIParser &parser) { replayer_opts.shader_cache_size_mb = parser.next_uint(); });
 	cbs.add("--ignore-derived-pipelines", [&](CLIParser &) { replayer_opts.ignore_derived_pipelines = true; });
+	cbs.add("--log-memory", [&](CLIParser &) { log_memory = true; });
 
 	cbs.error_handler = [] { print_help(); };
 
@@ -2358,6 +2364,8 @@ int main(int argc, char *argv[])
 	{
 		ThreadedReplayer replayer(opts, replayer_opts);
 		ret = run_normal_process(replayer, databases);
+		if (log_memory)
+			log_process_memory();
 	}
 
 	return ret;
