@@ -321,6 +321,9 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 	if (options.ignore_derived_pipelines)
 		cmdline += " --ignore-derived-pipelines";
 
+	if (options.null_device)
+		cmdline += " --null-device";
+
 	STARTUPINFO si = {};
 	si.cb = sizeof(STARTUPINFO);
 	si.dwFlags = STARTF_USESTDHANDLES;

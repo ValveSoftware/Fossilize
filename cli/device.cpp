@@ -82,6 +82,12 @@ static uint32_t major_minor_version(uint32_t version)
 
 bool VulkanDevice::init_device(const Options &opts)
 {
+	if (opts.null_device)
+	{
+		init_null_device();
+		return true;
+	}
+
 	if (volkInitialize() != VK_SUCCESS)
 	{
 		LOGE("volkInitialize failed.\n");
@@ -325,7 +331,7 @@ bool VulkanDevice::init_device(const Options &opts)
 
 VulkanDevice::~VulkanDevice()
 {
-	if (device)
+	if (!is_null_device && device)
 		vkDestroyDevice(device, nullptr);
 	if (callback)
 		vkDestroyDebugReportCallbackEXT(instance, callback, nullptr);
@@ -343,5 +349,159 @@ void VulkanDevice::notify_validation_error()
 {
 	if (validation_callback)
 		validation_callback(validation_callback_userdata);
+}
+
+template <typename T>
+static T allocate_dummy(size_t size)
+{
+	// Make sure to write something so the memory is forced to be resident.
+	void *ptr = malloc(size);
+	memset(ptr, 0xab, size);
+	return (T)ptr;
+}
+
+static VKAPI_ATTR VkResult VKAPI_CALL
+create_sampler(VkDevice, const VkSamplerCreateInfo *, const VkAllocationCallbacks *, VkSampler *sampler)
+{
+	*sampler = allocate_dummy<VkSampler>(64);
+	return VK_SUCCESS;
+}
+
+static VKAPI_ATTR void VKAPI_CALL destroy_sampler(VkDevice, VkSampler sampler, const VkAllocationCallbacks *)
+{
+	free((void *) sampler);
+}
+
+static VKAPI_ATTR VkResult VKAPI_CALL
+create_set_layout(VkDevice, const VkDescriptorSetLayoutCreateInfo *, const VkAllocationCallbacks *,
+                  VkDescriptorSetLayout *layout)
+{
+	*layout = allocate_dummy<VkDescriptorSetLayout>(256);
+	return VK_SUCCESS;
+}
+
+static VKAPI_ATTR void VKAPI_CALL
+destroy_set_layout(VkDevice, VkDescriptorSetLayout layout, const VkAllocationCallbacks *)
+{
+	free((void *) layout);
+}
+
+static VKAPI_ATTR VkResult VKAPI_CALL
+create_pipeline_layout(VkDevice, const VkPipelineLayoutCreateInfo *, const VkAllocationCallbacks *,
+                       VkPipelineLayout *layout)
+{
+	*layout = allocate_dummy<VkPipelineLayout>(256);
+	return VK_SUCCESS;
+}
+
+static VKAPI_ATTR void VKAPI_CALL
+destroy_pipeline_layout(VkDevice, VkPipelineLayout layout, const VkAllocationCallbacks *)
+{
+	free((void *) layout);
+}
+
+static VKAPI_ATTR VkResult VKAPI_CALL
+create_render_pass(VkDevice, const VkRenderPassCreateInfo *, const VkAllocationCallbacks *,
+                   VkRenderPass *pass)
+{
+	*pass = allocate_dummy<VkRenderPass>(1024);
+	return VK_SUCCESS;
+}
+
+static VKAPI_ATTR void VKAPI_CALL
+destroy_render_pass(VkDevice, VkRenderPass pass, const VkAllocationCallbacks *)
+{
+	free((void *) pass);
+}
+
+static VKAPI_ATTR VkResult VKAPI_CALL
+create_shader_module(VkDevice, const VkShaderModuleCreateInfo *info, const VkAllocationCallbacks *,
+                     VkShaderModule *module)
+{
+	*module = allocate_dummy<VkShaderModule>(info->codeSize);
+	return VK_SUCCESS;
+}
+
+static VKAPI_ATTR void VKAPI_CALL
+destroy_shader_module(VkDevice, VkShaderModule module, const VkAllocationCallbacks *)
+{
+	free((void *) module);
+}
+
+static VKAPI_ATTR VkResult VKAPI_CALL
+create_graphics_pipelines(VkDevice, VkPipelineCache, uint32_t count, const VkGraphicsPipelineCreateInfo *, const VkAllocationCallbacks *,
+                          VkPipeline *pipelines)
+{
+	for (uint32_t i = 0; i < count; i++)
+		pipelines[i] = allocate_dummy<VkPipeline>(4096);
+	return VK_SUCCESS;
+}
+
+static VKAPI_ATTR VkResult VKAPI_CALL
+create_compute_pipelines(VkDevice, VkPipelineCache, uint32_t count, const VkComputePipelineCreateInfo *, const VkAllocationCallbacks *,
+                         VkPipeline *pipelines)
+{
+	for (uint32_t i = 0; i < count; i++)
+		pipelines[i] = allocate_dummy<VkPipeline>(4096);
+	return VK_SUCCESS;
+}
+
+static VKAPI_ATTR void VKAPI_CALL
+destroy_pipeline(VkDevice, VkPipeline pipeline, const VkAllocationCallbacks *)
+{
+	free((void *) pipeline);
+}
+
+static VKAPI_ATTR VkResult VKAPI_CALL
+create_pipeline_cache(VkDevice, const VkPipelineCacheCreateInfo *, const VkAllocationCallbacks *, VkPipelineCache *cache)
+{
+	*cache = allocate_dummy<VkPipelineCache>(1024);
+	return VK_SUCCESS;
+}
+
+static VKAPI_ATTR void VKAPI_CALL
+destroy_pipeline_cache(VkDevice, VkPipelineCache cache, const VkAllocationCallbacks *)
+{
+	free((void *) cache);
+}
+
+static VKAPI_ATTR VkResult VKAPI_CALL
+get_pipeline_cache_data(VkDevice, VkPipelineCache, size_t *, void *)
+{
+	return VK_ERROR_OUT_OF_HOST_MEMORY;
+}
+
+static VKAPI_ATTR void VKAPI_CALL
+get_physical_device_properties(VkPhysicalDevice, VkPhysicalDeviceProperties *props)
+{
+	*props = {};
+	props->apiVersion = VK_API_VERSION_1_1;
+}
+
+void VulkanDevice::init_null_device()
+{
+	LOGI("Creating null device.\n");
+	device = reinterpret_cast<VkDevice>(uintptr_t(1));
+	gpu = reinterpret_cast<VkPhysicalDevice>(uintptr_t(2));
+	api_version = VK_API_VERSION_1_1;
+
+	vkCreateSampler = create_sampler;
+	vkDestroySampler = destroy_sampler;
+	vkCreateDescriptorSetLayout = create_set_layout;
+	vkDestroyDescriptorSetLayout = destroy_set_layout;
+	vkCreatePipelineLayout = create_pipeline_layout;
+	vkDestroyPipelineLayout = destroy_pipeline_layout;
+	vkCreateRenderPass = create_render_pass;
+	vkDestroyRenderPass = destroy_render_pass;
+	vkCreateShaderModule = create_shader_module;
+	vkDestroyShaderModule = destroy_shader_module;
+	vkCreateGraphicsPipelines = create_graphics_pipelines;
+	vkCreateComputePipelines = create_compute_pipelines;
+	vkDestroyPipeline = destroy_pipeline;
+	vkCreatePipelineCache = create_pipeline_cache;
+	vkDestroyPipelineCache = destroy_pipeline_cache;
+	vkGetPipelineCacheData = get_pipeline_cache_data;
+	vkGetPhysicalDeviceProperties = get_physical_device_properties;
+	is_null_device = true;
 }
 }

@@ -360,6 +360,9 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 		if (options.ignore_derived_pipelines)
 			argv.push_back("--ignore-derived-pipelines");
 
+		if (options.null_device)
+			argv.push_back("--null-device");
+
 		argv.push_back("--device-index");
 		char index_name[16];
 		sprintf(index_name, "%u", options.device_index);

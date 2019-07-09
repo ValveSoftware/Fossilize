@@ -33,6 +33,7 @@ public:
 	{
 		bool enable_validation = false;
 		bool need_disasm = true;
+		bool null_device = false;
 		int device_index = -1;
 		const VkApplicationInfo *application_info = nullptr;
 		const VkPhysicalDeviceFeatures2 *features = nullptr;
@@ -77,5 +78,8 @@ private:
 	void (*validation_callback)(void *) = nullptr;
 	void *validation_callback_userdata = nullptr;
 	bool supports_pipeline_feedback = false;
+
+	void init_null_device();
+	bool is_null_device = false;
 };
 }

@@ -1791,6 +1791,7 @@ static void print_help()
 	     "\t[--shader-cache-size <value (MiB)>]\n"
 	     "\t[--ignore-derived-pipelines]\n"
 	     "\t[--log-memory]\n"
+	     "\t[--null-device]\n"
 	     EXTRA_OPTIONS
 	     "\t<Database>\n");
 }
@@ -1884,6 +1885,7 @@ static int run_progress_process(const VulkanDevice::Options &device_opts,
 	opts.device_index = device_opts.device_index;
 	opts.enable_validation = device_opts.enable_validation;
 	opts.ignore_derived_pipelines = replayer_opts.ignore_derived_pipelines;
+	opts.null_device = device_opts.null_device;
 
 	ExternalReplayer replayer;
 	if (!replayer.start(opts))
@@ -2146,6 +2148,9 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 		     static_cast<unsigned long long>(tag_total_size_compressed));
 	}
 
+	// Done parsing static objects.
+	state_replayer.get_allocator().reset();
+
 	vector<EnqueuedWork> graphics_workload;
 	vector<EnqueuedWork> compute_workload;
 	replayer.enqueue_deferred_pipelines(replayer.deferred_graphics, replayer.graphics_pipelines, replayer.graphics_parents,
@@ -2304,6 +2309,7 @@ int main(int argc, char *argv[])
 	cbs.add("--shader-cache-size", [&](CLIParser &parser) { replayer_opts.shader_cache_size_mb = parser.next_uint(); });
 	cbs.add("--ignore-derived-pipelines", [&](CLIParser &) { replayer_opts.ignore_derived_pipelines = true; });
 	cbs.add("--log-memory", [&](CLIParser &) { log_memory = true; });
+	cbs.add("--null-device", [&](CLIParser &) { opts.null_device = true; });
 
 	cbs.error_handler = [] { print_help(); };
 

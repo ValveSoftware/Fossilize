@@ -73,6 +73,9 @@ public:
 		// Ignores derived pipelines, reduces memory consumption when replaying.
 		// Only useful if the driver in question ignores use of derived pipelines when hashing pipelines internally.
 		bool ignore_derived_pipelines;
+
+		// Creates a dummy device, useful for benchmarking time and/or memory consumption in isolation.
+		bool null_device;
 	};
 
 	ExternalReplayer();

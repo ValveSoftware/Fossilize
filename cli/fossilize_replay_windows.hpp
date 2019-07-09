@@ -370,6 +370,8 @@ bool ProcessProgress::start_child_process()
 		cmdline += " --pipeline-cache";
 	if (Global::base_replayer_options.spirv_validate)
 		cmdline += " --spirv-val";
+	if (Global::device_options.null_device)
+		cmdline += " --null-device";
 
 	if (!Global::base_replayer_options.on_disk_pipeline_cache_path.empty())
 	{
