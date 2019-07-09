@@ -320,11 +320,15 @@ struct ThreadedReplayer : StateCreatorInterface
 		per_thread_data.resize(num_worker_threads + 1);
 
 		// Could potentially overflow on 32-bit.
+#if ((SIZE_MAX / (1024 * 1024)) < UINT_MAX)
 		size_t target_size;
 		if (opts.shader_cache_size_mb <= (SIZE_MAX / (1024 * 1024)))
 			target_size = size_t(opts.shader_cache_size_mb) * 1024 * 1024;
 		else
 			target_size = SIZE_MAX;
+#else
+		size_t target_size = size_t(opts.shader_cache_size_mb) * 1024 * 1024;
+#endif
 
 		shader_modules.set_target_size(target_size);
 	}
