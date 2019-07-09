@@ -1949,9 +1949,9 @@ static int run_progress_process(const VulkanDevice::Options &device_opts,
 		}
 	}
 }
-#endif
 
 static void log_process_memory();
+#endif
 
 static int run_normal_process(ThreadedReplayer &replayer, const vector<const char *> &databases)
 {
@@ -2374,8 +2374,10 @@ int main(int argc, char *argv[])
 	{
 		ThreadedReplayer replayer(opts, replayer_opts);
 		ret = run_normal_process(replayer, databases);
+#ifndef NO_ROBUST_REPLAYER
 		if (log_memory)
 			log_process_memory();
+#endif
 	}
 
 	return ret;
