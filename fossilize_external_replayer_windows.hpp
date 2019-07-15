@@ -340,6 +340,14 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 		cmdline += std::to_string(options.end_compute_index);
 	}
 
+	if (options.pipeline_stats_path)
+	{
+		cmdline += " --enable-pipeline-stats ";
+		cmdline += "\"";
+		cmdline += options.pipeline_stats_path;
+		cmdline += "\"";
+	}
+
 	STARTUPINFO si = {};
 	si.cb = sizeof(STARTUPINFO);
 	si.dwFlags = STARTF_USESTDHANDLES;

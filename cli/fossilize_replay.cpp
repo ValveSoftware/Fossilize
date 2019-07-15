@@ -48,7 +48,13 @@
 #include <atomic>
 #include <algorithm>
 #include <utility>
+#include <map>
 #include <assert.h>
+
+#define RAPIDJSON_HAS_STDSTRING 1
+#include <rapidjson/document.h>
+#include <rapidjson/writer.h>
+#include <rapidjson/error/en.h>
 
 #ifdef FOSSILIZE_REPLAYER_SPIRV_VAL
 #include "spirv-tools/libspirv.hpp"
@@ -207,7 +213,9 @@ struct ThreadedReplayer : StateCreatorInterface
 		bool pipeline_cache = false;
 		bool spirv_validate = false;
 		bool ignore_derived_pipelines = false;
+		bool pipeline_stats = false;
 		string on_disk_pipeline_cache_path;
+		string pipeline_stats_path;
 
 		// VALVE: Add multi-threaded pipeline creation
 		unsigned num_threads = thread::hardware_concurrency();
@@ -419,6 +427,109 @@ struct ThreadedReplayer : StateCreatorInterface
 		return true;
 	}
 
+	void get_pipeline_stats(ResourceTag tag, Hash hash, VkPipeline pipeline)
+	{
+		VkPipelineInfoKHR pipeline_info = { VK_STRUCTURE_TYPE_PIPELINE_INFO_KHR };
+		pipeline_info.pNext = nullptr;
+		pipeline_info.pipeline = pipeline;
+
+		uint32_t pe_count;
+		vkGetPipelineExecutablePropertiesKHR(device->get_device(), &pipeline_info, &pe_count, NULL);
+		if (pe_count > 0)
+		{
+			rapidjson::Document doc;
+			doc.SetObject();
+			auto &alloc = doc.GetAllocator();
+
+			std::string db_path = global_database->get_db_path_for_hash(tag, hash);
+
+			char hash_str[17];
+			snprintf(hash_str, sizeof(hash_str), "%016" PRIx64, hash);
+
+			doc.AddMember("db_path", db_path, alloc);
+			doc.AddMember("pipeline", std::string(hash_str), alloc);
+			doc.AddMember("pipeline_type", std::string(tag == RESOURCE_GRAPHICS_PIPELINE ? "GRAPHICS" : "COMPUTE"), alloc);
+
+			rapidjson::Value execs(rapidjson::kArrayType);
+			vector<VkPipelineExecutablePropertiesKHR> pipe_executables(pe_count);
+			vkGetPipelineExecutablePropertiesKHR(device->get_device(), &pipeline_info, &pe_count, pipe_executables.data());
+			for (uint32_t exec = 0; exec < pe_count; exec++)
+			{
+				rapidjson::Value pe(rapidjson::kObjectType);
+				pe.AddMember("executable_name", rapidjson::StringRef(pipe_executables[exec].name), alloc);
+
+				rapidjson::Value pe_stats(rapidjson::kArrayType);
+
+				uint32_t stat_count;
+				VkPipelineExecutableInfoKHR exec_info = { VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_INFO_KHR };
+				exec_info.pNext = nullptr;
+				exec_info.pipeline = pipeline;
+				exec_info.executableIndex = exec;
+
+				vkGetPipelineExecutableStatisticsKHR(device->get_device(), &exec_info, &stat_count, nullptr);
+				if (stat_count > 0)
+				{
+					vector<VkPipelineExecutableStatisticKHR> stats(stat_count);
+					vkGetPipelineExecutableStatisticsKHR(device->get_device(), &exec_info, &stat_count, stats.data());
+					for (auto &st : stats)
+					{
+						rapidjson::Value stat(rapidjson::kObjectType);
+
+						stat.AddMember("name", std::string(st.name), alloc);
+						switch (st.format)
+						{
+						case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_BOOL32_KHR:
+							stat.AddMember("value", std::string(st.value.b32 == VK_TRUE ? "true" : "false"), alloc);
+							break;
+						case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_INT64_KHR:
+							stat.AddMember("value", std::to_string(st.value.i64), alloc);
+							break;
+						case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_UINT64_KHR:
+							stat.AddMember("value", std::to_string(st.value.u64), alloc);
+							break;
+						case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_FLOAT64_KHR:
+							stat.AddMember("value", std::to_string(st.value.f64), alloc);
+							break;
+						default:
+							LOGE("Unhandled format: %d", st.format);
+						}
+						pe_stats.PushBack(stat, alloc);
+					}
+				}
+				pe.AddMember("stats", pe_stats, alloc);
+				execs.PushBack(pe, alloc);
+			}
+			doc.AddMember("executables", execs, alloc);
+
+			rapidjson::StringBuffer buffer;
+			rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+			doc.Accept(writer);
+
+			{
+				lock_guard<mutex> lock(pipeline_stats_queue_mutex);
+
+				auto json_stat_path = opts.pipeline_stats_path + ".json";
+				FILE *stats_out = fopen(json_stat_path.c_str(), "r+b");
+				if (!stats_out)
+					stats_out = fopen(json_stat_path.c_str(), "wb");
+				if (stats_out)
+				{
+					fseek(stats_out, 0, SEEK_END);
+					if (ftell(stats_out) == 0)
+						fprintf(stats_out, "[");
+					else
+					{
+						fseek(stats_out, -1, SEEK_CUR);
+						fprintf(stats_out, ",");
+					}
+					fwrite(buffer.GetString(), buffer.GetSize(), 1, stats_out);
+					fprintf(stats_out, "]");
+					fclose(stats_out);
+				}
+			}
+		}
+	}
+
 	void run_creation_work_item(const PipelineWorkItem &work_item)
 	{
 		switch (work_item.tag)
@@ -491,6 +602,9 @@ struct ThreadedReplayer : StateCreatorInterface
 
 					graphics_pipeline_ns.fetch_add(duration_ns, std::memory_order_relaxed);
 					graphics_pipeline_count.fetch_add(1, std::memory_order_relaxed);
+
+					if (opts.pipeline_stats)
+						get_pipeline_stats(work_item.tag, work_item.hash, *work_item.output.pipeline);
 
 					if (!opts.ignore_derived_pipelines && (work_item.create_info.graphics_create_info->flags & VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT) != 0)
 					{
@@ -605,6 +719,9 @@ struct ThreadedReplayer : StateCreatorInterface
 
 					compute_pipeline_ns.fetch_add(duration_ns, std::memory_order_relaxed);
 					compute_pipeline_count.fetch_add(1, std::memory_order_relaxed);
+
+					if (opts.pipeline_stats)
+						get_pipeline_stats(work_item.tag, work_item.hash, *work_item.output.pipeline);
 
 					if (!opts.ignore_derived_pipelines && (work_item.create_info.compute_create_info->flags & VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT) != 0)
 					{
@@ -871,6 +988,7 @@ struct ThreadedReplayer : StateCreatorInterface
 			device_opts.application_info = app;
 			device_opts.features = features;
 			device_opts.need_disasm = false;
+			device_opts.want_pipeline_stats = opts.pipeline_stats;
 			auto start_device = chrono::steady_clock::now();
 			if (!device->init_device(device_opts))
 			{
@@ -879,6 +997,12 @@ struct ThreadedReplayer : StateCreatorInterface
 			}
 
 			device->set_validation_error_callback(on_validation_error, this);
+
+			if (opts.pipeline_stats && !device->has_pipeline_stats())
+			{
+				LOGI("Requested pipeline stats, but device does not support them. Disabling.\n");
+				opts.pipeline_stats = false;
+			}
 
 			if (opts.pipeline_cache)
 			{
@@ -1106,6 +1230,12 @@ struct ThreadedReplayer : StateCreatorInterface
 			info->basePipelineIndex = 0;
 		}
 
+		if (opts.pipeline_stats)
+		{
+			auto *info = const_cast<VkComputePipelineCreateInfo *>(create_info);
+			info->flags |= VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR;
+		}
+
 		auto &per_thread = get_per_thread_data();
 		unsigned index = per_thread.current_parse_index;
 		unsigned memory_index = per_thread.memory_context_index;
@@ -1161,6 +1291,12 @@ struct ThreadedReplayer : StateCreatorInterface
 			info->flags &= ~VK_PIPELINE_CREATE_DERIVATIVE_BIT;
 			info->basePipelineHandle = VK_NULL_HANDLE;
 			info->basePipelineIndex = 0;
+		}
+
+		if (opts.pipeline_stats)
+		{
+			auto *info = const_cast<VkGraphicsPipelineCreateInfo *>(create_info);
+			info->flags |= VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR;
 		}
 
 		auto &per_thread = get_per_thread_data();
@@ -1705,6 +1841,8 @@ struct ThreadedReplayer : StateCreatorInterface
 	std::mutex internal_enqueue_mutex;
 	std::queue<PipelineWorkItem> pipeline_work_queue;
 
+	std::mutex pipeline_stats_queue_mutex;
+
 	std::mutex hash_lock;
 	std::unordered_map<Hash, DeferredGraphicsInfo> graphics_parents;
 	std::unordered_map<Hash, DeferredComputeInfo> compute_parents;
@@ -1776,6 +1914,7 @@ static void print_help()
 	     "\t[--help]\n"
 	     "\t[--device-index <index>]\n"
 	     "\t[--enable-validation]\n"
+	     "\t[--enable-pipeline-stats]\n"
 	     "\t[--pipeline-cache]\n"
 	     "\t[--spirv-val]\n"
 	     "\t[--num-threads <count>]\n"
@@ -1869,6 +2008,8 @@ static int run_progress_process(const VulkanDevice::Options &device_opts,
 	ExternalReplayer::Options opts = {};
 	opts.on_disk_pipeline_cache = replayer_opts.on_disk_pipeline_cache_path.empty() ?
 		nullptr : replayer_opts.on_disk_pipeline_cache_path.c_str();
+	opts.pipeline_stats_path = replayer_opts.pipeline_stats_path.empty() ?
+		nullptr : replayer_opts.pipeline_stats_path.c_str();
 	opts.pipeline_cache = replayer_opts.pipeline_cache;
 	opts.num_threads = replayer_opts.num_threads;
 	opts.quiet = true;
@@ -1951,6 +2092,143 @@ static int run_progress_process(const VulkanDevice::Options &device_opts,
 
 static void log_process_memory();
 #endif
+
+static bool parse_json_stats(std::string json_path, rapidjson::Document &doc)
+{
+	FILE *json_fp = fopen(json_path.c_str(), "rb");
+	if (!json_fp)
+		return false;
+
+	fseek(json_fp, 0, SEEK_END);
+	long fsize = ftell(json_fp);
+	if (fsize <= 0)
+	{
+		fclose(json_fp);
+		return false;
+	}
+	fseek(json_fp, 0, SEEK_SET);
+
+	std::vector<char> buffer;
+	buffer.reserve(fsize);
+
+	fread(buffer.data(), fsize, 1, json_fp);
+	fclose(json_fp);
+
+	doc.Parse(buffer.data(), fsize);
+	bool ret = !doc.HasParseError();
+
+	return ret;
+}
+
+static void stats_to_csv(std::string stats_path, rapidjson::Document &doc)
+{
+	std::vector<std::string> header;
+	std::unordered_map<std::string, size_t> columns;
+	std::vector<std::map<size_t, std::string>> rows;
+
+	header.push_back("Database");
+	header.push_back("Pipeline type");
+	header.push_back("Pipeline hash");
+	header.push_back("Executable name");
+
+	for (auto itr = doc.Begin(); itr != doc.End(); itr++)
+	{
+		std::map<size_t, std::string> row;
+
+		auto &st = *itr;
+
+		row[0] = st["db_path"].GetString();
+		row[1] = st["pipeline_type"].GetString();
+		row[2] = st["pipeline"].GetString();
+
+		auto &execs = st["executables"];
+		for (auto e_itr = execs.Begin(); e_itr != execs.End(); e_itr++)
+		{
+			auto &exec = *e_itr;
+			row[3] = exec["executable_name"].GetString();
+			for (auto st_itr = exec["stats"].Begin(); st_itr != exec["stats"].End(); st_itr++)
+			{
+				auto &stat = *st_itr;
+				std::string key = stat["name"].GetString();
+				size_t insert_at;
+
+				auto col = columns.find(key);
+				if (col == columns.end())
+				{
+					insert_at = header.size();
+					columns[key] = insert_at;
+					header.push_back(key);
+				}
+				else
+				{
+					insert_at = col->second;
+				}
+
+				row[insert_at] = stat["value"].GetString();
+			}
+
+			rows.push_back(row);
+		}
+	}
+
+	FILE *fp = fopen(stats_path.c_str(), "wb");
+	if (!fp)
+		return;
+
+	size_t colnumber = 0;
+	for (auto &h : header)
+		fprintf(fp, "%s%s", h.c_str(), ++colnumber < header.size() ? "," : "\n");
+
+	for (auto &r : rows)
+	{
+		colnumber = 0;
+		for (size_t i = 0; i < header.size(); i++)
+		{
+			auto col = r.find(i);
+			fprintf(fp, "%s%s", col == r.end() ? "" : col->second.c_str(), ++colnumber < header.size() ? "," : "\n");
+		}
+	}
+
+	fclose(fp);
+}
+
+#ifndef NO_ROBUST_REPLAYER
+static void dump_stats(std::string stats_path, std::vector<std::string> json_paths)
+{
+	rapidjson::Document doc;
+	doc.SetArray();
+	auto &alloc = doc.GetAllocator();
+
+	for (auto &sp : json_paths)
+	{
+		rapidjson::Document tmp_doc;
+
+		if (!parse_json_stats(sp, tmp_doc))
+			continue;
+		doc.Reserve(doc.Size() + tmp_doc.Size(), alloc);
+		for (auto itr = tmp_doc.Begin(); itr != tmp_doc.End(); itr++)
+		{
+			rapidjson::Value v;
+			v.CopyFrom(*itr, alloc);
+			doc.PushBack(v, alloc);
+		}
+		remove(sp.c_str());
+	}
+
+	stats_to_csv(stats_path, doc);
+}
+#endif
+
+static void dump_stats(std::string stats_path)
+{
+	rapidjson::Document doc;
+	auto json_path = stats_path + ".json";
+
+	if (!parse_json_stats(json_path, doc))
+		return;
+	stats_to_csv(stats_path, doc);
+	remove(json_path.c_str());
+}
 
 static int run_normal_process(ThreadedReplayer &replayer, const vector<const char *> &databases)
 {
@@ -2289,6 +2567,7 @@ int main(int argc, char *argv[])
 		replayer_opts.start_compute_index = parser.next_uint();
 		replayer_opts.end_compute_index = parser.next_uint();
 	});
+	cbs.add("--enable-pipeline-stats", [&](CLIParser &parser) { replayer_opts.pipeline_stats_path = parser.next_string(); });
 
 #ifndef NO_ROBUST_REPLAYER
 	cbs.add("--quiet-slave", [&](CLIParser &) { quiet_slave = true; });
@@ -2341,6 +2620,9 @@ int main(int argc, char *argv[])
 		replayer_opts.pipeline_cache = true;
 #endif
 
+	if (!replayer_opts.pipeline_stats_path.empty())
+		replayer_opts.pipeline_stats = true;
+
 #ifndef FOSSILIZE_REPLAYER_SPIRV_VAL
 	if (replayer_opts.spirv_validate)
 		LOGE("--spirv-val is used, but SPIRV-Tools support was not enabled in fossilize-replay. Will be ignored.\n");
@@ -2377,6 +2659,35 @@ int main(int argc, char *argv[])
 		if (log_memory)
 			log_process_memory();
 #endif
+	}
+
+	if (replayer_opts.pipeline_stats
+#ifndef NO_ROBUST_REPLAYER
+		&& !(slave_process || progress)
+#endif
+		)
+	{
+#ifndef NO_ROBUST_REPLAYER
+		if (master_process)
+		{
+			std::vector<std::string> paths;
+
+			for (size_t idx = 0; idx < replayer_opts.num_threads; idx++)
+			{
+				auto path = replayer_opts.pipeline_stats_path;
+				if (idx != 0)
+				{
+					path += ".";
+					path += std::to_string(idx);
+				}
+				path += ".json";
+				paths.push_back(path);
+			}
+			dump_stats(replayer_opts.pipeline_stats_path, paths);
+		}
+		else
+#endif
+			dump_stats(replayer_opts.pipeline_stats_path);
 	}
 
 	return ret;

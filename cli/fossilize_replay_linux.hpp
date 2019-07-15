@@ -347,6 +347,12 @@ bool ProcessProgress::start_child_process()
 			copy_opts.on_disk_pipeline_cache_path += std::to_string(index);
 		}
 
+		if (!copy_opts.pipeline_stats_path.empty() && index != 0)
+		{
+			copy_opts.pipeline_stats_path += ".";
+			copy_opts.pipeline_stats_path += std::to_string(index);
+		}
+
 		exit(run_slave_process(Global::device_options, copy_opts, Global::databases));
 	}
 	else

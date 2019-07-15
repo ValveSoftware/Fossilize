@@ -395,6 +395,19 @@ bool ProcessProgress::start_child_process()
 	if (Global::base_replayer_options.ignore_derived_pipelines)
 		cmdline += " --ignore-derived-pipelines";
 
+	if (!Global::base_replayer_options.pipeline_stats_path.empty())
+	{
+		cmdline += " --enable-pipeline-stats ";
+		cmdline += "\"";
+		cmdline += Global::base_replayer_options.pipeline_stats_path;
+		if (index != 0)
+		{
+			cmdline += ".";
+			cmdline += std::to_string(index);
+		}
+		cmdline += "\"";
+	}
+
 	// Create custom named pipes which can be inherited by our child processes.
 	SECURITY_ATTRIBUTES attrs = {};
 	attrs.bInheritHandle = TRUE;

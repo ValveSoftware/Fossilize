@@ -244,7 +244,15 @@ bool VulkanDevice::init_device(const Options &opts)
 	VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR stats_feature = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR };
 	gpu_features2.pNext = &stats_feature;
 	if (has_device_features2)
+	{
 		vkGetPhysicalDeviceFeatures2(gpu, &gpu_features2);
+
+		pipeline_stats = stats_feature.pipelineExecutableInfo;
+		if (pipeline_stats && opts.want_pipeline_stats)
+			stats_feature.pipelineExecutableInfo = VK_TRUE;
+		else
+			stats_feature.pipelineExecutableInfo = VK_FALSE;
+	}
 	else
 		vkGetPhysicalDeviceFeatures(gpu, gpu_features);
 

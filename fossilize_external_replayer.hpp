@@ -45,6 +45,9 @@ public:
 		// Path to an on-disk pipeline cache. Maps to --on-disk-pipeline-cache.
 		const char *on_disk_pipeline_cache;
 
+		// Path to store pipeline stats in.
+		const char *pipeline_stats_path;
+
 		// Maps to --num-threads. If 0, no argument for --num-threads is passed.
 		unsigned num_threads;
 

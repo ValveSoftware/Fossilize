@@ -388,6 +388,12 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 			argv.push_back(compute_range_end);
 		}
 
+		if (options.pipeline_stats_path)
+		{
+			argv.push_back("--enable-pipeline-stats");
+			argv.push_back(options.pipeline_stats_path);
+		}
+
 		argv.push_back(nullptr);
 
 		if (options.quiet)
