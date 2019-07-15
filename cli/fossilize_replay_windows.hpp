@@ -28,6 +28,7 @@
 #include <fcntl.h>
 #include <signal.h>
 #include "fossilize_external_replayer.hpp"
+#include <inttypes.h>
 
 static bool write_all(HANDLE file, const char *str)
 {
@@ -274,7 +275,7 @@ static void send_faulty_modules_and_close(HANDLE file)
 	for (auto &m : Global::faulty_spirv_modules)
 	{
 		char buffer[18];
-		sprintf(buffer, "%llx\n", static_cast<unsigned long long>(m));
+		sprintf(buffer, "%" PRIx64 "\n", m);
 		write_all(file, buffer);
 	}
 
@@ -757,15 +758,13 @@ static void validation_error_cb(ThreadedReplayer *replayer)
 
 	if (per_thread.current_graphics_pipeline)
 	{
-		sprintf(buffer, "GRAPHICS_VERR %llx\n",
-		        static_cast<unsigned long long>(per_thread.current_graphics_pipeline));
+		sprintf(buffer, "GRAPHICS_VERR %" PRIx64 "\n", per_thread.current_graphics_pipeline);
 		write_all(crash_handle, buffer);
 	}
 
 	if (per_thread.current_compute_pipeline)
 	{
-		sprintf(buffer, "COMPUTE_VERR %llx\n",
-		        static_cast<unsigned long long>(per_thread.current_compute_pipeline));
+		sprintf(buffer, "COMPUTE_VERR %" PRIx64 "\n", per_thread.current_compute_pipeline);
 		write_all(crash_handle, buffer);
 	}
 }
@@ -793,8 +792,7 @@ static LONG WINAPI crash_handler(_EXCEPTION_POINTERS *)
 		// This allows a new process to ignore these modules.
 		for (unsigned i = 0; i < per_thread.num_failed_module_hashes; i++)
 		{
-			sprintf(buffer, "MODULE %llx\n",
-					static_cast<unsigned long long>(per_thread.failed_module_hashes[i]));
+			sprintf(buffer, "MODULE %" PRIx64 "\n", per_thread.failed_module_hashes[i]);
 			if (!write_all(crash_handle, buffer))
 				ExitProcess(2);
 		}

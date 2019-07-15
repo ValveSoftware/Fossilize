@@ -33,7 +33,7 @@
 #include "fossilize_errors.hpp"
 #include "util/object_cache.hpp"
 
-#include <cinttypes>
+#include <inttypes.h>
 #include <string>
 #include <unordered_set>
 #include <stdlib.h>
@@ -385,7 +385,7 @@ struct ThreadedReplayer : StateCreatorInterface
 		size_t json_size = 0;
 		if (!global_database->read_entry(work_item.tag, work_item.hash, &json_size, nullptr, PAYLOAD_READ_CONCURRENT_BIT))
 		{
-			LOGE("Failed to read entry (%u: %s)\n", unsigned(work_item.tag), uint64_string(work_item.hash).c_str());
+			LOGE("Failed to read entry (%u: %016" PRIx64 ")\n", unsigned(work_item.tag), work_item.hash);
 			return false;
 		}
 
@@ -393,7 +393,7 @@ struct ThreadedReplayer : StateCreatorInterface
 
 		if (!global_database->read_entry(work_item.tag, work_item.hash, &json_size, buffer.data(), PAYLOAD_READ_CONCURRENT_BIT))
 		{
-			LOGE("Failed to read entry (%u: %s)\n", unsigned(work_item.tag), uint64_string(work_item.hash).c_str());
+			LOGE("Failed to read entry (%u: %016" PRIx64 ")\n", unsigned(work_item.tag), work_item.hash);
 			return false;
 		}
 
@@ -403,7 +403,7 @@ struct ThreadedReplayer : StateCreatorInterface
 		per_thread.memory_context_index = work_item.memory_context_index;
 
 		if (!replayer.parse(*this, global_database, buffer.data(), buffer.size()))
-			LOGE("Failed to parse blob (tag: %d, hash: 0x%llx).\n", work_item.tag, static_cast<unsigned long long>(work_item.hash));
+			LOGE("Failed to parse blob (tag: %d, hash: 0x%016" PRIx64 ").\n", work_item.tag, work_item.hash);
 
 		if (work_item.tag == RESOURCE_SHADER_MODULE)
 		{
@@ -532,8 +532,7 @@ struct ThreadedReplayer : StateCreatorInterface
 				}
 				else
 				{
-					LOGE("Failed to create graphics pipeline for hash 0x%llx.\n",
-					     static_cast<unsigned long long>(work_item.hash));
+					LOGE("Failed to create graphics pipeline for hash 0x%016" PRIx64 ".\n", work_item.hash);
 				}
 			}
 
@@ -641,8 +640,7 @@ struct ThreadedReplayer : StateCreatorInterface
 				}
 				else
 				{
-					LOGE("Failed to create compute pipeline for hash 0x%llx.\n",
-					     static_cast<unsigned long long>(work_item.hash));
+					LOGE("Failed to create compute pipeline for hash 0x%016" PRIx64 ".\n", work_item.hash);
 				}
 			}
 
@@ -1065,8 +1063,7 @@ struct ThreadedReplayer : StateCreatorInterface
 			}
 			else
 			{
-				LOGE("Failed to create shader module for hash 0x%llx.\n",
-				     static_cast<unsigned long long>(hash));
+				LOGE("Failed to create shader module for hash 0x%016" PRIx64 ".\n", hash);
 			}
 		}
 
@@ -1294,8 +1291,7 @@ struct ThreadedReplayer : StateCreatorInterface
 			auto result = shader_modules.find_object((Hash) info->pStages[i].module);
 			if (!result.second)
 			{
-				LOGE("Could not find shader module %016llx in cache.\n",
-				     static_cast<unsigned long long>((Hash) info->pStages[i].module));
+				LOGE("Could not find shader module %016" PRIx64 " in cache.\n", (Hash) info->pStages[i].module);
 			}
 			const_cast<VkPipelineShaderStageCreateInfo *>(info->pStages)[i].module = result.first;
 		}
@@ -1306,8 +1302,7 @@ struct ThreadedReplayer : StateCreatorInterface
 		auto result = shader_modules.find_object((Hash) info->stage.module);
 		if (!result.second)
 		{
-			LOGE("Could not find shader module %016llx in cache.\n",
-			     static_cast<unsigned long long>((Hash) info->stage.module));
+			LOGE("Could not find shader module %016" PRIx64 " in cache.\n", (Hash) info->stage.module);
 		}
 		const_cast<VkComputePipelineCreateInfo*>(info)->stage.module = result.first;
 	}
@@ -1824,7 +1819,7 @@ static void log_faulty_modules(ExternalReplayer &replayer)
 	sort(begin(hashes), end(hashes));
 
 	for (auto &h : hashes)
-		LOGI("Detected faulty SPIR-V module: %016llx\n", static_cast<unsigned long long>(h));
+		LOGI("Detected faulty SPIR-V module: %016" PRIx64 "\n", h);
 }
 
 static void log_faulty_graphics(ExternalReplayer &replayer)
@@ -1840,7 +1835,7 @@ static void log_faulty_graphics(ExternalReplayer &replayer)
 
 	for (auto &h : hashes)
 	{
-		LOGI("Graphics pipeline failed validation: %016llx\n", static_cast<unsigned long long>(h));
+		LOGI("Graphics pipeline failed validation: %016" PRIx64 "\n", h);
 
 		// Ad-hoc hack to test automatic pruning ideas ...
 		//printf("--skip-graphics %016llx ", static_cast<unsigned long long>(h));
@@ -1860,7 +1855,7 @@ static void log_faulty_compute(ExternalReplayer &replayer)
 
 	for (auto &h : hashes)
 	{
-		LOGI("Compute pipeline failed validation: %016llx\n", static_cast<unsigned long long>(h));
+		LOGI("Compute pipeline failed validation: %016" PRIx64 "\n", h);
 
 		// Ad-hoc hack to test automatic pruning ideas ...
 		//printf("--skip-compute %016llx ", static_cast<unsigned long long>(h));
@@ -2049,7 +2044,7 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 			}
 
 			if (!state_replayer.parse(replayer, resolver.get(), state_json.data(), state_json.size()))
-				LOGE("Failed to parse blob (tag: %s, hash: %s).\n", tag_names[tag], uint64_string(hash).c_str());
+				LOGE("Failed to parse blob (tag: %s, hash: %016" PRIx64 ").\n", tag_names[tag], hash);
 		}
 
 		if (tag == RESOURCE_APPLICATION_INFO)
@@ -2059,9 +2054,9 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 			replayer.set_application_info(0, nullptr, nullptr);
 		}
 
-		LOGI("Total binary size for %s: %llu (%llu compressed)\n", tag_names[tag],
-		     static_cast<unsigned long long>(tag_total_size),
-		     static_cast<unsigned long long>(tag_total_size_compressed));
+		LOGI("Total binary size for %s: %" PRIu64 " (%" PRIu64 " compressed)\n", tag_names[tag],
+		     uint64_t(tag_total_size),
+		     uint64_t(tag_total_size_compressed));
 
 		auto main_thread_end = std::chrono::steady_clock::now();
 		auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(main_thread_end - main_thread_start).count();
@@ -2143,9 +2138,9 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 			tag_total_size += state_json_size;
 		}
 
-		LOGI("Total binary size for %s: %llu (%llu compressed)\n", tag_names[tag],
-		     static_cast<unsigned long long>(tag_total_size),
-		     static_cast<unsigned long long>(tag_total_size_compressed));
+		LOGI("Total binary size for %s: %" PRIu64 " (%" PRIu64 " compressed)\n", tag_names[tag],
+		     uint64_t(tag_total_size),
+		     uint64_t(tag_total_size_compressed));
 	}
 
 	// Done parsing static objects.
@@ -2176,9 +2171,9 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 	replayer.sync_worker_threads();
 	replayer.tear_down_threads();
 
-	LOGI("Total binary size for %s: %llu (%llu compressed)\n", tag_names[RESOURCE_SHADER_MODULE],
-	     static_cast<unsigned long long>(replayer.shader_module_total_size.load()),
-	     static_cast<unsigned long long>(replayer.shader_module_total_compressed_size.load()));
+	LOGI("Total binary size for %s: %" PRIu64 " (%" PRIu64 " compressed)\n", tag_names[RESOURCE_SHADER_MODULE],
+	     uint64_t(replayer.shader_module_total_size.load()),
+	     uint64_t(replayer.shader_module_total_compressed_size.load()));
 
 	unsigned long total_size =
 		replayer.samplers.size() +

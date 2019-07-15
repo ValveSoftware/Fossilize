@@ -34,6 +34,7 @@
 #include <unistd.h>
 #endif
 #include <signal.h>
+#include <inttypes.h>
 
 namespace Fossilize
 {
@@ -276,7 +277,7 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkApplicationInfo *appI
 	}
 
 	char hashString[17];
-	sprintf(hashString, "%016llx", static_cast<unsigned long long>(hash));
+	sprintf(hashString, "%016" PRIx64, hash);
 	if (!serializationPath.empty())
 		serializationPath += ".";
 	serializationPath += hashString;
