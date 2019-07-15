@@ -23,8 +23,10 @@
 #include "fossilize.hpp"
 #include "logging.hpp"
 #include "cli_parser.hpp"
+#include "fossilize_db.hpp"
 #include "file.hpp"
 #include "spirv-tools/optimizer.hpp"
+#include <inttypes.h>
 
 using namespace std;
 using namespace Fossilize;
@@ -38,6 +40,7 @@ static inline T fake_handle(uint64_t v)
 struct OptimizeReplayer : StateCreatorInterface
 {
 	StateRecorder recorder;
+	bool optimize_size = false;
 
 	bool enqueue_create_sampler(Hash hash, const VkSamplerCreateInfo *create_info, VkSampler *sampler) override
 	{
@@ -61,15 +64,27 @@ struct OptimizeReplayer : StateCreatorInterface
 	{
 		vector<uint32_t> compiled_spirv;
 		spvtools::Optimizer optimizer(SPV_ENV_VULKAN_1_1);
-		optimizer.RegisterPerformancePasses();
-		if (!optimizer.Run(create_info->pCode, create_info->codeSize / sizeof(uint32_t), &compiled_spirv))
-			return false;
-		auto info = *create_info;
-		info.pCode = compiled_spirv.data();
-		info.codeSize = compiled_spirv.size() * sizeof(uint32_t);
 
-		*module = fake_handle<VkShaderModule>(hash);
-		return recorder.record_shader_module(*module, info);
+		if (optimize_size)
+			optimizer.RegisterSizePasses();
+		else
+			optimizer.RegisterPerformancePasses();
+
+		if (!optimizer.Run(create_info->pCode, create_info->codeSize / sizeof(uint32_t), &compiled_spirv))
+		{
+			LOGE("Failed to optimize shader module %016" PRIx64 ". Using original module.\n", hash);
+			*module = fake_handle<VkShaderModule>(hash);
+			return recorder.record_shader_module(*module, *create_info);
+		}
+		else
+		{
+			auto info = *create_info;
+			info.pCode = compiled_spirv.data();
+			info.codeSize = compiled_spirv.size() * sizeof(uint32_t);
+
+			*module = fake_handle<VkShaderModule>(hash);
+			return recorder.record_shader_module(*module, info);
+		}
 	}
 
 	bool enqueue_create_render_pass(Hash hash, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass) override
@@ -95,20 +110,22 @@ static void print_help()
 {
 	LOGI("fossilize-opt\n"
 	     "\t[--help]\n"
-	     "\t[--input state.json]\n"
-	     "\t[--output state.json]\n");
+	     "\t[--optimize-size]\n"
+	     "\t[--input-db <path>]\n"
+	     "\t[--output-db <path>]\n");
 }
 
 int main(int argc, char *argv[])
 {
-	string json_path;
-	string json_output_path;
+	string input_db_path;
+	string output_db_path;
 	CLICallbacks cbs;
+	bool optimize_size = false;
 
-	cbs.default_handler = [&](const char *arg) { json_path = arg; };
 	cbs.add("--help", [](CLIParser &parser) { print_help(); parser.end(); });
-	cbs.add("--input", [&](CLIParser &parser) { json_path = parser.next_string(); });
-	cbs.add("--output", [&](CLIParser &parser) { json_output_path = parser.next_string(); });
+	cbs.add("--input-db", [&](CLIParser &parser) { input_db_path = parser.next_string(); });
+	cbs.add("--output-db", [&](CLIParser &parser) { output_db_path = parser.next_string(); });
+	cbs.add("--optimize-size", [&](CLIParser &) { optimize_size = true; });
 	cbs.error_handler = [] { print_help(); };
 
 	CLIParser parser(move(cbs), argc - 1, argv + 1);
@@ -117,44 +134,92 @@ int main(int argc, char *argv[])
 	if (parser.is_ended_state())
 		return EXIT_SUCCESS;
 
-	if (json_path.empty())
+	if (input_db_path.empty())
 	{
-		LOGE("No path to serialized state provided.\n");
+		LOGE("No input database provided.\n");
 		print_help();
 		return EXIT_FAILURE;
 	}
 
-	if (json_output_path.empty())
+	if (output_db_path.empty())
 	{
-		LOGE("No output path provided.\n");
+		LOGE("No output database provided.\n");
 		print_help();
 		return EXIT_FAILURE;
 	}
 
-	OptimizeReplayer replayer;
-	StateReplayer state_replayer;
-	auto state_json = load_buffer_from_file(json_path.c_str());
-	if (state_json.empty())
+	auto input_db = std::unique_ptr<DatabaseInterface>(create_database(input_db_path.c_str(), DatabaseMode::ReadOnly));
+	auto output_db = std::unique_ptr<DatabaseInterface>(create_database(output_db_path.c_str(), DatabaseMode::OverWrite));
+
+	OptimizeReplayer optimize_replayer;
+	optimize_replayer.optimize_size = optimize_size;
+
+	StateReplayer replayer;
+	optimize_replayer.recorder.set_database_enable_checksum(true);
+	optimize_replayer.recorder.set_database_enable_compression(true);
+
+	if (!input_db || !input_db->prepare())
 	{
-		LOGE("Failed to load state JSON from disk.\n");
+		LOGE("Failed to load database: %s\n", argv[1]);
 		return EXIT_FAILURE;
 	}
 
-	if (!state_replayer.parse(replayer, nullptr, state_json.data(), state_json.size()))
+	if (!output_db)
 	{
-		LOGE("Failed to parse.\n");
+		LOGE("Failed to open database for writing: %s\n", argv[2]);
 		return EXIT_FAILURE;
 	}
 
-	uint8_t *serialized;
-	size_t serialized_size;
-	if (replayer.recorder.serialize(&serialized, &serialized_size))
+	// Recording thread prepares.
+	optimize_replayer.recorder.init_recording_thread(output_db.get());
+
+	static const ResourceTag playback_order[] = {
+		RESOURCE_SHADER_MODULE,
+		RESOURCE_SAMPLER,
+		RESOURCE_DESCRIPTOR_SET_LAYOUT,
+		RESOURCE_PIPELINE_LAYOUT,
+		RESOURCE_RENDER_PASS,
+		RESOURCE_GRAPHICS_PIPELINE,
+		RESOURCE_COMPUTE_PIPELINE,
+	};
+
+	vector<uint8_t> state_json;
+	for (auto &tag : playback_order)
 	{
-		if (!write_buffer_to_file(json_output_path.c_str(), serialized, serialized_size))
+		size_t hash_count = 0;
+		if (!input_db->get_hash_list_for_resource_tag(tag, &hash_count, nullptr))
 		{
-			LOGE("Failed to write buffer to file: %s.\n", json_output_path.c_str());
+			LOGE("Failed to get hashes.\n");
 			return EXIT_FAILURE;
 		}
-		StateRecorder::free_serialized(serialized);
+
+		vector<Hash> hashes(hash_count);
+
+		if (!input_db->get_hash_list_for_resource_tag(tag, &hash_count, hashes.data()))
+		{
+			LOGE("Failed to get shader module hashes.\n");
+			return EXIT_FAILURE;
+		}
+
+		for (auto hash : hashes)
+		{
+			size_t state_json_size;
+			if (!input_db->read_entry(tag, hash, &state_json_size, nullptr, 0))
+			{
+				LOGE("Failed to load blob from cache.\n");
+				return EXIT_FAILURE;
+			}
+
+			state_json.resize(state_json_size);
+
+			if (!input_db->read_entry(tag, hash, &state_json_size, state_json.data(), 0))
+			{
+				LOGE("Failed to load blob from cache.\n");
+				return EXIT_FAILURE;
+			}
+
+			if (!replayer.parse(optimize_replayer, input_db.get(), state_json.data(), state_json.size()))
+				LOGE("Failed to parse blob (tag: %d, hash: 0x%" PRIx64 ").\n", tag, hash);
+		}
 	}
 }

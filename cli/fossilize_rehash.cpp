@@ -157,7 +157,8 @@ int main(int argc, char *argv[])
 		return EXIT_FAILURE;
 	}
 
-	if (!output_db || !output_db->prepare())
+	// Recording thread prepares.
+	if (!output_db)
 	{
 		LOGE("Failed to open database for writing: %s\n", argv[2]);
 		return EXIT_FAILURE;
