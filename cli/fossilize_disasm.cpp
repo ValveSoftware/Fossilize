@@ -28,12 +28,12 @@
 #include "file.hpp"
 #include "fossilize_db.hpp"
 
-#include <cinttypes>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <stdlib.h>
 #include <string.h>
+#include <inttypes.h>
 
 #include "spirv-tools/libspirv.hpp"
 #include "spirv_cross_c.h"
@@ -440,10 +440,11 @@ static void print_help()
 	     "\t[--target asm/glsl/amd]\n"
 	     "state.json\n");
 }
+
 static string uint64_string(uint64_t value)
 {
 	char str[17]; // 16 digits + null
-	sprintf(str, "%016llx", static_cast<unsigned long long>(value));
+	sprintf(str, "%016" PRIx64, value);
 	return string(str);
 }
 
@@ -578,7 +579,7 @@ int main(int argc, char *argv[])
 			}
 
 			if (!state_replayer.parse(replayer, resolver.get(), state_json.data(), state_json.size()))
-				LOGE("Failed to parse blob (tag: %d, hash: 0x%llx).\n", tag, static_cast<unsigned long long>(hash));
+				LOGE("Failed to parse blob (tag: %d, hash: 0x%016" PRIx64 ").\n", tag, hash);
 		}
 		LOGI("Replayed tag: %s\n", tag_names[tag]);
 	}

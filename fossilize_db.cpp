@@ -37,6 +37,7 @@
 #include <memory>
 #include <mutex>
 #include <dirent.h>
+#include <inttypes.h>
 
 using namespace std;
 
@@ -98,8 +99,8 @@ struct DumbDirectoryDatabase : DatabaseInterface
 				continue;
 
 			unsigned tag;
-			unsigned long long value;
-			if (sscanf(pEntry->d_name, "%x.%llx.json", &tag, &value) != 2)
+			uint64_t value;
+			if (sscanf(pEntry->d_name, "%x.%" SCNx64 ".json", &tag, &value) != 2)
 				continue;
 
 			if (tag >= RESOURCE_COUNT)
@@ -132,7 +133,7 @@ struct DumbDirectoryDatabase : DatabaseInterface
 			return false;
 
 		char filename[25]; // 2 digits + "." + 16 digits + ".json" + null
-		sprintf(filename, "%02x.%016llx.json", static_cast<unsigned>(tag), static_cast<unsigned long long>(hash));
+		sprintf(filename, "%02x.%016" PRIx64 ".json", static_cast<unsigned>(tag), hash);
 		auto path = Path::join(base_directory, filename);
 
 		FILE *file = fopen(path.c_str(), "rb");
@@ -188,7 +189,7 @@ struct DumbDirectoryDatabase : DatabaseInterface
 			return true;
 
 		char filename[25]; // 2 digits + "." + 16 digits + ".json" + null
-		sprintf(filename, "%02x.%016llx.json", static_cast<unsigned>(tag), static_cast<unsigned long long>(hash));
+		sprintf(filename, "%02x.%016" PRIx64 ".json", static_cast<unsigned>(tag), hash);
 		auto path = Path::join(base_directory, filename);
 
 		FILE *file = fopen(path.c_str(), "wb");
@@ -396,7 +397,7 @@ struct ZipDatabase : DatabaseInterface
 
 		char str[FOSSILIZE_BLOB_HASH_LENGTH + 1]; // 40 digits + null
 		sprintf(str, "%0*x", FOSSILIZE_BLOB_HASH_LENGTH - 16, tag);
-		sprintf(str + FOSSILIZE_BLOB_HASH_LENGTH - 16, "%016llx", static_cast<unsigned long long>(hash));
+		sprintf(str + FOSSILIZE_BLOB_HASH_LENGTH - 16, "%016" PRIx64, hash);
 
 		unsigned mz_flags;
 		if ((flags & PAYLOAD_WRITE_COMPRESS_BIT) != 0)
@@ -762,7 +763,7 @@ struct StreamArchive : DatabaseInterface
 
 		char str[FOSSILIZE_BLOB_HASH_LENGTH + 1]; // 40 digits + null
 		sprintf(str, "%0*x", FOSSILIZE_BLOB_HASH_LENGTH - 16, tag);
-		sprintf(str + FOSSILIZE_BLOB_HASH_LENGTH - 16, "%016llx", static_cast<unsigned long long>(hash));
+		sprintf(str + FOSSILIZE_BLOB_HASH_LENGTH - 16, "%016" PRIx64, hash);
 
 		if (fwrite(str, 1, FOSSILIZE_BLOB_HASH_LENGTH, file) != FOSSILIZE_BLOB_HASH_LENGTH)
 			return false;

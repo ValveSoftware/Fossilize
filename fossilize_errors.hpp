@@ -25,6 +25,7 @@
 #include <string>
 #include <utility>
 #include <stdint.h>
+#include <inttypes.h>
 
 #if defined(_MSC_VER) && (_MSC_VER <= 1800)
 #define FOSSILIZE_NOEXCEPT
@@ -49,22 +50,16 @@ static inline void log_error_pnext_chain(std::string what, const void *pNext)
 	LOGE("Error: %s\n", what.c_str());
 }
 
-static inline std::string uint64_string(uint64_t value)
-{
-	char str[17]; // 16 digits + null
-	sprintf(str, "%016llx", static_cast<unsigned long long>(value));
-	return str;
-}
-
 static inline void log_missing_resource(const char *type, Hash hash)
 {
-	std::string buffer;
-	buffer += "Referenced ";
-	buffer += type;
-	buffer += " ";
-	buffer += uint64_string(hash);
-	buffer += ", but it does not exist.";
-	LOGE("Error: %s\n", buffer.data());
+	LOGE("Referenced %s %016" PRIx64 ", but it does not exist.\n", type, hash);
+}
+
+template <typename T>
+static inline void log_failed_hash(const char *type, T object)
+{
+	LOGE("%s handle 0x%016" PRIx64 " is not registered. It has either not been recorded, or it failed to be recorded earlier.\n",
+	     type, (uint64_t)object);
 }
 }
 

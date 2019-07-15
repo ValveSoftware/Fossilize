@@ -27,6 +27,7 @@
 #include <unordered_map>
 #include "layer/utils.hpp"
 #include "cli_parser.hpp"
+#include <inttypes.h>
 
 using namespace Fossilize;
 using namespace std;
@@ -211,7 +212,7 @@ int main(int argc, char *argv[])
 			}
 
 			if (!replayer.parse(rehash_replayer, input_db.get(), state_json.data(), state_json.size()))
-				LOGE("Failed to parse blob (tag: %d, hash: 0x%llx).\n", tag, static_cast<unsigned long long>(hash));
+				LOGE("Failed to parse blob (tag: %d, hash: 0x%" PRIx64 ").\n", tag, hash);
 		}
 
 		if (tag == RESOURCE_APPLICATION_INFO)

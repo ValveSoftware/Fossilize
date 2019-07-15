@@ -27,6 +27,7 @@
 #include <memory>
 #include <random>
 #include <vector>
+#include <inttypes.h>
 
 using namespace Fossilize;
 
@@ -286,7 +287,7 @@ static bool dummy_replay_archive(const char *path)
 			}
 
 			if (!state_replayer.parse(replayer, nullptr, state_json.data(), state_json.size()))
-				LOGE("Failed to parse blob (tag: %d, hash: 0x%llx).\n", tag, static_cast<unsigned long long>(hash));
+				LOGE("Failed to parse blob (tag: %d, hash: 0x%" PRIx64 ").\n", tag, hash);
 		}
 	}
 

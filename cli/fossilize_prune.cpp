@@ -28,6 +28,7 @@
 #include <unordered_map>
 #include "layer/utils.hpp"
 #include "cli_parser.hpp"
+#include <inttypes.h>
 
 using namespace Fossilize;
 using namespace std;
@@ -86,8 +87,7 @@ struct PruneReplayer : StateCreatorInterface
 	void set_application_info(Hash hash, const VkApplicationInfo *app,
 	                          const VkPhysicalDeviceFeatures2 *) override
 	{
-		LOGI("Available application feature hash: %016llx\n",
-		     static_cast<unsigned long long>(hash));
+		LOGI("Available application feature hash: %016" PRIx64 "\n", hash);
 
 		if (app)
 		{
@@ -295,8 +295,7 @@ static bool copy_accessed_types(DatabaseInterface &input_db,
 			if (tag == RESOURCE_SHADER_MODULE)
 			{
 				// We did not resolve shader module references, so we might hit an error here, but that's fine.
-				LOGE("Reference shader module %016llx does not exist in database.\n",
-				     static_cast<unsigned long long>(hash));
+				LOGE("Reference shader module %016" PRIx64 " does not exist in database.\n", hash);
 				continue;
 			}
 			else
@@ -477,7 +476,7 @@ int main(int argc, char *argv[])
 			prune_replayer.has_application_info_for_blob = false;
 			prune_replayer.blob_belongs_to_application_info = false;
 			if (!replayer.parse(prune_replayer, input_db.get(), state_json.data(), state_json.size()))
-				LOGE("Failed to parse blob (tag: %d, hash: 0x%llx).\n", tag, static_cast<unsigned long long>(hash));
+				LOGE("Failed to parse blob (tag: %d, hash: 0x%" PRIx64 ").\n", tag, hash);
 
 			if (tag == RESOURCE_APPLICATION_INFO)
 			{

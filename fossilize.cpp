@@ -25,6 +25,7 @@
 #include <condition_variable>
 #include <thread>
 #include <stddef.h>
+#include <inttypes.h>
 #include "fossilize.hpp"
 #include <algorithm>
 #include <unordered_map>
@@ -140,7 +141,7 @@ template <typename Allocator>
 static Value uint64_string(uint64_t value, Allocator &alloc)
 {
 	char str[17]; // 16 digits + null
-	sprintf(str, "%016llx", static_cast<unsigned long long>(value));
+	sprintf(str, "%016" PRIx64, value);
 	return Value(str, alloc);
 }
 
@@ -3038,7 +3039,7 @@ bool StateRecorder::get_hash_for_compute_pipeline_handle(VkPipeline pipeline, Ha
 	auto itr = impl->compute_pipeline_to_hash.find(pipeline);
 	if (itr == end(impl->compute_pipeline_to_hash))
 	{
-		LOGE("Handle is not registered.\n");
+		log_failed_hash("Compute pipeline", pipeline);
 		return false;
 	}
 	else
@@ -3053,7 +3054,7 @@ bool StateRecorder::get_hash_for_graphics_pipeline_handle(VkPipeline pipeline, H
 	auto itr = impl->graphics_pipeline_to_hash.find(pipeline);
 	if (itr == end(impl->graphics_pipeline_to_hash))
 	{
-		LOGE("Handle is not registered.\n");
+		log_failed_hash("Graphics pipeline", pipeline);
 		return false;
 	}
 	else
@@ -3068,7 +3069,7 @@ bool StateRecorder::get_hash_for_sampler(VkSampler sampler, Hash *hash) const
 	auto itr = impl->sampler_to_hash.find(sampler);
 	if (itr == end(impl->sampler_to_hash))
 	{
-		LOGE("Handle is not registered.\n");
+		log_failed_hash("Sampler", sampler);
 		return false;
 	}
 	else
@@ -3083,7 +3084,7 @@ bool StateRecorder::get_hash_for_shader_module(VkShaderModule module, Hash *hash
 	auto itr = impl->shader_module_to_hash.find(module);
 	if (itr == end(impl->shader_module_to_hash))
 	{
-		LOGE("Handle is not registered.\n");
+		log_failed_hash("Shader module", module);
 		return false;
 	}
 	else
@@ -3098,7 +3099,7 @@ bool StateRecorder::get_hash_for_pipeline_layout(VkPipelineLayout layout, Hash *
 	auto itr = impl->pipeline_layout_to_hash.find(layout);
 	if (itr == end(impl->pipeline_layout_to_hash))
 	{
-		LOGE("Handle is not registered.\n");
+		log_failed_hash("Pipeline layout", layout);
 		return false;
 	}
 	else
@@ -3113,7 +3114,7 @@ bool StateRecorder::get_hash_for_descriptor_set_layout(VkDescriptorSetLayout lay
 	auto itr = impl->descriptor_set_layout_to_hash.find(layout);
 	if (itr == end(impl->descriptor_set_layout_to_hash))
 	{
-		LOGE("Handle is not registered.\n");
+		log_failed_hash("Descriptor set layout", layout);
 		return false;
 	}
 	else
@@ -3128,7 +3129,7 @@ bool StateRecorder::get_hash_for_render_pass(VkRenderPass render_pass, Hash *has
 	auto itr = impl->render_pass_to_hash.find(render_pass);
 	if (itr == end(impl->render_pass_to_hash))
 	{
-		LOGE("Handle is not registered.\n");
+		log_failed_hash("Render pass", render_pass);
 		return false;
 	}
 	else
