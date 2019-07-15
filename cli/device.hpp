@@ -33,6 +33,7 @@ public:
 	{
 		bool enable_validation = false;
 		bool need_disasm = true;
+		bool null_device = false;
 		int device_index = -1;
 		const VkApplicationInfo *application_info = nullptr;
 		const VkPhysicalDeviceFeatures2 *features = nullptr;
@@ -62,6 +63,11 @@ public:
 	void set_validation_error_callback(void (*callback)(void *), void *userdata);
 	void notify_validation_error();
 
+	bool pipeline_feedback_enabled() const
+	{
+		return supports_pipeline_feedback;
+	}
+
 private:
 	VkInstance instance = VK_NULL_HANDLE;
 	VkPhysicalDevice gpu = VK_NULL_HANDLE;
@@ -71,5 +77,9 @@ private:
 
 	void (*validation_callback)(void *) = nullptr;
 	void *validation_callback_userdata = nullptr;
+	bool supports_pipeline_feedback = false;
+
+	void init_null_device();
+	bool is_null_device = false;
 };
 }

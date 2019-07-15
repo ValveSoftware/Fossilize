@@ -31,6 +31,7 @@
 #include "fossilize_external_replayer.hpp"
 #include "fossilize_external_replayer_control_block.hpp"
 #include "fossilize_errors.hpp"
+#include "util/object_cache.hpp"
 
 #include <cinttypes>
 #include <string>
@@ -205,6 +206,7 @@ struct ThreadedReplayer : StateCreatorInterface
 	{
 		bool pipeline_cache = false;
 		bool spirv_validate = false;
+		bool ignore_derived_pipelines = false;
 		string on_disk_pipeline_cache_path;
 
 		// VALVE: Add multi-threaded pipeline creation
@@ -212,6 +214,8 @@ struct ThreadedReplayer : StateCreatorInterface
 
 		// VALVE: --loop option for testing performance
 		unsigned loop_count = 1;
+
+		unsigned shader_cache_size_mb = 256;
 
 		// Carve out a range of which pipelines to replay.
 		// Used for multi-process replays where each process gets its own slice to churn through.
@@ -304,13 +308,29 @@ struct ThreadedReplayer : StateCreatorInterface
 		graphics_pipeline_count.store(0);
 		compute_pipeline_count.store(0);
 		shader_module_count.store(0);
+		shader_module_evicted_count.store(0);
 		thread_total_ns.store(0);
 		total_idle_ns.store(0);
 		total_peak_memory.store(0);
+		pipeline_cache_hits.store(0);
+		pipeline_cache_misses.store(0);
 
 		shader_module_total_compressed_size.store(0);
 		shader_module_total_size.store(0);
 		per_thread_data.resize(num_worker_threads + 1);
+
+		// Could potentially overflow on 32-bit.
+#if ((SIZE_MAX / (1024 * 1024)) < UINT_MAX)
+		size_t target_size;
+		if (opts.shader_cache_size_mb <= (SIZE_MAX / (1024 * 1024)))
+			target_size = size_t(opts.shader_cache_size_mb) * 1024 * 1024;
+		else
+			target_size = SIZE_MAX;
+#else
+		size_t target_size = size_t(opts.shader_cache_size_mb) * 1024 * 1024;
+#endif
+
+		shader_modules.set_target_size(target_size);
 	}
 
 	PerThreadData &get_per_thread_data()
@@ -453,6 +473,16 @@ struct ThreadedReplayer : StateCreatorInterface
 				spurious_crash();
 #endif
 
+				VkPipelineCreationFeedbackEXT feedbacks[16] = {};
+				VkPipelineCreationFeedbackEXT primary_feedback = {};
+				VkPipelineCreationFeedbackCreateInfoEXT feedback = { VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO_EXT };
+				feedback.pipelineStageCreationFeedbackCount = work_item.create_info.graphics_create_info->stageCount;
+				feedback.pPipelineStageCreationFeedbacks = feedbacks;
+				feedback.pPipelineCreationFeedback = &primary_feedback;
+
+				if (opts.pipeline_cache && device->pipeline_feedback_enabled())
+					const_cast<VkGraphicsPipelineCreateInfo *>(work_item.create_info.graphics_create_info)->pNext = &feedback;
+
 				if (vkCreateGraphicsPipelines(device->get_device(), pipeline_cache, 1, work_item.create_info.graphics_create_info,
 				                              nullptr, work_item.output.pipeline) == VK_SUCCESS)
 				{
@@ -462,7 +492,7 @@ struct ThreadedReplayer : StateCreatorInterface
 					graphics_pipeline_ns.fetch_add(duration_ns, std::memory_order_relaxed);
 					graphics_pipeline_count.fetch_add(1, std::memory_order_relaxed);
 
-					if ((work_item.create_info.graphics_create_info->flags & VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT) != 0)
+					if (!opts.ignore_derived_pipelines && (work_item.create_info.graphics_create_info->flags & VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT) != 0)
 					{
 						*work_item.hash_map_entry.pipeline = *work_item.output.pipeline;
 					}
@@ -476,6 +506,29 @@ struct ThreadedReplayer : StateCreatorInterface
 
 					if (opts.control_block && i == 0)
 						opts.control_block->successful_graphics.fetch_add(1, std::memory_order_relaxed);
+
+					if (opts.pipeline_cache && i == 0 && (primary_feedback.flags & VK_PIPELINE_CREATION_FEEDBACK_VALID_BIT_EXT) != 0)
+					{
+						bool cache_hit = (primary_feedback.flags & VK_PIPELINE_CREATION_FEEDBACK_APPLICATION_PIPELINE_CACHE_HIT_BIT_EXT) != 0;
+
+						// Check per-stage feedback.
+						if (!cache_hit)
+						{
+							cache_hit = true;
+							for (uint32_t j = 0; j < feedback.pipelineStageCreationFeedbackCount; j++)
+							{
+								bool valid = (feedbacks[j].flags & VK_PIPELINE_CREATION_FEEDBACK_VALID_BIT_EXT) != 0;
+								bool hit = (feedbacks[j].flags & VK_PIPELINE_CREATION_FEEDBACK_APPLICATION_PIPELINE_CACHE_HIT_BIT_EXT) != 0;
+								if (!valid || !hit)
+									cache_hit = false;
+							}
+						}
+
+						if (cache_hit)
+							pipeline_cache_hits.fetch_add(1, std::memory_order_relaxed);
+						else
+							pipeline_cache_misses.fetch_add(1, std::memory_order_relaxed);
+					}
 				}
 				else
 				{
@@ -534,6 +587,15 @@ struct ThreadedReplayer : StateCreatorInterface
 #ifdef SIMULATE_UNSTABLE_DRIVER
 				spurious_crash();
 #endif
+				VkPipelineCreationFeedbackEXT feedbacks = {};
+				VkPipelineCreationFeedbackEXT primary_feedback = {};
+				VkPipelineCreationFeedbackCreateInfoEXT feedback = { VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO_EXT };
+				feedback.pipelineStageCreationFeedbackCount = 1;
+				feedback.pPipelineStageCreationFeedbacks = &feedbacks;
+				feedback.pPipelineCreationFeedback = &primary_feedback;
+
+				if (opts.pipeline_cache && device->pipeline_feedback_enabled())
+					const_cast<VkComputePipelineCreateInfo *>(work_item.create_info.compute_create_info)->pNext = &feedback;
 
 				if (vkCreateComputePipelines(device->get_device(), pipeline_cache, 1,
 				                             work_item.create_info.compute_create_info,
@@ -545,7 +607,7 @@ struct ThreadedReplayer : StateCreatorInterface
 					compute_pipeline_ns.fetch_add(duration_ns, std::memory_order_relaxed);
 					compute_pipeline_count.fetch_add(1, std::memory_order_relaxed);
 
-					if ((work_item.create_info.compute_create_info->flags & VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT) != 0)
+					if (!opts.ignore_derived_pipelines && (work_item.create_info.compute_create_info->flags & VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT) != 0)
 					{
 						*work_item.hash_map_entry.pipeline = *work_item.output.pipeline;
 					}
@@ -559,6 +621,23 @@ struct ThreadedReplayer : StateCreatorInterface
 
 					if (opts.control_block && i == 0)
 						opts.control_block->successful_compute.fetch_add(1, std::memory_order_relaxed);
+
+					if (opts.pipeline_cache && i == 0 && (primary_feedback.flags & VK_PIPELINE_CREATION_FEEDBACK_VALID_BIT_EXT) != 0)
+					{
+						bool cache_hit = (primary_feedback.flags & VK_PIPELINE_CREATION_FEEDBACK_APPLICATION_PIPELINE_CACHE_HIT_BIT_EXT) != 0;
+
+						if (!cache_hit)
+						{
+							bool valid = (feedbacks.flags & VK_PIPELINE_CREATION_FEEDBACK_VALID_BIT_EXT) != 0;
+							bool hit = (feedbacks.flags & VK_PIPELINE_CREATION_FEEDBACK_APPLICATION_PIPELINE_CACHE_HIT_BIT_EXT) != 0;
+							cache_hit = valid && hit;
+						}
+
+						if (cache_hit)
+							pipeline_cache_hits.fetch_add(1, std::memory_order_relaxed);
+						else
+							pipeline_cache_misses.fetch_add(1, std::memory_order_relaxed);
+					}
 				}
 				else
 				{
@@ -714,9 +793,6 @@ struct ThreadedReplayer : StateCreatorInterface
 		for (auto &pipeline_layout : pipeline_layouts)
 			if (pipeline_layout.second)
 				vkDestroyPipelineLayout(device->get_device(), pipeline_layout.second, nullptr);
-		for (auto &shader_module : shader_modules)
-			if (shader_module.second)
-				vkDestroyShaderModule(device->get_device(), shader_module.second, nullptr);
 		for (auto &render_pass : render_passes)
 			if (render_pass.second)
 				vkDestroyRenderPass(device->get_device(), render_pass.second, nullptr);
@@ -726,6 +802,11 @@ struct ThreadedReplayer : StateCreatorInterface
 		for (auto &pipeline : graphics_pipelines)
 			if (pipeline.second)
 				vkDestroyPipeline(device->get_device(), pipeline.second, nullptr);
+
+		shader_modules.delete_cache([this](Hash, VkShaderModule module) {
+			if (module != VK_NULL_HANDLE)
+				vkDestroyShaderModule(device->get_device(), module, nullptr);
+		});
 	}
 
 	bool validate_pipeline_cache_header(const vector<uint8_t> &blob)
@@ -917,11 +998,12 @@ struct ThreadedReplayer : StateCreatorInterface
 
 	bool enqueue_create_shader_module(Hash hash, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module) override
 	{
+		*module = VK_NULL_HANDLE;
 		if (masked_shader_modules.count(hash))
 		{
-			*module = VK_NULL_HANDLE;
 			lock_guard<mutex> lock(internal_enqueue_mutex);
-			shader_modules[hash] = VK_NULL_HANDLE;
+			//LOGI("Inserting shader module %016llx.\n", static_cast<unsigned long long>(hash));
+			shader_modules.insert_object(hash, *module, 1);
 			return true;
 		}
 
@@ -945,7 +1027,8 @@ struct ThreadedReplayer : StateCreatorInterface
 				LOGE("Failed to validate SPIR-V module: %0" PRIX64 "\n", hash);
 				*module = VK_NULL_HANDLE;
 				lock_guard<mutex> lock(internal_enqueue_mutex);
-				shader_modules[hash] = VK_NULL_HANDLE;
+				//LOGI("Inserting shader module %016llx.\n", static_cast<unsigned long long>(hash));
+				shader_modules.insert_object(hash, VK_NULL_HANDLE, 1);
 				shader_module_count.fetch_add(1, std::memory_order_relaxed);
 
 				if (opts.control_block)
@@ -956,18 +1039,12 @@ struct ThreadedReplayer : StateCreatorInterface
 		}
 #endif
 
-		VkShaderModule *hash_map_entry;
-		{
-			lock_guard<mutex> lock(internal_enqueue_mutex);
-			hash_map_entry = &shader_modules[hash];
-		}
-
 		for (unsigned i = 0; i < loop_count; i++)
 		{
 			// Avoid leak.
-			if (*hash_map_entry != VK_NULL_HANDLE)
-				vkDestroyShaderModule(device->get_device(), *hash_map_entry, nullptr);
-			*hash_map_entry = VK_NULL_HANDLE;
+			if (*module != VK_NULL_HANDLE)
+				vkDestroyShaderModule(device->get_device(), *module, nullptr);
+			*module = VK_NULL_HANDLE;
 
 			auto start_time = chrono::steady_clock::now();
 			if (vkCreateShaderModule(device->get_device(), create_info, nullptr, module) == VK_SUCCESS)
@@ -976,7 +1053,6 @@ struct ThreadedReplayer : StateCreatorInterface
 				auto duration_ns = chrono::duration_cast<chrono::nanoseconds>(end_time - start_time).count();
 				shader_module_ns.fetch_add(duration_ns, std::memory_order_relaxed);
 				shader_module_count.fetch_add(1, std::memory_order_relaxed);
-				*hash_map_entry = *module;
 
 				if (robustness)
 				{
@@ -992,6 +1068,12 @@ struct ThreadedReplayer : StateCreatorInterface
 				LOGE("Failed to create shader module for hash 0x%llx.\n",
 				     static_cast<unsigned long long>(hash));
 			}
+		}
+
+		{
+			lock_guard<mutex> lock(internal_enqueue_mutex);
+			//LOGI("Inserting shader module %016llx.\n", static_cast<unsigned long long>(hash));
+			shader_modules.insert_object(hash, *module, create_info->codeSize);
 		}
 
 		return true;
@@ -1014,6 +1096,13 @@ struct ThreadedReplayer : StateCreatorInterface
 		if (parent && derived)
 		{
 			LOGE("A parent pipeline is also a derived pipeline. Avoid potential deep dependency chains in replay by forcing the pipeline to be non-derived.\n");
+			auto *info = const_cast<VkComputePipelineCreateInfo *>(create_info);
+			info->flags &= ~VK_PIPELINE_CREATE_DERIVATIVE_BIT;
+			info->basePipelineHandle = VK_NULL_HANDLE;
+			info->basePipelineIndex = 0;
+		}
+		else if (opts.ignore_derived_pipelines)
+		{
 			auto *info = const_cast<VkComputePipelineCreateInfo *>(create_info);
 			info->flags &= ~VK_PIPELINE_CREATE_DERIVATIVE_BIT;
 			info->basePipelineHandle = VK_NULL_HANDLE;
@@ -1054,7 +1143,6 @@ struct ThreadedReplayer : StateCreatorInterface
 		if (derived && create_info->basePipelineHandle == VK_NULL_HANDLE)
 			LOGE("Creating a derived pipeline with NULL handle.\n");
 
-
 		// It has never been observed that an application uses multiple layers of derived pipelines.
 		// Rather than trying to replay with arbitrary layers of derived-ness - which may or may not have any impact on caching -
 		// We force these pipelines to be non-derived.
@@ -1065,6 +1153,13 @@ struct ThreadedReplayer : StateCreatorInterface
 		if (parent && derived)
 		{
 			LOGE("A parent pipeline is also a derived pipeline. Avoid potential deep dependency chains in replay by forcing the pipeline to be non-derived.\n");
+			auto *info = const_cast<VkGraphicsPipelineCreateInfo *>(create_info);
+			info->flags &= ~VK_PIPELINE_CREATE_DERIVATIVE_BIT;
+			info->basePipelineHandle = VK_NULL_HANDLE;
+			info->basePipelineIndex = 0;
+		}
+		else if (opts.ignore_derived_pipelines)
+		{
 			auto *info = const_cast<VkGraphicsPipelineCreateInfo *>(create_info);
 			info->flags &= ~VK_PIPELINE_CREATE_DERIVATIVE_BIT;
 			info->basePipelineHandle = VK_NULL_HANDLE;
@@ -1167,10 +1262,14 @@ struct ThreadedReplayer : StateCreatorInterface
 			work_item.memory_context_index = SHADER_MODULE_MEMORY_CONTEXT;
 			enqueue_work_item(work_item);
 			enqueued_shader_modules.insert(shader_module_hash);
+			//LOGI("Queueing up shader module: %016llx.\n", static_cast<unsigned long long>((Hash) shader_module_hash));
 			return true;
 		}
 		else
+		{
+			//LOGI("Not queueing up shader module: %016llx.\n", static_cast<unsigned long long>((Hash) shader_module_hash));
 			return false;
+		}
 	}
 
 	bool enqueue_shader_modules(const VkGraphicsPipelineCreateInfo *info)
@@ -1192,15 +1291,25 @@ struct ThreadedReplayer : StateCreatorInterface
 	{
 		for (uint32_t i = 0; i < info->stageCount; i++)
 		{
-			const_cast<VkPipelineShaderStageCreateInfo *>(info->pStages)[i].module =
-					shader_modules[(Hash) info->pStages[i].module];
+			auto result = shader_modules.find_object((Hash) info->pStages[i].module);
+			if (!result.second)
+			{
+				LOGE("Could not find shader module %016llx in cache.\n",
+				     static_cast<unsigned long long>((Hash) info->pStages[i].module));
+			}
+			const_cast<VkPipelineShaderStageCreateInfo *>(info->pStages)[i].module = result.first;
 		}
 	}
 
 	void resolve_shader_modules(VkComputePipelineCreateInfo *info)
 	{
-		const_cast<VkComputePipelineCreateInfo*>(info)->stage.module =
-				shader_modules[(Hash) info->stage.module];
+		auto result = shader_modules.find_object((Hash) info->stage.module);
+		if (!result.second)
+		{
+			LOGE("Could not find shader module %016llx in cache.\n",
+			     static_cast<unsigned long long>((Hash) info->stage.module));
+		}
+		const_cast<VkComputePipelineCreateInfo*>(info)->stage.module = result.first;
 	}
 
 	template <typename DerivedInfo>
@@ -1246,12 +1355,13 @@ struct ThreadedReplayer : StateCreatorInterface
 		enum PassOrder
 		{
 			PARSE_ENQUEUE_OFFSET = 0,
-			ENQUEUE_SHADER_MODULES_PRIMARY_OFFSET = 1,
-			RESOLVE_SHADER_MODULE_AND_ENQUEUE_PIPELINES_PRIMARY_OFFSET = 2,
-			ENQUEUE_OUT_OF_RANGE_PARENT_PIPELINES = 3,
-			ENQUEUE_SHADER_MODULE_SECONDARY_OFFSET = 4,
-			ENQUEUE_DERIVED_PIPELINES_OFFSET = 5,
-			PASS_COUNT = 6
+			MAINTAIN_SHADER_MODULE_LRU_CACHE = 1,
+			ENQUEUE_SHADER_MODULES_PRIMARY_OFFSET = 2,
+			RESOLVE_SHADER_MODULE_AND_ENQUEUE_PIPELINES_PRIMARY_OFFSET = 3,
+			ENQUEUE_OUT_OF_RANGE_PARENT_PIPELINES = 4,
+			ENQUEUE_SHADER_MODULE_SECONDARY_OFFSET = 5,
+			ENQUEUE_DERIVED_PIPELINES_OFFSET = 6,
+			PASS_COUNT = 7
 		};
 
 		auto outside_range_hashes = make_shared<unordered_set<Hash>>();
@@ -1267,6 +1377,7 @@ struct ThreadedReplayer : StateCreatorInterface
 		// - ...
 		// - Pass 6, chunk 0 (reclaim memory for context 0)
 		// - Pass 6, chunk 1 (reclaim memory for context 1)
+		// - Pass 7, sync point
 		// - Pass 0, chunk 2 (context 0)
 		// - Pass 1, chunk 3 (context 1)
 
@@ -1325,6 +1436,29 @@ struct ThreadedReplayer : StateCreatorInterface
 					                 }
 				                 }
 			                 }});
+
+			if (memory_index == 0)
+			{
+				work.push_back({ get_order_index(MAINTAIN_SHADER_MODULE_LRU_CACHE),
+				                 [this]() {
+					                 // Now all worker threads are drained for any work which needs shader modules,
+					                 // so we can maintain the shader module LRU cache while we're parsing new pipelines in parallel.
+					                 shader_modules.prune_cache([this](Hash hash, VkShaderModule module) {
+						                 assert(enqueued_shader_modules.count((VkShaderModule) hash) != 0);
+						                 //LOGI("Removing shader module %016llx.\n", static_cast<unsigned long long>(hash));
+						                 enqueued_shader_modules.erase((VkShaderModule) hash);
+						                 if (module != VK_NULL_HANDLE)
+							                 vkDestroyShaderModule(device->get_device(), module, nullptr);
+
+						                 shader_module_evicted_count.fetch_add(1, std::memory_order_relaxed);
+					                 });
+
+					                 // Need to forget that we have seen an object before so we can replay the same object multiple times.
+					                 for (auto &per_thread : per_thread_data)
+						                 if (per_thread.per_thread_replayers)
+							                 per_thread.per_thread_replayers[SHADER_MODULE_MEMORY_CONTEXT].forget_handle_references();
+				                 }});
+			}
 
 			work.push_back({ get_order_index(ENQUEUE_SHADER_MODULES_PRIMARY_OFFSET),
 			                 [this, derived, deferred, memory_index]() {
@@ -1540,7 +1674,9 @@ struct ThreadedReplayer : StateCreatorInterface
 	std::unordered_map<Hash, VkSampler> samplers;
 	std::unordered_map<Hash, VkDescriptorSetLayout> layouts;
 	std::unordered_map<Hash, VkPipelineLayout> pipeline_layouts;
-	std::unordered_map<Hash, VkShaderModule> shader_modules;
+
+	ObjectCache<VkShaderModule> shader_modules;
+
 	std::unordered_map<Hash, VkRenderPass> render_passes;
 	std::unordered_map<Hash, VkPipeline> compute_pipelines;
 	std::unordered_map<Hash, VkPipeline> graphics_pipelines;
@@ -1589,6 +1725,9 @@ struct ThreadedReplayer : StateCreatorInterface
 	std::atomic<std::uint32_t> graphics_pipeline_count;
 	std::atomic<std::uint32_t> compute_pipeline_count;
 	std::atomic<std::uint32_t> shader_module_count;
+	std::atomic<std::uint32_t> shader_module_evicted_count;
+	std::atomic<std::uint32_t> pipeline_cache_hits;
+	std::atomic<std::uint32_t> pipeline_cache_misses;
 
 	std::atomic<std::uint64_t> shader_module_total_size;
 	std::atomic<std::uint64_t> shader_module_total_compressed_size;
@@ -1649,6 +1788,10 @@ static void print_help()
 	     "\t[--on-disk-pipeline-cache <path>]\n"
 	     "\t[--graphics-pipeline-range <start> <end>]\n"
 	     "\t[--compute-pipeline-range <start> <end>]\n"
+	     "\t[--shader-cache-size <value (MiB)>]\n"
+	     "\t[--ignore-derived-pipelines]\n"
+	     "\t[--log-memory]\n"
+	     "\t[--null-device]\n"
 	     EXTRA_OPTIONS
 	     "\t<Database>\n");
 }
@@ -1741,6 +1884,8 @@ static int run_progress_process(const VulkanDevice::Options &device_opts,
 	opts.spirv_validate = replayer_opts.spirv_validate;
 	opts.device_index = device_opts.device_index;
 	opts.enable_validation = device_opts.enable_validation;
+	opts.ignore_derived_pipelines = replayer_opts.ignore_derived_pipelines;
+	opts.null_device = device_opts.null_device;
 
 	ExternalReplayer replayer;
 	if (!replayer.start(opts))
@@ -1804,6 +1949,8 @@ static int run_progress_process(const VulkanDevice::Options &device_opts,
 		}
 	}
 }
+
+static void log_process_memory();
 #endif
 
 static int run_normal_process(ThreadedReplayer &replayer, const vector<const char *> &databases)
@@ -1966,6 +2113,7 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 			compute_start_index = start_index;
 		}
 
+		assert(hashes);
 		hashes->resize(resource_hash_count);
 
 		if (!resolver->get_hash_list_for_resource_tag(tag, &resource_hash_count, hashes->data()))
@@ -2000,6 +2148,9 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 		     static_cast<unsigned long long>(tag_total_size_compressed));
 	}
 
+	// Done parsing static objects.
+	state_replayer.get_allocator().reset();
+
 	vector<EnqueuedWork> graphics_workload;
 	vector<EnqueuedWork> compute_workload;
 	replayer.enqueue_deferred_pipelines(replayer.deferred_graphics, replayer.graphics_pipelines, replayer.graphics_parents,
@@ -2033,7 +2184,7 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 		replayer.samplers.size() +
 		replayer.layouts.size() +
 		replayer.pipeline_layouts.size() +
-		replayer.shader_modules.size() +
+		replayer.shader_modules.get_current_object_count() +
 		replayer.render_passes.size() +
 		replayer.compute_pipelines.size() +
 		replayer.graphics_pipelines.size();
@@ -2045,9 +2196,18 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 	LOGI("Opening archive took %ld ms:\n", elapsed_ms_read_archive);
 	LOGI("Parsing archive took %ld ms:\n", elapsed_ms_prepare);
 
+	if (replayer.opts.pipeline_cache && replayer.device->pipeline_feedback_enabled())
+	{
+		LOGI("Pipeline cache hits reported: %u\n", replayer.pipeline_cache_hits.load());
+		LOGI("Pipeline cache misses reported: %u\n", replayer.pipeline_cache_misses.load());
+	}
+
 	LOGI("Playing back %u shader modules took %.3f s (accumulated time)\n",
 	     replayer.shader_module_count.load(),
 	     replayer.shader_module_ns.load() * 1e-9);
+
+	LOGI("Shader cache evicted %u shader modules in total\n",
+	     replayer.shader_module_evicted_count.load());
 
 	LOGI("Playing back %u graphics pipelines took %.3f s (accumulated time)\n",
 	     replayer.graphics_pipeline_count.load(),
@@ -2070,7 +2230,6 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 	LOGI("  samplers:              %7lu\n", (unsigned long)replayer.samplers.size());
 	LOGI("  descriptor set layouts:%7lu\n", (unsigned long)replayer.layouts.size());
 	LOGI("  pipeline layouts:      %7lu\n", (unsigned long)replayer.pipeline_layouts.size());
-	LOGI("  shader modules:        %7lu\n", (unsigned long)replayer.shader_modules.size());
 	LOGI("  render passes:         %7lu\n", (unsigned long)replayer.render_passes.size());
 	LOGI("  compute pipelines:     %7lu\n", (unsigned long)replayer.compute_pipelines.size());
 	LOGI("  graphics pipelines:    %7lu\n", (unsigned long)replayer.graphics_pipelines.size());
@@ -2111,6 +2270,8 @@ int main(int argc, char *argv[])
 #endif
 #endif
 
+	bool log_memory = false;
+
 	CLICallbacks cbs;
 	cbs.default_handler = [&](const char *arg) { databases.push_back(arg); };
 	cbs.add("--help", [](CLIParser &parser) { print_help(); parser.end(); });
@@ -2144,6 +2305,11 @@ int main(int argc, char *argv[])
 	cbs.add("--shmem-fd", [&](CLIParser &parser) { shmem_fd = parser.next_uint(); });
 #endif
 #endif
+
+	cbs.add("--shader-cache-size", [&](CLIParser &parser) { replayer_opts.shader_cache_size_mb = parser.next_uint(); });
+	cbs.add("--ignore-derived-pipelines", [&](CLIParser &) { replayer_opts.ignore_derived_pipelines = true; });
+	cbs.add("--log-memory", [&](CLIParser &) { log_memory = true; });
+	cbs.add("--null-device", [&](CLIParser &) { opts.null_device = true; });
 
 	cbs.error_handler = [] { print_help(); };
 
@@ -2208,6 +2374,10 @@ int main(int argc, char *argv[])
 	{
 		ThreadedReplayer replayer(opts, replayer_opts);
 		ret = run_normal_process(replayer, databases);
+#ifndef NO_ROBUST_REPLAYER
+		if (log_memory)
+			log_process_memory();
+#endif
 	}
 
 	return ret;

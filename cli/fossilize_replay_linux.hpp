@@ -362,6 +362,9 @@ static int run_master_process(const VulkanDevice::Options &opts,
 	Global::base_replayer_options = replayer_opts;
 	Global::databases = databases;
 	unsigned processes = replayer_opts.num_threads;
+
+	// Split shader cache overhead across all processes.
+	Global::base_replayer_options.shader_cache_size_mb /= max(Global::base_replayer_options.num_threads, 1u);
 	Global::base_replayer_options.num_threads = 1;
 
 	// Try to map the shared control block.
@@ -771,4 +774,22 @@ static int run_slave_process(const VulkanDevice::Options &opts,
 #endif
 
 	return ret;
+}
+
+static void log_process_memory()
+{
+	char path[1024];
+	sprintf(path, "/proc/%d/status", getpid());
+	FILE *file = fopen(path, "r");
+	if (!file)
+	{
+		LOGE("Failed to log process memory.\n");
+		return;
+	}
+
+	char line_buffer[1024];
+	while (fgets(line_buffer, sizeof(line_buffer), file))
+		fprintf(stderr, "%s", line_buffer);
+
+	fclose(file);
 }

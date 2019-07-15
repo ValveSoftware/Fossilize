@@ -370,6 +370,8 @@ bool ProcessProgress::start_child_process()
 		cmdline += " --pipeline-cache";
 	if (Global::base_replayer_options.spirv_validate)
 		cmdline += " --spirv-val";
+	if (Global::device_options.null_device)
+		cmdline += " --null-device";
 
 	if (!Global::base_replayer_options.on_disk_pipeline_cache_path.empty())
 	{
@@ -385,6 +387,12 @@ bool ProcessProgress::start_child_process()
 		// TODO: Merge the on-disk pipeline caches, but it's probably not that important.
 		// We're supposed to populate the driver caches here first and foremost.
 	}
+
+	cmdline += " --shader-cache-size ";
+	cmdline += std::to_string(Global::base_replayer_options.shader_cache_size_mb);
+
+	if (Global::base_replayer_options.ignore_derived_pipelines)
+		cmdline += " --ignore-derived-pipelines";
 
 	// Create custom named pipes which can be inherited by our child processes.
 	SECURITY_ATTRIBUTES attrs = {};
@@ -566,9 +574,12 @@ static int run_master_process(const VulkanDevice::Options &opts,
 	Global::base_replayer_options = replayer_opts;
 	Global::databases = databases;
 	unsigned processes = replayer_opts.num_threads;
-	Global::base_replayer_options.num_threads = 1;
 	Global::shm_name = shm_name;
 	Global::shm_mutex_name = shm_mutex_name;
+
+	// Split shader cache overhead across all processes.
+	Global::base_replayer_options.shader_cache_size_mb /= max(Global::base_replayer_options.num_threads, 1u);
+	Global::base_replayer_options.num_threads = 1;
 
 	Global::job_handle = CreateJobObjectA(nullptr, nullptr);
 	if (!Global::job_handle)
@@ -890,4 +901,9 @@ static int run_slave_process(const VulkanDevice::Options &opts,
 #endif
 
 	return code;
+}
+
+static void log_process_memory()
+{
+
 }

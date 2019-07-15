@@ -291,8 +291,20 @@ static bool copy_accessed_types(DatabaseInterface &input_db,
 	{
 		size_t compressed_size = 0;
 		if (!input_db.read_entry(tag, hash, &compressed_size, nullptr, PAYLOAD_READ_RAW_FOSSILIZE_DB_BIT))
-			return false;
+		{
+			if (tag == RESOURCE_SHADER_MODULE)
+			{
+				// We did not resolve shader module references, so we might hit an error here, but that's fine.
+				LOGE("Reference shader module %016llx does not exist in database.\n",
+				     static_cast<unsigned long long>(hash));
+				continue;
+			}
+			else
+				return false;
+		}
+
 		state_json.resize(compressed_size);
+
 		if (!input_db.read_entry(tag, hash, &compressed_size, state_json.data(), PAYLOAD_READ_RAW_FOSSILIZE_DB_BIT))
 			return false;
 		if (!output_db.write_entry(tag, hash, state_json.data(), state_json.size(), PAYLOAD_WRITE_RAW_FOSSILIZE_DB_BIT))
