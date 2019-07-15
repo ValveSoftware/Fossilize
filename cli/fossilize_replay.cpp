@@ -640,7 +640,7 @@ struct ThreadedReplayer : StateCreatorInterface
 				}
 				else
 				{
-					LOGE("Failed to create compute pipeline for hash 0x%016" PRIx64 ".\n", static_cast<unsigned long long>(work_item.hash));
+					LOGE("Failed to create compute pipeline for hash 0x%016" PRIx64 ".\n", work_item.hash);
 				}
 			}
 
