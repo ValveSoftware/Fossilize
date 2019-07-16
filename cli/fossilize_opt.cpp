@@ -45,19 +45,19 @@ struct OptimizeReplayer : StateCreatorInterface
 	bool enqueue_create_sampler(Hash hash, const VkSamplerCreateInfo *create_info, VkSampler *sampler) override
 	{
 		*sampler = fake_handle<VkSampler>(hash);
-		return recorder.record_sampler(*sampler, *create_info);
+		return recorder.record_sampler(*sampler, *create_info, hash);
 	}
 
 	bool enqueue_create_descriptor_set_layout(Hash hash, const VkDescriptorSetLayoutCreateInfo *create_info, VkDescriptorSetLayout *layout) override
 	{
 		*layout = fake_handle<VkDescriptorSetLayout>(hash);
-		return recorder.record_descriptor_set_layout(*layout, *create_info);
+		return recorder.record_descriptor_set_layout(*layout, *create_info, hash);
 	}
 
 	bool enqueue_create_pipeline_layout(Hash hash, const VkPipelineLayoutCreateInfo *create_info, VkPipelineLayout *layout) override
 	{
 		*layout = fake_handle<VkPipelineLayout>(hash);
-		return recorder.record_pipeline_layout(*layout, *create_info);
+		return recorder.record_pipeline_layout(*layout, *create_info, hash);
 	}
 
 	bool enqueue_create_shader_module(Hash hash, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module) override
@@ -74,7 +74,7 @@ struct OptimizeReplayer : StateCreatorInterface
 		{
 			LOGE("Failed to optimize shader module %016" PRIx64 ". Using original module.\n", hash);
 			*module = fake_handle<VkShaderModule>(hash);
-			return recorder.record_shader_module(*module, *create_info);
+			return recorder.record_shader_module(*module, *create_info, hash);
 		}
 		else
 		{
@@ -83,26 +83,26 @@ struct OptimizeReplayer : StateCreatorInterface
 			info.codeSize = compiled_spirv.size() * sizeof(uint32_t);
 
 			*module = fake_handle<VkShaderModule>(hash);
-			return recorder.record_shader_module(*module, info);
+			return recorder.record_shader_module(*module, info, hash);
 		}
 	}
 
 	bool enqueue_create_render_pass(Hash hash, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass) override
 	{
 		*render_pass = fake_handle<VkRenderPass>(hash);
-		return recorder.record_render_pass(*render_pass, *create_info);
+		return recorder.record_render_pass(*render_pass, *create_info, hash);
 	}
 
 	bool enqueue_create_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
 		*pipeline = fake_handle<VkPipeline>(hash);
-		return recorder.record_compute_pipeline(*pipeline, *create_info, nullptr, 0);
+		return recorder.record_compute_pipeline(*pipeline, *create_info, nullptr, 0, hash);
 	}
 
 	bool enqueue_create_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
 		*pipeline = fake_handle<VkPipeline>(hash);
-		return recorder.record_graphics_pipeline(*pipeline, *create_info, nullptr, 0);
+		return recorder.record_graphics_pipeline(*pipeline, *create_info, nullptr, 0, hash);
 	}
 };
 
