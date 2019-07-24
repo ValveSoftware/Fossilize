@@ -45,7 +45,8 @@ static void print_help()
 	     "\t[--skip-graphics hash]\n"
 	     "\t[--skip-compute hash]\n"
 	     "\t[--skip-module hash]\n"
-	     "\t[--skip-application-info-links]\n");
+	     "\t[--skip-application-info-links]\n"
+	     "\t[--invert-module-pruning]\n");
 }
 
 template <typename T>
@@ -320,6 +321,7 @@ int main(int argc, char *argv[])
 	Hash application_hash = 0;
 	bool should_filter_application_hash = false;
 	bool skip_application_info_links = false;
+	bool invert_module_pruning = false;
 
 	unordered_set<Hash> filter_graphics;
 	unordered_set<Hash> filter_compute;
@@ -356,6 +358,9 @@ int main(int argc, char *argv[])
 	});
 	cbs.add("--skip-application-info-links", [&](CLIParser &) {
 		skip_application_info_links = true;
+	});
+	cbs.add("--invert-module-pruning", [&](CLIParser &) {
+		invert_module_pruning = true;
 	});
 
 	cbs.error_handler = [] { print_help(); };
@@ -496,6 +501,39 @@ int main(int argc, char *argv[])
 				}
 			}
 		}
+	}
+
+	if (invert_module_pruning)
+	{
+		// In this mode we're only interesting in emitting the shader modules we did not emit for whatever reason.
+		// A handy debug option in some scenarios.
+		prune_replayer.filtered_blob_hashes[RESOURCE_APPLICATION_BLOB_LINK].clear();
+		prune_replayer.accessed_samplers.clear();
+		prune_replayer.accessed_descriptor_sets.clear();
+		prune_replayer.accessed_render_passes.clear();
+		prune_replayer.accessed_pipeline_layouts.clear();
+		prune_replayer.accessed_graphics_pipelines.clear();
+		prune_replayer.accessed_compute_pipelines.clear();
+
+		size_t hash_count = 0;
+		if (!input_db->get_hash_list_for_resource_tag(RESOURCE_SHADER_MODULE, &hash_count, nullptr))
+		{
+			LOGE("Failed to get hashes.\n");
+			return EXIT_FAILURE;
+		}
+
+		vector<Hash> hashes(hash_count);
+		if (!input_db->get_hash_list_for_resource_tag(RESOURCE_SHADER_MODULE, &hash_count, hashes.data()))
+		{
+			LOGE("Failed to get shader module hashes.\n");
+			return EXIT_FAILURE;
+		}
+
+		unordered_set<Hash> unreferenced_modules;
+		for (auto &h : hashes)
+			if (prune_replayer.accessed_shader_modules.count(h) == 0)
+				unreferenced_modules.insert(h);
+		prune_replayer.accessed_shader_modules = move(unreferenced_modules);
 	}
 
 	if (!copy_accessed_types(*input_db, *output_db, state_json,
