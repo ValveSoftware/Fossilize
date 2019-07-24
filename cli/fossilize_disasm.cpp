@@ -341,34 +341,37 @@ static string disassemble_spirv_glsl(const VkShaderModuleCreateInfo *create_info
 	spvc_compiler_options_set_bool(opts, SPVC_COMPILER_OPTION_GLSL_VULKAN_SEMANTICS, SPVC_TRUE);
 	spvc_compiler_install_compiler_options(comp, opts);
 
-	switch (stage)
+	if (entry)
 	{
-	case VK_SHADER_STAGE_VERTEX_BIT:
-		spvc_compiler_set_entry_point(comp, entry, SpvExecutionModelVertex);
-		break;
+		switch (stage)
+		{
+		case VK_SHADER_STAGE_VERTEX_BIT:
+			spvc_compiler_set_entry_point(comp, entry, SpvExecutionModelVertex);
+			break;
 
-	case VK_SHADER_STAGE_FRAGMENT_BIT:
-		spvc_compiler_set_entry_point(comp, entry, SpvExecutionModelFragment);
-		break;
+		case VK_SHADER_STAGE_FRAGMENT_BIT:
+			spvc_compiler_set_entry_point(comp, entry, SpvExecutionModelFragment);
+			break;
 
-	case VK_SHADER_STAGE_GEOMETRY_BIT:
-		spvc_compiler_set_entry_point(comp, entry, SpvExecutionModelGeometry);
-		break;
+		case VK_SHADER_STAGE_GEOMETRY_BIT:
+			spvc_compiler_set_entry_point(comp, entry, SpvExecutionModelGeometry);
+			break;
 
-	case VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT:
-		spvc_compiler_set_entry_point(comp, entry, SpvExecutionModelTessellationControl);
-		break;
+		case VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT:
+			spvc_compiler_set_entry_point(comp, entry, SpvExecutionModelTessellationControl);
+			break;
 
-	case VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT:
-		spvc_compiler_set_entry_point(comp, entry, SpvExecutionModelTessellationEvaluation);
-		break;
+		case VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT:
+			spvc_compiler_set_entry_point(comp, entry, SpvExecutionModelTessellationEvaluation);
+			break;
 
-	case VK_SHADER_STAGE_COMPUTE_BIT:
-		spvc_compiler_set_entry_point(comp, entry, SpvExecutionModelGLCompute);
-		break;
+		case VK_SHADER_STAGE_COMPUTE_BIT:
+			spvc_compiler_set_entry_point(comp, entry, SpvExecutionModelGLCompute);
+			break;
 
-	default:
-		return "// Failed";
+		default:
+			return "// Failed";
+		}
 	}
 
 	const char *output;
@@ -475,6 +478,7 @@ int main(int argc, char *argv[])
 	string output;
 	VulkanDevice::Options opts;
 	DisasmMethod method = DisasmMethod::Asm;
+	bool module_only = false;
 
 	CLICallbacks cbs;
 	cbs.default_handler = [&](const char *arg) { json_path = arg; };
@@ -485,6 +489,7 @@ int main(int argc, char *argv[])
 	cbs.add("--target", [&](CLIParser &parser) {
 		method = method_from_string(parser.next_string());
 	});
+	cbs.add("--module-only", [&](CLIParser &) { module_only = true; });
 	cbs.error_handler = [] { print_help(); };
 
 	CLIParser parser(move(cbs), argc - 1, argv + 1);
@@ -503,6 +508,12 @@ int main(int argc, char *argv[])
 	VulkanDevice device;
 	if (method == DisasmMethod::AMD)
 	{
+		if (module_only)
+		{
+			LOGE("Cannot do module-only disassembly with AMD target.\n");
+			return EXIT_FAILURE;
+		}
+
 		if (!device.init_device(opts))
 		{
 			LOGE("Failed to create device.\n");
@@ -545,6 +556,9 @@ int main(int argc, char *argv[])
 
 	for (auto &tag : playback_order)
 	{
+		if (module_only && tag != RESOURCE_SHADER_MODULE)
+			continue;
+
 		LOGI("Replaying tag: %s\n", tag_names[tag]);
 		size_t hash_count = 0;
 		if (!resolver->get_hash_list_for_resource_tag(tag, &hash_count, nullptr))
@@ -586,23 +600,18 @@ int main(int argc, char *argv[])
 
 	unordered_set<VkShaderModule> unique_shader_modules;
 
-	string disassembled;
-	size_t graphics_pipeline_count = replayer.graphics_infos.size();
-	for (size_t i = 0; i < graphics_pipeline_count; i++)
+	if (module_only)
 	{
-		auto *info = replayer.graphics_infos[i];
-		for (uint32_t j = 0; j < info->stageCount; j++)
+		string disassembled;
+		size_t module_count = replayer.shader_module_infos.size();
+		for (size_t i = 0; i < module_count; i++)
 		{
-			VkShaderModule module = info->pStages[j].module;
-			unique_shader_modules.insert(module);
-			auto *module_info = replayer.shader_module_infos[replayer.module_to_index[module]];
-			disassembled = disassemble_spirv(device, replayer.graphics_pipelines[i], method, info->pStages[j].stage,
-			                                 module_info, info->pStages[j].pName);
+			auto *module_info = replayer.shader_module_infos[i];
+			disassembled = disassemble_spirv(device, VK_NULL_HANDLE, method, VK_SHADER_STAGE_ALL,
+			                                 module_info, nullptr);
 
-			string path = output + "/" + uint64_string((uint64_t) module) + "." +
-			              info->pStages[j].pName + "." +
-			              uint64_string(replayer.graphics_hashes[i]) +
-			              "." + stage_to_string(info->pStages[j].stage);
+			auto module_hash = (Hash)replayer.shader_modules[i];
+			string path = output + "/" + uint64_string(module_hash);
 
 			LOGI("Dumping disassembly to: %s\n", path.c_str());
 			if (!write_string_to_file(path.c_str(), disassembled.c_str()))
@@ -612,31 +621,60 @@ int main(int argc, char *argv[])
 			}
 		}
 	}
-
-	size_t compute_pipeline_count = replayer.compute_infos.size();
-	for (size_t i = 0; i < compute_pipeline_count; i++)
+	else
 	{
-		auto *info = replayer.compute_infos[i];
-		VkShaderModule module = info->stage.module;
-		unique_shader_modules.insert(module);
-		auto *module_info = replayer.shader_module_infos[replayer.module_to_index[module]];
-		disassembled = disassemble_spirv(device, replayer.compute_pipelines[i], method, info->stage.stage,
-		                                 module_info, info->stage.pName);
-
-		string path = output + "/" + uint64_string((uint64_t) module) + "." +
-		              info->stage.pName + "." +
-		              uint64_string(replayer.compute_hashes[i]) +
-		              "." + stage_to_string(info->stage.stage);
-
-		LOGI("Dumping disassembly to: %s\n", path.c_str());
-		if (!write_string_to_file(path.c_str(), disassembled.c_str()))
+		string disassembled;
+		size_t graphics_pipeline_count = replayer.graphics_infos.size();
+		for (size_t i = 0; i < graphics_pipeline_count; i++)
 		{
-			LOGE("Failed to write disassembly to file: %s\n", output.c_str());
-			return EXIT_FAILURE;
-		}
-	}
+			auto *info = replayer.graphics_infos[i];
+			for (uint32_t j = 0; j < info->stageCount; j++)
+			{
+				VkShaderModule module = info->pStages[j].module;
+				unique_shader_modules.insert(module);
+				auto *module_info = replayer.shader_module_infos[replayer.module_to_index[module]];
+				disassembled = disassemble_spirv(device, replayer.graphics_pipelines[i], method, info->pStages[j].stage,
+				                                 module_info, info->pStages[j].pName);
 
-	LOGI("Shader modules used: %u, shader modules in database: %u\n",
-	     unsigned(unique_shader_modules.size()), unsigned(replayer.shader_module_infos.size()));
+				string path = output + "/" + uint64_string((uint64_t) module) + "." +
+				              info->pStages[j].pName + "." +
+				              uint64_string(replayer.graphics_hashes[i]) +
+				              "." + stage_to_string(info->pStages[j].stage);
+
+				LOGI("Dumping disassembly to: %s\n", path.c_str());
+				if (!write_string_to_file(path.c_str(), disassembled.c_str()))
+				{
+					LOGE("Failed to write disassembly to file: %s\n", output.c_str());
+					return EXIT_FAILURE;
+				}
+			}
+		}
+
+		size_t compute_pipeline_count = replayer.compute_infos.size();
+		for (size_t i = 0; i < compute_pipeline_count; i++)
+		{
+			auto *info = replayer.compute_infos[i];
+			VkShaderModule module = info->stage.module;
+			unique_shader_modules.insert(module);
+			auto *module_info = replayer.shader_module_infos[replayer.module_to_index[module]];
+			disassembled = disassemble_spirv(device, replayer.compute_pipelines[i], method, info->stage.stage,
+			                                 module_info, info->stage.pName);
+
+			string path = output + "/" + uint64_string((uint64_t) module) + "." +
+			              info->stage.pName + "." +
+			              uint64_string(replayer.compute_hashes[i]) +
+			              "." + stage_to_string(info->stage.stage);
+
+			LOGI("Dumping disassembly to: %s\n", path.c_str());
+			if (!write_string_to_file(path.c_str(), disassembled.c_str()))
+			{
+				LOGE("Failed to write disassembly to file: %s\n", output.c_str());
+				return EXIT_FAILURE;
+			}
+		}
+
+		LOGI("Shader modules used: %u, shader modules in database: %u\n",
+		     unsigned(unique_shader_modules.size()), unsigned(replayer.shader_module_infos.size()));
+	}
 	return EXIT_SUCCESS;
 }
