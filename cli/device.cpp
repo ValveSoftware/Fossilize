@@ -236,16 +236,16 @@ bool VulkanDevice::init_device(const Options &opts)
 	}
 
 	api_version = target_api_version;
-	bool has_device_features2 = api_version >= VK_MAKE_VERSION(1, 1, 0);
+	bool has_device_features2 = find_extension(exts, VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
 
 	// FIXME: There are arbitrary features we can request here from physical_device_features2.
-	VkPhysicalDeviceFeatures2 gpu_features2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+	VkPhysicalDeviceFeatures2KHR gpu_features2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2_KHR };
 	VkPhysicalDeviceFeatures *gpu_features = &gpu_features2.features;
 	VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR stats_feature = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR };
 	gpu_features2.pNext = &stats_feature;
 	if (has_device_features2)
 	{
-		vkGetPhysicalDeviceFeatures2(gpu, &gpu_features2);
+		vkGetPhysicalDeviceFeatures2KHR(gpu, &gpu_features2);
 
 		pipeline_stats = stats_feature.pipelineExecutableInfo;
 		if (pipeline_stats && opts.want_pipeline_stats)
