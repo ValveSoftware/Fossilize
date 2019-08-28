@@ -20,6 +20,10 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
+#define RAPIDJSON_HAS_STDSTRING 1
+#include "rapidjson/document.h"
+#include "rapidjson/writer.h"
+
 #include "volk.h"
 #include "device.hpp"
 #include "fossilize.hpp"
@@ -50,11 +54,6 @@
 #include <utility>
 #include <map>
 #include <assert.h>
-
-#define RAPIDJSON_HAS_STDSTRING 1
-#include <rapidjson/document.h>
-#include <rapidjson/writer.h>
-#include <rapidjson/error/en.h>
 
 #ifdef FOSSILIZE_REPLAYER_SPIRV_VAL
 #include "spirv-tools/libspirv.hpp"
@@ -154,7 +153,7 @@ void spurious_deadlock()
 
 // Unstable, but deterministic.
 template <typename BidirectionalItr, typename UnaryPredicate>
-BidirectionalItr unstable_remove_if(BidirectionalItr first, BidirectionalItr last, UnaryPredicate &&p)
+static BidirectionalItr unstable_remove_if(BidirectionalItr first, BidirectionalItr last, UnaryPredicate &&p)
 {
 	while (first != last)
 	{
@@ -2141,8 +2140,9 @@ static bool parse_json_stats(const std::string &foz_path, rapidjson::Document &d
 			json_buffer.resize(json_size);
 			if (!db->read_entry(tag, hash, &json_size, json_buffer.data(), 0))
 				continue;
+			json_buffer.push_back('\0');
 
-			tmp_doc.Parse(rapidjson::StringRef(json_buffer.data(), json_buffer.size()));
+			tmp_doc.Parse(rapidjson::StringRef(json_buffer.data()));
 			if (tmp_doc.HasParseError())
 				continue;
 
@@ -2715,7 +2715,7 @@ int main(int argc, char *argv[])
 					path += ".";
 					path += std::to_string(idx);
 				}
-				path += ".json";
+				path += ".foz";
 				paths.push_back(path);
 			}
 			dump_stats(replayer_opts.pipeline_stats_path, paths);
