@@ -54,12 +54,13 @@ public:
 		// Maps to --device-index.
 		unsigned device_index;
 
-		// Carve out a range of which pipelines to replay.
+		// Carve out a range of which pipelines to replay if use_pipeline_range is set.
 		// Used for multi-process replays where each process gets its own slice to churn through.
 		unsigned start_graphics_index;
 		unsigned end_graphics_index;
 		unsigned start_compute_index;
 		unsigned end_compute_index;
+		bool use_pipeline_range;
 
 		// Maps to --pipeline-cache
 		bool pipeline_cache;

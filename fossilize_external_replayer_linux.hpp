@@ -369,18 +369,16 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 		argv.push_back(index_name);
 
 		char graphics_range_start[16], graphics_range_end[16];
-		if (options.start_graphics_index != 0 || options.end_graphics_index != ~0u)
+		char compute_range_start[16], compute_range_end[16];
+
+		if (options.use_pipeline_range)
 		{
 			argv.push_back("--graphics-pipeline-range");
 			sprintf(graphics_range_start, "%u", options.start_graphics_index);
 			sprintf(graphics_range_end, "%u", options.end_graphics_index);
 			argv.push_back(graphics_range_start);
 			argv.push_back(graphics_range_end);
-		}
 
-		char compute_range_start[16], compute_range_end[16];
-		if (options.start_compute_index != 0 || options.end_compute_index != ~0u)
-		{
 			argv.push_back("--compute-pipeline-range");
 			sprintf(compute_range_start, "%u", options.start_compute_index);
 			sprintf(compute_range_end, "%u", options.end_compute_index);
