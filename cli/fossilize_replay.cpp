@@ -512,29 +512,15 @@ struct ThreadedReplayer : StateCreatorInterface
 			rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
 			doc.Accept(writer);
 
+			if (pipeline_stats_db)
 			{
-				// TODO: Replace this with dumping to a FossilizeDB archive.
 				// Need lock here because multiple threads could be in flight.
 				lock_guard<mutex> lock(pipeline_stats_queue_mutex);
 
-				auto json_stat_path = opts.pipeline_stats_path + ".json";
-				FILE *stats_out = fopen(json_stat_path.c_str(), "r+b");
-				if (!stats_out)
-					stats_out = fopen(json_stat_path.c_str(), "wb");
-				if (stats_out)
-				{
-					fseek(stats_out, 0, SEEK_END);
-					if (ftell(stats_out) == 0)
-						fprintf(stats_out, "[");
-					else
-					{
-						fseek(stats_out, -1, SEEK_CUR);
-						fprintf(stats_out, ",");
-					}
-					fwrite(buffer.GetString(), buffer.GetSize(), 1, stats_out);
-					fprintf(stats_out, "]");
-					fclose(stats_out);
-				}
+				if (pipeline_stats_db->write_entry(tag, hash, buffer.GetString(), buffer.GetLength(), 0))
+					pipeline_stats_db->flush();
+				else
+					LOGE("Failed to write pipeline stats entry to database.\n");
 			}
 		}
 	}
@@ -1011,6 +997,18 @@ struct ThreadedReplayer : StateCreatorInterface
 			{
 				LOGI("Requested pipeline stats, but device does not support them. Disabling.\n");
 				opts.pipeline_stats = false;
+			}
+
+			if (opts.pipeline_stats)
+			{
+				auto foz_path = opts.pipeline_stats_path + ".foz";
+				pipeline_stats_db.reset(create_stream_archive_database(foz_path.c_str(), DatabaseMode::Append));
+				if (!pipeline_stats_db->prepare())
+				{
+					LOGE("Failed to prepare stats database. Disabling pipeline stats.\n");
+					pipeline_stats_db.reset();
+					opts.pipeline_stats = false;
+				}
 			}
 
 			if (opts.pipeline_cache)
@@ -1851,6 +1849,7 @@ struct ThreadedReplayer : StateCreatorInterface
 	std::queue<PipelineWorkItem> pipeline_work_queue;
 
 	std::mutex pipeline_stats_queue_mutex;
+	std::unique_ptr<DatabaseInterface> pipeline_stats_db;
 
 	std::mutex hash_lock;
 	std::unordered_map<Hash, DeferredGraphicsInfo> graphics_parents;
@@ -2107,33 +2106,56 @@ static int run_progress_process(const VulkanDevice::Options &device_opts,
 static void log_process_memory();
 #endif
 
-static bool parse_json_stats(std::string json_path, rapidjson::Document &doc)
+static bool parse_json_stats(const std::string &foz_path, rapidjson::Document &doc)
 {
-	FILE *json_fp = fopen(json_path.c_str(), "rb");
-	if (!json_fp)
+	auto db = std::unique_ptr<DatabaseInterface>(create_stream_archive_database(foz_path.c_str(), DatabaseMode::ReadOnly));
+	if (!db)
+		return false;
+	if (!db->prepare())
 		return false;
 
-	fseek(json_fp, 0, SEEK_END);
-	long fsize = ftell(json_fp);
-	if (fsize <= 0)
+	static const ResourceTag stat_tags[] = {
+		RESOURCE_GRAPHICS_PIPELINE,
+		RESOURCE_COMPUTE_PIPELINE,
+	};
+
+	doc.SetArray();
+
+	std::vector<char> json_buffer;
+
+	for (auto &tag : stat_tags)
 	{
-		fclose(json_fp);
-		return false;
+		size_t num_hashes = 0;
+		if (!db->get_hash_list_for_resource_tag(tag, &num_hashes, nullptr))
+			return false;
+		std::vector<Hash> hashes(num_hashes);
+		if (!db->get_hash_list_for_resource_tag(tag, &num_hashes, hashes.data()))
+			return false;
+
+		for (auto &hash : hashes)
+		{
+			rapidjson::Document tmp_doc;
+			size_t json_size = 0;
+			if (!db->read_entry(tag, hash, &json_size, nullptr, 0))
+				continue;
+			json_buffer.resize(json_size);
+			if (!db->read_entry(tag, hash, &json_size, json_buffer.data(), 0))
+				continue;
+
+			tmp_doc.Parse(rapidjson::StringRef(json_buffer.data(), json_buffer.size()));
+			if (tmp_doc.HasParseError())
+				continue;
+
+			rapidjson::Value v;
+			v.CopyFrom(tmp_doc, doc.GetAllocator());
+			doc.PushBack(v, doc.GetAllocator());
+		}
 	}
-	fseek(json_fp, 0, SEEK_SET);
 
-	std::vector<char> buffer(fsize);
-
-	fread(buffer.data(), fsize, 1, json_fp);
-	fclose(json_fp);
-
-	doc.Parse(buffer.data(), fsize);
-	bool ret = !doc.HasParseError();
-
-	return ret;
+	return true;
 }
 
-static void stats_to_csv(std::string stats_path, rapidjson::Document &doc)
+static void stats_to_csv(const std::string &stats_path, rapidjson::Document &doc)
 {
 	std::vector<std::string> header;
 	std::unordered_map<std::string, size_t> columns;
@@ -2206,18 +2228,18 @@ static void stats_to_csv(std::string stats_path, rapidjson::Document &doc)
 }
 
 #ifndef NO_ROBUST_REPLAYER
-static void dump_stats(const std::string &stats_path, const std::vector<std::string> &json_paths)
+static void dump_stats(const std::string &stats_path, const std::vector<std::string> &foz_paths)
 {
 	rapidjson::Document doc;
 	doc.SetArray();
 	auto &alloc = doc.GetAllocator();
 
-	for (auto &sp : json_paths)
+	for (auto &sp : foz_paths)
 	{
 		rapidjson::Document tmp_doc;
-
 		if (!parse_json_stats(sp, tmp_doc))
 			continue;
+
 		doc.Reserve(doc.Size() + tmp_doc.Size(), alloc);
 		for (auto itr = tmp_doc.Begin(); itr != tmp_doc.End(); itr++)
 		{
@@ -2235,12 +2257,12 @@ static void dump_stats(const std::string &stats_path, const std::vector<std::str
 static void dump_stats(const std::string &stats_path)
 {
 	rapidjson::Document doc;
-	auto json_path = stats_path + ".json";
+	auto foz_path = stats_path + ".foz";
 
-	if (!parse_json_stats(json_path, doc))
+	if (!parse_json_stats(foz_path, doc))
 		return;
 	stats_to_csv(stats_path, doc);
-	remove(json_path.c_str());
+	remove(foz_path.c_str());
 }
 
 static int run_normal_process(ThreadedReplayer &replayer, const vector<const char *> &databases)
