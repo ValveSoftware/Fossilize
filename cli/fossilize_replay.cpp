@@ -1000,7 +1000,7 @@ struct ThreadedReplayer : StateCreatorInterface
 
 			if (opts.pipeline_stats)
 			{
-				auto foz_path = opts.pipeline_stats_path + ".foz";
+				auto foz_path = opts.pipeline_stats_path + ".__tmp.foz";
 				pipeline_stats_db.reset(create_stream_archive_database(foz_path.c_str(), DatabaseMode::Append));
 				if (!pipeline_stats_db->prepare())
 				{
@@ -2257,7 +2257,7 @@ static void dump_stats(const std::string &stats_path, const std::vector<std::str
 static void dump_stats(const std::string &stats_path)
 {
 	rapidjson::Document doc;
-	auto foz_path = stats_path + ".foz";
+	auto foz_path = stats_path + ".__tmp.foz";
 
 	if (!parse_json_stats(foz_path, doc))
 		return;
@@ -2715,7 +2715,7 @@ int main(int argc, char *argv[])
 					path += ".";
 					path += std::to_string(idx);
 				}
-				path += ".foz";
+				path += ".__tmp.foz";
 				paths.push_back(path);
 			}
 			dump_stats(replayer_opts.pipeline_stats_path, paths);
