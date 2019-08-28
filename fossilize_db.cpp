@@ -233,6 +233,14 @@ struct DumbDirectoryDatabase : DatabaseInterface
 		return true;
 	}
 
+	const char *get_db_path_for_hash(ResourceTag tag, Hash hash) override
+	{
+		if (!has_entry(tag, hash))
+			return nullptr;
+
+		return base_directory.c_str();
+	}
+
 	string base_directory;
 	DatabaseMode mode;
 	unordered_set<Hash> seen_blobs[RESOURCE_COUNT];
@@ -447,6 +455,14 @@ struct ZipDatabase : DatabaseInterface
 			sort(hashes, hashes + size);
 		}
 		return true;
+	}
+
+	const char *get_db_path_for_hash(ResourceTag tag, Hash hash) override
+	{
+		if (!has_entry(tag, hash))
+			return nullptr;
+
+		return path.c_str();
 	}
 
 	string path;
@@ -977,6 +993,14 @@ struct StreamArchive : DatabaseInterface
 			return false;
 	}
 
+	const char *get_db_path_for_hash(ResourceTag tag, Hash hash) override
+	{
+		if (!has_entry(tag, hash))
+			return nullptr;
+
+		return path.c_str();
+	}
+
 	FILE *file = nullptr;
 	string path;
 	unordered_map<Hash, Entry> seen_blobs[RESOURCE_COUNT];
@@ -1177,6 +1201,20 @@ struct ConcurrentDatabase : DatabaseInterface
 		}
 
 		return true;
+	}
+
+	const char *get_db_path_for_hash(ResourceTag tag, Hash hash) override
+	{
+		if (readonly_interface && readonly_interface->has_entry(tag, hash))
+			return readonly_interface->get_db_path_for_hash(tag, hash);
+
+		for (auto &extra : extra_readonly)
+		{
+			if (extra->has_entry(tag, hash))
+				return extra->get_db_path_for_hash(tag, hash);
+		}
+
+		return nullptr;
 	}
 
 	std::string base_path;

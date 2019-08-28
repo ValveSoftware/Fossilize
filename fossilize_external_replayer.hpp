@@ -45,11 +45,21 @@ public:
 		// Path to an on-disk pipeline cache. Maps to --on-disk-pipeline-cache.
 		const char *on_disk_pipeline_cache;
 
+		// Path to store pipeline stats in.
+		const char *pipeline_stats_path;
+
 		// Maps to --num-threads. If 0, no argument for --num-threads is passed.
 		unsigned num_threads;
 
 		// Maps to --device-index.
 		unsigned device_index;
+
+		// Carve out a range of which pipelines to replay.
+		// Used for multi-process replays where each process gets its own slice to churn through.
+		unsigned start_graphics_index;
+		unsigned end_graphics_index;
+		unsigned start_compute_index;
+		unsigned end_compute_index;
 
 		// Maps to --pipeline-cache
 		bool pipeline_cache;

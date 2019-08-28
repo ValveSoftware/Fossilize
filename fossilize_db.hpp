@@ -98,6 +98,8 @@ public:
 
 	// Ensures all file writes are flushed, ala fflush(). Might be noop depending on the implementation.
 	virtual void flush() = 0;
+
+	virtual const char *get_db_path_for_hash(ResourceTag tag, Hash hash) = 0;
 };
 
 enum class DatabaseMode

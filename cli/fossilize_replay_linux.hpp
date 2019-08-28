@@ -347,6 +347,12 @@ bool ProcessProgress::start_child_process()
 			copy_opts.on_disk_pipeline_cache_path += std::to_string(index);
 		}
 
+		if (!copy_opts.pipeline_stats_path.empty() && index != 0)
+		{
+			copy_opts.pipeline_stats_path += ".";
+			copy_opts.pipeline_stats_path += std::to_string(index);
+		}
+
 		exit(run_slave_process(Global::device_options, copy_opts, Global::databases));
 	}
 	else
@@ -475,14 +481,31 @@ static int run_master_process(const VulkanDevice::Options &opts,
 		}
 	}
 
+	unsigned requested_graphic_pipelines = replayer_opts.end_graphics_index - replayer_opts.start_graphics_index;
+	unsigned graphics_pipeline_offset = 0;
+	unsigned requested_compute_pipelines = replayer_opts.end_compute_index - replayer_opts.start_compute_index;
+	unsigned compute_pipeline_offset = 0;
+
+	if (requested_graphic_pipelines < num_graphics_pipelines)
+	{
+		num_graphics_pipelines = requested_graphic_pipelines;
+		graphics_pipeline_offset = replayer_opts.start_graphics_index;
+	}
+
+	if (requested_compute_pipelines < num_compute_pipelines)
+	{
+		num_compute_pipelines = requested_compute_pipelines;
+		compute_pipeline_offset = replayer_opts.start_compute_index;
+	}
+
 	// fork() and pipe() strategy.
 	for (unsigned i = 0; i < processes; i++)
 	{
 		auto &progress = child_processes[i];
-		progress.start_graphics_index = (i * unsigned(num_graphics_pipelines)) / processes;
-		progress.end_graphics_index = ((i + 1) * unsigned(num_graphics_pipelines)) / processes;
-		progress.start_compute_index = (i * unsigned(num_compute_pipelines)) / processes;
-		progress.end_compute_index = ((i + 1) * unsigned(num_compute_pipelines)) / processes;
+		progress.start_graphics_index = graphics_pipeline_offset + (i * unsigned(num_graphics_pipelines)) / processes;
+		progress.end_graphics_index = graphics_pipeline_offset + ((i + 1) * unsigned(num_graphics_pipelines)) / processes;
+		progress.start_compute_index = compute_pipeline_offset + (i * unsigned(num_compute_pipelines)) / processes;
+		progress.end_compute_index = compute_pipeline_offset + ((i + 1) * unsigned(num_compute_pipelines)) / processes;
 		progress.index = i;
 		if (!progress.start_child_process())
 		{
