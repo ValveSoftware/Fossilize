@@ -946,7 +946,29 @@ struct ThreadedReplayer : StateCreatorInterface
 		});
 	}
 
-	bool validate_pipeline_cache_header(const vector<uint8_t> &blob)
+	bool validate_validation_cache_header(const vector<uint8_t> &blob) const
+	{
+		if (blob.size() < 8 + VK_UUID_SIZE)
+		{
+			LOGE("Validation cache header is too small.\n");
+			return false;
+		}
+
+		const auto read_le = [&](unsigned offset) -> uint32_t {
+			return uint32_t(blob[offset + 0]) |
+			       (uint32_t(blob[offset + 1]) << 8) |
+			       (uint32_t(blob[offset + 2]) << 16) |
+			       (uint32_t(blob[offset + 3]) << 24);
+		};
+
+		if (read_le(4) != VK_VALIDATION_CACHE_HEADER_VERSION_ONE_EXT)
+			return false;
+
+		// Doesn't seem to be a way to get the UUID, but layer should reject mismatches.
+		return true;
+	}
+
+	bool validate_pipeline_cache_header(const vector<uint8_t> &blob) const
 	{
 		if (blob.size() < 16 + VK_UUID_SIZE)
 		{
@@ -1088,10 +1110,41 @@ struct ThreadedReplayer : StateCreatorInterface
 				if (device->has_validation_cache())
 				{
 					VkValidationCacheCreateInfoEXT info = {VK_STRUCTURE_TYPE_VALIDATION_CACHE_CREATE_INFO_EXT };
+					vector<uint8_t> on_disk_cache;
+
+					FILE *file = fopen(opts.on_disk_validation_cache_path.c_str(), "rb");
+					if (file)
+					{
+						fseek(file, 0, SEEK_END);
+						size_t len = ftell(file);
+						rewind(file);
+
+						if (len != 0)
+						{
+							on_disk_cache.resize(len);
+							if (fread(on_disk_cache.data(), 1, len, file) == len)
+							{
+								if (validate_validation_cache_header(on_disk_cache))
+								{
+									info.pInitialData = on_disk_cache.data();
+									info.initialDataSize = on_disk_cache.size();
+								}
+								else
+									LOGI("Failed to validate validation cache. Creating a blank one.\n");
+							}
+						}
+					}
+
 					if (vkCreateValidationCacheEXT(device->get_device(), &info, nullptr, &validation_cache) != VK_SUCCESS)
 					{
-						LOGE("Failed to create validation cache.\n");
-						validation_cache = VK_NULL_HANDLE;
+						LOGE("Failed to create validation cache, trying to create a blank one.\n");
+						info.initialDataSize = 0;
+						info.pInitialData = nullptr;
+						if (vkCreateValidationCacheEXT(device->get_device(), &info, nullptr, &validation_cache) != VK_SUCCESS)
+						{
+							LOGE("Failed to create validation cache.\n");
+							validation_cache = VK_NULL_HANDLE;
+						}
 					}
 				}
 				else
@@ -1218,6 +1271,13 @@ struct ThreadedReplayer : StateCreatorInterface
 			if (*module != VK_NULL_HANDLE)
 				vkDestroyShaderModule(device->get_device(), *module, nullptr);
 			*module = VK_NULL_HANDLE;
+
+			VkShaderModuleValidationCacheCreateInfoEXT validation_info = { VK_STRUCTURE_TYPE_SHADER_MODULE_VALIDATION_CACHE_CREATE_INFO_EXT };
+			if (validation_cache)
+			{
+				validation_info.validationCache = validation_cache;
+				const_cast<VkShaderModuleCreateInfo *>(create_info)->pNext = &validation_info;
+			}
 
 			auto start_time = chrono::steady_clock::now();
 			if (vkCreateShaderModule(device->get_device(), create_info, nullptr, module) == VK_SUCCESS)
