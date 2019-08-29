@@ -74,6 +74,11 @@ public:
 		return pipeline_stats;
 	}
 
+	bool has_validation_cache() const
+	{
+		return validation_cache;
+	}
+
 private:
 	VkInstance instance = VK_NULL_HANDLE;
 	VkPhysicalDevice gpu = VK_NULL_HANDLE;
@@ -88,5 +93,6 @@ private:
 	void init_null_device();
 	bool is_null_device = false;
 	bool pipeline_stats = false;
+	bool validation_cache = false;
 };
 }

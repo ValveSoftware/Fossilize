@@ -297,7 +297,17 @@ bool VulkanDevice::init_device(const Options &opts)
 
 		// FIXME: This will not work on Android, use "shopping list of layers" method. :(
 		if (find_layer(device_layers, "VK_LAYER_LUNARG_standard_validation"))
+		{
 			active_device_layers.push_back("VK_LAYER_LUNARG_standard_validation");
+
+			uint32_t validation_ext_count = 0;
+			vkEnumerateDeviceExtensionProperties(gpu, "VK_LAYER_LUNARG_standard_validation", &validation_ext_count, nullptr);
+			vector<VkExtensionProperties> validation_extensions(validation_ext_count);
+			vkEnumerateDeviceExtensionProperties(gpu, "VK_LAYER_LUNARG_standard_validation", &validation_ext_count, validation_extensions.data());
+			validation_cache = find_extension(validation_extensions, VK_EXT_VALIDATION_CACHE_EXTENSION_NAME);
+			if (validation_cache)
+				active_device_extensions.push_back(VK_EXT_VALIDATION_CACHE_EXTENSION_NAME);
+		}
 	}
 
 	uint32_t device_ext_count = 0;

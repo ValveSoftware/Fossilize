@@ -214,6 +214,7 @@ struct ThreadedReplayer : StateCreatorInterface
 		bool ignore_derived_pipelines = false;
 		bool pipeline_stats = false;
 		string on_disk_pipeline_cache_path;
+		string on_disk_validation_cache_path;
 		string pipeline_stats_path;
 
 		// VALVE: Add multi-threaded pipeline creation
@@ -873,6 +874,32 @@ struct ThreadedReplayer : StateCreatorInterface
 		}
 	}
 
+	void flush_validation_cache()
+	{
+		if (device && validation_cache)
+		{
+			if (!opts.on_disk_validation_cache_path.empty())
+			{
+				size_t validation_cache_size = 0;
+				if (vkGetValidationCacheDataEXT(device->get_device(), validation_cache, &validation_cache_size, nullptr) == VK_SUCCESS)
+				{
+					vector<uint8_t> validation_buffer(validation_cache_size);
+					if (vkGetValidationCacheDataEXT(device->get_device(), validation_cache, &validation_cache_size, validation_buffer.data()) == VK_SUCCESS)
+					{
+						// This isn't safe to do in a signal handler, but it's unlikely to be a problem in practice.
+						FILE *file = fopen(opts.on_disk_validation_cache_path.c_str(), "wb");
+						if (!file || fwrite(validation_buffer.data(), 1, validation_buffer.size(), file) != validation_buffer.size())
+							LOGE("Failed to write pipeline cache data to disk.\n");
+						if (file)
+							fclose(file);
+					}
+				}
+			}
+			vkDestroyValidationCacheEXT(device->get_device(), validation_cache, nullptr);
+			validation_cache = VK_NULL_HANDLE;
+		}
+	}
+
 	void tear_down_threads()
 	{
 		// Signal that it's time for threads to die.
@@ -892,6 +919,7 @@ struct ThreadedReplayer : StateCreatorInterface
 	{
 		tear_down_threads();
 		flush_pipeline_cache();
+		flush_validation_cache();
 
 		for (auto &sampler : samplers)
 			if (sampler.second)
@@ -1052,6 +1080,23 @@ struct ThreadedReplayer : StateCreatorInterface
 						LOGE("Failed to create pipeline cache.\n");
 						pipeline_cache = VK_NULL_HANDLE;
 					}
+				}
+			}
+
+			if (!opts.on_disk_validation_cache_path.empty())
+			{
+				if (device->has_validation_cache())
+				{
+					VkValidationCacheCreateInfoEXT info = {VK_STRUCTURE_TYPE_VALIDATION_CACHE_CREATE_INFO_EXT };
+					if (vkCreateValidationCacheEXT(device->get_device(), &info, nullptr, &validation_cache) != VK_SUCCESS)
+					{
+						LOGE("Failed to create validation cache.\n");
+						validation_cache = VK_NULL_HANDLE;
+					}
+				}
+				else
+				{
+					LOGE("Requested validation cache, but validation layers do not support this extension.\n");
 				}
 			}
 
@@ -1803,6 +1848,7 @@ struct ThreadedReplayer : StateCreatorInterface
 		spurious_deadlock();
 #endif
 		flush_pipeline_cache();
+		flush_validation_cache();
 		device.reset();
 	}
 
@@ -1821,6 +1867,7 @@ struct ThreadedReplayer : StateCreatorInterface
 	std::unordered_map<VkShaderModule, Hash> shader_module_to_hash;
 	std::unordered_set<VkShaderModule> enqueued_shader_modules;
 	VkPipelineCache pipeline_cache = VK_NULL_HANDLE;
+	VkValidationCacheEXT validation_cache = VK_NULL_HANDLE;
 
 	// VALVE: multi-threaded work queue for replayer
 
@@ -1927,6 +1974,7 @@ static void print_help()
 	     "\t[--num-threads <count>]\n"
 	     "\t[--loop <count>]\n"
 	     "\t[--on-disk-pipeline-cache <path>]\n"
+	     "\t[--on-disk-validation-cache <path>]\n"
 	     "\t[--graphics-pipeline-range <start> <end>]\n"
 	     "\t[--compute-pipeline-range <start> <end>]\n"
 	     "\t[--shader-cache-size <value (MiB)>]\n"
@@ -2592,6 +2640,10 @@ int main(int argc, char *argv[])
 	cbs.add("--pipeline-cache", [&](CLIParser &) { replayer_opts.pipeline_cache = true; });
 	cbs.add("--spirv-val", [&](CLIParser &) { replayer_opts.spirv_validate = true; });
 	cbs.add("--on-disk-pipeline-cache", [&](CLIParser &parser) { replayer_opts.on_disk_pipeline_cache_path = parser.next_string(); });
+	cbs.add("--on-disk-validation-cache", [&](CLIParser &parser) {
+		replayer_opts.on_disk_validation_cache_path = parser.next_string();
+		opts.enable_validation = true;
+	});
 	cbs.add("--num-threads", [&](CLIParser &parser) { replayer_opts.num_threads = parser.next_uint(); });
 	cbs.add("--loop", [&](CLIParser &parser) { replayer_opts.loop_count = parser.next_uint(); });
 	cbs.add("--graphics-pipeline-range", [&](CLIParser &parser) {
