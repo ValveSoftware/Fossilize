@@ -389,6 +389,20 @@ bool ProcessProgress::start_child_process()
 		// We're supposed to populate the driver caches here first and foremost.
 	}
 
+	if (!Global::base_replayer_options.on_disk_validation_cache_path.empty())
+	{
+		cmdline += " --on-disk-validation-cache ";
+		cmdline += "\"";
+		cmdline += Global::base_replayer_options.on_disk_validation_cache_path;
+		if (index != 0)
+		{
+			cmdline += ".";
+			cmdline += std::to_string(index);
+		}
+		cmdline += "\"";
+		// TODO: Merge the on-disk validation caches, but it's probably not that important.
+	}
+
 	cmdline += " --shader-cache-size ";
 	cmdline += std::to_string(Global::base_replayer_options.shader_cache_size_mb);
 

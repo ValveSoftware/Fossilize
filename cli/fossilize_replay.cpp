@@ -2122,9 +2122,11 @@ static int run_progress_process(const VulkanDevice::Options &device_opts,
 {
 	ExternalReplayer::Options opts = {};
 	opts.on_disk_pipeline_cache = replayer_opts.on_disk_pipeline_cache_path.empty() ?
-		nullptr : replayer_opts.on_disk_pipeline_cache_path.c_str();
+	                              nullptr : replayer_opts.on_disk_pipeline_cache_path.c_str();
+	opts.on_disk_validation_cache = replayer_opts.on_disk_validation_cache_path.empty() ?
+	                                nullptr : replayer_opts.on_disk_validation_cache_path.c_str();
 	opts.pipeline_stats_path = replayer_opts.pipeline_stats_path.empty() ?
-		nullptr : replayer_opts.pipeline_stats_path.c_str();
+	                           nullptr : replayer_opts.pipeline_stats_path.c_str();
 	opts.pipeline_cache = replayer_opts.pipeline_cache;
 	opts.num_threads = replayer_opts.num_threads;
 	opts.quiet = true;

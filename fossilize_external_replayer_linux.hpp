@@ -354,6 +354,12 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 			argv.push_back(options.on_disk_pipeline_cache);
 		}
 
+		if (options.on_disk_validation_cache)
+		{
+			argv.push_back("--on-disk-validation-cache");
+			argv.push_back(options.on_disk_validation_cache);
+		}
+
 		if (options.enable_validation)
 			argv.push_back("--enable-validation");
 

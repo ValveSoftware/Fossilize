@@ -312,6 +312,14 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 		cmdline += "\"";
 	}
 
+	if (options.on_disk_validation_cache)
+	{
+		cmdline += " --on-disk-validation-cache ";
+		cmdline += "\"";
+		cmdline += options.on_disk_validation_cache;
+		cmdline += "\"";
+	}
+
 	cmdline += " --device-index ";
 	cmdline += std::to_string(options.device_index);
 
