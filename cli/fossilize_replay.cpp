@@ -215,6 +215,8 @@ struct ThreadedReplayer : StateCreatorInterface
 		bool pipeline_stats = false;
 		string on_disk_pipeline_cache_path;
 		string on_disk_validation_cache_path;
+		string on_disk_validation_whitelist_path;
+		string on_disk_validation_blacklist_path;
 		string pipeline_stats_path;
 
 		// VALVE: Add multi-threaded pipeline creation
@@ -302,6 +304,7 @@ struct ThreadedReplayer : StateCreatorInterface
 		unsigned num_failed_module_hashes = 0;
 
 		bool force_outside_range = false;
+		bool triggered_validation_error = false;
 	};
 
 	ThreadedReplayer(const VulkanDevice::Options &device_opts_, const Options &opts_)
@@ -339,11 +342,39 @@ struct ThreadedReplayer : StateCreatorInterface
 #endif
 
 		shader_modules.set_target_size(target_size);
+		init_whitelist_db();
+		init_blacklist_db();
 	}
 
 	PerThreadData &get_per_thread_data()
 	{
 		return per_thread_data[Global::worker_thread_index];
+	}
+
+	void init_whitelist_db()
+	{
+		if (!opts.on_disk_validation_whitelist_path.empty())
+		{
+			validation_whitelist_db.reset(create_concurrent_database(opts.on_disk_validation_whitelist_path.c_str(), DatabaseMode::Append, nullptr, 0));
+			if (!validation_whitelist_db->prepare())
+			{
+				LOGE("Could not open validation whitelist DB. Ignoring.\n");
+				validation_whitelist_db.reset();
+			}
+		}
+	}
+
+	void init_blacklist_db()
+	{
+		if (!opts.on_disk_validation_blacklist_path.empty())
+		{
+			validation_blacklist_db.reset(create_concurrent_database(opts.on_disk_validation_blacklist_path.c_str(), DatabaseMode::Append, nullptr, 0));
+			if (!validation_blacklist_db->prepare())
+			{
+				LOGE("Could not open validation blacklist DB. Ignoring.\n");
+				validation_blacklist_db.reset();
+			}
+		}
 	}
 
 	void start_worker_threads()
@@ -525,6 +556,35 @@ struct ThreadedReplayer : StateCreatorInterface
 		}
 	}
 
+	void blacklist_resource(ResourceTag tag, Hash hash)
+	{
+		if (validation_blacklist_db)
+		{
+			lock_guard<mutex> holder{validation_db_mutex};
+			validation_blacklist_db->write_entry(tag, hash, nullptr, 0, 0);
+		}
+	}
+
+	void whitelist_resource(ResourceTag tag, Hash hash)
+	{
+		if (validation_whitelist_db)
+		{
+			lock_guard<mutex> holder{validation_db_mutex};
+			validation_whitelist_db->write_entry(tag, hash, nullptr, 0, 0);
+		}
+	}
+
+	bool resource_is_blacklisted(ResourceTag tag, Hash hash)
+	{
+		if (validation_blacklist_db)
+		{
+			lock_guard<mutex> holder{validation_db_mutex};
+			return validation_blacklist_db->has_entry(tag, hash);
+		}
+		else
+			return false;
+	}
+
 	void run_creation_work_item(const PipelineWorkItem &work_item)
 	{
 		switch (work_item.tag)
@@ -535,6 +595,7 @@ struct ThreadedReplayer : StateCreatorInterface
 			per_thread.current_graphics_index = work_item.index + 1;
 			per_thread.current_graphics_pipeline = work_item.hash;
 			per_thread.current_compute_pipeline = 0;
+			per_thread.triggered_validation_error = false;
 
 			// Make sure to iterate the index so main thread and worker threads
 			// have a coherent idea of replayer state.
@@ -564,6 +625,14 @@ struct ThreadedReplayer : StateCreatorInterface
 					LOGE("Invalid derivative pipeline!\n");
 					break;
 				}
+			}
+
+			// Don't bother replaying blacklisted objects.
+			if (resource_is_blacklisted(work_item.tag, work_item.hash))
+			{
+				*work_item.output.pipeline = VK_NULL_HANDLE;
+				LOGE("Resource is blacklisted, ignoring.\n");
+				break;
 			}
 
 			for (unsigned i = 0; i < loop_count; i++)
@@ -645,6 +714,9 @@ struct ThreadedReplayer : StateCreatorInterface
 				}
 			}
 
+			if (device_opts.enable_validation && !per_thread.triggered_validation_error)
+				whitelist_resource(work_item.tag, work_item.hash);
+
 			per_thread.current_graphics_pipeline = 0;
 			per_thread.current_compute_pipeline = 0;
 			break;
@@ -656,6 +728,7 @@ struct ThreadedReplayer : StateCreatorInterface
 			per_thread.current_compute_index = work_item.index + 1;
 			per_thread.current_compute_pipeline = work_item.hash;
 			per_thread.current_graphics_pipeline = 0;
+			per_thread.triggered_validation_error = false;
 
 			// Make sure to iterate the index so main thread and worker threads
 			// have a coherent idea of replayer state.
@@ -681,6 +754,14 @@ struct ThreadedReplayer : StateCreatorInterface
 					*work_item.output.pipeline = VK_NULL_HANDLE;
 					break;
 				}
+			}
+
+			// Don't bother replaying blacklisted objects.
+			if (resource_is_blacklisted(work_item.tag, work_item.hash))
+			{
+				*work_item.output.pipeline = VK_NULL_HANDLE;
+				LOGE("Resource is blacklisted, ignoring.\n");
+				break;
 			}
 
 			for (unsigned i = 0; i < loop_count; i++)
@@ -755,6 +836,9 @@ struct ThreadedReplayer : StateCreatorInterface
 					LOGE("Failed to create compute pipeline for hash 0x%016" PRIx64 ".\n", work_item.hash);
 				}
 			}
+
+			if (device_opts.enable_validation && !per_thread.triggered_validation_error)
+				whitelist_resource(work_item.tag, work_item.hash);
 
 			per_thread.current_compute_pipeline = 0;
 			per_thread.current_graphics_pipeline = 0;
@@ -1909,6 +1993,10 @@ struct ThreadedReplayer : StateCreatorInterface
 #endif
 		flush_pipeline_cache();
 		flush_validation_cache();
+		if (validation_whitelist_db)
+			validation_whitelist_db->flush();
+		if (validation_blacklist_db)
+			validation_blacklist_db->flush();
 		device.reset();
 	}
 
@@ -1957,6 +2045,10 @@ struct ThreadedReplayer : StateCreatorInterface
 	std::mutex pipeline_stats_queue_mutex;
 	std::unique_ptr<DatabaseInterface> pipeline_stats_db;
 
+	std::mutex validation_db_mutex;
+	std::unique_ptr<DatabaseInterface> validation_whitelist_db;
+	std::unique_ptr<DatabaseInterface> validation_blacklist_db;
+
 	std::mutex hash_lock;
 	std::unordered_map<Hash, DeferredGraphicsInfo> graphics_parents;
 	std::unordered_map<Hash, DeferredComputeInfo> compute_parents;
@@ -1997,6 +2089,15 @@ struct ThreadedReplayer : StateCreatorInterface
 static void on_validation_error(void *userdata)
 {
 	auto *replayer = static_cast<ThreadedReplayer *>(userdata);
+
+	auto &per_thread = replayer->get_per_thread_data();
+	per_thread.triggered_validation_error = true;
+
+	if (per_thread.current_graphics_pipeline)
+		replayer->blacklist_resource(RESOURCE_GRAPHICS_PIPELINE, per_thread.current_graphics_pipeline);
+	if (per_thread.current_compute_pipeline)
+		replayer->blacklist_resource(RESOURCE_COMPUTE_PIPELINE, per_thread.current_compute_pipeline);
+
 	if (replayer->opts.on_validation_error_callback)
 		replayer->opts.on_validation_error_callback(replayer);
 }
@@ -2035,6 +2136,8 @@ static void print_help()
 	     "\t[--loop <count>]\n"
 	     "\t[--on-disk-pipeline-cache <path>]\n"
 	     "\t[--on-disk-validation-cache <path>]\n"
+	     "\t[--on-disk-validation-whitelist <path>]\n"
+	     "\t[--on-disk-validation-blacklist <path>]\n"
 	     "\t[--graphics-pipeline-range <start> <end>]\n"
 	     "\t[--compute-pipeline-range <start> <end>]\n"
 	     "\t[--shader-cache-size <value (MiB)>]\n"
@@ -2704,6 +2807,14 @@ int main(int argc, char *argv[])
 	cbs.add("--on-disk-pipeline-cache", [&](CLIParser &parser) { replayer_opts.on_disk_pipeline_cache_path = parser.next_string(); });
 	cbs.add("--on-disk-validation-cache", [&](CLIParser &parser) {
 		replayer_opts.on_disk_validation_cache_path = parser.next_string();
+		opts.enable_validation = true;
+	});
+	cbs.add("--on-disk-validation-blacklist", [&](CLIParser &parser) {
+		replayer_opts.on_disk_validation_blacklist_path = parser.next_string();
+		opts.enable_validation = true;
+	});
+	cbs.add("--on-disk-validation-whitelist", [&](CLIParser &parser) {
+		replayer_opts.on_disk_validation_whitelist_path = parser.next_string();
 		opts.enable_validation = true;
 	});
 	cbs.add("--num-threads", [&](CLIParser &parser) { replayer_opts.num_threads = parser.next_uint(); });
