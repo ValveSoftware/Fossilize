@@ -330,7 +330,7 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 
 	if (options.on_disk_validation_blacklist)
 	{
-		cmdline += " --on-disk-validation-blaclist ";
+		cmdline += " --on-disk-validation-blacklist ";
 		cmdline += "\"";
 		cmdline += options.on_disk_validation_blacklist;
 		cmdline += "\"";
