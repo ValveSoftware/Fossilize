@@ -76,7 +76,7 @@ enum class DatabaseMode
 	OverWrite,
 	// In the stream database backend, this will ensure that the database is exclusively created.
 	// For other backends, this is an alias for OverWrite
-			ExclusiveOverWrite
+	ExclusiveOverWrite
 };
 
 // This is an interface to interact with an external database for blob modules.
