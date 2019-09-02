@@ -632,6 +632,8 @@ struct ThreadedReplayer : StateCreatorInterface
 			{
 				*work_item.output.pipeline = VK_NULL_HANDLE;
 				LOGE("Resource is blacklisted, ignoring.\n");
+				if (opts.control_block)
+					opts.control_block->skipped_graphics.fetch_add(1, std::memory_order_relaxed);
 				break;
 			}
 
@@ -761,6 +763,8 @@ struct ThreadedReplayer : StateCreatorInterface
 			{
 				*work_item.output.pipeline = VK_NULL_HANDLE;
 				LOGE("Resource is blacklisted, ignoring.\n");
+				if (opts.control_block)
+					opts.control_block->skipped_compute.fetch_add(1, std::memory_order_relaxed);
 				break;
 			}
 
@@ -1309,7 +1313,7 @@ struct ThreadedReplayer : StateCreatorInterface
 	bool enqueue_create_shader_module(Hash hash, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module) override
 	{
 		*module = VK_NULL_HANDLE;
-		if (masked_shader_modules.count(hash))
+		if (masked_shader_modules.count(hash) || resource_is_blacklisted(RESOURCE_SHADER_MODULE, hash))
 		{
 			lock_guard<mutex> lock(internal_enqueue_mutex);
 			//LOGI("Inserting shader module %016llx.\n", static_cast<unsigned long long>(hash));
@@ -1348,6 +1352,9 @@ struct ThreadedReplayer : StateCreatorInterface
 			}
 		}
 #endif
+
+		auto &per_thread = get_per_thread_data();
+		per_thread.triggered_validation_error = false;
 
 		for (unsigned i = 0; i < loop_count; i++)
 		{
@@ -1390,6 +1397,16 @@ struct ThreadedReplayer : StateCreatorInterface
 			lock_guard<mutex> lock(internal_enqueue_mutex);
 			//LOGI("Inserting shader module %016llx.\n", static_cast<unsigned long long>(hash));
 			shader_modules.insert_object(hash, *module, create_info->codeSize);
+		}
+
+		// vkCreateShaderModule doesn't generally crash anything, so just deal with blacklisting here
+		// rather than in an error callback.
+		if (device_opts.enable_validation)
+		{
+			if (!per_thread.triggered_validation_error)
+				whitelist_resource(RESOURCE_SHADER_MODULE, hash);
+			else
+				blacklist_resource(RESOURCE_SHADER_MODULE, hash);
 		}
 
 		return true;
@@ -2228,6 +2245,10 @@ static int run_progress_process(const VulkanDevice::Options &device_opts,
 	                              nullptr : replayer_opts.on_disk_pipeline_cache_path.c_str();
 	opts.on_disk_validation_cache = replayer_opts.on_disk_validation_cache_path.empty() ?
 	                                nullptr : replayer_opts.on_disk_validation_cache_path.c_str();
+	opts.on_disk_validation_whitelist = replayer_opts.on_disk_validation_whitelist_path.empty() ?
+	                                    nullptr : replayer_opts.on_disk_validation_whitelist_path.c_str();
+	opts.on_disk_validation_blacklist = replayer_opts.on_disk_validation_blacklist_path.empty() ?
+	                                    nullptr : replayer_opts.on_disk_validation_blacklist_path.c_str();
 	opts.pipeline_stats_path = replayer_opts.pipeline_stats_path.empty() ?
 	                           nullptr : replayer_opts.pipeline_stats_path.c_str();
 	opts.pipeline_cache = replayer_opts.pipeline_cache;

@@ -360,6 +360,18 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 			argv.push_back(options.on_disk_validation_cache);
 		}
 
+		if (options.on_disk_validation_whitelist)
+		{
+			argv.push_back("--on-disk-validation-whitelist");
+			argv.push_back(options.on_disk_validation_whitelist);
+		}
+
+		if (options.on_disk_validation_blacklist)
+		{
+			argv.push_back("--on-disk-validation-blacklist");
+			argv.push_back(options.on_disk_validation_blacklist);
+		}
+
 		if (options.enable_validation)
 			argv.push_back("--enable-validation");
 

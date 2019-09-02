@@ -403,6 +403,22 @@ bool ProcessProgress::start_child_process()
 		// TODO: Merge the on-disk validation caches, but it's probably not that important.
 	}
 
+	if (!Global::base_replayer_options.on_disk_validation_whitelist_path.empty())
+	{
+		cmdline += " --on-disk-validation-whitelist ";
+		cmdline += "\"";
+		cmdline += Global::base_replayer_options.on_disk_validation_whitelist_path;
+		cmdline += "\"";
+	}
+
+	if (!Global::base_replayer_options.on_disk_validation_blacklist_path.empty())
+	{
+		cmdline += " --on-disk-validation-blacklist ";
+		cmdline += "\"";
+		cmdline += Global::base_replayer_options.on_disk_validation_blacklist_path;
+		cmdline += "\"";
+	}
+
 	cmdline += " --shader-cache-size ";
 	cmdline += std::to_string(Global::base_replayer_options.shader_cache_size_mb);
 
