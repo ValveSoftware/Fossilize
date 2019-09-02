@@ -1318,6 +1318,8 @@ struct ThreadedReplayer : StateCreatorInterface
 			lock_guard<mutex> lock(internal_enqueue_mutex);
 			//LOGI("Inserting shader module %016llx.\n", static_cast<unsigned long long>(hash));
 			shader_modules.insert_object(hash, *module, 1);
+			if (opts.control_block)
+				opts.control_block->banned_modules.fetch_add(1, std::memory_order_relaxed);
 			return true;
 		}
 
