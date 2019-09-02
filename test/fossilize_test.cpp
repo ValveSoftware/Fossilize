@@ -870,6 +870,157 @@ static bool test_concurrent_database()
 	return true;
 }
 
+static bool test_filter()
+{
+	static const uint8_t blob[4] = { 1, 2, 3, 4 };
+
+	{
+		auto db = std::unique_ptr<DatabaseInterface>(create_stream_archive_database(".__test_filter.foz",
+		                                                                             DatabaseMode::OverWrite));
+		if (!db->prepare())
+			return false;
+
+		if (!db->write_entry(RESOURCE_SHADER_MODULE, 10, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
+			return false;
+		if (!db->write_entry(RESOURCE_SHADER_MODULE, 11, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
+			return false;
+		if (!db->write_entry(RESOURCE_SHADER_MODULE, 12, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
+			return false;
+
+		if (!db->write_entry(RESOURCE_GRAPHICS_PIPELINE, 10, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
+			return false;
+		if (!db->write_entry(RESOURCE_GRAPHICS_PIPELINE, 11, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
+			return false;
+		if (!db->write_entry(RESOURCE_GRAPHICS_PIPELINE, 12, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
+			return false;
+
+		if (!db->write_entry(RESOURCE_COMPUTE_PIPELINE, 10, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
+			return false;
+		if (!db->write_entry(RESOURCE_COMPUTE_PIPELINE, 11, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
+			return false;
+		if (!db->write_entry(RESOURCE_COMPUTE_PIPELINE, 12, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
+			return false;
+	}
+
+	{
+		auto whitelist = std::unique_ptr<DatabaseInterface>(create_stream_archive_database(".__test_whitelist.foz",
+		                                                                                   DatabaseMode::OverWrite));
+		auto blacklist = std::unique_ptr<DatabaseInterface>(create_stream_archive_database(".__test_blacklist.foz",
+		                                                                                   DatabaseMode::OverWrite));
+
+		if (!whitelist->prepare())
+			return false;
+		if (!blacklist->prepare())
+			return false;
+
+		if (!whitelist->write_entry(RESOURCE_SHADER_MODULE, 10, nullptr, 0, 0))
+			return false;
+		if (!whitelist->write_entry(RESOURCE_SHADER_MODULE, 11, nullptr, 0, 0))
+			return false;
+		if (!whitelist->write_entry(RESOURCE_SHADER_MODULE, 12, nullptr, 0, 0))
+			return false;
+
+		if (!whitelist->write_entry(RESOURCE_GRAPHICS_PIPELINE, 11, nullptr, 0, 0))
+			return false;
+		if (!whitelist->write_entry(RESOURCE_GRAPHICS_PIPELINE, 12, nullptr, 0, 0))
+			return false;
+		if (!blacklist->write_entry(RESOURCE_GRAPHICS_PIPELINE, 10, nullptr, 0, 0))
+			return false;
+
+		if (!whitelist->write_entry(RESOURCE_COMPUTE_PIPELINE, 10, nullptr, 0, 0))
+			return false;
+		if (!whitelist->write_entry(RESOURCE_COMPUTE_PIPELINE, 12, nullptr, 0, 0))
+			return false;
+		if (!blacklist->write_entry(RESOURCE_COMPUTE_PIPELINE, 11, nullptr, 0, 0))
+			return false;
+	}
+
+	for (unsigned i = 0; i < 3; i++)
+	{
+		auto db = std::unique_ptr<DatabaseInterface>(create_stream_archive_database(".__test_filter.foz",
+		                                                                            DatabaseMode::ReadOnly));
+		switch (i)
+		{
+		case 0:
+			if (!db->load_whitelist_database(i ? ".__test_blacklist.foz" : ".__test_whitelist.foz"))
+				return false;
+			break;
+
+		case 1:
+			if (!db->load_blacklist_database(".__test_blacklist.foz"))
+				return false;
+			break;
+
+		case 2:
+			if (!db->load_whitelist_database(".__test_whitelist.foz"))
+				return false;
+			if (!db->load_blacklist_database(".__test_blacklist.foz"))
+				return false;
+			break;
+
+		default:
+			return false;
+		}
+
+		if (!db->prepare())
+			return false;
+
+		size_t count;
+		Hash hashes[3];
+
+		// Test whitelist filtering of different types.
+		if (!db->has_entry(RESOURCE_SHADER_MODULE, 10))
+			return false;
+		if (!db->has_entry(RESOURCE_SHADER_MODULE, 11))
+			return false;
+		if (!db->has_entry(RESOURCE_SHADER_MODULE, 12))
+			return false;
+		if (db->has_entry(RESOURCE_GRAPHICS_PIPELINE, 10))
+			return false;
+		if (db->has_entry(RESOURCE_COMPUTE_PIPELINE, 11))
+			return false;
+
+		// Test get_hash_list.
+		if (!db->get_hash_list_for_resource_tag(RESOURCE_SHADER_MODULE, &count, nullptr))
+			return false;
+		if (count != 3)
+			return false;
+		if (!db->get_hash_list_for_resource_tag(RESOURCE_SHADER_MODULE, &count, hashes))
+			return false;
+
+		static const Hash expected_0[3] = { 10, 11, 12 };
+		if (memcmp(expected_0, hashes, sizeof(expected_0)) != 0)
+			return false;
+
+		if (!db->get_hash_list_for_resource_tag(RESOURCE_GRAPHICS_PIPELINE, &count, nullptr))
+			return false;
+		if (count != 2)
+			return false;
+		if (!db->get_hash_list_for_resource_tag(RESOURCE_GRAPHICS_PIPELINE, &count, hashes))
+			return false;
+
+		static const Hash expected_1[2] = { 11, 12 };
+		if (memcmp(expected_1, hashes, sizeof(expected_1)) != 0)
+			return false;
+
+		if (!db->get_hash_list_for_resource_tag(RESOURCE_COMPUTE_PIPELINE, &count, nullptr))
+			return false;
+		if (count != 2)
+			return false;
+		if (!db->get_hash_list_for_resource_tag(RESOURCE_COMPUTE_PIPELINE, &count, hashes))
+			return false;
+
+		static const Hash expected_2[2] = { 10, 12 };
+		if (memcmp(expected_2, hashes, sizeof(expected_2)) != 0)
+			return false;
+	}
+
+	remove(".__test_filter.foz");
+	remove(".__test_whitelist.foz");
+	remove(".__test_blacklist.foz");
+	return true;
+}
+
 int main()
 {
 	if (!test_concurrent_database_extra_paths())
@@ -877,6 +1028,8 @@ int main()
 	if (!test_concurrent_database())
 		return EXIT_FAILURE;
 	if (!test_database())
+		return EXIT_FAILURE;
+	if (!test_filter())
 		return EXIT_FAILURE;
 
 	std::vector<uint8_t> res;
