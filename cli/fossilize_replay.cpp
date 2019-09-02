@@ -214,6 +214,9 @@ struct ThreadedReplayer : StateCreatorInterface
 		bool ignore_derived_pipelines = false;
 		bool pipeline_stats = false;
 		string on_disk_pipeline_cache_path;
+		string on_disk_validation_cache_path;
+		string on_disk_validation_whitelist_path;
+		string on_disk_validation_blacklist_path;
 		string pipeline_stats_path;
 
 		// VALVE: Add multi-threaded pipeline creation
@@ -301,6 +304,7 @@ struct ThreadedReplayer : StateCreatorInterface
 		unsigned num_failed_module_hashes = 0;
 
 		bool force_outside_range = false;
+		bool triggered_validation_error = false;
 	};
 
 	ThreadedReplayer(const VulkanDevice::Options &device_opts_, const Options &opts_)
@@ -338,11 +342,39 @@ struct ThreadedReplayer : StateCreatorInterface
 #endif
 
 		shader_modules.set_target_size(target_size);
+		init_whitelist_db();
+		init_blacklist_db();
 	}
 
 	PerThreadData &get_per_thread_data()
 	{
 		return per_thread_data[Global::worker_thread_index];
+	}
+
+	void init_whitelist_db()
+	{
+		if (!opts.on_disk_validation_whitelist_path.empty())
+		{
+			validation_whitelist_db.reset(create_concurrent_database(opts.on_disk_validation_whitelist_path.c_str(), DatabaseMode::Append, nullptr, 0));
+			if (!validation_whitelist_db->prepare())
+			{
+				LOGE("Could not open validation whitelist DB. Ignoring.\n");
+				validation_whitelist_db.reset();
+			}
+		}
+	}
+
+	void init_blacklist_db()
+	{
+		if (!opts.on_disk_validation_blacklist_path.empty())
+		{
+			validation_blacklist_db.reset(create_concurrent_database(opts.on_disk_validation_blacklist_path.c_str(), DatabaseMode::Append, nullptr, 0));
+			if (!validation_blacklist_db->prepare())
+			{
+				LOGE("Could not open validation blacklist DB. Ignoring.\n");
+				validation_blacklist_db.reset();
+			}
+		}
 	}
 
 	void start_worker_threads()
@@ -524,6 +556,35 @@ struct ThreadedReplayer : StateCreatorInterface
 		}
 	}
 
+	void blacklist_resource(ResourceTag tag, Hash hash)
+	{
+		if (validation_blacklist_db)
+		{
+			lock_guard<mutex> holder{validation_db_mutex};
+			validation_blacklist_db->write_entry(tag, hash, nullptr, 0, 0);
+		}
+	}
+
+	void whitelist_resource(ResourceTag tag, Hash hash)
+	{
+		if (validation_whitelist_db)
+		{
+			lock_guard<mutex> holder{validation_db_mutex};
+			validation_whitelist_db->write_entry(tag, hash, nullptr, 0, 0);
+		}
+	}
+
+	bool resource_is_blacklisted(ResourceTag tag, Hash hash)
+	{
+		if (validation_blacklist_db)
+		{
+			lock_guard<mutex> holder{validation_db_mutex};
+			return validation_blacklist_db->has_entry(tag, hash);
+		}
+		else
+			return false;
+	}
+
 	void run_creation_work_item(const PipelineWorkItem &work_item)
 	{
 		switch (work_item.tag)
@@ -534,6 +595,7 @@ struct ThreadedReplayer : StateCreatorInterface
 			per_thread.current_graphics_index = work_item.index + 1;
 			per_thread.current_graphics_pipeline = work_item.hash;
 			per_thread.current_compute_pipeline = 0;
+			per_thread.triggered_validation_error = false;
 
 			// Make sure to iterate the index so main thread and worker threads
 			// have a coherent idea of replayer state.
@@ -563,6 +625,16 @@ struct ThreadedReplayer : StateCreatorInterface
 					LOGE("Invalid derivative pipeline!\n");
 					break;
 				}
+			}
+
+			// Don't bother replaying blacklisted objects.
+			if (resource_is_blacklisted(work_item.tag, work_item.hash))
+			{
+				*work_item.output.pipeline = VK_NULL_HANDLE;
+				LOGE("Resource is blacklisted, ignoring.\n");
+				if (opts.control_block)
+					opts.control_block->skipped_graphics.fetch_add(1, std::memory_order_relaxed);
+				break;
 			}
 
 			for (unsigned i = 0; i < loop_count; i++)
@@ -644,6 +716,9 @@ struct ThreadedReplayer : StateCreatorInterface
 				}
 			}
 
+			if (device_opts.enable_validation && !per_thread.triggered_validation_error)
+				whitelist_resource(work_item.tag, work_item.hash);
+
 			per_thread.current_graphics_pipeline = 0;
 			per_thread.current_compute_pipeline = 0;
 			break;
@@ -655,6 +730,7 @@ struct ThreadedReplayer : StateCreatorInterface
 			per_thread.current_compute_index = work_item.index + 1;
 			per_thread.current_compute_pipeline = work_item.hash;
 			per_thread.current_graphics_pipeline = 0;
+			per_thread.triggered_validation_error = false;
 
 			// Make sure to iterate the index so main thread and worker threads
 			// have a coherent idea of replayer state.
@@ -680,6 +756,16 @@ struct ThreadedReplayer : StateCreatorInterface
 					*work_item.output.pipeline = VK_NULL_HANDLE;
 					break;
 				}
+			}
+
+			// Don't bother replaying blacklisted objects.
+			if (resource_is_blacklisted(work_item.tag, work_item.hash))
+			{
+				*work_item.output.pipeline = VK_NULL_HANDLE;
+				LOGE("Resource is blacklisted, ignoring.\n");
+				if (opts.control_block)
+					opts.control_block->skipped_compute.fetch_add(1, std::memory_order_relaxed);
+				break;
 			}
 
 			for (unsigned i = 0; i < loop_count; i++)
@@ -754,6 +840,9 @@ struct ThreadedReplayer : StateCreatorInterface
 					LOGE("Failed to create compute pipeline for hash 0x%016" PRIx64 ".\n", work_item.hash);
 				}
 			}
+
+			if (device_opts.enable_validation && !per_thread.triggered_validation_error)
+				whitelist_resource(work_item.tag, work_item.hash);
 
 			per_thread.current_compute_pipeline = 0;
 			per_thread.current_graphics_pipeline = 0;
@@ -873,6 +962,32 @@ struct ThreadedReplayer : StateCreatorInterface
 		}
 	}
 
+	void flush_validation_cache()
+	{
+		if (device && validation_cache)
+		{
+			if (!opts.on_disk_validation_cache_path.empty())
+			{
+				size_t validation_cache_size = 0;
+				if (vkGetValidationCacheDataEXT(device->get_device(), validation_cache, &validation_cache_size, nullptr) == VK_SUCCESS)
+				{
+					vector<uint8_t> validation_buffer(validation_cache_size);
+					if (vkGetValidationCacheDataEXT(device->get_device(), validation_cache, &validation_cache_size, validation_buffer.data()) == VK_SUCCESS)
+					{
+						// This isn't safe to do in a signal handler, but it's unlikely to be a problem in practice.
+						FILE *file = fopen(opts.on_disk_validation_cache_path.c_str(), "wb");
+						if (!file || fwrite(validation_buffer.data(), 1, validation_buffer.size(), file) != validation_buffer.size())
+							LOGE("Failed to write pipeline cache data to disk.\n");
+						if (file)
+							fclose(file);
+					}
+				}
+			}
+			vkDestroyValidationCacheEXT(device->get_device(), validation_cache, nullptr);
+			validation_cache = VK_NULL_HANDLE;
+		}
+	}
+
 	void tear_down_threads()
 	{
 		// Signal that it's time for threads to die.
@@ -892,6 +1007,7 @@ struct ThreadedReplayer : StateCreatorInterface
 	{
 		tear_down_threads();
 		flush_pipeline_cache();
+		flush_validation_cache();
 
 		for (auto &sampler : samplers)
 			if (sampler.second)
@@ -918,7 +1034,29 @@ struct ThreadedReplayer : StateCreatorInterface
 		});
 	}
 
-	bool validate_pipeline_cache_header(const vector<uint8_t> &blob)
+	bool validate_validation_cache_header(const vector<uint8_t> &blob) const
+	{
+		if (blob.size() < 8 + VK_UUID_SIZE)
+		{
+			LOGE("Validation cache header is too small.\n");
+			return false;
+		}
+
+		const auto read_le = [&](unsigned offset) -> uint32_t {
+			return uint32_t(blob[offset + 0]) |
+			       (uint32_t(blob[offset + 1]) << 8) |
+			       (uint32_t(blob[offset + 2]) << 16) |
+			       (uint32_t(blob[offset + 3]) << 24);
+		};
+
+		if (read_le(4) != VK_VALIDATION_CACHE_HEADER_VERSION_ONE_EXT)
+			return false;
+
+		// Doesn't seem to be a way to get the UUID, but layer should reject mismatches.
+		return true;
+	}
+
+	bool validate_pipeline_cache_header(const vector<uint8_t> &blob) const
 	{
 		if (blob.size() < 16 + VK_UUID_SIZE)
 		{
@@ -1055,6 +1193,54 @@ struct ThreadedReplayer : StateCreatorInterface
 				}
 			}
 
+			if (!opts.on_disk_validation_cache_path.empty())
+			{
+				if (device->has_validation_cache())
+				{
+					VkValidationCacheCreateInfoEXT info = {VK_STRUCTURE_TYPE_VALIDATION_CACHE_CREATE_INFO_EXT };
+					vector<uint8_t> on_disk_cache;
+
+					FILE *file = fopen(opts.on_disk_validation_cache_path.c_str(), "rb");
+					if (file)
+					{
+						fseek(file, 0, SEEK_END);
+						size_t len = ftell(file);
+						rewind(file);
+
+						if (len != 0)
+						{
+							on_disk_cache.resize(len);
+							if (fread(on_disk_cache.data(), 1, len, file) == len)
+							{
+								if (validate_validation_cache_header(on_disk_cache))
+								{
+									info.pInitialData = on_disk_cache.data();
+									info.initialDataSize = on_disk_cache.size();
+								}
+								else
+									LOGI("Failed to validate validation cache. Creating a blank one.\n");
+							}
+						}
+					}
+
+					if (vkCreateValidationCacheEXT(device->get_device(), &info, nullptr, &validation_cache) != VK_SUCCESS)
+					{
+						LOGE("Failed to create validation cache, trying to create a blank one.\n");
+						info.initialDataSize = 0;
+						info.pInitialData = nullptr;
+						if (vkCreateValidationCacheEXT(device->get_device(), &info, nullptr, &validation_cache) != VK_SUCCESS)
+						{
+							LOGE("Failed to create validation cache.\n");
+							validation_cache = VK_NULL_HANDLE;
+						}
+					}
+				}
+				else
+				{
+					LOGE("Requested validation cache, but validation layers do not support this extension.\n");
+				}
+			}
+
 			auto end_device = chrono::steady_clock::now();
 			long time_ms = chrono::duration_cast<chrono::milliseconds>(end_device - start_device).count();
 			LOGI("Creating Vulkan device took: %ld ms\n", time_ms);
@@ -1127,7 +1313,7 @@ struct ThreadedReplayer : StateCreatorInterface
 	bool enqueue_create_shader_module(Hash hash, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module) override
 	{
 		*module = VK_NULL_HANDLE;
-		if (masked_shader_modules.count(hash))
+		if (masked_shader_modules.count(hash) || resource_is_blacklisted(RESOURCE_SHADER_MODULE, hash))
 		{
 			lock_guard<mutex> lock(internal_enqueue_mutex);
 			//LOGI("Inserting shader module %016llx.\n", static_cast<unsigned long long>(hash));
@@ -1167,12 +1353,22 @@ struct ThreadedReplayer : StateCreatorInterface
 		}
 #endif
 
+		auto &per_thread = get_per_thread_data();
+		per_thread.triggered_validation_error = false;
+
 		for (unsigned i = 0; i < loop_count; i++)
 		{
 			// Avoid leak.
 			if (*module != VK_NULL_HANDLE)
 				vkDestroyShaderModule(device->get_device(), *module, nullptr);
 			*module = VK_NULL_HANDLE;
+
+			VkShaderModuleValidationCacheCreateInfoEXT validation_info = { VK_STRUCTURE_TYPE_SHADER_MODULE_VALIDATION_CACHE_CREATE_INFO_EXT };
+			if (validation_cache)
+			{
+				validation_info.validationCache = validation_cache;
+				const_cast<VkShaderModuleCreateInfo *>(create_info)->pNext = &validation_info;
+			}
 
 			auto start_time = chrono::steady_clock::now();
 			if (vkCreateShaderModule(device->get_device(), create_info, nullptr, module) == VK_SUCCESS)
@@ -1201,6 +1397,16 @@ struct ThreadedReplayer : StateCreatorInterface
 			lock_guard<mutex> lock(internal_enqueue_mutex);
 			//LOGI("Inserting shader module %016llx.\n", static_cast<unsigned long long>(hash));
 			shader_modules.insert_object(hash, *module, create_info->codeSize);
+		}
+
+		// vkCreateShaderModule doesn't generally crash anything, so just deal with blacklisting here
+		// rather than in an error callback.
+		if (device_opts.enable_validation)
+		{
+			if (!per_thread.triggered_validation_error)
+				whitelist_resource(RESOURCE_SHADER_MODULE, hash);
+			else
+				blacklist_resource(RESOURCE_SHADER_MODULE, hash);
 		}
 
 		return true;
@@ -1803,6 +2009,11 @@ struct ThreadedReplayer : StateCreatorInterface
 		spurious_deadlock();
 #endif
 		flush_pipeline_cache();
+		flush_validation_cache();
+		if (validation_whitelist_db)
+			validation_whitelist_db->flush();
+		if (validation_blacklist_db)
+			validation_blacklist_db->flush();
 		device.reset();
 	}
 
@@ -1821,6 +2032,7 @@ struct ThreadedReplayer : StateCreatorInterface
 	std::unordered_map<VkShaderModule, Hash> shader_module_to_hash;
 	std::unordered_set<VkShaderModule> enqueued_shader_modules;
 	VkPipelineCache pipeline_cache = VK_NULL_HANDLE;
+	VkValidationCacheEXT validation_cache = VK_NULL_HANDLE;
 
 	// VALVE: multi-threaded work queue for replayer
 
@@ -1849,6 +2061,10 @@ struct ThreadedReplayer : StateCreatorInterface
 
 	std::mutex pipeline_stats_queue_mutex;
 	std::unique_ptr<DatabaseInterface> pipeline_stats_db;
+
+	std::mutex validation_db_mutex;
+	std::unique_ptr<DatabaseInterface> validation_whitelist_db;
+	std::unique_ptr<DatabaseInterface> validation_blacklist_db;
 
 	std::mutex hash_lock;
 	std::unordered_map<Hash, DeferredGraphicsInfo> graphics_parents;
@@ -1890,6 +2106,15 @@ struct ThreadedReplayer : StateCreatorInterface
 static void on_validation_error(void *userdata)
 {
 	auto *replayer = static_cast<ThreadedReplayer *>(userdata);
+
+	auto &per_thread = replayer->get_per_thread_data();
+	per_thread.triggered_validation_error = true;
+
+	if (per_thread.current_graphics_pipeline)
+		replayer->blacklist_resource(RESOURCE_GRAPHICS_PIPELINE, per_thread.current_graphics_pipeline);
+	if (per_thread.current_compute_pipeline)
+		replayer->blacklist_resource(RESOURCE_COMPUTE_PIPELINE, per_thread.current_compute_pipeline);
+
 	if (replayer->opts.on_validation_error_callback)
 		replayer->opts.on_validation_error_callback(replayer);
 }
@@ -1927,6 +2152,9 @@ static void print_help()
 	     "\t[--num-threads <count>]\n"
 	     "\t[--loop <count>]\n"
 	     "\t[--on-disk-pipeline-cache <path>]\n"
+	     "\t[--on-disk-validation-cache <path>]\n"
+	     "\t[--on-disk-validation-whitelist <path>]\n"
+	     "\t[--on-disk-validation-blacklist <path>]\n"
 	     "\t[--graphics-pipeline-range <start> <end>]\n"
 	     "\t[--compute-pipeline-range <start> <end>]\n"
 	     "\t[--shader-cache-size <value (MiB)>]\n"
@@ -2014,9 +2242,15 @@ static int run_progress_process(const VulkanDevice::Options &device_opts,
 {
 	ExternalReplayer::Options opts = {};
 	opts.on_disk_pipeline_cache = replayer_opts.on_disk_pipeline_cache_path.empty() ?
-		nullptr : replayer_opts.on_disk_pipeline_cache_path.c_str();
+	                              nullptr : replayer_opts.on_disk_pipeline_cache_path.c_str();
+	opts.on_disk_validation_cache = replayer_opts.on_disk_validation_cache_path.empty() ?
+	                                nullptr : replayer_opts.on_disk_validation_cache_path.c_str();
+	opts.on_disk_validation_whitelist = replayer_opts.on_disk_validation_whitelist_path.empty() ?
+	                                    nullptr : replayer_opts.on_disk_validation_whitelist_path.c_str();
+	opts.on_disk_validation_blacklist = replayer_opts.on_disk_validation_blacklist_path.empty() ?
+	                                    nullptr : replayer_opts.on_disk_validation_blacklist_path.c_str();
 	opts.pipeline_stats_path = replayer_opts.pipeline_stats_path.empty() ?
-		nullptr : replayer_opts.pipeline_stats_path.c_str();
+	                           nullptr : replayer_opts.pipeline_stats_path.c_str();
 	opts.pipeline_cache = replayer_opts.pipeline_cache;
 	opts.num_threads = replayer_opts.num_threads;
 	opts.quiet = true;
@@ -2592,6 +2826,18 @@ int main(int argc, char *argv[])
 	cbs.add("--pipeline-cache", [&](CLIParser &) { replayer_opts.pipeline_cache = true; });
 	cbs.add("--spirv-val", [&](CLIParser &) { replayer_opts.spirv_validate = true; });
 	cbs.add("--on-disk-pipeline-cache", [&](CLIParser &parser) { replayer_opts.on_disk_pipeline_cache_path = parser.next_string(); });
+	cbs.add("--on-disk-validation-cache", [&](CLIParser &parser) {
+		replayer_opts.on_disk_validation_cache_path = parser.next_string();
+		opts.enable_validation = true;
+	});
+	cbs.add("--on-disk-validation-blacklist", [&](CLIParser &parser) {
+		replayer_opts.on_disk_validation_blacklist_path = parser.next_string();
+		opts.enable_validation = true;
+	});
+	cbs.add("--on-disk-validation-whitelist", [&](CLIParser &parser) {
+		replayer_opts.on_disk_validation_whitelist_path = parser.next_string();
+		opts.enable_validation = true;
+	});
 	cbs.add("--num-threads", [&](CLIParser &parser) { replayer_opts.num_threads = parser.next_uint(); });
 	cbs.add("--loop", [&](CLIParser &parser) { replayer_opts.loop_count = parser.next_uint(); });
 	cbs.add("--graphics-pipeline-range", [&](CLIParser &parser) {

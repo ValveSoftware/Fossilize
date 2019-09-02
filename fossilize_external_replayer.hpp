@@ -45,6 +45,13 @@ public:
 		// Path to an on-disk pipeline cache. Maps to --on-disk-pipeline-cache.
 		const char *on_disk_pipeline_cache;
 
+		// Path to an on-disk validation cache. Maps to --on-disk-validation-cache.
+		const char *on_disk_validation_cache;
+
+		// Path to on-disk validation white/blacklists.
+		const char *on_disk_validation_whitelist;
+		const char *on_disk_validation_blacklist;
+
 		// Path to store pipeline stats in.
 		const char *pipeline_stats_path;
 

@@ -347,6 +347,12 @@ bool ProcessProgress::start_child_process()
 			copy_opts.on_disk_pipeline_cache_path += std::to_string(index);
 		}
 
+		if (!copy_opts.on_disk_validation_cache_path.empty() && index != 0)
+		{
+			copy_opts.on_disk_validation_cache_path += ".";
+			copy_opts.on_disk_validation_cache_path += std::to_string(index);
+		}
+
 		if (!copy_opts.pipeline_stats_path.empty() && index != 0)
 		{
 			copy_opts.pipeline_stats_path += ".";

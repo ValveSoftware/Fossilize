@@ -312,6 +312,30 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 		cmdline += "\"";
 	}
 
+	if (options.on_disk_validation_cache)
+	{
+		cmdline += " --on-disk-validation-cache ";
+		cmdline += "\"";
+		cmdline += options.on_disk_validation_cache;
+		cmdline += "\"";
+	}
+
+	if (options.on_disk_validation_whitelist)
+	{
+		cmdline += " --on-disk-validation-whitelist ";
+		cmdline += "\"";
+		cmdline += options.on_disk_validation_whitelist;
+		cmdline += "\"";
+	}
+
+	if (options.on_disk_validation_blacklist)
+	{
+		cmdline += " --on-disk-validation-blacklist ";
+		cmdline += "\"";
+		cmdline += options.on_disk_validation_blacklist;
+		cmdline += "\"";
+	}
+
 	cmdline += " --device-index ";
 	cmdline += std::to_string(options.device_index);
 

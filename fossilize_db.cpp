@@ -71,10 +71,79 @@ private:
 	bool enable;
 };
 
+struct DatabaseInterface::Impl
+{
+	std::unique_ptr<DatabaseInterface> whitelist;
+	std::unique_ptr<DatabaseInterface> blacklist;
+	DatabaseMode mode;
+};
+
+DatabaseInterface::DatabaseInterface(DatabaseMode mode)
+{
+	impl = new Impl;
+	impl->mode = mode;
+}
+
+bool DatabaseInterface::load_whitelist_database(const char *path)
+{
+	if (impl->mode != DatabaseMode::ReadOnly)
+		return false;
+
+	impl->whitelist.reset(create_stream_archive_database(path, DatabaseMode::ReadOnly));
+
+	if (!impl->whitelist)
+		return false;
+
+	if (!impl->whitelist->prepare())
+	{
+		impl->whitelist.reset();
+		return false;
+	}
+
+	return true;
+}
+
+bool DatabaseInterface::load_blacklist_database(const char *path)
+{
+	if (impl->mode != DatabaseMode::ReadOnly)
+		return false;
+
+	impl->blacklist.reset(create_stream_archive_database(path, DatabaseMode::ReadOnly));
+
+	if (!impl->blacklist)
+		return false;
+
+	if (!impl->blacklist->prepare())
+	{
+		impl->blacklist.reset();
+		return false;
+	}
+
+	return true;
+}
+
+DatabaseInterface::~DatabaseInterface()
+{
+	delete impl;
+}
+
+bool DatabaseInterface::test_resource_filter(ResourceTag tag, Hash hash) const
+{
+	if (tag != RESOURCE_SHADER_MODULE && tag != RESOURCE_COMPUTE_PIPELINE && tag != RESOURCE_GRAPHICS_PIPELINE)
+		return true;
+
+	if (impl->whitelist && !impl->whitelist->has_entry(tag, hash))
+		return false;
+	if (impl->blacklist && impl->blacklist->has_entry(tag, hash))
+		return false;
+
+	return true;
+}
+
 struct DumbDirectoryDatabase : DatabaseInterface
 {
 	DumbDirectoryDatabase(const string &base, DatabaseMode mode_)
-		: base_directory(base), mode(mode_)
+		: DatabaseInterface(mode_), base_directory(base), mode(mode_)
 	{
 		if (mode == DatabaseMode::ExclusiveOverWrite)
 			mode = DatabaseMode::OverWrite;
@@ -106,7 +175,8 @@ struct DumbDirectoryDatabase : DatabaseInterface
 			if (tag >= RESOURCE_COUNT)
 				continue;
 
-			seen_blobs[tag].insert(value);
+			if (test_resource_filter(static_cast<ResourceTag>(tag), value))
+				seen_blobs[tag].insert(value);
 		}
 
 		closedir(dp);
@@ -115,6 +185,8 @@ struct DumbDirectoryDatabase : DatabaseInterface
 
 	bool has_entry(ResourceTag tag, Hash hash) override
 	{
+		if (!test_resource_filter(tag, hash))
+			return false;
 		return seen_blobs[tag].count(hash) != 0;
 	}
 
@@ -255,7 +327,7 @@ DatabaseInterface *create_dumb_folder_database(const char *directory_path, Datab
 struct ZipDatabase : DatabaseInterface
 {
 	ZipDatabase(const string &path_, DatabaseMode mode_)
-		: path(path_), mode(mode_)
+		: DatabaseInterface(mode_), path(path_), mode(mode_)
 	{
 		if (mode == DatabaseMode::ExclusiveOverWrite)
 			mode = DatabaseMode::OverWrite;
@@ -326,7 +398,9 @@ struct ZipDatabase : DatabaseInterface
 				if (tag >= RESOURCE_COUNT)
 					continue;
 				uint64_t value = strtoull(value_str, nullptr, 16);
-				seen_blobs[tag].emplace(value, Entry{i, size_t(s.m_uncomp_size)});
+
+				if (test_resource_filter(static_cast<ResourceTag>(tag), value))
+					seen_blobs[tag].emplace(value, Entry{i, size_t(s.m_uncomp_size)});
 			}
 
 			// In-place update the archive. Should we consider emitting a new archive instead?
@@ -425,12 +499,15 @@ struct ZipDatabase : DatabaseInterface
 		}
 
 		// The index is irrelevant, we're not going to read from this archive any time soon.
-		seen_blobs[tag].emplace(hash, Entry{~0u, size});
+		if (test_resource_filter(static_cast<ResourceTag>(tag), hash))
+			seen_blobs[tag].emplace(hash, Entry{~0u, size});
 		return true;
 	}
 
 	bool has_entry(ResourceTag tag, Hash hash) override
 	{
+		if (!test_resource_filter(tag, hash))
+			return false;
 		return seen_blobs[tag].count(hash) != 0;
 	}
 
@@ -520,7 +597,7 @@ struct StreamArchive : DatabaseInterface
 	};
 
 	StreamArchive(const string &path_, DatabaseMode mode_)
-		: path(path_), mode(mode_)
+		: DatabaseInterface(mode_), path(path_), mode(mode_)
 	{
 	}
 
@@ -641,7 +718,8 @@ struct StreamArchive : DatabaseInterface
 						Entry entry = {};
 						entry.header = header;
 						entry.offset = offset;
-						seen_blobs[tag].emplace(value, entry);
+						if (test_resource_filter(static_cast<ResourceTag>(tag), value))
+							seen_blobs[tag].emplace(value, entry);
 					}
 
 					if (fseek(file, header.payload_size, SEEK_CUR) < 0)
@@ -860,6 +938,8 @@ struct StreamArchive : DatabaseInterface
 
 	bool has_entry(ResourceTag tag, Hash hash) override
 	{
+		if (!test_resource_filter(tag, hash))
+			return false;
 		return seen_blobs[tag].count(hash) != 0;
 	}
 
@@ -1032,7 +1112,7 @@ struct ConcurrentDatabase : DatabaseInterface
 {
 	explicit ConcurrentDatabase(const char *base_path_, DatabaseMode mode_,
 	                            const char * const *extra_paths, size_t num_extra_paths)
-		: base_path(base_path_ ? base_path_ : ""), mode(mode_)
+		: DatabaseInterface(mode_), base_path(base_path_ ? base_path_ : ""), mode(mode_)
 	{
 		if (!base_path.empty())
 		{
@@ -1063,7 +1143,8 @@ struct ConcurrentDatabase : DatabaseInterface
 				return;
 
 			for (auto &hash : hashes)
-				primed_hashes[i].insert(hash);
+				if (test_resource_filter(tag, hash))
+					primed_hashes[i].insert(hash);
 		}
 	}
 
@@ -1158,6 +1239,8 @@ struct ConcurrentDatabase : DatabaseInterface
 	// Checks if entry already exists in database, i.e. no need to serialize.
 	bool has_entry(ResourceTag tag, Hash hash) override
 	{
+		if (!test_resource_filter(tag, hash))
+			return false;
 		if (primed_hashes[tag].count(hash))
 			return true;
 

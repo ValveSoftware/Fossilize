@@ -69,13 +69,33 @@ enum PayloadReadFlagBits
 using PayloadWriteFlags = uint32_t;
 using PayloadReadFlags = uint32_t;
 
+enum class DatabaseMode
+{
+	Append,
+	ReadOnly,
+	OverWrite,
+	// In the stream database backend, this will ensure that the database is exclusively created.
+	// For other backends, this is an alias for OverWrite
+	ExclusiveOverWrite
+};
+
 // This is an interface to interact with an external database for blob modules.
 // It is is a simple database with key + blob.
 // NOTE: The database is NOT thread-safe.
 class DatabaseInterface
 {
 public:
-	virtual ~DatabaseInterface() = default;
+	DatabaseInterface(DatabaseMode mode);
+	virtual ~DatabaseInterface();
+
+	// Loads a white-list and/or blacklist database which filters
+	// which entries are retrieved through get_hash_list_for_resource_tag.
+	// The database is a stream archive (.foz) with 0-sized blobs for tags
+	// SHADER_MODULE, COMPUTE_PIPELINE, GRAPHICS_PIPELINE.
+	// This must be called before prepare().
+	// Can only be used for ReadOnly database mode.
+	bool load_whitelist_database(const char *path);
+	bool load_blacklist_database(const char *path);
 
 	// Prepares the database. It can load in the off-line archive from disk.
 	virtual bool prepare() = 0;
@@ -100,16 +120,11 @@ public:
 	virtual void flush() = 0;
 
 	virtual const char *get_db_path_for_hash(ResourceTag tag, Hash hash) = 0;
-};
 
-enum class DatabaseMode
-{
-	Append,
-	ReadOnly,
-	OverWrite,
-	// In the stream database backend, this will ensure that the database is exclusively created.
-	// For other backends, this is an alias for OverWrite
-	ExclusiveOverWrite
+protected:
+	bool test_resource_filter(ResourceTag tag, Hash hash) const;
+	struct Impl;
+	Impl *impl;
 };
 
 DatabaseInterface *create_dumb_folder_database(const char *directory_path, DatabaseMode mode);
