@@ -1119,7 +1119,6 @@ struct ThreadedReplayer : StateCreatorInterface
 			device.reset(new VulkanDevice);
 			device_opts.application_info = app;
 			device_opts.features = features;
-			device_opts.need_disasm = false;
 			device_opts.want_pipeline_stats = opts.pipeline_stats;
 			auto start_device = chrono::steady_clock::now();
 			if (!device->init_device(device_opts))

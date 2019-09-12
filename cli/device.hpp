@@ -32,7 +32,7 @@ public:
 	struct Options
 	{
 		bool enable_validation = false;
-		bool need_disasm = true;
+		bool want_amd_shader_info = false;
 		bool null_device = false;
 		bool want_pipeline_stats = false;
 		int device_index = -1;
@@ -79,6 +79,11 @@ public:
 		return validation_cache;
 	}
 
+	bool has_amd_shader_info() const
+	{
+		return amd_shader_info;
+	}
+
 private:
 	VkInstance instance = VK_NULL_HANDLE;
 	VkPhysicalDevice gpu = VK_NULL_HANDLE;
@@ -94,5 +99,6 @@ private:
 	bool is_null_device = false;
 	bool pipeline_stats = false;
 	bool validation_cache = false;
+	bool amd_shader_info = false;
 };
 }

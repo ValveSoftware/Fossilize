@@ -46,12 +46,12 @@ static bool find_extension(const vector<VkExtensionProperties> &exts, const char
 	return itr != end(exts);
 }
 
-static bool filter_extension(const char *ext, bool need_disasm)
+static bool filter_extension(const char *ext, bool want_amd_shader_info)
 {
 	// Ban certain extensions, because they conflict with others.
 	if (strcmp(ext, VK_AMD_NEGATIVE_VIEWPORT_HEIGHT_EXTENSION_NAME) == 0)
 		return false;
-	else if (strcmp(ext, VK_AMD_SHADER_INFO_EXTENSION_NAME) == 0 && !need_disasm)
+	else if (strcmp(ext, VK_AMD_SHADER_INFO_EXTENSION_NAME) == 0 && !want_amd_shader_info)
 	{
 		// Mesa disables the pipeline cache when VK_AMD_shader_info is used, so disable this extension unless we need it.
 		return false;
@@ -319,12 +319,16 @@ bool VulkanDevice::init_device(const Options &opts)
 
 	for (auto &ext : device_ext_props)
 	{
-		if (filter_extension(ext.extensionName, opts.need_disasm))
+		if (filter_extension(ext.extensionName, opts.want_amd_shader_info))
 			active_device_extensions.push_back(ext.extensionName);
 	}
 
 	supports_pipeline_feedback = find_if(begin(active_device_extensions), end(active_device_extensions), [](const char *ext) {
 		return strcmp(ext, VK_EXT_PIPELINE_CREATION_FEEDBACK_EXTENSION_NAME) == 0;
+	}) != end(active_device_extensions);
+
+	amd_shader_info = find_if(begin(active_device_extensions), end(active_device_extensions), [](const char *ext) {
+		return strcmp(ext, VK_AMD_SHADER_INFO_EXTENSION_NAME) == 0;
 	}) != end(active_device_extensions);
 
 	VkDeviceCreateInfo device_info = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
