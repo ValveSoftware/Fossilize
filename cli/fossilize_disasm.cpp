@@ -166,6 +166,7 @@ struct DisasmReplayer : StateCreatorInterface
 		module_to_index[*module] = shader_modules.size();
 		shader_modules.push_back(*module);
 		shader_module_infos.push_back(create_info);
+		module_hashes.push_back(hash);
 		return true;
 	}
 
@@ -245,6 +246,7 @@ struct DisasmReplayer : StateCreatorInterface
 
 	vector<Hash> graphics_hashes;
 	vector<Hash> compute_hashes;
+	vector<Hash> module_hashes;
 	unordered_map<VkShaderModule, unsigned> module_to_index;
 
 	vector<VkSampler> samplers;
@@ -610,7 +612,7 @@ int main(int argc, char *argv[])
 			disassembled = disassemble_spirv(device, VK_NULL_HANDLE, method, VK_SHADER_STAGE_ALL,
 			                                 module_info, nullptr);
 
-			auto module_hash = (Hash)replayer.shader_modules[i];
+			auto module_hash = replayer.module_hashes[i];
 			string path = output + "/" + uint64_string(module_hash);
 
 			LOGI("Dumping disassembly to: %s\n", path.c_str());
@@ -632,11 +634,14 @@ int main(int argc, char *argv[])
 			{
 				VkShaderModule module = info->pStages[j].module;
 				unique_shader_modules.insert(module);
-				auto *module_info = replayer.shader_module_infos[replayer.module_to_index[module]];
+				unsigned index = replayer.module_to_index[module];
+				auto *module_info = replayer.shader_module_infos[index];
 				disassembled = disassemble_spirv(device, replayer.graphics_pipelines[i], method, info->pStages[j].stage,
 				                                 module_info, info->pStages[j].pName);
 
-				string path = output + "/" + uint64_string((uint64_t) module) + "." +
+				Hash module_hash = replayer.module_hashes[index];
+
+				string path = output + "/" + uint64_string(module_hash) + "." +
 				              info->pStages[j].pName + "." +
 				              uint64_string(replayer.graphics_hashes[i]) +
 				              "." + stage_to_string(info->pStages[j].stage);
@@ -656,11 +661,15 @@ int main(int argc, char *argv[])
 			auto *info = replayer.compute_infos[i];
 			VkShaderModule module = info->stage.module;
 			unique_shader_modules.insert(module);
-			auto *module_info = replayer.shader_module_infos[replayer.module_to_index[module]];
+
+			unsigned index = replayer.module_to_index[module];
+			auto *module_info = replayer.shader_module_infos[index];
 			disassembled = disassemble_spirv(device, replayer.compute_pipelines[i], method, info->stage.stage,
 			                                 module_info, info->stage.pName);
 
-			string path = output + "/" + uint64_string((uint64_t) module) + "." +
+			Hash module_hash = replayer.module_hashes[index];
+
+			string path = output + "/" + uint64_string(module_hash) + "." +
 			              info->stage.pName + "." +
 			              uint64_string(replayer.compute_hashes[i]) +
 			              "." + stage_to_string(info->stage.stage);
