@@ -166,6 +166,7 @@ struct DisasmReplayer : StateCreatorInterface
 		module_to_index[*module] = shader_modules.size();
 		shader_modules.push_back(*module);
 		shader_module_infos.push_back(create_info);
+		module_hashes.push_back(hash);
 		return true;
 	}
 
@@ -193,6 +194,9 @@ struct DisasmReplayer : StateCreatorInterface
 	{
 		if (device)
 		{
+			if (device->has_pipeline_stats())
+				const_cast<VkComputePipelineCreateInfo *>(create_info)->flags |= VK_PIPELINE_CREATE_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR;
+
 			LOGI("Creating compute pipeline %0" PRIX64 "\n", hash);
 			if (vkCreateComputePipelines(device->get_device(), pipeline_cache, 1, create_info, nullptr, pipeline) !=
 			    VK_SUCCESS)
@@ -215,6 +219,9 @@ struct DisasmReplayer : StateCreatorInterface
 	{
 		if (device)
 		{
+			if (device->has_pipeline_stats())
+				const_cast<VkGraphicsPipelineCreateInfo *>(create_info)->flags |= VK_PIPELINE_CREATE_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR;
+
 			LOGI("Creating graphics pipeline %0" PRIX64 "\n", hash);
 			if (vkCreateGraphicsPipelines(device->get_device(), pipeline_cache, 1, create_info, nullptr, pipeline) !=
 			    VK_SUCCESS)
@@ -245,6 +252,7 @@ struct DisasmReplayer : StateCreatorInterface
 
 	vector<Hash> graphics_hashes;
 	vector<Hash> compute_hashes;
+	vector<Hash> module_hashes;
 	unordered_map<VkShaderModule, unsigned> module_to_index;
 
 	vector<VkSampler> samplers;
@@ -261,7 +269,7 @@ enum class DisasmMethod
 {
 	Asm,
 	GLSL,
-	AMD
+	ISA
 };
 
 static DisasmMethod method_from_string(const char *method)
@@ -270,8 +278,10 @@ static DisasmMethod method_from_string(const char *method)
 		return DisasmMethod::Asm;
 	else if (strcmp(method, "glsl") == 0)
 		return DisasmMethod::GLSL;
-	else if (strcmp(method, "amd") == 0)
-		return DisasmMethod::AMD;
+	else if (strcmp(method, "amd") == 0) // Compat
+		return DisasmMethod::ISA;
+	else if (strcmp(method, "isa") == 0) // Compat
+		return DisasmMethod::ISA;
 	else
 	{
 		LOGE("Invalid disasm method: %s\n", method);
@@ -388,10 +398,9 @@ static string disassemble_spirv_glsl(const VkShaderModuleCreateInfo *create_info
 
 static string disassemble_spirv_amd(const VulkanDevice &device, VkPipeline pipeline, VkShaderStageFlagBits stage)
 {
-	if (!vkGetShaderInfoAMD)
+	if (!device.has_amd_shader_info())
 	{
 		LOGE("Does not have vkGetShaderInfoAMD.\n");
-		// FIXME: Check extension properly, lazy for now :)
 		return "";
 	}
 
@@ -413,6 +422,77 @@ static string disassemble_spirv_amd(const VulkanDevice &device, VkPipeline pipel
 	return string(begin(ret), end(ret));
 }
 
+static string disassemble_spirv_isa(const VulkanDevice &device, VkPipeline pipeline, VkShaderStageFlagBits stage)
+{
+	if (device.has_pipeline_stats())
+	{
+		uint32_t count = 0;
+		VkPipelineInfoKHR pipeline_info = { VK_STRUCTURE_TYPE_PIPELINE_INFO_KHR };
+		pipeline_info.pipeline = pipeline;
+
+		if (vkGetPipelineExecutablePropertiesKHR(device.get_device(), &pipeline_info, &count, nullptr) != VK_SUCCESS)
+			return "";
+
+		vector<VkPipelineExecutablePropertiesKHR> executables(count);
+		for (auto &exec : executables)
+			exec.sType = VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_PROPERTIES_KHR;
+
+		if (vkGetPipelineExecutablePropertiesKHR(device.get_device(), &pipeline_info, &count, executables.data()) != VK_SUCCESS)
+			return "";
+
+		uint32_t index = 0;
+		for (; index < count; index++)
+		{
+			if ((executables[index].stages & stage) != 0)
+				break;
+		}
+
+		if (index >= count)
+			return "// Could not find stage in compiled pipeline.";
+
+		VkPipelineExecutableInfoKHR executable = { VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_INFO_KHR };
+		executable.pipeline = pipeline;
+		executable.executableIndex = index;
+
+		if (vkGetPipelineExecutableInternalRepresentationsKHR(device.get_device(), &executable, &count, nullptr) != VK_SUCCESS)
+			return "";
+
+		vector<VkPipelineExecutableInternalRepresentationKHR> representations(count);
+		for (auto &rep : representations)
+			rep.sType = VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_INTERNAL_REPRESENTATION_KHR;
+
+		if (vkGetPipelineExecutableInternalRepresentationsKHR(device.get_device(), &executable, &count, representations.data()) != VK_SUCCESS)
+			return "";
+
+		for (auto &rep : representations)
+			rep.pData = malloc(rep.dataSize);
+
+		if (vkGetPipelineExecutableInternalRepresentationsKHR(device.get_device(), &executable, &count, representations.data()) != VK_SUCCESS)
+			return "";
+
+		string result;
+		for (auto &rep : representations)
+		{
+			if (rep.isText)
+			{
+				result += "Representation: ";
+				result += rep.name;
+				result += " (";
+				result += rep.description;
+				result += ")\n\n";
+				result += static_cast<const char *>(rep.pData);
+				result += "\n\n";
+			}
+			free(rep.pData);
+		}
+		return result;
+	}
+	else if (device.has_amd_shader_info())
+		return disassemble_spirv_amd(device, pipeline, stage);
+	else
+		return "";
+}
+
 static string disassemble_spirv(const VulkanDevice &device, VkPipeline pipeline,
                                 DisasmMethod method, VkShaderStageFlagBits stage,
                                 const VkShaderModuleCreateInfo *module_create_info, const char *entry_point)
@@ -425,8 +505,8 @@ static string disassemble_spirv(const VulkanDevice &device, VkPipeline pipeline,
 	case DisasmMethod::GLSL:
 		return disassemble_spirv_glsl(module_create_info, entry_point, stage);
 
-	case DisasmMethod::AMD:
-		return disassemble_spirv_amd(device, pipeline, stage);
+	case DisasmMethod::ISA:
+		return disassemble_spirv_isa(device, pipeline, stage);
 
 	default:
 		return "";
@@ -440,7 +520,7 @@ static void print_help()
 	     "\t[--device-index <index>]\n"
 	     "\t[--enable-validation]\n"
 	     "\t[--output <path>]\n"
-	     "\t[--target asm/glsl/amd]\n"
+	     "\t[--target asm/glsl/isa]\n"
 	     "state.json\n");
 }
 
@@ -506,17 +586,26 @@ int main(int argc, char *argv[])
 	}
 
 	VulkanDevice device;
-	if (method == DisasmMethod::AMD)
+	if (method == DisasmMethod::ISA)
 	{
+		opts.want_amd_shader_info = true;
+		opts.want_pipeline_stats = true;
+
 		if (module_only)
 		{
-			LOGE("Cannot do module-only disassembly with AMD target.\n");
+			LOGE("Cannot do module-only disassembly with ISA target.\n");
 			return EXIT_FAILURE;
 		}
 
 		if (!device.init_device(opts))
 		{
 			LOGE("Failed to create device.\n");
+			return EXIT_FAILURE;
+		}
+
+		if (!device.has_amd_shader_info() && !device.has_pipeline_stats())
+		{
+			LOGE("Neither AMD_shader_info or executable properties extension are available.\n");
 			return EXIT_FAILURE;
 		}
 	}
@@ -610,7 +699,7 @@ int main(int argc, char *argv[])
 			disassembled = disassemble_spirv(device, VK_NULL_HANDLE, method, VK_SHADER_STAGE_ALL,
 			                                 module_info, nullptr);
 
-			auto module_hash = (Hash)replayer.shader_modules[i];
+			auto module_hash = replayer.module_hashes[i];
 			string path = output + "/" + uint64_string(module_hash);
 
 			LOGI("Dumping disassembly to: %s\n", path.c_str());
@@ -632,11 +721,14 @@ int main(int argc, char *argv[])
 			{
 				VkShaderModule module = info->pStages[j].module;
 				unique_shader_modules.insert(module);
-				auto *module_info = replayer.shader_module_infos[replayer.module_to_index[module]];
+				unsigned index = replayer.module_to_index[module];
+				auto *module_info = replayer.shader_module_infos[index];
 				disassembled = disassemble_spirv(device, replayer.graphics_pipelines[i], method, info->pStages[j].stage,
 				                                 module_info, info->pStages[j].pName);
 
-				string path = output + "/" + uint64_string((uint64_t) module) + "." +
+				Hash module_hash = replayer.module_hashes[index];
+
+				string path = output + "/" + uint64_string(module_hash) + "." +
 				              info->pStages[j].pName + "." +
 				              uint64_string(replayer.graphics_hashes[i]) +
 				              "." + stage_to_string(info->pStages[j].stage);
@@ -656,11 +748,15 @@ int main(int argc, char *argv[])
 			auto *info = replayer.compute_infos[i];
 			VkShaderModule module = info->stage.module;
 			unique_shader_modules.insert(module);
-			auto *module_info = replayer.shader_module_infos[replayer.module_to_index[module]];
+
+			unsigned index = replayer.module_to_index[module];
+			auto *module_info = replayer.shader_module_infos[index];
 			disassembled = disassemble_spirv(device, replayer.compute_pipelines[i], method, info->stage.stage,
 			                                 module_info, info->stage.pName);
 
-			string path = output + "/" + uint64_string((uint64_t) module) + "." +
+			Hash module_hash = replayer.module_hashes[index];
+
+			string path = output + "/" + uint64_string(module_hash) + "." +
 			              info->stage.pName + "." +
 			              uint64_string(replayer.compute_hashes[i]) +
 			              "." + stage_to_string(info->stage.stage);

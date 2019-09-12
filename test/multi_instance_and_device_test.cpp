@@ -36,7 +36,6 @@ void test_thread(const VkApplicationInfo *info, const VkPhysicalDeviceFeatures2 
 	VulkanDevice::Options opts;
 	opts.application_info = info;
 	opts.features = features;
-	opts.need_disasm = false;
 	opts.enable_validation = false;
 	VulkanDevice device;
 	if (!device.init_device(opts))
