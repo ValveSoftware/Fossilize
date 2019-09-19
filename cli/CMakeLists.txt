@@ -26,6 +26,7 @@ function(add_fossilize_cli NAME)
 	if (FOSSILIZE_SANITIZE_ADDRESS OR FOSSILIZE_SANITIZE_THREADS)
 		set_target_properties(${NAME} PROPERTIES LINK_FLAGS "${FOSSILIZE_LINK_FLAGS}")
 	endif()
+	install(TARGETS ${NAME} DESTINATION bin)
 endfunction()
 
 add_fossilize_cli(fossilize-replay fossilize_replay.cpp)
