@@ -19,6 +19,17 @@ endif()
 
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/layer)
 
+# First is a JSON file which can be used directly from the build folder.
+if (WIN32)
+	set(FOSSILIZE_LAYER_PATH ".\\VkLayer_fossilize.dll")
+elseif (APPLE)
+	set(FOSSILIZE_LAYER_PATH "./libVkLayer_fossilize.dylib")
+else()
+	set(FOSSILIZE_LAYER_PATH "./libVkLayer_fossilize.so")
+endif()
+
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/VkLayer_fossilize.json.in ${CMAKE_BINARY_DIR}/layer/VkLayer_fossilize.json @ONLY)
+
 if (WIN32)
 	add_custom_command(TARGET VkLayer_fossilize POST_BUILD
 		COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/VkLayer_fossilize_win32.json ${CMAKE_BINARY_DIR}/layer/VkLayer_fossilize.json)
@@ -40,9 +51,10 @@ else()
 			add_custom_command(TARGET VkLayer_fossilize POST_BUILD
 				COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/VkLayer_fossilize_dylib.json ${CMAKE_BINARY_DIR}/layer/VkLayer_fossilize.json)
 		else()
-			add_custom_command(TARGET VkLayer_fossilize POST_BUILD
-				COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/VkLayer_fossilize.json ${CMAKE_BINARY_DIR}/layer/VkLayer_fossilize.json)
-			install(FILES ${CMAKE_BINARY_DIR}/layer/VkLayer_fossilize.json DESTINATION share/vulkan/explicit_layer.d)
+			# Second one is for installation, where we want to rely on LD_LIBRARY_PATH
+			set(FOSSILIZE_LAYER_PATH "libVkLayer_fossilize.so")
+			configure_file(${CMAKE_CURRENT_SOURCE_DIR}/VkLayer_fossilize.json.in ${CMAKE_BINARY_DIR}/VkLayer_fossilize.json @ONLY)
+			install(FILES ${CMAKE_BINARY_DIR}/VkLayer_fossilize.json DESTINATION share/vulkan/explicit_layer.d)
 		endif()
 	endif()
 	if (${CMAKE_BUILD_TYPE} MATCHES "Release")

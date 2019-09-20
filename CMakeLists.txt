@@ -56,9 +56,14 @@ add_library(fossilize STATIC
         fossilize_types.hpp
         varint.cpp varint.hpp
         fossilize_db.cpp fossilize_db.hpp
+        fossilize_inttypes.h
         util/intrusive_list.hpp util/object_pool.hpp util/object_cache.hpp
         path.hpp path.cpp)
 set_target_properties(fossilize PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+if (WIN32 AND CMAKE_COMPILER_IS_GNUCXX)
+	target_compile_definitions(fossilize PUBLIC __USE_MINGW_ANSI_STDIO=1)
+endif()
 
 if (NOT ANDROID)
     target_sources(fossilize PRIVATE fossilize_external_replayer.cpp fossilize_external_replayer.hpp)
