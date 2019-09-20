@@ -34,7 +34,7 @@
 #include <unistd.h>
 #endif
 #include <signal.h>
-#include <inttypes.h>
+#include "fossilize_inttypes.h"
 
 namespace Fossilize
 {

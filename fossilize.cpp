@@ -25,7 +25,7 @@
 #include <condition_variable>
 #include <thread>
 #include <stddef.h>
-#include <inttypes.h>
+#include "fossilize_inttypes.h"
 #include "fossilize.hpp"
 #include <algorithm>
 #include <unordered_map>

@@ -20,13 +20,13 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
+#include "fossilize_inttypes.h"
 #include "fossilize.hpp"
 #include "logging.hpp"
 #include "cli_parser.hpp"
 #include "fossilize_db.hpp"
 #include "file.hpp"
 #include "spirv-tools/optimizer.hpp"
-#include <inttypes.h>
 
 using namespace std;
 using namespace Fossilize;

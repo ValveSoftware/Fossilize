@@ -20,6 +20,7 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
+#include "fossilize_inttypes.h"
 #include "fossilize_db.hpp"
 #include <memory>
 #include <vector>
@@ -27,7 +28,6 @@
 #include <unordered_map>
 #include "layer/utils.hpp"
 #include "cli_parser.hpp"
-#include <inttypes.h>
 
 using namespace Fossilize;
 using namespace std;

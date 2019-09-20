@@ -20,6 +20,8 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
+#include "fossilize_inttypes.h"
+
 #define RAPIDJSON_HAS_STDSTRING 1
 #include "rapidjson/document.h"
 #include "rapidjson/writer.h"
@@ -37,7 +39,6 @@
 #include "fossilize_errors.hpp"
 #include "util/object_cache.hpp"
 
-#include <inttypes.h>
 #include <string>
 #include <unordered_set>
 #include <stdlib.h>

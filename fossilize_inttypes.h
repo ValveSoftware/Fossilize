@@ -1,4 +1,4 @@
-/* Copyright (c) 2018-2019 Hans-Kristian Arntzen
+/* Copyright (c) 2019 Hans-Kristian Arntzen
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files (the
@@ -22,44 +22,10 @@
 
 #pragma once
 
-#include <string>
-#include <utility>
-#include <stdint.h>
-#include "fossilize_inttypes.h"
-
-#if defined(_MSC_VER) && (_MSC_VER <= 1800)
-#define FOSSILIZE_NOEXCEPT
-#else
-#define FOSSILIZE_NOEXCEPT noexcept
+// Need this macro to be defined in order to use format macros in C++.
+#ifndef __STDC_FORMAT_MACROS
+#define __STDC_FORMAT_MACROS
 #endif
 
-namespace Fossilize
-{
-static inline void log_error_pnext_chain(std::string what, const void *pNext)
-{
-	what += " (pNext->sType chain: [";
-	while (pNext != nullptr)
-	{
-		auto *next = static_cast<const VkBaseInStructure *>(pNext);
-		what += std::to_string(next->sType);
-		pNext = next->pNext;
-		if (pNext != nullptr)
-			what += ", ";
-	}
-	what += "])";
-	LOGE("Error: %s\n", what.c_str());
-}
-
-static inline void log_missing_resource(const char *type, Hash hash)
-{
-	LOGE("Referenced %s %016" PRIx64 ", but it does not exist.\n", type, hash);
-}
-
-template <typename T>
-static inline void log_failed_hash(const char *type, T object)
-{
-	LOGE("%s handle 0x%016" PRIx64 " is not registered. It has either not been recorded, or it failed to be recorded earlier.\n",
-	     type, (uint64_t)object);
-}
-}
+#include <inttypes.h>
 

@@ -37,7 +37,8 @@
 #include <memory>
 #include <mutex>
 #include <dirent.h>
-#include <inttypes.h>
+
+#include "fossilize_inttypes.h"
 
 using namespace std;
 

@@ -27,7 +27,7 @@
 #include <memory>
 #include <random>
 #include <vector>
-#include <inttypes.h>
+#include "fossilize_inttypes.h"
 
 using namespace Fossilize;
 

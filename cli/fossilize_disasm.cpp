@@ -33,7 +33,7 @@
 #include <unordered_set>
 #include <stdlib.h>
 #include <string.h>
-#include <inttypes.h>
+#include "fossilize_inttypes.h"
 
 #include "spirv-tools/libspirv.hpp"
 #include "spirv_cross_c.h"
