@@ -21,7 +21,7 @@ file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/layer)
 
 # First is a JSON file which can be used directly from the build folder.
 if (WIN32)
-	set(FOSSILIZE_LAYER_PATH ".\\VkLayer_fossilize.dll")
+	set(FOSSILIZE_LAYER_PATH ".\\\\VkLayer_fossilize.dll")
 elseif (APPLE)
 	set(FOSSILIZE_LAYER_PATH "./libVkLayer_fossilize.dylib")
 else()
