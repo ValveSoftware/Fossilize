@@ -10,6 +10,7 @@ add_library(VkLayer_fossilize SHARED
 target_include_directories(VkLayer_fossilize PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_options(VkLayer_fossilize PRIVATE ${FOSSILIZE_CXX_FLAGS})
 set_target_properties(VkLayer_fossilize PROPERTIES LINK_FLAGS "${FOSSILIZE_LINK_FLAGS}")
+install(TARGETS VkLayer_fossilize DESTINATION lib)
 
 option(FOSSILIZE_LAYER_CAPTURE_SIGSEGV "Support capturing segfaults." ON)
 if (FOSSILIZE_LAYER_CAPTURE_SIGSEGV)
@@ -41,6 +42,7 @@ else()
 		else()
 			add_custom_command(TARGET VkLayer_fossilize POST_BUILD
 				COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/VkLayer_fossilize.json ${CMAKE_BINARY_DIR}/layer/VkLayer_fossilize.json)
+			install(FILES ${CMAKE_BINARY_DIR}/layer/VkLayer_fossilize.json DESTINATION share/vulkan/explicit_layer.d)
 		endif()
 	endif()
 	if (${CMAKE_BUILD_TYPE} MATCHES "Release")
