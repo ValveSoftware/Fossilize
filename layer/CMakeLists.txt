@@ -31,8 +31,6 @@ endif()
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/VkLayer_fossilize.json.in ${CMAKE_BINARY_DIR}/layer/VkLayer_fossilize.json @ONLY)
 
 if (WIN32)
-	add_custom_command(TARGET VkLayer_fossilize POST_BUILD
-		COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/VkLayer_fossilize_win32.json ${CMAKE_BINARY_DIR}/layer/VkLayer_fossilize.json)
 	set_target_properties(VkLayer_fossilize PROPERTIES PREFIX "" LIBRARY_OUTPUT_NAME VkLayer_fossilize)
 	if (CMAKE_COMPILER_IS_GNUCXX)
 		if (${CMAKE_BUILD_TYPE} MATCHES "Release")
