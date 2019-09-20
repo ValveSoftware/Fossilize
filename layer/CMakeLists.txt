@@ -48,14 +48,14 @@ else()
 
 	if (NOT ANDROID)
 		if (APPLE)
-			add_custom_command(TARGET VkLayer_fossilize POST_BUILD
-				COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/VkLayer_fossilize_dylib.json ${CMAKE_BINARY_DIR}/layer/VkLayer_fossilize.json)
+			# Second one is for installation, where we want to rely on LD_LIBRARY_PATH
+			set(FOSSILIZE_LAYER_PATH "libVkLayer_fossilize.dylib")
 		else()
 			# Second one is for installation, where we want to rely on LD_LIBRARY_PATH
 			set(FOSSILIZE_LAYER_PATH "libVkLayer_fossilize.so")
-			configure_file(${CMAKE_CURRENT_SOURCE_DIR}/VkLayer_fossilize.json.in ${CMAKE_BINARY_DIR}/VkLayer_fossilize.json @ONLY)
-			install(FILES ${CMAKE_BINARY_DIR}/VkLayer_fossilize.json DESTINATION share/vulkan/explicit_layer.d)
 		endif()
+		configure_file(${CMAKE_CURRENT_SOURCE_DIR}/VkLayer_fossilize.json.in ${CMAKE_BINARY_DIR}/VkLayer_fossilize.json @ONLY)
+		install(FILES ${CMAKE_BINARY_DIR}/VkLayer_fossilize.json DESTINATION share/vulkan/explicit_layer.d)
 	endif()
 	if (${CMAKE_BUILD_TYPE} MATCHES "Release")
 		if (APPLE)
