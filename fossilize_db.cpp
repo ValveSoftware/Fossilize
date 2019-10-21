@@ -620,7 +620,16 @@ struct StreamArchive : DatabaseInterface
 		switch (mode)
 		{
 		case DatabaseMode::ReadOnly:
+#if _WIN32
+			{
+				file = nullptr;
+				int fd = _open(path.c_str(), _O_BINARY | _O_RDONLY | _O_SEQUENTIAL, _S_IREAD);
+				if (fd >= 0)
+					file = _fdopen(fd, "rb");
+			}
+#else
 			file = fopen(path.c_str(), "rb");
+#endif
 			break;
 
 		case DatabaseMode::Append:
@@ -653,6 +662,13 @@ struct StreamArchive : DatabaseInterface
 
 		if (mode != DatabaseMode::OverWrite && mode != DatabaseMode::ExclusiveOverWrite)
 		{
+#if _WIN32
+			if (mode == DatabaseMode::ReadOnly)
+			{
+				// Set the buffer size to reduce I/O cost of sparse freads
+				setvbuf(file, nullptr, _IOFBF, FOSSILIZE_BLOB_HASH_LENGTH + sizeof(PayloadHeaderRaw));
+			}
+#endif
 			// Scan through the archive and get the list of files.
 			fseek(file, 0, SEEK_END);
 			size_t len = ftell(file);
@@ -677,28 +693,23 @@ struct StreamArchive : DatabaseInterface
 				{
 					begin_append_offset = offset;
 
-					char blob_name[FOSSILIZE_BLOB_HASH_LENGTH];
-					PayloadHeaderRaw header_raw = {};
+					PayloadHeaderRaw *header_raw = nullptr;
+					char bytes_to_read[FOSSILIZE_BLOB_HASH_LENGTH + sizeof(PayloadHeaderRaw)];
 					PayloadHeader header = {};
 
 					// Corrupt entry. Our process might have been killed before we could write all data.
-					if (offset + sizeof(blob_name) + sizeof(header_raw) > len)
+					if (offset + sizeof(bytes_to_read) > len)
 					{
 						LOGE("Detected sliced file. Dropping entries from here.\n");
 						break;
 					}
 
-					// NAME
-					if (fread(blob_name, 1, sizeof(blob_name), file) != sizeof(blob_name))
+					// NAME + HEADER in one read
+					if (fread(bytes_to_read, 1, sizeof(bytes_to_read), file) != sizeof(bytes_to_read))
 						return false;
-					offset += sizeof(blob_name);
-
-					// HEADER
-					if (fread(&header_raw, 1, sizeof(header_raw), file) != sizeof(header_raw))
-						return false;
-					offset += sizeof(header_raw);
-
-					convert_from_le(header, header_raw);
+					offset += sizeof(bytes_to_read);
+					header_raw = (PayloadHeaderRaw*)&bytes_to_read[FOSSILIZE_BLOB_HASH_LENGTH];
+					convert_from_le(header, *header_raw);
 
 					// Corrupt entry. Our process might have been killed before we could write all data.
 					if (offset + header.payload_size > len)
@@ -709,8 +720,8 @@ struct StreamArchive : DatabaseInterface
 
 					char tag_str[16 + 1] = {};
 					char value_str[16 + 1] = {};
-					memcpy(tag_str, blob_name + FOSSILIZE_BLOB_HASH_LENGTH - 32, 16);
-					memcpy(value_str, blob_name + FOSSILIZE_BLOB_HASH_LENGTH - 16, 16);
+					memcpy(tag_str, bytes_to_read + FOSSILIZE_BLOB_HASH_LENGTH - 32, 16);
+					memcpy(value_str, bytes_to_read + FOSSILIZE_BLOB_HASH_LENGTH - 16, 16);
 
 					auto tag = unsigned(strtoul(tag_str, nullptr, 16));
 					if (tag < RESOURCE_COUNT)
