@@ -2,7 +2,7 @@ language:
   - cpp
   - python
 
-python: 3.7
+python: 3.8
 
 matrix:
   include:
@@ -19,13 +19,13 @@ matrix:
     - os: windows
       before_install:
         - choco install python3
-        - export PATH="/c/Python37:/c/Python37/Scripts:$PATH"
+        - export PATH="/c/Python38:/c/Python38/Scripts:$PATH"
       env:
         - GENERATOR="Visual Studio 15 2017"
     - os: windows
       before_install:
         - choco install python3
-        - export PATH="/c/Python37:/c/Python37/Scripts:$PATH"
+        - export PATH="/c/Python38:/c/Python38/Scripts:$PATH"
       env:
         - GENERATOR="Visual Studio 15 2017 Win64"
 
