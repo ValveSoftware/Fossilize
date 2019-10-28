@@ -79,6 +79,16 @@ struct DatabaseInterface::Impl
 	DatabaseMode mode;
 };
 
+bool DatabaseInterface::write_table_of_contents(const char *)
+{
+	return false;
+}
+
+bool DatabaseInterface::set_table_of_contents(const char *)
+{
+	return false;
+}
+
 DatabaseInterface::DatabaseInterface(DatabaseMode mode)
 {
 	impl = new Impl;
@@ -570,6 +580,14 @@ static const uint8_t stream_reference_magic_and_version[16] = {
 	0, 0, 0, FOSSILIZE_FORMAT_VERSION, // 4 bytes to use for versioning.
 };
 
+static const uint8_t stream_reference_magic_and_version_toc[16] = {
+	0x81, 'F', 'O', 'S',
+	'S', 'I', 'L', 'I',
+	'Z', 'E', 'T', 'O',
+	'C', 0, 0, FOSSILIZE_FORMAT_VERSION, // 4 bytes to use for versioning.
+};
+
+
 struct StreamArchive : DatabaseInterface
 {
 	enum { MagicSize = sizeof(stream_reference_magic_and_version) };
@@ -594,7 +612,19 @@ struct StreamArchive : DatabaseInterface
 
 	struct PayloadHeaderRaw
 	{
-		uint8_t data[4 * 4];
+		static_assert(sizeof(PayloadHeader) == 16, "sizeof(PayloadHeader) is wrong.");
+		uint8_t data[sizeof(PayloadHeader)];
+	};
+
+	struct PayloadHeaderTOC : PayloadHeader
+	{
+		uint64_t offset;
+	};
+
+	struct PayloadHeaderTOCRaw
+	{
+		static_assert(sizeof(PayloadHeaderTOC) == 24, "sizeof(PayloadHeader) is wrong.");
+		uint8_t data[sizeof(PayloadHeaderTOC)];
 	};
 
 	StreamArchive(const string &path_, DatabaseMode mode_)
@@ -617,16 +647,28 @@ struct StreamArchive : DatabaseInterface
 
 	bool prepare() override
 	{
+		bool use_toc = !toc_path.empty();
+		if (use_toc)
+		{
+			if (mode != DatabaseMode::ReadOnly)
+				return false;
+			if (!parse_table_of_contents())
+				return false;
+		}
+
 		switch (mode)
 		{
 		case DatabaseMode::ReadOnly:
 #if _WIN32
+			if (toc_path.empty())
 			{
 				file = nullptr;
 				int fd = _open(path.c_str(), _O_BINARY | _O_RDONLY | _O_SEQUENTIAL, _S_IREAD);
 				if (fd >= 0)
 					file = _fdopen(fd, "rb");
 			}
+			else
+				file = fopen(path.c_str(), "rb");
 #else
 			file = fopen(path.c_str(), "rb");
 #endif
@@ -669,12 +711,16 @@ struct StreamArchive : DatabaseInterface
 				setvbuf(file, nullptr, _IOFBF, FOSSILIZE_BLOB_HASH_LENGTH + sizeof(PayloadHeaderRaw));
 			}
 #endif
-			// Scan through the archive and get the list of files.
-			fseek(file, 0, SEEK_END);
-			size_t len = ftell(file);
-			rewind(file);
+			size_t len = 0;
+			if (!use_toc)
+			{
+				// Scan through the archive and get the list of files.
+				fseek(file, 0, SEEK_END);
+				len = ftell(file);
+				rewind(file);
+			}
 
-			if (len != 0)
+			if (len != 0 || mode == DatabaseMode::ReadOnly)
 			{
 				uint8_t magic[MagicSize];
 				if (fread(magic, 1, MagicSize, file) != MagicSize)
@@ -689,6 +735,7 @@ struct StreamArchive : DatabaseInterface
 				size_t offset = MagicSize;
 				size_t begin_append_offset = len;
 
+				// This loop is skipped when we use TOC (len == 0).
 				while (offset < len)
 				{
 					begin_append_offset = offset;
@@ -829,6 +876,25 @@ struct StreamArchive : DatabaseInterface
 		}
 	}
 
+	static void convert_from_le(uint64_t *output, const uint8_t *le_input, unsigned word_count)
+	{
+		for (unsigned i = 0; i < word_count; i++)
+		{
+			uint64_t v =
+					(uint64_t(le_input[0]) << 0) |
+					(uint64_t(le_input[1]) << 8) |
+					(uint64_t(le_input[2]) << 16) |
+					(uint64_t(le_input[3]) << 24) |
+					(uint64_t(le_input[4]) << 32) |
+					(uint64_t(le_input[5]) << 40) |
+					(uint64_t(le_input[6]) << 48) |
+					(uint64_t(le_input[7]) << 56);
+
+			*output++ = v;
+			le_input += 8;
+		}
+	}
+
 	static void convert_from_le(PayloadHeader &header, const PayloadHeaderRaw &raw)
 	{
 		convert_from_le(&header.payload_size, raw.data + 0, 1);
@@ -837,15 +903,32 @@ struct StreamArchive : DatabaseInterface
 		convert_from_le(&header.uncompressed_size, raw.data + 12, 1);
 	}
 
+	static void convert_from_le(PayloadHeaderTOC &header, const PayloadHeaderTOCRaw &raw)
+	{
+		convert_from_le(&header.payload_size, raw.data + 0, 1);
+		convert_from_le(&header.format, raw.data + 4, 1);
+		convert_from_le(&header.crc, raw.data + 8, 1);
+		convert_from_le(&header.uncompressed_size, raw.data + 12, 1);
+		convert_from_le(&header.offset, raw.data + 16, 1);
+	}
+
 	static void convert_to_le(uint8_t *le_output, const uint32_t *value_input, unsigned count)
 	{
 		for (unsigned i = 0; i < count; i++)
 		{
 			uint32_t v = value_input[i];
-			*le_output++ = uint8_t((v >> 0) & 0xffu);
-			*le_output++ = uint8_t((v >> 8) & 0xffu);
-			*le_output++ = uint8_t((v >> 16) & 0xffu);
-			*le_output++ = uint8_t((v >> 24) & 0xffu);
+			for (unsigned j = 0; j < 4; j++)
+				*le_output++ = uint8_t((v >> (j * 8)) & 0xffu);
+		}
+	}
+
+	static void convert_to_le(uint8_t *le_output, const uint64_t *value_input, unsigned count)
+	{
+		for (unsigned i = 0; i < count; i++)
+		{
+			uint64_t v = value_input[i];
+			for (unsigned j = 0; j < 8; j++)
+				*le_output++ = uint8_t((v >> (j * 8)) & 0xffu);
 		}
 	}
 
@@ -856,6 +939,16 @@ struct StreamArchive : DatabaseInterface
 		convert_to_le(le_output + 4, &header.format, 1);
 		convert_to_le(le_output + 8, &header.crc, 1);
 		convert_to_le(le_output + 12, &header.uncompressed_size, 1);
+	}
+
+	static void convert_to_le(PayloadHeaderTOCRaw &raw, const PayloadHeaderTOC &header)
+	{
+		uint8_t *le_output = raw.data;
+		convert_to_le(le_output + 0, &header.payload_size, 1);
+		convert_to_le(le_output + 4, &header.format, 1);
+		convert_to_le(le_output + 8, &header.crc, 1);
+		convert_to_le(le_output + 12, &header.uncompressed_size, 1);
+		convert_to_le(le_output + 16, &header.offset, 1);
 	}
 
 	bool write_entry(ResourceTag tag, Hash hash, const void *blob, size_t size, PayloadWriteFlags flags) override
@@ -1093,6 +1186,110 @@ struct StreamArchive : DatabaseInterface
 		return path.c_str();
 	}
 
+	bool parse_table_of_contents()
+	{
+		FILE *toc_file = fopen(toc_path.c_str(), "rb");
+		if (!toc_file)
+			return false;
+
+		uint8_t magic[MagicSize];
+		if (fread(magic, 1, MagicSize, toc_file) != MagicSize)
+		{
+			fclose(toc_file);
+			return false;
+		}
+
+		if (memcmp(magic, stream_reference_magic_and_version_toc, MagicSize - 1))
+		{
+			fclose(toc_file);
+			return false;
+		}
+
+		int version = magic[MagicSize - 1];
+		if (version > FOSSILIZE_FORMAT_VERSION || version < FOSSILIZE_FORMAT_MIN_COMPAT_VERSION)
+			return false;
+
+		PayloadHeaderTOCRaw raw;
+		while (!feof(toc_file))
+		{
+			char blob_name[FOSSILIZE_BLOB_HASH_LENGTH];
+			if (fread(blob_name, 1, sizeof(blob_name), toc_file) != sizeof(blob_name))
+				break;
+			if (fread(&raw, 1, sizeof(raw), toc_file) != sizeof(raw))
+				break;
+
+			PayloadHeaderTOC toc;
+			convert_from_le(toc, raw);
+
+			char tag_str[16 + 1] = {};
+			char value_str[16 + 1] = {};
+			memcpy(tag_str, blob_name + FOSSILIZE_BLOB_HASH_LENGTH - 32, 16);
+			memcpy(value_str, blob_name + FOSSILIZE_BLOB_HASH_LENGTH - 16, 16);
+			auto tag = unsigned(strtoul(tag_str, nullptr, 16));
+
+			if (tag < RESOURCE_COUNT)
+			{
+				uint64_t value = strtoull(value_str, nullptr, 16);
+				auto &blob = seen_blobs[tag][value];
+				blob.header = static_cast<const PayloadHeader &>(toc);
+				blob.offset = toc.offset;
+			}
+		}
+
+		fclose(toc_file);
+		return true;
+	}
+
+	bool set_table_of_contents(const char *toc_path_) override
+	{
+		toc_path = toc_path_;
+		return true;
+	}
+
+	bool write_table_of_contents(const char *toc_path_) override
+	{
+		FILE *toc_file = fopen(toc_path_, "wb");
+		if (!toc_file)
+			return false;
+
+		if (fwrite(stream_reference_magic_and_version_toc, 1, sizeof(stream_reference_magic_and_version_toc), toc_file) !=
+		    sizeof(stream_reference_magic_and_version_toc))
+		{
+			fclose(toc_file);
+			return false;
+		}
+
+		for (unsigned tag = 0; tag < RESOURCE_COUNT; tag++)
+		{
+			for (auto &entry : seen_blobs[tag])
+			{
+				char str[FOSSILIZE_BLOB_HASH_LENGTH + 1]; // 40 digits + null
+				sprintf(str, "%0*x", FOSSILIZE_BLOB_HASH_LENGTH - 16, tag);
+				sprintf(str + FOSSILIZE_BLOB_HASH_LENGTH - 16, "%016" PRIx64, entry.first);
+				if (fwrite(str, 1, FOSSILIZE_BLOB_HASH_LENGTH, toc_file) != FOSSILIZE_BLOB_HASH_LENGTH)
+				{
+					fclose(toc_file);
+					return false;
+				}
+
+				PayloadHeaderTOC toc;
+
+				static_cast<PayloadHeader &>(toc) = entry.second.header;
+				toc.offset = entry.second.offset;
+				PayloadHeaderTOCRaw raw;
+				convert_to_le(raw, toc);
+				if (fwrite(&raw, 1, sizeof(raw), toc_file) != sizeof(raw))
+				{
+					fclose(toc_file);
+					return false;
+				}
+			}
+		}
+
+		fclose(toc_file);
+		return true;
+	}
+
 	FILE *file = nullptr;
 	string path;
 	unordered_map<Hash, Entry> seen_blobs[RESOURCE_COUNT];
@@ -1101,6 +1298,7 @@ struct StreamArchive : DatabaseInterface
 	size_t zlib_buffer_size = 0;
 	bool alive = false;
 	std::mutex read_lock;
+	string toc_path;
 };
 
 DatabaseInterface *create_stream_archive_database(const char *path, DatabaseMode mode)

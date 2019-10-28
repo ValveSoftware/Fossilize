@@ -121,6 +121,13 @@ public:
 
 	virtual const char *get_db_path_for_hash(ResourceTag tag, Hash hash) = 0;
 
+	// From an already prepared archive, write a table-of-contents file which may accelerate prepare() steps when parsing
+	// databases from cold disk cache on HDDs.
+	virtual bool write_table_of_contents(const char *path);
+
+	// In prepare(), rely on a side-channel TOC rather than going through the entire archive.
+	virtual bool set_table_of_contents(const char *path);
+
 protected:
 	bool test_resource_filter(ResourceTag tag, Hash hash) const;
 	struct Impl;
