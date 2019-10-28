@@ -2163,6 +2163,7 @@ static void print_help()
 	     "\t[--ignore-derived-pipelines]\n"
 	     "\t[--log-memory]\n"
 	     "\t[--null-device]\n"
+	     "\t[--toc <path>]\n"
 	     EXTRA_OPTIONS
 	     "\t<Database>\n");
 }
@@ -2501,11 +2502,17 @@ static void dump_stats(const std::string &stats_path)
 	remove(foz_path.c_str());
 }
 
-static int run_normal_process(ThreadedReplayer &replayer, const vector<const char *> &databases)
+static int run_normal_process(ThreadedReplayer &replayer, const vector<const char *> &databases, const string &toc_path = "")
 {
 	auto start_time = chrono::steady_clock::now();
 	auto start_create_archive = chrono::steady_clock::now();
 	auto resolver = create_database(databases);
+
+	if (!toc_path.empty() && !resolver->set_table_of_contents(toc_path.c_str()))
+	{
+		LOGE("Failed to set table of contents.\n");
+		return EXIT_FAILURE;
+	}
 
 	auto end_create_archive = chrono::steady_clock::now();
 
@@ -2819,6 +2826,7 @@ int main(int argc, char *argv[])
 #endif
 
 	bool log_memory = false;
+	string toc_path;
 
 	CLICallbacks cbs;
 	cbs.default_handler = [&](const char *arg) { databases.push_back(arg); };
@@ -2871,6 +2879,7 @@ int main(int argc, char *argv[])
 	cbs.add("--ignore-derived-pipelines", [&](CLIParser &) { replayer_opts.ignore_derived_pipelines = true; });
 	cbs.add("--log-memory", [&](CLIParser &) { log_memory = true; });
 	cbs.add("--null-device", [&](CLIParser &) { opts.null_device = true; });
+	cbs.add("--toc", [&](CLIParser &parser) { toc_path = parser.next_string(); });
 
 	cbs.error_handler = [] { print_help(); };
 
@@ -2937,7 +2946,7 @@ int main(int argc, char *argv[])
 #endif
 	{
 		ThreadedReplayer replayer(opts, replayer_opts);
-		ret = run_normal_process(replayer, databases);
+		ret = run_normal_process(replayer, databases, toc_path);
 #ifndef NO_ROBUST_REPLAYER
 		if (log_memory)
 			log_process_memory();
