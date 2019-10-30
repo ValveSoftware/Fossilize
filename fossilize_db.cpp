@@ -1294,8 +1294,11 @@ struct StreamArchive : DatabaseInterface
 	void add_seen_blob(ResourceTag tag, Hash hash, const Entry &entry)
 	{
 		assert(tag < RESOURCE_COUNT);
-		seen_blobs_unordered[tag][hash] = entry;
-		seen_blobs_ordered[tag].push_back(hash);
+		if (seen_blobs_unordered[tag].count(hash) == 0)
+		{
+			seen_blobs_unordered[tag][hash] = entry;
+			seen_blobs_ordered[tag].push_back(hash);
+		}
 	}
 
 	bool has_seen_blob(ResourceTag tag, Hash hash) const
@@ -1368,8 +1371,16 @@ struct ConcurrentDatabase : DatabaseInterface
 				return;
 
 			for (auto &hash : hashes)
+			{
 				if (test_resource_filter(tag, hash))
-					primed_hashes[i].insert(hash);
+				{
+					if (primed_hashes_unordered[i].count(hash) == 0)
+					{
+						primed_hashes_unordered[i].insert(hash);
+						primed_hashes_ordered[i].push_back(hash);
+					}
+				}
+			}
 		}
 	}
 
@@ -1429,7 +1440,7 @@ struct ConcurrentDatabase : DatabaseInterface
 		if (mode != DatabaseMode::Append)
 			return false;
 
-		if (primed_hashes[tag].count(hash))
+		if (primed_hashes_unordered[tag].count(hash))
 			return true;
 
 		// All threads must have called prepare and synchronized readonly_interface from that,
@@ -1466,7 +1477,7 @@ struct ConcurrentDatabase : DatabaseInterface
 	{
 		if (!test_resource_filter(tag, hash))
 			return false;
-		if (primed_hashes[tag].count(hash))
+		if (primed_hashes_unordered[tag].count(hash))
 			return true;
 
 		// All threads must have called prepare and synchronized readonly_interface from that,
@@ -1479,7 +1490,7 @@ struct ConcurrentDatabase : DatabaseInterface
 
 	bool get_hash_list_for_resource_tag(ResourceTag tag, size_t *num_hashes, Hash *hashes) override
 	{
-		size_t readonly_size = primed_hashes[tag].size();
+		size_t readonly_size = primed_hashes_ordered[tag].size();
 
 		size_t writeonly_size = 0;
 		if (!writeonly_interface || !writeonly_interface->get_hash_list_for_resource_tag(tag, &writeonly_size, nullptr))
@@ -1497,15 +1508,11 @@ struct ConcurrentDatabase : DatabaseInterface
 
 		if (hashes)
 		{
-			Hash *iter = hashes;
-			for (auto &blob : primed_hashes[tag])
-				*iter++ = blob;
+			memcpy(hashes, primed_hashes_ordered[tag].data(), readonly_size * sizeof(Hash));
 
-			if (writeonly_size != 0 && !writeonly_interface->get_hash_list_for_resource_tag(tag, &writeonly_size, iter))
+			if (writeonly_size != 0 && !writeonly_interface->get_hash_list_for_resource_tag(tag, &writeonly_size,
+			                                                                                hashes + readonly_size))
 				return false;
-
-			// Make replay more deterministic.
-			sort(hashes, hashes + total_size);
 		}
 
 		return true;
@@ -1530,7 +1537,10 @@ struct ConcurrentDatabase : DatabaseInterface
 	std::unique_ptr<DatabaseInterface> readonly_interface;
 	std::unique_ptr<DatabaseInterface> writeonly_interface;
 	std::vector<std::unique_ptr<DatabaseInterface>> extra_readonly;
-	std::unordered_set<Hash> primed_hashes[RESOURCE_COUNT];
+
+	std::unordered_set<Hash> primed_hashes_unordered[RESOURCE_COUNT];
+	std::vector<Hash> primed_hashes_ordered[RESOURCE_COUNT];
+
 	bool has_prepared_readonly = false;
 	bool need_writeonly_database = true;
 };
