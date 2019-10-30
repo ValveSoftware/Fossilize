@@ -778,7 +778,7 @@ struct StreamArchive : DatabaseInterface
 						entry.header = header;
 						entry.offset = offset;
 						if (test_resource_filter(static_cast<ResourceTag>(tag), value))
-							seen_blobs[tag].emplace(value, entry);
+							add_seen_blob(static_cast<ResourceTag>(tag), value, entry);
 					}
 
 					if (fseek(file, header.payload_size, SEEK_CUR) < 0)
@@ -819,8 +819,8 @@ struct StreamArchive : DatabaseInterface
 		if (!alive || mode != DatabaseMode::ReadOnly)
 			return false;
 
-		auto itr = seen_blobs[tag].find(hash);
-		if (itr == end(seen_blobs[tag]))
+		auto itr = seen_blobs_unordered[tag].find(hash);
+		if (itr == end(seen_blobs_unordered[tag]))
 			return false;
 
 		if (!blob_size)
@@ -956,8 +956,7 @@ struct StreamArchive : DatabaseInterface
 		if (!alive || mode == DatabaseMode::ReadOnly)
 			return false;
 
-		auto itr = seen_blobs[tag].find(hash);
-		if (itr != end(seen_blobs[tag]))
+		if (has_seen_blob(tag, hash))
 			return true;
 
 		char str[FOSSILIZE_BLOB_HASH_LENGTH + 1]; // 40 digits + null
@@ -1037,7 +1036,7 @@ struct StreamArchive : DatabaseInterface
 		}
 
 		// The entry is irrelevant, we're not going to read from this archive any time soon.
-		seen_blobs[tag].emplace(hash, Entry{});
+		add_seen_blob(tag, hash, {});
 		return true;
 	}
 
@@ -1045,12 +1044,12 @@ struct StreamArchive : DatabaseInterface
 	{
 		if (!test_resource_filter(tag, hash))
 			return false;
-		return seen_blobs[tag].count(hash) != 0;
+		return has_seen_blob(tag, hash);
 	}
 
 	bool get_hash_list_for_resource_tag(ResourceTag tag, size_t *hash_count, Hash *hashes) override
 	{
-		size_t size = seen_blobs[tag].size();
+		size_t size = seen_blobs_ordered[tag].size();
 		if (hashes)
 		{
 			if (size != *hash_count)
@@ -1060,14 +1059,7 @@ struct StreamArchive : DatabaseInterface
 			*hash_count = size;
 
 		if (hashes)
-		{
-			Hash *iter = hashes;
-			for (auto &blob : seen_blobs[tag])
-				*iter++ = blob.first;
-
-			// Make replay more deterministic.
-			sort(hashes, hashes + size);
-		}
+			memcpy(hashes, seen_blobs_ordered[tag].data(), seen_blobs_ordered[tag].size() * sizeof(Hash));
 		return true;
 	}
 
@@ -1230,9 +1222,11 @@ struct StreamArchive : DatabaseInterface
 			if (tag < RESOURCE_COUNT)
 			{
 				uint64_t value = strtoull(value_str, nullptr, 16);
-				auto &blob = seen_blobs[tag][value];
-				blob.header = static_cast<const PayloadHeader &>(toc);
-				blob.offset = toc.offset;
+
+				Entry entry;
+				entry.header = static_cast<const PayloadHeader &>(toc);
+				entry.offset = toc.offset;
+				add_seen_blob(static_cast<ResourceTag>(tag), value, entry);
 			}
 		}
 
@@ -1261,12 +1255,19 @@ struct StreamArchive : DatabaseInterface
 
 		for (unsigned tag = 0; tag < RESOURCE_COUNT; tag++)
 		{
-			for (auto &entry : seen_blobs[tag])
+			for (auto &hash : seen_blobs_ordered[tag])
 			{
 				char str[FOSSILIZE_BLOB_HASH_LENGTH + 1]; // 40 digits + null
 				sprintf(str, "%0*x", FOSSILIZE_BLOB_HASH_LENGTH - 16, tag);
-				sprintf(str + FOSSILIZE_BLOB_HASH_LENGTH - 16, "%016" PRIx64, entry.first);
+				sprintf(str + FOSSILIZE_BLOB_HASH_LENGTH - 16, "%016" PRIx64, hash);
 				if (fwrite(str, 1, FOSSILIZE_BLOB_HASH_LENGTH, toc_file) != FOSSILIZE_BLOB_HASH_LENGTH)
+				{
+					fclose(toc_file);
+					return false;
+				}
+
+				auto itr = seen_blobs_unordered[tag].find(hash);
+				if (itr == end(seen_blobs_unordered[tag]))
 				{
 					fclose(toc_file);
 					return false;
@@ -1274,8 +1275,8 @@ struct StreamArchive : DatabaseInterface
 
 				PayloadHeaderTOC toc;
 
-				static_cast<PayloadHeader &>(toc) = entry.second.header;
-				toc.offset = entry.second.offset;
+				static_cast<PayloadHeader &>(toc) = itr->second.header;
+				toc.offset = itr->second.offset;
 				PayloadHeaderTOCRaw raw;
 				convert_to_le(raw, toc);
 				if (fwrite(&raw, 1, sizeof(raw), toc_file) != sizeof(raw))
@@ -1290,9 +1291,23 @@ struct StreamArchive : DatabaseInterface
 		return true;
 	}
 
+	void add_seen_blob(ResourceTag tag, Hash hash, const Entry &entry)
+	{
+		assert(tag < RESOURCE_COUNT);
+		seen_blobs_unordered[tag][hash] = entry;
+		seen_blobs_ordered[tag].push_back(hash);
+	}
+
+	bool has_seen_blob(ResourceTag tag, Hash hash) const
+	{
+		assert(tag < RESOURCE_COUNT);
+		return seen_blobs_unordered[tag].count(hash) != 0;
+	}
+
 	FILE *file = nullptr;
 	string path;
-	unordered_map<Hash, Entry> seen_blobs[RESOURCE_COUNT];
+	unordered_map<Hash, Entry> seen_blobs_unordered[RESOURCE_COUNT];
+	vector<Hash> seen_blobs_ordered[RESOURCE_COUNT];
 	DatabaseMode mode;
 	uint8_t *zlib_buffer = nullptr;
 	size_t zlib_buffer_size = 0;
