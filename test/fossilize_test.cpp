@@ -374,6 +374,11 @@ static void record_compute_pipelines(StateRecorder &recorder)
 	pipe.stage.module = fake_handle<VkShaderModule>(5000);
 	pipe.stage.pName = "main";
 
+	VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT required_size =
+			{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT };
+	required_size.requiredSubgroupSize = 64;
+	pipe.stage.pNext = &required_size;
+
 	VkSpecializationInfo spec = {};
 	spec.dataSize = 16;
 	static const float data[4] = { 1.0f, 2.0f, 3.0f, 4.0f };
@@ -426,6 +431,12 @@ static void record_graphics_pipelines(StateRecorder &recorder)
 	stages[1].pName = "frag";
 	stages[1].module = fake_handle<VkShaderModule>(5001);
 	stages[1].pSpecializationInfo = &spec;
+
+	VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT required_size =
+			{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT };
+	required_size.requiredSubgroupSize = 16;
+	stages[1].pNext = &required_size;
+
 	pipe.pStages = stages;
 
 	VkPipelineVertexInputStateCreateInfo vi = { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };

@@ -208,6 +208,7 @@ struct StateReplayer::Impl
 	bool parse_color_blend_advanced_state(const Value &state, VkPipelineColorBlendAdvancedStateCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_rasterization_conservative_state(const Value &state, VkPipelineRasterizationConservativeStateCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_rasterization_line_state(const Value &state, VkPipelineRasterizationLineStateCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_shader_stage_required_subgroup_size(const Value &state, VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_uints(const Value &attachments, const uint32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	bool parse_sints(const Value &attachments, const int32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	const char *duplicate_string(const char *str, size_t len);
@@ -291,6 +292,8 @@ struct StateRecorder::Impl
 	void *copy_pnext_struct(const VkPipelineRasterizationConservativeStateCreateInfoEXT *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPipelineRasterizationLineStateCreateInfoEXT *create_info,
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 
 	bool remap_sampler_handle(VkSampler sampler, VkSampler *out_sampler) const FOSSILIZE_WARN_UNUSED;
@@ -620,6 +623,13 @@ static void hash_pnext_struct(const StateRecorder *,
 	h.u32(create_info.lineStipplePattern);
 }
 
+static void hash_pnext_struct(const StateRecorder *,
+                              Hasher &h,
+                              const VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT &create_info)
+{
+	h.u32(create_info.requiredSubgroupSize);
+}
+
 static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const void *pNext)
 {
 	while (pNext != nullptr)
@@ -663,6 +673,10 @@ static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const voi
 
 		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_LINE_STATE_CREATE_INFO_EXT:
 			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineRasterizationLineStateCreateInfoEXT *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT:
+			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT *>(pNext));
 			break;
 
 		default:
@@ -1055,6 +1069,9 @@ bool compute_hash_compute_pipeline(const StateRecorder &recorder, const VkComput
 		hash_specialization_info(h, *create_info.stage.pSpecializationInfo);
 	else
 		h.u32(0);
+
+	if (!hash_pnext_chain(&recorder, h, create_info.stage.pNext))
+		return false;
 
 	*out_hash = h.get();
 	return true;
@@ -1872,6 +1889,10 @@ bool StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, D
 	info.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 	info.stage.stage = static_cast<VkShaderStageFlagBits>(stage["stage"].GetUint());
 
+	if (stage.HasMember("pNext"))
+		if (!parse_pnext_chain(stage["pNext"], &info.stage.pNext))
+			return false;
+
 	auto module = string_to_uint64(stage["module"].GetString());
 	if (module > 0 && resolve_shader_modules)
 	{
@@ -2248,6 +2269,10 @@ bool StateReplayer::Impl::parse_stages(StateCreatorInterface &iface, DatabaseInt
 			if (!parse_specialization_info(obj["specializationInfo"], &state->pSpecializationInfo))
 				return false;
 
+		if (obj.HasMember("pNext"))
+			if (!parse_pnext_chain(obj["pNext"], &state->pNext))
+				return false;
+
 		auto module = string_to_uint64(obj["module"].GetString());
 		if (module > 0 && resolve_shader_modules)
 		{
@@ -2557,6 +2582,17 @@ bool StateReplayer::Impl::parse_rasterization_line_state(const Value &state,
 	return true;
 }
 
+bool StateReplayer::Impl::parse_shader_stage_required_subgroup_size(const Value &state,
+                                                                    VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT>();
+
+	info->requiredSubgroupSize = state["requiredSubgroupSize"].GetUint();
+
+	*out_info = info;
+	return true;
+}
+
 bool StateReplayer::Impl::parse_multiview_state(const Value &state, VkRenderPassMultiviewCreateInfo **out_info)
 {
 	auto *info = allocator.allocate_cleared<VkRenderPassMultiviewCreateInfo>();
@@ -2675,6 +2711,15 @@ bool StateReplayer::Impl::parse_pnext_chain(const Value &pnext, const void **out
 		{
 			VkPipelineRasterizationLineStateCreateInfoEXT *info = nullptr;
 			if (!parse_rasterization_line_state(next, &info))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT:
+		{
+			VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT *info = nullptr;
+			if (!parse_shader_stage_required_subgroup_size(next, &info))
 				return false;
 			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
 			break;
@@ -2917,6 +2962,12 @@ void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineRasterizationLineSt
 	return copy(create_info, 1, alloc);
 }
 
+void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT *create_info,
+                                             ScratchAllocator &alloc)
+{
+	return copy(create_info, 1, alloc);
+}
+
 void *StateRecorder::Impl::copy_pnext_struct(
 		const VkPipelineRasterizationDepthClipStateCreateInfoEXT *create_info,
 		ScratchAllocator &alloc)
@@ -3001,6 +3052,13 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_LINE_STATE_CREATE_INFO_EXT:
 		{
 			auto *ci = static_cast<const VkPipelineRasterizationLineStateCreateInfoEXT *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT:
+		{
+			auto *ci = static_cast<const VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT *>(pNext);
 			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
 			break;
 		}
@@ -3582,13 +3640,11 @@ bool StateRecorder::Impl::copy_compute_pipeline(const VkComputePipelineCreateInf
 		if (!copy_specialization_info(info->stage.pSpecializationInfo, alloc, &info->stage.pSpecializationInfo))
 			return false;
 
-	if (info->stage.pNext)
-	{
-		log_error_pnext_chain("pNext in VkPipelineShaderStageCreateInfo not supported.", info->stage.pNext);
-		return false;
-	}
-
 	info->stage.pName = copy(info->stage.pName, strlen(info->stage.pName) + 1, alloc);
+
+	if (!copy_pnext_chain(info->stage.pNext, alloc, &info->stage.pNext))
+		return false;
+
 	*out_create_info = info;
 	return true;
 }
@@ -3721,16 +3777,16 @@ bool StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateI
 	for (uint32_t i = 0; i < info->stageCount; i++)
 	{
 		auto &stage = const_cast<VkPipelineShaderStageCreateInfo &>(info->pStages[i]);
-		if (stage.pNext)
-		{
-			log_error_pnext_chain("pNext in VkPipelineShaderStageCreateInfo not supported.", stage.pNext);
-			return false;
-		}
 
 		stage.pName = copy(stage.pName, strlen(stage.pName) + 1, alloc);
 		if (stage.pSpecializationInfo)
 			if (!copy_specialization_info(stage.pSpecializationInfo, alloc, &stage.pSpecializationInfo))
 				return false;
+
+		const void *pNext = nullptr;
+		if (!copy_pnext_chain(stage.pNext, alloc, &pNext))
+			return false;
+		stage.pNext = pNext;
 	}
 
 	if (info->pColorBlendState)
@@ -4521,45 +4577,6 @@ static bool json_value(const VkShaderModuleCreateInfo& module, Allocator& alloc,
 }
 
 template <typename Allocator>
-static bool json_value(const VkComputePipelineCreateInfo& pipe, Allocator& alloc, Value *out_value)
-{
-	Value p(kObjectType);
-	p.AddMember("flags", pipe.flags, alloc);
-	p.AddMember("layout", uint64_string(api_object_cast<uint64_t>(pipe.layout), alloc), alloc);
-	p.AddMember("basePipelineHandle", uint64_string(api_object_cast<uint64_t>(pipe.basePipelineHandle), alloc), alloc);
-	p.AddMember("basePipelineIndex", pipe.basePipelineIndex, alloc);
-	Value stage(kObjectType);
-	stage.AddMember("flags", pipe.stage.flags, alloc);
-	stage.AddMember("stage", pipe.stage.stage, alloc);
-	stage.AddMember("module", uint64_string(api_object_cast<uint64_t>(pipe.stage.module), alloc), alloc);
-	stage.AddMember("name", StringRef(pipe.stage.pName), alloc);
-	if (pipe.stage.pSpecializationInfo)
-	{
-		Value spec(kObjectType);
-		spec.AddMember("dataSize", uint64_t(pipe.stage.pSpecializationInfo->dataSize), alloc);
-		spec.AddMember("data",
-					   encode_base64(pipe.stage.pSpecializationInfo->pData,
-									 pipe.stage.pSpecializationInfo->dataSize), alloc);
-		Value map_entries(kArrayType);
-		for (uint32_t i = 0; i < pipe.stage.pSpecializationInfo->mapEntryCount; i++)
-		{
-			auto &e = pipe.stage.pSpecializationInfo->pMapEntries[i];
-			Value map_entry(kObjectType);
-			map_entry.AddMember("offset", e.offset, alloc);
-			map_entry.AddMember("size", uint64_t(e.size), alloc);
-			map_entry.AddMember("constantID", e.constantID, alloc);
-			map_entries.PushBack(map_entry, alloc);
-		}
-		spec.AddMember("mapEntries", map_entries, alloc);
-		stage.AddMember("specializationInfo", spec, alloc);
-	}
-	p.AddMember("stage", stage, alloc);
-
-	*out_value = p;
-	return true;
-}
-
-template <typename Allocator>
 static bool json_value(const VkPipelineTessellationDomainOriginStateCreateInfo &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -4714,6 +4731,17 @@ static bool json_value(const VkPipelineRasterizationLineStateCreateInfoEXT &crea
 }
 
 template <typename Allocator>
+static bool json_value(const VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("requiredSubgroupSize", create_info.requiredSubgroupSize, alloc);
+
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
 static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *out_value)
 {
 	Value nexts(kArrayType);
@@ -4769,6 +4797,11 @@ static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *o
 				return false;
 			break;
 
+		case VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT:
+			if (!json_value(*static_cast<const VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT *>(pNext), alloc, &next))
+				return false;
+			break;
+
 		default:
 			log_error_pnext_chain("Unsupported pNext found, cannot hash sType.", pNext);
 			return false;
@@ -4779,6 +4812,54 @@ static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *o
 	}
 
 	*out_value = nexts;
+	return true;
+}
+
+template <typename Allocator>
+static bool json_value(const VkComputePipelineCreateInfo& pipe, Allocator& alloc, Value *out_value)
+{
+	Value p(kObjectType);
+	p.AddMember("flags", pipe.flags, alloc);
+	p.AddMember("layout", uint64_string(api_object_cast<uint64_t>(pipe.layout), alloc), alloc);
+	p.AddMember("basePipelineHandle", uint64_string(api_object_cast<uint64_t>(pipe.basePipelineHandle), alloc), alloc);
+	p.AddMember("basePipelineIndex", pipe.basePipelineIndex, alloc);
+	Value stage(kObjectType);
+	stage.AddMember("flags", pipe.stage.flags, alloc);
+	stage.AddMember("stage", pipe.stage.stage, alloc);
+	stage.AddMember("module", uint64_string(api_object_cast<uint64_t>(pipe.stage.module), alloc), alloc);
+	stage.AddMember("name", StringRef(pipe.stage.pName), alloc);
+	if (pipe.stage.pSpecializationInfo)
+	{
+		Value spec(kObjectType);
+		spec.AddMember("dataSize", uint64_t(pipe.stage.pSpecializationInfo->dataSize), alloc);
+		spec.AddMember("data",
+		               encode_base64(pipe.stage.pSpecializationInfo->pData,
+		                             pipe.stage.pSpecializationInfo->dataSize), alloc);
+		Value map_entries(kArrayType);
+		for (uint32_t i = 0; i < pipe.stage.pSpecializationInfo->mapEntryCount; i++)
+		{
+			auto &e = pipe.stage.pSpecializationInfo->pMapEntries[i];
+			Value map_entry(kObjectType);
+			map_entry.AddMember("offset", e.offset, alloc);
+			map_entry.AddMember("size", uint64_t(e.size), alloc);
+			map_entry.AddMember("constantID", e.constantID, alloc);
+			map_entries.PushBack(map_entry, alloc);
+		}
+		spec.AddMember("mapEntries", map_entries, alloc);
+		stage.AddMember("specializationInfo", spec, alloc);
+	}
+
+	if (pipe.stage.pNext)
+	{
+		Value nexts;
+		if (!pnext_chain_json_value(pipe.stage.pNext, alloc, &nexts))
+			return false;
+		stage.AddMember("pNext", nexts, alloc);
+	}
+
+	p.AddMember("stage", stage, alloc);
+
+	*out_value = p;
 	return true;
 }
 
@@ -5226,6 +5307,15 @@ static bool json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& allo
 			spec.AddMember("mapEntries", map_entries, alloc);
 			stage.AddMember("specializationInfo", spec, alloc);
 		}
+
+		if (s.pNext)
+		{
+			Value nexts;
+			if (!pnext_chain_json_value(s.pNext, alloc, &nexts))
+				return false;
+			stage.AddMember("pNext", nexts, alloc);
+		}
+
 		stages.PushBack(stage, alloc);
 	}
 	p.AddMember("stages", stages, alloc);
