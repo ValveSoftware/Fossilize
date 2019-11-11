@@ -453,6 +453,12 @@ static void record_graphics_pipelines(StateRecorder &recorder)
 	vi.pNext = &divisor;
 	divisor.pNext = &divisor2;
 
+	VkPipelineColorBlendAdvancedStateCreateInfoEXT advanced = { VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_ADVANCED_STATE_CREATE_INFO_EXT };
+	advanced.blendOverlap = VK_BLEND_OVERLAP_CONJOINT_EXT;
+	advanced.srcPremultiplied = VK_TRUE;
+	advanced.dstPremultiplied = VK_TRUE;
+	blend.pNext = &advanced;
+
 	static const VkVertexInputAttributeDescription attrs[2] = {
 		{ 2, 1, VK_FORMAT_R16G16_SFLOAT, 5 },
 		{ 9, 1, VK_FORMAT_R8_UINT, 5 },

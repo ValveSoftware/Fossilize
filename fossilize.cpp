@@ -205,6 +205,7 @@ struct StateReplayer::Impl
 	bool parse_rasterization_stream_state(const Value &state, VkPipelineRasterizationStateStreamCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_multiview_state(const Value &state, VkRenderPassMultiviewCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_descriptor_set_binding_flags(const Value &state, VkDescriptorSetLayoutBindingFlagsCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_color_blend_advanced_state(const Value &state, VkPipelineColorBlendAdvancedStateCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_uints(const Value &attachments, const uint32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	bool parse_sints(const Value &attachments, const int32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	const char *duplicate_string(const char *str, size_t len);
@@ -282,6 +283,8 @@ struct StateRecorder::Impl
 	void *copy_pnext_struct(const VkRenderPassMultiviewCreateInfo *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkDescriptorSetLayoutBindingFlagsCreateInfoEXT *create_info,
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkPipelineColorBlendAdvancedStateCreateInfoEXT *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 
 	bool remap_sampler_handle(VkSampler sampler, VkSampler *out_sampler) const FOSSILIZE_WARN_UNUSED;
@@ -583,6 +586,15 @@ static void hash_pnext_struct(const StateRecorder *,
 		h.u32(create_info.pBindingFlags[i]);
 }
 
+static void hash_pnext_struct(const StateRecorder *,
+                              Hasher &h,
+                              const VkPipelineColorBlendAdvancedStateCreateInfoEXT &create_info)
+{
+	h.u32(create_info.srcPremultiplied);
+	h.u32(create_info.dstPremultiplied);
+	h.u32(create_info.blendOverlap);
+}
+
 static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const void *pNext)
 {
 	while (pNext != nullptr)
@@ -614,6 +626,10 @@ static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const voi
 
 		case VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT:
 			hash_pnext_struct(recorder, h, *static_cast<const VkDescriptorSetLayoutBindingFlagsCreateInfoEXT *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_ADVANCED_STATE_CREATE_INFO_EXT:
+			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineColorBlendAdvancedStateCreateInfoEXT *>(pNext));
 			break;
 
 		default:
@@ -2074,6 +2090,10 @@ bool StateReplayer::Impl::parse_color_blend_state(const Value &blend, const VkPi
 			return false;
 	}
 
+	if (blend.HasMember("pNext"))
+		if (!parse_pnext_chain(blend["pNext"], &state->pNext))
+			return false;
+
 	*out_info = state;
 	return true;
 }
@@ -2464,6 +2484,19 @@ bool StateReplayer::Impl::parse_descriptor_set_binding_flags(const Value &state,
 	return true;
 }
 
+bool StateReplayer::Impl::parse_color_blend_advanced_state(const Value &state,
+                                                           VkPipelineColorBlendAdvancedStateCreateInfoEXT **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkPipelineColorBlendAdvancedStateCreateInfoEXT>();
+
+	info->blendOverlap = static_cast<VkBlendOverlapEXT>(state["blendOverlap"].GetUint());
+	info->srcPremultiplied = state["srcPremultiplied"].GetUint();
+	info->dstPremultiplied = state["dstPremultiplied"].GetUint();
+
+	*out_info = info;
+	return true;
+}
+
 bool StateReplayer::Impl::parse_multiview_state(const Value &state, VkRenderPassMultiviewCreateInfo **out_info)
 {
 	auto *info = allocator.allocate_cleared<VkRenderPassMultiviewCreateInfo>();
@@ -2555,6 +2588,15 @@ bool StateReplayer::Impl::parse_pnext_chain(const Value &pnext, const void **out
 		{
 			VkDescriptorSetLayoutBindingFlagsCreateInfoEXT *info = nullptr;
 			if (!parse_descriptor_set_binding_flags(next, &info))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_ADVANCED_STATE_CREATE_INFO_EXT:
+		{
+			VkPipelineColorBlendAdvancedStateCreateInfoEXT *info = nullptr;
+			if (!parse_color_blend_advanced_state(next, &info))
 				return false;
 			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
 			break;
@@ -2779,6 +2821,12 @@ void *StateRecorder::Impl::copy_pnext_struct(const VkDescriptorSetLayoutBindingF
 	return info;
 }
 
+void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineColorBlendAdvancedStateCreateInfoEXT *create_info,
+                                             ScratchAllocator &alloc)
+{
+	return copy(create_info, 1, alloc);
+}
+
 void *StateRecorder::Impl::copy_pnext_struct(
 		const VkPipelineRasterizationDepthClipStateCreateInfoEXT *create_info,
 		ScratchAllocator &alloc)
@@ -2842,6 +2890,13 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 		case VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT:
 		{
 			auto *ci = static_cast<const VkDescriptorSetLayoutBindingFlagsCreateInfoEXT *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_ADVANCED_STATE_CREATE_INFO_EXT:
+		{
+			auto *ci = static_cast<const VkPipelineColorBlendAdvancedStateCreateInfoEXT *>(pNext);
 			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
 			break;
 		}
@@ -3472,13 +3527,12 @@ bool StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateI
 
 	if (info->pColorBlendState)
 	{
-		if (info->pColorBlendState->pNext)
-		{
-			log_error_pnext_chain("pNext in VkPipelineColorBlendStateCreateInfo not supported.",
-			                      info->pColorBlendState->pNext);
-			return false;
-		}
 		info->pColorBlendState = copy(info->pColorBlendState, 1, alloc);
+		const void *pNext = nullptr;
+		if (!copy_pnext_chain(info->pColorBlendState->pNext, alloc, &pNext))
+			return false;
+
+		const_cast<VkPipelineColorBlendStateCreateInfo *>(info->pColorBlendState)->pNext = pNext;
 	}
 
 	if (info->pVertexInputState)
@@ -4513,6 +4567,20 @@ static bool json_value(const VkDescriptorSetLayoutBindingFlagsCreateInfoEXT &cre
 }
 
 template <typename Allocator>
+static bool json_value(const VkPipelineColorBlendAdvancedStateCreateInfoEXT &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+
+	value.AddMember("srcPremultiplied", uint32_t(create_info.srcPremultiplied), alloc);
+	value.AddMember("dstPremultiplied", uint32_t(create_info.dstPremultiplied), alloc);
+	value.AddMember("blendOverlap", create_info.blendOverlap, alloc);
+
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
 static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *out_value)
 {
 	Value nexts(kArrayType);
@@ -4550,6 +4618,11 @@ static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *o
 
 		case VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT:
 			if (!json_value(*static_cast<const VkDescriptorSetLayoutBindingFlagsCreateInfoEXT *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_ADVANCED_STATE_CREATE_INFO_EXT:
+			if (!json_value(*static_cast<const VkPipelineColorBlendAdvancedStateCreateInfoEXT *>(pNext), alloc, &next))
 				return false;
 			break;
 
@@ -4899,6 +4972,15 @@ static bool json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& allo
 			attachments.PushBack(att, alloc);
 		}
 		cb.AddMember("attachments", attachments, alloc);
+
+		if (pipe.pColorBlendState->pNext)
+		{
+			Value nexts;
+			if (!pnext_chain_json_value(pipe.pColorBlendState->pNext, alloc, &nexts))
+				return false;
+			cb.AddMember("pNext", nexts, alloc);
+		}
+
 		p.AddMember("colorBlendState", cb, alloc);
 	}
 
