@@ -62,7 +62,9 @@ struct ReplayInterface : StateCreatorInterface
 
 	bool enqueue_create_sampler(Hash hash, const VkSamplerCreateInfo *create_info, VkSampler *sampler) override
 	{
-		Hash recorded_hash = Hashing::compute_hash_sampler(*create_info);
+		Hash recorded_hash;
+		if (!Hashing::compute_hash_sampler(*create_info, &recorded_hash))
+			return false;
 		if (recorded_hash != hash)
 			return false;
 
@@ -96,7 +98,9 @@ struct ReplayInterface : StateCreatorInterface
 
 	bool enqueue_create_shader_module(Hash hash, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module) override
 	{
-		Hash recorded_hash = Hashing::compute_hash_shader_module(*create_info);
+		Hash recorded_hash;
+		if (!Hashing::compute_hash_shader_module(*create_info, &recorded_hash))
+			return false;
 		if (recorded_hash != hash)
 			return false;
 
@@ -106,7 +110,9 @@ struct ReplayInterface : StateCreatorInterface
 
 	bool enqueue_create_render_pass(Hash hash, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass) override
 	{
-		Hash recorded_hash = Hashing::compute_hash_render_pass(*create_info);
+		Hash recorded_hash;
+		if (!Hashing::compute_hash_render_pass(*create_info, &recorded_hash))
+			return false;
 		if (recorded_hash != hash)
 			return false;
 
@@ -325,10 +331,25 @@ static void record_render_passes(StateRecorder &recorder)
 	pass.pSubpasses = subpasses;
 	pass.dependencyCount = 0;
 	pass.pDependencies = deps;
+
+	VkRenderPassMultiviewCreateInfo multiview = { VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO };
+	multiview.subpassCount = 3;
+	static const uint32_t view_masks[3] = { 2, 4, 5 };
+	multiview.pViewMasks = view_masks;
+	multiview.dependencyCount = 2;
+	static const int32_t view_offsets[2] = { -2, 1 };
+	multiview.pViewOffsets = view_offsets;
+	multiview.correlationMaskCount = 4;
+	static const uint32_t correlation_masks[4] = { 1, 2, 3, 4 };
+	multiview.pCorrelationMasks = correlation_masks;
+	pass.pNext = &multiview;
+
 	if (!recorder.record_render_pass(fake_handle<VkRenderPass>(30000), pass))
 		abort();
 
 	pass.dependencyCount = 0;
+	VkRenderPassMultiviewCreateInfo blank_multiview = { VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO };
+	pass.pNext = &blank_multiview;
 	if (!recorder.record_render_pass(fake_handle<VkRenderPass>(30001), pass))
 		abort();
 }
