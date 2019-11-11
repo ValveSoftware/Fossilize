@@ -62,7 +62,9 @@ struct ReplayInterface : StateCreatorInterface
 
 	bool enqueue_create_sampler(Hash hash, const VkSamplerCreateInfo *create_info, VkSampler *sampler) override
 	{
-		Hash recorded_hash = Hashing::compute_hash_sampler(*create_info);
+		Hash recorded_hash;
+		if (!Hashing::compute_hash_sampler(*create_info, &recorded_hash))
+			return false;
 		if (recorded_hash != hash)
 			return false;
 
@@ -96,7 +98,9 @@ struct ReplayInterface : StateCreatorInterface
 
 	bool enqueue_create_shader_module(Hash hash, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module) override
 	{
-		Hash recorded_hash = Hashing::compute_hash_shader_module(*create_info);
+		Hash recorded_hash;
+		if (!Hashing::compute_hash_shader_module(*create_info, &recorded_hash))
+			return false;
 		if (recorded_hash != hash)
 			return false;
 
@@ -106,7 +110,9 @@ struct ReplayInterface : StateCreatorInterface
 
 	bool enqueue_create_render_pass(Hash hash, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass) override
 	{
-		Hash recorded_hash = Hashing::compute_hash_render_pass(*create_info);
+		Hash recorded_hash;
+		if (!Hashing::compute_hash_render_pass(*create_info, &recorded_hash))
+			return false;
 		if (recorded_hash != hash)
 			return false;
 
@@ -206,11 +212,23 @@ static void record_set_layouts(StateRecorder &recorder)
 	bindings[2].descriptorCount = 3;
 	bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 	bindings[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+	VkDescriptorSetLayoutBindingFlagsCreateInfoEXT flags = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT };
+	static const VkDescriptorBindingFlagsEXT binding_flags[] = {
+		VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT_EXT,
+		VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT_EXT,
+		VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT_EXT,
+	};
+	flags.pBindingFlags = binding_flags;
+	flags.bindingCount = 3;
+	layout.pNext = &flags;
+
 	if (!recorder.record_descriptor_set_layout(fake_handle<VkDescriptorSetLayout>(1000), layout))
 		abort();
 
 	layout.bindingCount = 2;
 	layout.pBindings = bindings + 1;
+	flags.bindingCount = 0;
 	if (!recorder.record_descriptor_set_layout(fake_handle<VkDescriptorSetLayout>(1001), layout))
 		abort();
 }
@@ -325,10 +343,25 @@ static void record_render_passes(StateRecorder &recorder)
 	pass.pSubpasses = subpasses;
 	pass.dependencyCount = 0;
 	pass.pDependencies = deps;
+
+	VkRenderPassMultiviewCreateInfo multiview = { VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO };
+	multiview.subpassCount = 3;
+	static const uint32_t view_masks[3] = { 2, 4, 5 };
+	multiview.pViewMasks = view_masks;
+	multiview.dependencyCount = 2;
+	static const int32_t view_offsets[2] = { -2, 1 };
+	multiview.pViewOffsets = view_offsets;
+	multiview.correlationMaskCount = 4;
+	static const uint32_t correlation_masks[4] = { 1, 2, 3, 4 };
+	multiview.pCorrelationMasks = correlation_masks;
+	pass.pNext = &multiview;
+
 	if (!recorder.record_render_pass(fake_handle<VkRenderPass>(30000), pass))
 		abort();
 
 	pass.dependencyCount = 0;
+	VkRenderPassMultiviewCreateInfo blank_multiview = { VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO };
+	pass.pNext = &blank_multiview;
 	if (!recorder.record_render_pass(fake_handle<VkRenderPass>(30001), pass))
 		abort();
 }
@@ -340,6 +373,11 @@ static void record_compute_pipelines(StateRecorder &recorder)
 	pipe.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
 	pipe.stage.module = fake_handle<VkShaderModule>(5000);
 	pipe.stage.pName = "main";
+
+	VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT required_size =
+			{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT };
+	required_size.requiredSubgroupSize = 64;
+	pipe.stage.pNext = &required_size;
 
 	VkSpecializationInfo spec = {};
 	spec.dataSize = 16;
@@ -393,6 +431,12 @@ static void record_graphics_pipelines(StateRecorder &recorder)
 	stages[1].pName = "frag";
 	stages[1].module = fake_handle<VkShaderModule>(5001);
 	stages[1].pSpecializationInfo = &spec;
+
+	VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT required_size =
+			{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT };
+	required_size.requiredSubgroupSize = 16;
+	stages[1].pNext = &required_size;
+
 	pipe.pStages = stages;
 
 	VkPipelineVertexInputStateCreateInfo vi = { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
@@ -419,6 +463,12 @@ static void record_graphics_pipelines(StateRecorder &recorder)
 	divisor2.pVertexBindingDivisors = divisor_descs;
 	vi.pNext = &divisor;
 	divisor.pNext = &divisor2;
+
+	VkPipelineColorBlendAdvancedStateCreateInfoEXT advanced = { VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_ADVANCED_STATE_CREATE_INFO_EXT };
+	advanced.blendOverlap = VK_BLEND_OVERLAP_CONJOINT_EXT;
+	advanced.srcPremultiplied = VK_TRUE;
+	advanced.dstPremultiplied = VK_TRUE;
+	blend.pNext = &advanced;
 
 	static const VkVertexInputAttributeDescription attrs[2] = {
 		{ 2, 1, VK_FORMAT_R16G16_SFLOAT, 5 },
@@ -529,6 +579,21 @@ static void record_graphics_pipelines(StateRecorder &recorder)
 			{ VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_STREAM_CREATE_INFO_EXT };
 	stream_state.rasterizationStream = VK_TRUE;
 	clip_state.pNext = &stream_state;
+
+	VkPipelineRasterizationConservativeStateCreateInfoEXT conservative_state =
+			{ VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_CONSERVATIVE_STATE_CREATE_INFO_EXT };
+	conservative_state.flags = 0;
+	conservative_state.extraPrimitiveOverestimationSize = 2.5f;
+	conservative_state.conservativeRasterizationMode = VK_CONSERVATIVE_RASTERIZATION_MODE_OVERESTIMATE_EXT;
+	stream_state.pNext = &conservative_state;
+
+	VkPipelineRasterizationLineStateCreateInfoEXT line_state =
+			{ VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_LINE_STATE_CREATE_INFO_EXT };
+	line_state.lineRasterizationMode = VK_LINE_RASTERIZATION_MODE_BRESENHAM_EXT;
+	line_state.lineStippleFactor = 2;
+	line_state.lineStipplePattern = 3;
+	line_state.stippledLineEnable = VK_TRUE;
+	conservative_state.pNext = &line_state;
 
 	ia.topology = VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
 	ia.primitiveRestartEnable = VK_TRUE;

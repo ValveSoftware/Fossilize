@@ -267,9 +267,9 @@ StateRecorderApplicationFeatureHash compute_application_feature_hash(const VkApp
 Hash compute_combined_application_feature_hash(const StateRecorderApplicationFeatureHash &base_hash);
 
 // Shader modules, samplers and render passes are standalone modules, so they can be hashed in isolation.
-Hash compute_hash_shader_module(const VkShaderModuleCreateInfo &create_info);
-Hash compute_hash_sampler(const VkSamplerCreateInfo &create_info);
-Hash compute_hash_render_pass(const VkRenderPassCreateInfo &create_info);
+bool compute_hash_shader_module(const VkShaderModuleCreateInfo &create_info, Hash *hash);
+bool compute_hash_sampler(const VkSamplerCreateInfo &create_info, Hash *hash);
+bool compute_hash_render_pass(const VkRenderPassCreateInfo &create_info, Hash *hash);
 
 // If you are recording in threaded mode, these must only be called from the recording thread,
 // as the dependent objects might not have been recorded yet, and thus the mapping of dependent objects is unknown.

@@ -203,7 +203,14 @@ struct StateReplayer::Impl
 	bool parse_vertex_input_divisor_state(const Value &state, VkPipelineVertexInputDivisorStateCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_rasterization_depth_clip_state(const Value &state, VkPipelineRasterizationDepthClipStateCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_rasterization_stream_state(const Value &state, VkPipelineRasterizationStateStreamCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_multiview_state(const Value &state, VkRenderPassMultiviewCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_descriptor_set_binding_flags(const Value &state, VkDescriptorSetLayoutBindingFlagsCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_color_blend_advanced_state(const Value &state, VkPipelineColorBlendAdvancedStateCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_rasterization_conservative_state(const Value &state, VkPipelineRasterizationConservativeStateCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_rasterization_line_state(const Value &state, VkPipelineRasterizationLineStateCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_shader_stage_required_subgroup_size(const Value &state, VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_uints(const Value &attachments, const uint32_t **out_uints) FOSSILIZE_WARN_UNUSED;
+	bool parse_sints(const Value &attachments, const int32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	const char *duplicate_string(const char *str, size_t len);
 	bool resolve_derivative_pipelines = true;
 	bool resolve_shader_modules = true;
@@ -275,6 +282,18 @@ struct StateRecorder::Impl
 	void *copy_pnext_struct(const VkPipelineRasterizationDepthClipStateCreateInfoEXT *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPipelineRasterizationStateStreamCreateInfoEXT *create_info,
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkRenderPassMultiviewCreateInfo *create_info,
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkDescriptorSetLayoutBindingFlagsCreateInfoEXT *create_info,
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkPipelineColorBlendAdvancedStateCreateInfoEXT *create_info,
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkPipelineRasterizationConservativeStateCreateInfoEXT *create_info,
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkPipelineRasterizationLineStateCreateInfoEXT *create_info,
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 
 	bool remap_sampler_handle(VkSampler sampler, VkSampler *out_sampler) const FOSSILIZE_WARN_UNUSED;
@@ -400,7 +419,7 @@ static Hash compute_hash_application_info_link(Hash app_hash, ResourceTag tag, H
 	return h.get();
 }
 
-Hash compute_hash_sampler(const VkSamplerCreateInfo &sampler)
+bool compute_hash_sampler(const VkSamplerCreateInfo &sampler, Hash *out_hash)
 {
 	Hasher h;
 
@@ -421,8 +440,11 @@ Hash compute_hash_sampler(const VkSamplerCreateInfo &sampler)
 	h.u32(sampler.borderColor);
 	h.u32(sampler.unnormalizedCoordinates);
 
-	return h.get();
+	*out_hash = h.get();
+	return true;
 }
+
+static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const void *pNext) FOSSILIZE_WARN_UNUSED;
 
 bool compute_hash_descriptor_set_layout(const StateRecorder &recorder, const VkDescriptorSetLayoutCreateInfo &layout, Hash *out_hash)
 {
@@ -451,6 +473,9 @@ bool compute_hash_descriptor_set_layout(const StateRecorder &recorder, const VkD
 			}
 		}
 	}
+
+	if (!hash_pnext_chain(&recorder, h, layout.pNext))
+		return false;
 
 	*out_hash = h.get();
 	return true;
@@ -489,12 +514,13 @@ bool compute_hash_pipeline_layout(const StateRecorder &recorder, const VkPipelin
 	return true;
 }
 
-Hash compute_hash_shader_module(const VkShaderModuleCreateInfo &create_info)
+bool compute_hash_shader_module(const VkShaderModuleCreateInfo &create_info, Hash *out_hash)
 {
 	Hasher h;
 	h.data(create_info.pCode, create_info.codeSize);
 	h.u32(create_info.flags);
-	return h.get();
+	*out_hash = h.get();
+	return true;
 }
 
 static void hash_specialization_info(Hasher &h, const VkSpecializationInfo &spec)
@@ -510,14 +536,14 @@ static void hash_specialization_info(Hasher &h, const VkSpecializationInfo &spec
 	}
 }
 
-static void hash_pnext_struct(const StateRecorder &,
+static void hash_pnext_struct(const StateRecorder *,
                               Hasher &h,
                               const VkPipelineTessellationDomainOriginStateCreateInfo &create_info)
 {
 	h.u32(create_info.domainOrigin);
 }
 
-static void hash_pnext_struct(const StateRecorder &,
+static void hash_pnext_struct(const StateRecorder *,
                               Hasher &h,
                               const VkPipelineVertexInputDivisorStateCreateInfoEXT &create_info)
 {
@@ -529,7 +555,7 @@ static void hash_pnext_struct(const StateRecorder &,
 	}
 }
 
-static void hash_pnext_struct(const StateRecorder &,
+static void hash_pnext_struct(const StateRecorder *,
                               Hasher &h,
                               const VkPipelineRasterizationDepthClipStateCreateInfoEXT &create_info)
 {
@@ -537,7 +563,7 @@ static void hash_pnext_struct(const StateRecorder &,
 	h.u32(create_info.depthClipEnable);
 }
 
-static void hash_pnext_struct(const StateRecorder &,
+static void hash_pnext_struct(const StateRecorder *,
                               Hasher &h,
                               const VkPipelineRasterizationStateStreamCreateInfoEXT &create_info)
 {
@@ -545,9 +571,66 @@ static void hash_pnext_struct(const StateRecorder &,
 	h.u32(create_info.rasterizationStream);
 }
 
-static bool hash_pnext_chain(const StateRecorder &recorder, Hasher &h, const void *pNext) FOSSILIZE_WARN_UNUSED;
+static void hash_pnext_struct(const StateRecorder *,
+                              Hasher &h,
+                              const VkRenderPassMultiviewCreateInfo &create_info)
+{
+	h.u32(create_info.subpassCount);
+	for (uint32_t i = 0; i < create_info.subpassCount; i++)
+		h.u32(create_info.pViewMasks[i]);
+	h.u32(create_info.dependencyCount);
+	for (uint32_t i = 0; i < create_info.dependencyCount; i++)
+		h.s32(create_info.pViewOffsets[i]);
+	h.u32(create_info.correlationMaskCount);
+	for (uint32_t i = 0; i < create_info.correlationMaskCount; i++)
+		h.u32(create_info.pCorrelationMasks[i]);
+}
 
-static bool hash_pnext_chain(const StateRecorder &recorder, Hasher &h, const void *pNext)
+static void hash_pnext_struct(const StateRecorder *,
+                              Hasher &h,
+                              const VkDescriptorSetLayoutBindingFlagsCreateInfoEXT &create_info)
+{
+	h.u32(create_info.bindingCount);
+	for (uint32_t i = 0; i < create_info.bindingCount; i++)
+		h.u32(create_info.pBindingFlags[i]);
+}
+
+static void hash_pnext_struct(const StateRecorder *,
+                              Hasher &h,
+                              const VkPipelineColorBlendAdvancedStateCreateInfoEXT &create_info)
+{
+	h.u32(create_info.srcPremultiplied);
+	h.u32(create_info.dstPremultiplied);
+	h.u32(create_info.blendOverlap);
+}
+
+static void hash_pnext_struct(const StateRecorder *,
+                              Hasher &h,
+                              const VkPipelineRasterizationConservativeStateCreateInfoEXT &create_info)
+{
+	h.u32(create_info.flags);
+	h.u32(create_info.conservativeRasterizationMode);
+	h.f32(create_info.extraPrimitiveOverestimationSize);
+}
+
+static void hash_pnext_struct(const StateRecorder *,
+                              Hasher &h,
+                              const VkPipelineRasterizationLineStateCreateInfoEXT &create_info)
+{
+	h.u32(create_info.lineRasterizationMode);
+	h.u32(create_info.stippledLineEnable);
+	h.u32(create_info.lineStippleFactor);
+	h.u32(create_info.lineStipplePattern);
+}
+
+static void hash_pnext_struct(const StateRecorder *,
+                              Hasher &h,
+                              const VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT &create_info)
+{
+	h.u32(create_info.requiredSubgroupSize);
+}
+
+static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const void *pNext)
 {
 	while (pNext != nullptr)
 	{
@@ -570,6 +653,30 @@ static bool hash_pnext_chain(const StateRecorder &recorder, Hasher &h, const voi
 
 		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_STREAM_CREATE_INFO_EXT:
 			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineRasterizationStateStreamCreateInfoEXT *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO:
+			hash_pnext_struct(recorder, h, *static_cast<const VkRenderPassMultiviewCreateInfo *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT:
+			hash_pnext_struct(recorder, h, *static_cast<const VkDescriptorSetLayoutBindingFlagsCreateInfoEXT *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_ADVANCED_STATE_CREATE_INFO_EXT:
+			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineColorBlendAdvancedStateCreateInfoEXT *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_CONSERVATIVE_STATE_CREATE_INFO_EXT:
+			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineRasterizationConservativeStateCreateInfoEXT *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_LINE_STATE_CREATE_INFO_EXT:
+			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineRasterizationLineStateCreateInfoEXT *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT:
+			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT *>(pNext));
 			break;
 
 		default:
@@ -660,7 +767,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 			}
 		}
 
-		if (!hash_pnext_chain(recorder, h, state.pNext))
+		if (!hash_pnext_chain(&recorder, h, state.pNext))
 			return false;
 	}
 	else
@@ -711,7 +818,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 			}
 		}
 
-		if (!hash_pnext_chain(recorder, h, ds.pNext))
+		if (!hash_pnext_chain(&recorder, h, ds.pNext))
 			return false;
 	}
 	else
@@ -724,7 +831,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 		h.u32(ia.primitiveRestartEnable);
 		h.u32(ia.topology);
 
-		if (!hash_pnext_chain(recorder, h, ia.pNext))
+		if (!hash_pnext_chain(&recorder, h, ia.pNext))
 			return false;
 	}
 	else
@@ -751,7 +858,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 		if (!dynamic_line_width)
 			h.f32(rs.lineWidth);
 
-		if (!hash_pnext_chain(recorder, h, rs.pNext))
+		if (!hash_pnext_chain(&recorder, h, rs.pNext))
 			return false;
 	}
 	else
@@ -775,7 +882,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 		else
 			h.u32(0);
 
-		if (!hash_pnext_chain(recorder, h, ms.pNext))
+		if (!hash_pnext_chain(&recorder, h, ms.pNext))
 			return false;
 	}
 
@@ -809,7 +916,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 			}
 		}
 
-		if (!hash_pnext_chain(recorder, h, vp.pNext))
+		if (!hash_pnext_chain(&recorder, h, vp.pNext))
 			return false;
 	}
 	else
@@ -837,7 +944,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 			h.u32(vi.pVertexBindingDescriptions[i].stride);
 		}
 
-		if (!hash_pnext_chain(recorder, h, vi.pNext))
+		if (!hash_pnext_chain(&recorder, h, vi.pNext))
 			return false;
 	}
 	else
@@ -886,7 +993,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 			for (auto &blend_const : b.blendConstants)
 				h.f32(blend_const);
 
-		if (!hash_pnext_chain(recorder, h, b.pNext))
+		if (!hash_pnext_chain(&recorder, h, b.pNext))
 			return false;
 	}
 	else
@@ -898,7 +1005,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 		h.u32(tess.flags);
 		h.u32(tess.patchControlPoints);
 
-		if (!hash_pnext_chain(recorder, h, tess.pNext))
+		if (!hash_pnext_chain(&recorder, h, tess.pNext))
 			return false;
 	}
 	else
@@ -920,7 +1027,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 		else
 			h.u32(0);
 
-		if (!hash_pnext_chain(recorder, h, stage.pNext))
+		if (!hash_pnext_chain(&recorder, h, stage.pNext))
 			return false;
 	}
 
@@ -962,6 +1069,9 @@ bool compute_hash_compute_pipeline(const StateRecorder &recorder, const VkComput
 		hash_specialization_info(h, *create_info.stage.pSpecializationInfo);
 	else
 		h.u32(0);
+
+	if (!hash_pnext_chain(&recorder, h, create_info.stage.pNext))
+		return false;
 
 	*out_hash = h.get();
 	return true;
@@ -1032,7 +1142,7 @@ static void hash_subpass(Hasher &h, const VkSubpassDescription &subpass)
 		h.u32(0);
 }
 
-Hash compute_hash_render_pass(const VkRenderPassCreateInfo &create_info)
+bool compute_hash_render_pass(const VkRenderPassCreateInfo &create_info, Hash *out_hash)
 {
 	Hasher h;
 
@@ -1058,7 +1168,11 @@ Hash compute_hash_render_pass(const VkRenderPassCreateInfo &create_info)
 		hash_subpass(h, subpass);
 	}
 
-	return h.get();
+	if (!hash_pnext_chain(nullptr, h, create_info.pNext))
+		return false;
+
+	*out_hash = h.get();
+	return true;
 }
 }
 
@@ -1357,6 +1471,10 @@ bool StateReplayer::Impl::parse_descriptor_set_layouts(StateCreatorInterface &if
 				return false;
 		}
 
+		if (obj.HasMember("pNext"))
+			if (!parse_pnext_chain(obj["pNext"], &info.pNext))
+				return false;
+
 		if (!iface.enqueue_create_descriptor_set_layout(hash, &info, &replayed_descriptor_set_layouts[hash]))
 		{
 			LOGE("Failed to create descriptor set layout.\n");
@@ -1547,6 +1665,17 @@ bool StateReplayer::Impl::parse_uints(const Value &uints, const uint32_t **out_u
 	return true;
 }
 
+bool StateReplayer::Impl::parse_sints(const Value &ints, const int32_t **out_sints)
+{
+	auto *s32s = allocator.allocate_n<int32_t>(ints.Size());
+	auto *ret = s32s;
+	for (auto itr = ints.Begin(); itr != ints.End(); ++itr, s32s++)
+		*s32s = itr->GetInt();
+
+	*out_sints = ret;
+	return true;
+}
+
 bool StateReplayer::Impl::parse_render_pass_subpasses(const Value &subpasses, const VkSubpassDescription **out_subpasses)
 {
 	auto *infos = allocator.allocate_n_cleared<VkSubpassDescription>(subpasses.Size());
@@ -1628,6 +1757,10 @@ bool StateReplayer::Impl::parse_render_passes(StateCreatorInterface &iface, cons
 			if (!parse_render_pass_subpasses(obj["subpasses"], &info.pSubpasses))
 				return false;
 		}
+
+		if (obj.HasMember("pNext"))
+			if (!parse_pnext_chain(obj["pNext"], &info.pNext))
+				return false;
 
 		if (!iface.enqueue_create_render_pass(hash, &info, &replayed_render_passes[hash]))
 		{
@@ -1755,6 +1888,10 @@ bool StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, D
 	auto &stage = obj["stage"];
 	info.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 	info.stage.stage = static_cast<VkShaderStageFlagBits>(stage["stage"].GetUint());
+
+	if (stage.HasMember("pNext"))
+		if (!parse_pnext_chain(stage["pNext"], &info.stage.pNext))
+			return false;
 
 	auto module = string_to_uint64(stage["module"].GetString());
 	if (module > 0 && resolve_shader_modules)
@@ -2007,6 +2144,10 @@ bool StateReplayer::Impl::parse_color_blend_state(const Value &blend, const VkPi
 			return false;
 	}
 
+	if (blend.HasMember("pNext"))
+		if (!parse_pnext_chain(blend["pNext"], &state->pNext))
+			return false;
+
 	*out_info = state;
 	return true;
 }
@@ -2126,6 +2267,10 @@ bool StateReplayer::Impl::parse_stages(StateCreatorInterface &iface, DatabaseInt
 		state->pName = duplicate_string(obj["name"].GetString(), obj["name"].GetStringLength());
 		if (obj.HasMember("specializationInfo"))
 			if (!parse_specialization_info(obj["specializationInfo"], &state->pSpecializationInfo))
+				return false;
+
+		if (obj.HasMember("pNext"))
+			if (!parse_pnext_chain(obj["pNext"], &state->pNext))
 				return false;
 
 		auto module = string_to_uint64(obj["module"].GetString());
@@ -2382,6 +2527,101 @@ bool StateReplayer::Impl::parse_rasterization_stream_state(const Value &state, V
 	return true;
 }
 
+bool StateReplayer::Impl::parse_descriptor_set_binding_flags(const Value &state,
+                                                             VkDescriptorSetLayoutBindingFlagsCreateInfoEXT **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkDescriptorSetLayoutBindingFlagsCreateInfoEXT>();
+	if (state.HasMember("bindingFlags"))
+	{
+		info->bindingCount = state["bindingFlags"].Size();
+		if (!parse_uints(state["bindingFlags"], &info->pBindingFlags))
+			return false;
+	}
+
+	*out_info = info;
+	return true;
+}
+
+bool StateReplayer::Impl::parse_color_blend_advanced_state(const Value &state,
+                                                           VkPipelineColorBlendAdvancedStateCreateInfoEXT **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkPipelineColorBlendAdvancedStateCreateInfoEXT>();
+
+	info->blendOverlap = static_cast<VkBlendOverlapEXT>(state["blendOverlap"].GetUint());
+	info->srcPremultiplied = state["srcPremultiplied"].GetUint();
+	info->dstPremultiplied = state["dstPremultiplied"].GetUint();
+
+	*out_info = info;
+	return true;
+}
+
+bool StateReplayer::Impl::parse_rasterization_conservative_state(const Value &state,
+                                                                 VkPipelineRasterizationConservativeStateCreateInfoEXT **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkPipelineRasterizationConservativeStateCreateInfoEXT>();
+
+	info->flags = state["flags"].GetUint();
+	info->conservativeRasterizationMode = static_cast<VkConservativeRasterizationModeEXT>(state["conservativeRasterizationMode"].GetUint());
+	info->extraPrimitiveOverestimationSize = state["extraPrimitiveOverestimationSize"].GetFloat();
+
+	*out_info = info;
+	return true;
+}
+
+bool StateReplayer::Impl::parse_rasterization_line_state(const Value &state,
+                                                         VkPipelineRasterizationLineStateCreateInfoEXT **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkPipelineRasterizationLineStateCreateInfoEXT>();
+
+	info->lineRasterizationMode = static_cast<VkLineRasterizationModeEXT>(state["lineRasterizationMode"].GetUint());
+	info->stippledLineEnable = state["stippledLineEnable"].GetUint();
+	info->lineStippleFactor = state["lineStippleFactor"].GetUint();
+	info->lineStipplePattern = state["lineStipplePattern"].GetUint();
+
+	*out_info = info;
+	return true;
+}
+
+bool StateReplayer::Impl::parse_shader_stage_required_subgroup_size(const Value &state,
+                                                                    VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT>();
+
+	info->requiredSubgroupSize = state["requiredSubgroupSize"].GetUint();
+
+	*out_info = info;
+	return true;
+}
+
+bool StateReplayer::Impl::parse_multiview_state(const Value &state, VkRenderPassMultiviewCreateInfo **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkRenderPassMultiviewCreateInfo>();
+
+	if (state.HasMember("viewMasks"))
+	{
+		info->subpassCount = state["viewMasks"].Size();
+		if (!parse_uints(state["viewMasks"], &info->pViewMasks))
+			return false;
+	}
+
+	if (state.HasMember("viewOffsets"))
+	{
+		info->dependencyCount = state["viewOffsets"].Size();
+		if (!parse_sints(state["viewOffsets"], &info->pViewOffsets))
+			return false;
+	}
+
+	if (state.HasMember("correlationMasks"))
+	{
+		info->correlationMaskCount = state["correlationMasks"].Size();
+		if (!parse_uints(state["correlationMasks"], &info->pCorrelationMasks))
+			return false;
+	}
+
+	*out_info = info;
+	return true;
+}
+
 bool StateReplayer::Impl::parse_pnext_chain(const Value &pnext, const void **outpNext)
 {
 	VkBaseInStructure *ret = nullptr;
@@ -2426,6 +2666,60 @@ bool StateReplayer::Impl::parse_pnext_chain(const Value &pnext, const void **out
 		{
 			VkPipelineRasterizationStateStreamCreateInfoEXT *info = nullptr;
 			if (!parse_rasterization_stream_state(next, &info))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO:
+		{
+			VkRenderPassMultiviewCreateInfo *info = nullptr;
+			if (!parse_multiview_state(next, &info))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT:
+		{
+			VkDescriptorSetLayoutBindingFlagsCreateInfoEXT *info = nullptr;
+			if (!parse_descriptor_set_binding_flags(next, &info))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_ADVANCED_STATE_CREATE_INFO_EXT:
+		{
+			VkPipelineColorBlendAdvancedStateCreateInfoEXT *info = nullptr;
+			if (!parse_color_blend_advanced_state(next, &info))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_CONSERVATIVE_STATE_CREATE_INFO_EXT:
+		{
+			VkPipelineRasterizationConservativeStateCreateInfoEXT *info = nullptr;
+			if (!parse_rasterization_conservative_state(next, &info))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_LINE_STATE_CREATE_INFO_EXT:
+		{
+			VkPipelineRasterizationLineStateCreateInfoEXT *info = nullptr;
+			if (!parse_rasterization_line_state(next, &info))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT:
+		{
+			VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT *info = nullptr;
+			if (!parse_shader_stage_required_subgroup_size(next, &info))
 				return false;
 			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
 			break;
@@ -2627,6 +2921,54 @@ void *StateRecorder::Impl::copy_pnext_struct(
 }
 
 void *StateRecorder::Impl::copy_pnext_struct(
+		const VkRenderPassMultiviewCreateInfo *create_info,
+		ScratchAllocator &alloc)
+{
+	auto *info = copy(create_info, 1, alloc);
+	if (info->pViewMasks)
+		info->pViewMasks = copy(create_info->pViewMasks, create_info->subpassCount, alloc);
+	if (info->pViewOffsets)
+		info->pViewOffsets = copy(create_info->pViewOffsets, create_info->dependencyCount, alloc);
+	if (info->pCorrelationMasks)
+		info->pCorrelationMasks = copy(create_info->pCorrelationMasks, create_info->correlationMaskCount, alloc);
+
+	return info;
+}
+
+void *StateRecorder::Impl::copy_pnext_struct(const VkDescriptorSetLayoutBindingFlagsCreateInfoEXT *create_info,
+                                             ScratchAllocator &alloc)
+{
+	auto *info = copy(create_info, 1, alloc);
+	if (info->pBindingFlags)
+		info->pBindingFlags = copy(create_info->pBindingFlags, create_info->bindingCount, alloc);
+	return info;
+}
+
+void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineColorBlendAdvancedStateCreateInfoEXT *create_info,
+                                             ScratchAllocator &alloc)
+{
+	return copy(create_info, 1, alloc);
+}
+
+void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineRasterizationConservativeStateCreateInfoEXT *create_info,
+                                             ScratchAllocator &alloc)
+{
+	return copy(create_info, 1, alloc);
+}
+
+void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineRasterizationLineStateCreateInfoEXT *create_info,
+                                             ScratchAllocator &alloc)
+{
+	return copy(create_info, 1, alloc);
+}
+
+void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT *create_info,
+                                             ScratchAllocator &alloc)
+{
+	return copy(create_info, 1, alloc);
+}
+
+void *StateRecorder::Impl::copy_pnext_struct(
 		const VkPipelineRasterizationDepthClipStateCreateInfoEXT *create_info,
 		ScratchAllocator &alloc)
 {
@@ -2675,6 +3017,48 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_STREAM_CREATE_INFO_EXT:
 		{
 			auto *ci = static_cast<const VkPipelineRasterizationStateStreamCreateInfoEXT *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO:
+		{
+			auto *ci = static_cast<const VkRenderPassMultiviewCreateInfo *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT:
+		{
+			auto *ci = static_cast<const VkDescriptorSetLayoutBindingFlagsCreateInfoEXT *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_ADVANCED_STATE_CREATE_INFO_EXT:
+		{
+			auto *ci = static_cast<const VkPipelineColorBlendAdvancedStateCreateInfoEXT *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_CONSERVATIVE_STATE_CREATE_INFO_EXT:
+		{
+			auto *ci = static_cast<const VkPipelineRasterizationConservativeStateCreateInfoEXT *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_LINE_STATE_CREATE_INFO_EXT:
+		{
+			auto *ci = static_cast<const VkPipelineRasterizationLineStateCreateInfoEXT *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT:
+		{
+			auto *ci = static_cast<const VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT *>(pNext);
 			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
 			break;
 		}
@@ -2872,11 +3256,6 @@ bool StateRecorder::record_descriptor_set_layout(VkDescriptorSetLayout set_layou
                                                  Hash custom_hash)
 {
 	{
-		if (create_info.pNext)
-		{
-			log_error_pnext_chain("pNext in VkDescriptorSetLayoutCreateInfo not supported.", create_info.pNext);
-			return false;
-		}
 		std::lock_guard<std::mutex> lock(impl->record_lock);
 
 		VkDescriptorSetLayoutCreateInfo *new_info = nullptr;
@@ -2978,11 +3357,6 @@ bool StateRecorder::record_render_pass(VkRenderPass render_pass, const VkRenderP
                                        Hash custom_hash)
 {
 	{
-		if (create_info.pNext)
-		{
-			log_error_pnext_chain("pNext in VkRenderPassCreateInfo not supported.", create_info.pNext);
-			return false;
-		}
 		std::lock_guard<std::mutex> lock(impl->record_lock);
 
 		VkRenderPassCreateInfo *new_info = nullptr;
@@ -3191,9 +3565,6 @@ bool StateRecorder::Impl::copy_descriptor_set_layout(
 	const VkDescriptorSetLayoutCreateInfo *create_info, ScratchAllocator &alloc,
 	VkDescriptorSetLayoutCreateInfo **out_create_info)
 {
-	if (create_info->pNext)
-		return false;
-
 	auto *info = copy(create_info, 1, alloc);
 	info->pBindings = copy(info->pBindings, info->bindingCount, alloc);
 
@@ -3207,6 +3578,9 @@ bool StateRecorder::Impl::copy_descriptor_set_layout(
 			b.pImmutableSamplers = copy(b.pImmutableSamplers, b.descriptorCount, alloc);
 		}
 	}
+
+	if (!copy_pnext_chain(create_info->pNext, alloc, &info->pNext))
+		return false;
 
 	*out_create_info = info;
 	return true;
@@ -3266,13 +3640,11 @@ bool StateRecorder::Impl::copy_compute_pipeline(const VkComputePipelineCreateInf
 		if (!copy_specialization_info(info->stage.pSpecializationInfo, alloc, &info->stage.pSpecializationInfo))
 			return false;
 
-	if (info->stage.pNext)
-	{
-		log_error_pnext_chain("pNext in VkPipelineShaderStageCreateInfo not supported.", info->stage.pNext);
-		return false;
-	}
-
 	info->stage.pName = copy(info->stage.pName, strlen(info->stage.pName) + 1, alloc);
+
+	if (!copy_pnext_chain(info->stage.pNext, alloc, &info->stage.pNext))
+		return false;
+
 	*out_create_info = info;
 	return true;
 }
@@ -3315,13 +3687,12 @@ bool StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateI
 
 	if (info->pColorBlendState)
 	{
-		if (info->pColorBlendState->pNext)
-		{
-			log_error_pnext_chain("pNext in VkPipelineColorBlendStateCreateInfo not supported.",
-			                      info->pColorBlendState->pNext);
-			return false;
-		}
 		info->pColorBlendState = copy(info->pColorBlendState, 1, alloc);
+		const void *pNext = nullptr;
+		if (!copy_pnext_chain(info->pColorBlendState->pNext, alloc, &pNext))
+			return false;
+
+		const_cast<VkPipelineColorBlendStateCreateInfo *>(info->pColorBlendState)->pNext = pNext;
 	}
 
 	if (info->pVertexInputState)
@@ -3406,16 +3777,16 @@ bool StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateI
 	for (uint32_t i = 0; i < info->stageCount; i++)
 	{
 		auto &stage = const_cast<VkPipelineShaderStageCreateInfo &>(info->pStages[i]);
-		if (stage.pNext)
-		{
-			log_error_pnext_chain("pNext in VkPipelineShaderStageCreateInfo not supported.", stage.pNext);
-			return false;
-		}
 
 		stage.pName = copy(stage.pName, strlen(stage.pName) + 1, alloc);
 		if (stage.pSpecializationInfo)
 			if (!copy_specialization_info(stage.pSpecializationInfo, alloc, &stage.pSpecializationInfo))
 				return false;
+
+		const void *pNext = nullptr;
+		if (!copy_pnext_chain(stage.pNext, alloc, &pNext))
+			return false;
+		stage.pNext = pNext;
 	}
 
 	if (info->pColorBlendState)
@@ -3479,6 +3850,9 @@ bool StateRecorder::Impl::copy_render_pass(const VkRenderPassCreateInfo *create_
 		if (sub.pPreserveAttachments)
 			sub.pPreserveAttachments = copy(sub.pPreserveAttachments, sub.preserveAttachmentCount, alloc);
 	}
+
+	if (!copy_pnext_chain(create_info->pNext, alloc, &info->pNext))
+		return false;
 
 	*out_create_info = info;
 	return true;
@@ -3771,7 +4145,9 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 			auto *create_info = reinterpret_cast<VkSamplerCreateInfo *>(record_item.create_info);
 			auto hash = record_item.custom_hash;
 			if (hash == 0)
-				hash = Hashing::compute_hash_sampler(*create_info);
+				if (!Hashing::compute_hash_sampler(*create_info, &hash))
+					break;
+
 			sampler_to_hash[api_object_cast<VkSampler>(record_item.handle)] = hash;
 
 			if (database_iface)
@@ -3810,7 +4186,9 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 			auto *create_info = reinterpret_cast<VkRenderPassCreateInfo *>(record_item.create_info);
 			auto hash = record_item.custom_hash;
 			if (hash == 0)
-				hash = Hashing::compute_hash_render_pass(*create_info);
+				if (!Hashing::compute_hash_render_pass(*create_info, &hash))
+					break;
+
 			render_pass_to_hash[api_object_cast<VkRenderPass>(record_item.handle)] = hash;
 
 			if (database_iface)
@@ -3849,7 +4227,9 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 			auto *create_info = reinterpret_cast<VkShaderModuleCreateInfo *>(record_item.create_info);
 			auto hash = record_item.custom_hash;
 			if (hash == 0)
-				hash = Hashing::compute_hash_shader_module(*create_info);
+				if (!Hashing::compute_hash_shader_module(*create_info, &hash))
+					break;
+
 			shader_module_to_hash[api_object_cast<VkShaderModule>(record_item.handle)] = hash;
 
 			if (database_iface)
@@ -4160,36 +4540,6 @@ static bool json_value(const VkSamplerCreateInfo& sampler, Allocator& alloc, Val
 }
 
 template <typename Allocator>
-static bool json_value(const VkDescriptorSetLayoutCreateInfo& layout, Allocator& alloc, Value *out_value)
-{
-	Value l(kObjectType);
-	l.AddMember("flags", layout.flags, alloc);
-
-	Value bindings(kArrayType);
-	for (uint32_t i = 0; i < layout.bindingCount; i++)
-	{
-		auto &b = layout.pBindings[i];
-		Value binding(kObjectType);
-		binding.AddMember("descriptorType", b.descriptorType, alloc);
-		binding.AddMember("descriptorCount", b.descriptorCount, alloc);
-		binding.AddMember("stageFlags", b.stageFlags, alloc);
-		binding.AddMember("binding", b.binding, alloc);
-		if (b.pImmutableSamplers)
-		{
-			Value immutables(kArrayType);
-			for (uint32_t j = 0; j < b.descriptorCount; j++)
-				immutables.PushBack(uint64_string(api_object_cast<uint64_t>(b.pImmutableSamplers[j]), alloc), alloc);
-			binding.AddMember("immutableSamplers", immutables, alloc);
-		}
-		bindings.PushBack(binding, alloc);
-	}
-	l.AddMember("bindings", bindings, alloc);
-
-	*out_value = l;
-	return true;
-}
-
-template <typename Allocator>
 static bool json_value(const VkPipelineLayoutCreateInfo& layout, Allocator& alloc, Value *out_value)
 {
 	Value p(kObjectType);
@@ -4223,6 +4573,331 @@ static bool json_value(const VkShaderModuleCreateInfo& module, Allocator& alloc,
 	m.AddMember("code", encode_base64(module.pCode, module.codeSize), alloc);
 
 	*out_value = m;
+	return true;
+}
+
+template <typename Allocator>
+static bool json_value(const VkPipelineTessellationDomainOriginStateCreateInfo &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("domainOrigin", create_info.domainOrigin, alloc);
+
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
+static bool json_value(const VkPipelineVertexInputDivisorStateCreateInfoEXT &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("vertexBindingDivisorCount", create_info.vertexBindingDivisorCount, alloc);
+
+	if (create_info.pVertexBindingDivisors)
+	{
+		Value divisors(kArrayType);
+		for (uint32_t i = 0; i < create_info.vertexBindingDivisorCount; i++)
+		{
+			Value divisor(kObjectType);
+			divisor.AddMember("binding", create_info.pVertexBindingDivisors[i].binding, alloc);
+			divisor.AddMember("divisor", create_info.pVertexBindingDivisors[i].divisor, alloc);
+			divisors.PushBack(divisor, alloc);
+		}
+		value.AddMember("vertexBindingDivisors", divisors, alloc);
+	}
+
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
+static bool json_value(const VkPipelineRasterizationDepthClipStateCreateInfoEXT &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("flags", create_info.flags, alloc);
+	value.AddMember("depthClipEnable", create_info.depthClipEnable, alloc);
+
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
+static bool json_value(const VkPipelineRasterizationStateStreamCreateInfoEXT &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("flags", create_info.flags, alloc);
+	value.AddMember("rasterizationStream", create_info.rasterizationStream, alloc);
+
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
+static bool json_value(const VkRenderPassMultiviewCreateInfo &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+
+	if (create_info.subpassCount)
+	{
+		Value view_masks(kArrayType);
+		for (uint32_t i = 0; i < create_info.subpassCount; i++)
+			view_masks.PushBack(create_info.pViewMasks[i], alloc);
+		value.AddMember("viewMasks", view_masks, alloc);
+	}
+
+	if (create_info.dependencyCount)
+	{
+		Value view_offsets(kArrayType);
+		for (uint32_t i = 0; i < create_info.dependencyCount; i++)
+			view_offsets.PushBack(create_info.pViewOffsets[i], alloc);
+		value.AddMember("viewOffsets", view_offsets, alloc);
+	}
+
+	if (create_info.correlationMaskCount)
+	{
+		Value correlation_masks(kArrayType);
+		for (uint32_t i = 0; i < create_info.correlationMaskCount; i++)
+			correlation_masks.PushBack(create_info.pCorrelationMasks[i], alloc);
+		value.AddMember("correlationMasks", correlation_masks, alloc);
+	}
+
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
+static bool json_value(const VkDescriptorSetLayoutBindingFlagsCreateInfoEXT &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+
+	if (create_info.bindingCount)
+	{
+		Value binding_flags(kArrayType);
+		for (uint32_t i = 0; i < create_info.bindingCount; i++)
+			binding_flags.PushBack(create_info.pBindingFlags[i], alloc);
+		value.AddMember("bindingFlags", binding_flags, alloc);
+	}
+
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
+static bool json_value(const VkPipelineColorBlendAdvancedStateCreateInfoEXT &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+
+	value.AddMember("srcPremultiplied", uint32_t(create_info.srcPremultiplied), alloc);
+	value.AddMember("dstPremultiplied", uint32_t(create_info.dstPremultiplied), alloc);
+	value.AddMember("blendOverlap", create_info.blendOverlap, alloc);
+
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
+static bool json_value(const VkPipelineRasterizationConservativeStateCreateInfoEXT &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+
+	value.AddMember("flags", create_info.flags, alloc);
+	value.AddMember("conservativeRasterizationMode", create_info.conservativeRasterizationMode, alloc);
+	value.AddMember("extraPrimitiveOverestimationSize", create_info.extraPrimitiveOverestimationSize, alloc);
+
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
+static bool json_value(const VkPipelineRasterizationLineStateCreateInfoEXT &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+
+	value.AddMember("lineRasterizationMode", create_info.lineRasterizationMode, alloc);
+	value.AddMember("stippledLineEnable", create_info.stippledLineEnable, alloc);
+	value.AddMember("lineStippleFactor", create_info.lineStippleFactor, alloc);
+	value.AddMember("lineStipplePattern", create_info.lineStipplePattern, alloc);
+
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
+static bool json_value(const VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("requiredSubgroupSize", create_info.requiredSubgroupSize, alloc);
+
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
+static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *out_value)
+{
+	Value nexts(kArrayType);
+
+	while (pNext != nullptr)
+	{
+		auto *pin = static_cast<const VkBaseInStructure *>(pNext);
+		Value next;
+		switch (pin->sType)
+		{
+		case VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_DOMAIN_ORIGIN_STATE_CREATE_INFO:
+			if (!json_value(*static_cast<const VkPipelineTessellationDomainOriginStateCreateInfo *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_DIVISOR_STATE_CREATE_INFO_EXT:
+			if (!json_value(*static_cast<const VkPipelineVertexInputDivisorStateCreateInfoEXT *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_DEPTH_CLIP_STATE_CREATE_INFO_EXT:
+			if (!json_value(*static_cast<const VkPipelineRasterizationDepthClipStateCreateInfoEXT *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_STREAM_CREATE_INFO_EXT:
+			if (!json_value(*static_cast<const VkPipelineRasterizationStateStreamCreateInfoEXT *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO:
+			if (!json_value(*static_cast<const VkRenderPassMultiviewCreateInfo *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT:
+			if (!json_value(*static_cast<const VkDescriptorSetLayoutBindingFlagsCreateInfoEXT *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_ADVANCED_STATE_CREATE_INFO_EXT:
+			if (!json_value(*static_cast<const VkPipelineColorBlendAdvancedStateCreateInfoEXT *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_CONSERVATIVE_STATE_CREATE_INFO_EXT:
+			if (!json_value(*static_cast<const VkPipelineRasterizationConservativeStateCreateInfoEXT *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_LINE_STATE_CREATE_INFO_EXT:
+			if (!json_value(*static_cast<const VkPipelineRasterizationLineStateCreateInfoEXT *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT:
+			if (!json_value(*static_cast<const VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		default:
+			log_error_pnext_chain("Unsupported pNext found, cannot hash sType.", pNext);
+			return false;
+		}
+
+		nexts.PushBack(next, alloc);
+		pNext = pin->pNext;
+	}
+
+	*out_value = nexts;
+	return true;
+}
+
+template <typename Allocator>
+static bool json_value(const VkComputePipelineCreateInfo& pipe, Allocator& alloc, Value *out_value)
+{
+	Value p(kObjectType);
+	p.AddMember("flags", pipe.flags, alloc);
+	p.AddMember("layout", uint64_string(api_object_cast<uint64_t>(pipe.layout), alloc), alloc);
+	p.AddMember("basePipelineHandle", uint64_string(api_object_cast<uint64_t>(pipe.basePipelineHandle), alloc), alloc);
+	p.AddMember("basePipelineIndex", pipe.basePipelineIndex, alloc);
+	Value stage(kObjectType);
+	stage.AddMember("flags", pipe.stage.flags, alloc);
+	stage.AddMember("stage", pipe.stage.stage, alloc);
+	stage.AddMember("module", uint64_string(api_object_cast<uint64_t>(pipe.stage.module), alloc), alloc);
+	stage.AddMember("name", StringRef(pipe.stage.pName), alloc);
+	if (pipe.stage.pSpecializationInfo)
+	{
+		Value spec(kObjectType);
+		spec.AddMember("dataSize", uint64_t(pipe.stage.pSpecializationInfo->dataSize), alloc);
+		spec.AddMember("data",
+		               encode_base64(pipe.stage.pSpecializationInfo->pData,
+		                             pipe.stage.pSpecializationInfo->dataSize), alloc);
+		Value map_entries(kArrayType);
+		for (uint32_t i = 0; i < pipe.stage.pSpecializationInfo->mapEntryCount; i++)
+		{
+			auto &e = pipe.stage.pSpecializationInfo->pMapEntries[i];
+			Value map_entry(kObjectType);
+			map_entry.AddMember("offset", e.offset, alloc);
+			map_entry.AddMember("size", uint64_t(e.size), alloc);
+			map_entry.AddMember("constantID", e.constantID, alloc);
+			map_entries.PushBack(map_entry, alloc);
+		}
+		spec.AddMember("mapEntries", map_entries, alloc);
+		stage.AddMember("specializationInfo", spec, alloc);
+	}
+
+	if (pipe.stage.pNext)
+	{
+		Value nexts;
+		if (!pnext_chain_json_value(pipe.stage.pNext, alloc, &nexts))
+			return false;
+		stage.AddMember("pNext", nexts, alloc);
+	}
+
+	p.AddMember("stage", stage, alloc);
+
+	*out_value = p;
+	return true;
+}
+
+template <typename Allocator>
+static bool json_value(const VkDescriptorSetLayoutCreateInfo& layout, Allocator& alloc, Value *out_value)
+{
+	Value l(kObjectType);
+	l.AddMember("flags", layout.flags, alloc);
+
+	Value bindings(kArrayType);
+	for (uint32_t i = 0; i < layout.bindingCount; i++)
+	{
+		auto &b = layout.pBindings[i];
+		Value binding(kObjectType);
+		binding.AddMember("descriptorType", b.descriptorType, alloc);
+		binding.AddMember("descriptorCount", b.descriptorCount, alloc);
+		binding.AddMember("stageFlags", b.stageFlags, alloc);
+		binding.AddMember("binding", b.binding, alloc);
+		if (b.pImmutableSamplers)
+		{
+			Value immutables(kArrayType);
+			for (uint32_t j = 0; j < b.descriptorCount; j++)
+				immutables.PushBack(uint64_string(api_object_cast<uint64_t>(b.pImmutableSamplers[j]), alloc), alloc);
+			binding.AddMember("immutableSamplers", immutables, alloc);
+		}
+		bindings.PushBack(binding, alloc);
+	}
+	l.AddMember("bindings", bindings, alloc);
+
+	if (layout.pNext)
+	{
+		Value nexts;
+		if (!pnext_chain_json_value(layout.pNext, alloc, &nexts))
+			return false;
+		l.AddMember("pNext", nexts, alloc);
+	}
+
+	*out_value = l;
 	return true;
 }
 
@@ -4345,149 +5020,15 @@ static bool json_value(const VkRenderPassCreateInfo& pass, Allocator& alloc, Val
 	}
 	json_object.AddMember("subpasses", subpasses, alloc);
 
-	*out_value = json_object;
-	return true;
-}
-
-template <typename Allocator>
-static bool json_value(const VkComputePipelineCreateInfo& pipe, Allocator& alloc, Value *out_value)
-{
-	Value p(kObjectType);
-	p.AddMember("flags", pipe.flags, alloc);
-	p.AddMember("layout", uint64_string(api_object_cast<uint64_t>(pipe.layout), alloc), alloc);
-	p.AddMember("basePipelineHandle", uint64_string(api_object_cast<uint64_t>(pipe.basePipelineHandle), alloc), alloc);
-	p.AddMember("basePipelineIndex", pipe.basePipelineIndex, alloc);
-	Value stage(kObjectType);
-	stage.AddMember("flags", pipe.stage.flags, alloc);
-	stage.AddMember("stage", pipe.stage.stage, alloc);
-	stage.AddMember("module", uint64_string(api_object_cast<uint64_t>(pipe.stage.module), alloc), alloc);
-	stage.AddMember("name", StringRef(pipe.stage.pName), alloc);
-	if (pipe.stage.pSpecializationInfo)
+	if (pass.pNext)
 	{
-		Value spec(kObjectType);
-		spec.AddMember("dataSize", uint64_t(pipe.stage.pSpecializationInfo->dataSize), alloc);
-		spec.AddMember("data",
-					   encode_base64(pipe.stage.pSpecializationInfo->pData,
-									 pipe.stage.pSpecializationInfo->dataSize), alloc);
-		Value map_entries(kArrayType);
-		for (uint32_t i = 0; i < pipe.stage.pSpecializationInfo->mapEntryCount; i++)
-		{
-			auto &e = pipe.stage.pSpecializationInfo->pMapEntries[i];
-			Value map_entry(kObjectType);
-			map_entry.AddMember("offset", e.offset, alloc);
-			map_entry.AddMember("size", uint64_t(e.size), alloc);
-			map_entry.AddMember("constantID", e.constantID, alloc);
-			map_entries.PushBack(map_entry, alloc);
-		}
-		spec.AddMember("mapEntries", map_entries, alloc);
-		stage.AddMember("specializationInfo", spec, alloc);
-	}
-	p.AddMember("stage", stage, alloc);
-
-	*out_value = p;
-	return true;
-}
-
-template <typename Allocator>
-static bool json_value(const VkPipelineTessellationDomainOriginStateCreateInfo &create_info, Allocator &alloc, Value *out_value)
-{
-	Value value(kObjectType);
-	value.AddMember("sType", create_info.sType, alloc);
-	value.AddMember("domainOrigin", create_info.domainOrigin, alloc);
-
-	*out_value = value;
-	return true;
-}
-
-template <typename Allocator>
-static bool json_value(const VkPipelineVertexInputDivisorStateCreateInfoEXT &create_info, Allocator &alloc, Value *out_value)
-{
-	Value value(kObjectType);
-	value.AddMember("sType", create_info.sType, alloc);
-	value.AddMember("vertexBindingDivisorCount", create_info.vertexBindingDivisorCount, alloc);
-
-	if (create_info.pVertexBindingDivisors)
-	{
-		Value divisors(kArrayType);
-		for (uint32_t i = 0; i < create_info.vertexBindingDivisorCount; i++)
-		{
-			Value divisor(kObjectType);
-			divisor.AddMember("binding", create_info.pVertexBindingDivisors[i].binding, alloc);
-			divisor.AddMember("divisor", create_info.pVertexBindingDivisors[i].divisor, alloc);
-			divisors.PushBack(divisor, alloc);
-		}
-		value.AddMember("vertexBindingDivisors", divisors, alloc);
-	}
-
-	*out_value = value;
-	return true;
-}
-
-template <typename Allocator>
-static bool json_value(const VkPipelineRasterizationDepthClipStateCreateInfoEXT &create_info, Allocator &alloc, Value *out_value)
-{
-	Value value(kObjectType);
-	value.AddMember("sType", create_info.sType, alloc);
-	value.AddMember("flags", create_info.flags, alloc);
-	value.AddMember("depthClipEnable", create_info.depthClipEnable, alloc);
-
-	*out_value = value;
-	return true;
-}
-
-template <typename Allocator>
-static bool json_value(const VkPipelineRasterizationStateStreamCreateInfoEXT &create_info, Allocator &alloc, Value *out_value)
-{
-	Value value(kObjectType);
-	value.AddMember("sType", create_info.sType, alloc);
-	value.AddMember("flags", create_info.flags, alloc);
-	value.AddMember("rasterizationStream", create_info.rasterizationStream, alloc);
-
-	*out_value = value;
-	return true;
-}
-
-template <typename Allocator>
-static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *out_value)
-{
-	Value nexts(kArrayType);
-
-	while (pNext != nullptr)
-	{
-		auto *pin = static_cast<const VkBaseInStructure *>(pNext);
-		Value next;
-		switch (pin->sType)
-		{
-		case VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_DOMAIN_ORIGIN_STATE_CREATE_INFO:
-			if (!json_value(*static_cast<const VkPipelineTessellationDomainOriginStateCreateInfo *>(pNext), alloc, &next))
-				return false;
-			break;
-
-		case VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_DIVISOR_STATE_CREATE_INFO_EXT:
-			if (!json_value(*static_cast<const VkPipelineVertexInputDivisorStateCreateInfoEXT *>(pNext), alloc, &next))
-				return false;
-			break;
-
-		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_DEPTH_CLIP_STATE_CREATE_INFO_EXT:
-			if (!json_value(*static_cast<const VkPipelineRasterizationDepthClipStateCreateInfoEXT *>(pNext), alloc, &next))
-				return false;
-			break;
-
-		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_STREAM_CREATE_INFO_EXT:
-			if (!json_value(*static_cast<const VkPipelineRasterizationStateStreamCreateInfoEXT *>(pNext), alloc, &next))
-				return false;
-			break;
-
-		default:
-			log_error_pnext_chain("Unsupported pNext found, cannot hash sType.", pNext);
+		Value nexts;
+		if (!pnext_chain_json_value(pass.pNext, alloc, &nexts))
 			return false;
-		}
-
-		nexts.PushBack(next, alloc);
-		pNext = pin->pNext;
+		json_object.AddMember("pNext", nexts, alloc);
 	}
 
-	*out_value = nexts;
+	*out_value = json_object;
 	return true;
 }
 
@@ -4655,6 +5196,15 @@ static bool json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& allo
 			attachments.PushBack(att, alloc);
 		}
 		cb.AddMember("attachments", attachments, alloc);
+
+		if (pipe.pColorBlendState->pNext)
+		{
+			Value nexts;
+			if (!pnext_chain_json_value(pipe.pColorBlendState->pNext, alloc, &nexts))
+				return false;
+			cb.AddMember("pNext", nexts, alloc);
+		}
+
 		p.AddMember("colorBlendState", cb, alloc);
 	}
 
@@ -4757,6 +5307,15 @@ static bool json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& allo
 			spec.AddMember("mapEntries", map_entries, alloc);
 			stage.AddMember("specializationInfo", spec, alloc);
 		}
+
+		if (s.pNext)
+		{
+			Value nexts;
+			if (!pnext_chain_json_value(s.pNext, alloc, &nexts))
+				return false;
+			stage.AddMember("pNext", nexts, alloc);
+		}
+
 		stages.PushBack(stage, alloc);
 	}
 	p.AddMember("stages", stages, alloc);
