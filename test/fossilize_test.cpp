@@ -212,11 +212,23 @@ static void record_set_layouts(StateRecorder &recorder)
 	bindings[2].descriptorCount = 3;
 	bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 	bindings[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+	VkDescriptorSetLayoutBindingFlagsCreateInfoEXT flags = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT };
+	static const VkDescriptorBindingFlagsEXT binding_flags[] = {
+		VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT_EXT,
+		VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT_EXT,
+		VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT_EXT,
+	};
+	flags.pBindingFlags = binding_flags;
+	flags.bindingCount = 3;
+	layout.pNext = &flags;
+
 	if (!recorder.record_descriptor_set_layout(fake_handle<VkDescriptorSetLayout>(1000), layout))
 		abort();
 
 	layout.bindingCount = 2;
 	layout.pBindings = bindings + 1;
+	flags.bindingCount = 0;
 	if (!recorder.record_descriptor_set_layout(fake_handle<VkDescriptorSetLayout>(1001), layout))
 		abort();
 }

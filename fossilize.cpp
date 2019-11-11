@@ -204,6 +204,7 @@ struct StateReplayer::Impl
 	bool parse_rasterization_depth_clip_state(const Value &state, VkPipelineRasterizationDepthClipStateCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_rasterization_stream_state(const Value &state, VkPipelineRasterizationStateStreamCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_multiview_state(const Value &state, VkRenderPassMultiviewCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_descriptor_set_binding_flags(const Value &state, VkDescriptorSetLayoutBindingFlagsCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_uints(const Value &attachments, const uint32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	bool parse_sints(const Value &attachments, const int32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	const char *duplicate_string(const char *str, size_t len);
@@ -279,6 +280,8 @@ struct StateRecorder::Impl
 	void *copy_pnext_struct(const VkPipelineRasterizationStateStreamCreateInfoEXT *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkRenderPassMultiviewCreateInfo *create_info,
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkDescriptorSetLayoutBindingFlagsCreateInfoEXT *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 
 	bool remap_sampler_handle(VkSampler sampler, VkSampler *out_sampler) const FOSSILIZE_WARN_UNUSED;
@@ -429,6 +432,8 @@ bool compute_hash_sampler(const VkSamplerCreateInfo &sampler, Hash *out_hash)
 	return true;
 }
 
+static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const void *pNext) FOSSILIZE_WARN_UNUSED;
+
 bool compute_hash_descriptor_set_layout(const StateRecorder &recorder, const VkDescriptorSetLayoutCreateInfo &layout, Hash *out_hash)
 {
 	Hasher h;
@@ -456,6 +461,9 @@ bool compute_hash_descriptor_set_layout(const StateRecorder &recorder, const VkD
 			}
 		}
 	}
+
+	if (!hash_pnext_chain(&recorder, h, layout.pNext))
+		return false;
 
 	*out_hash = h.get();
 	return true;
@@ -566,7 +574,14 @@ static void hash_pnext_struct(const StateRecorder *,
 		h.u32(create_info.pCorrelationMasks[i]);
 }
 
-static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const void *pNext) FOSSILIZE_WARN_UNUSED;
+static void hash_pnext_struct(const StateRecorder *,
+                              Hasher &h,
+                              const VkDescriptorSetLayoutBindingFlagsCreateInfoEXT &create_info)
+{
+	h.u32(create_info.bindingCount);
+	for (uint32_t i = 0; i < create_info.bindingCount; i++)
+		h.u32(create_info.pBindingFlags[i]);
+}
 
 static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const void *pNext)
 {
@@ -595,6 +610,10 @@ static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const voi
 
 		case VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO:
 			hash_pnext_struct(recorder, h, *static_cast<const VkRenderPassMultiviewCreateInfo *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT:
+			hash_pnext_struct(recorder, h, *static_cast<const VkDescriptorSetLayoutBindingFlagsCreateInfoEXT *>(pNext));
 			break;
 
 		default:
@@ -1385,6 +1404,10 @@ bool StateReplayer::Impl::parse_descriptor_set_layouts(StateCreatorInterface &if
 			if (!parse_descriptor_set_bindings(bindings, &info.pBindings))
 				return false;
 		}
+
+		if (obj.HasMember("pNext"))
+			if (!parse_pnext_chain(obj["pNext"], &info.pNext))
+				return false;
 
 		if (!iface.enqueue_create_descriptor_set_layout(hash, &info, &replayed_descriptor_set_layouts[hash]))
 		{
@@ -2426,6 +2449,21 @@ bool StateReplayer::Impl::parse_rasterization_stream_state(const Value &state, V
 	return true;
 }
 
+bool StateReplayer::Impl::parse_descriptor_set_binding_flags(const Value &state,
+                                                             VkDescriptorSetLayoutBindingFlagsCreateInfoEXT **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkDescriptorSetLayoutBindingFlagsCreateInfoEXT>();
+	if (state.HasMember("bindingFlags"))
+	{
+		info->bindingCount = state["bindingFlags"].Size();
+		if (!parse_uints(state["bindingFlags"], &info->pBindingFlags))
+			return false;
+	}
+
+	*out_info = info;
+	return true;
+}
+
 bool StateReplayer::Impl::parse_multiview_state(const Value &state, VkRenderPassMultiviewCreateInfo **out_info)
 {
 	auto *info = allocator.allocate_cleared<VkRenderPassMultiviewCreateInfo>();
@@ -2508,6 +2546,15 @@ bool StateReplayer::Impl::parse_pnext_chain(const Value &pnext, const void **out
 		{
 			VkRenderPassMultiviewCreateInfo *info = nullptr;
 			if (!parse_multiview_state(next, &info))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT:
+		{
+			VkDescriptorSetLayoutBindingFlagsCreateInfoEXT *info = nullptr;
+			if (!parse_descriptor_set_binding_flags(next, &info))
 				return false;
 			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
 			break;
@@ -2723,6 +2770,15 @@ void *StateRecorder::Impl::copy_pnext_struct(
 	return info;
 }
 
+void *StateRecorder::Impl::copy_pnext_struct(const VkDescriptorSetLayoutBindingFlagsCreateInfoEXT *create_info,
+                                             ScratchAllocator &alloc)
+{
+	auto *info = copy(create_info, 1, alloc);
+	if (info->pBindingFlags)
+		info->pBindingFlags = copy(create_info->pBindingFlags, create_info->bindingCount, alloc);
+	return info;
+}
+
 void *StateRecorder::Impl::copy_pnext_struct(
 		const VkPipelineRasterizationDepthClipStateCreateInfoEXT *create_info,
 		ScratchAllocator &alloc)
@@ -2779,6 +2835,13 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 		case VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO:
 		{
 			auto *ci = static_cast<const VkRenderPassMultiviewCreateInfo *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT:
+		{
+			auto *ci = static_cast<const VkDescriptorSetLayoutBindingFlagsCreateInfoEXT *>(pNext);
 			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
 			break;
 		}
@@ -2976,11 +3039,6 @@ bool StateRecorder::record_descriptor_set_layout(VkDescriptorSetLayout set_layou
                                                  Hash custom_hash)
 {
 	{
-		if (create_info.pNext)
-		{
-			log_error_pnext_chain("pNext in VkDescriptorSetLayoutCreateInfo not supported.", create_info.pNext);
-			return false;
-		}
 		std::lock_guard<std::mutex> lock(impl->record_lock);
 
 		VkDescriptorSetLayoutCreateInfo *new_info = nullptr;
@@ -3290,9 +3348,6 @@ bool StateRecorder::Impl::copy_descriptor_set_layout(
 	const VkDescriptorSetLayoutCreateInfo *create_info, ScratchAllocator &alloc,
 	VkDescriptorSetLayoutCreateInfo **out_create_info)
 {
-	if (create_info->pNext)
-		return false;
-
 	auto *info = copy(create_info, 1, alloc);
 	info->pBindings = copy(info->pBindings, info->bindingCount, alloc);
 
@@ -3306,6 +3361,9 @@ bool StateRecorder::Impl::copy_descriptor_set_layout(
 			b.pImmutableSamplers = copy(b.pImmutableSamplers, b.descriptorCount, alloc);
 		}
 	}
+
+	if (!copy_pnext_chain(create_info->pNext, alloc, &info->pNext))
+		return false;
 
 	*out_create_info = info;
 	return true;
@@ -4268,36 +4326,6 @@ static bool json_value(const VkSamplerCreateInfo& sampler, Allocator& alloc, Val
 }
 
 template <typename Allocator>
-static bool json_value(const VkDescriptorSetLayoutCreateInfo& layout, Allocator& alloc, Value *out_value)
-{
-	Value l(kObjectType);
-	l.AddMember("flags", layout.flags, alloc);
-
-	Value bindings(kArrayType);
-	for (uint32_t i = 0; i < layout.bindingCount; i++)
-	{
-		auto &b = layout.pBindings[i];
-		Value binding(kObjectType);
-		binding.AddMember("descriptorType", b.descriptorType, alloc);
-		binding.AddMember("descriptorCount", b.descriptorCount, alloc);
-		binding.AddMember("stageFlags", b.stageFlags, alloc);
-		binding.AddMember("binding", b.binding, alloc);
-		if (b.pImmutableSamplers)
-		{
-			Value immutables(kArrayType);
-			for (uint32_t j = 0; j < b.descriptorCount; j++)
-				immutables.PushBack(uint64_string(api_object_cast<uint64_t>(b.pImmutableSamplers[j]), alloc), alloc);
-			binding.AddMember("immutableSamplers", immutables, alloc);
-		}
-		bindings.PushBack(binding, alloc);
-	}
-	l.AddMember("bindings", bindings, alloc);
-
-	*out_value = l;
-	return true;
-}
-
-template <typename Allocator>
 static bool json_value(const VkPipelineLayoutCreateInfo& layout, Allocator& alloc, Value *out_value)
 {
 	Value p(kObjectType);
@@ -4467,6 +4495,24 @@ static bool json_value(const VkRenderPassMultiviewCreateInfo &create_info, Alloc
 }
 
 template <typename Allocator>
+static bool json_value(const VkDescriptorSetLayoutBindingFlagsCreateInfoEXT &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+
+	if (create_info.bindingCount)
+	{
+		Value binding_flags(kArrayType);
+		for (uint32_t i = 0; i < create_info.bindingCount; i++)
+			binding_flags.PushBack(create_info.pBindingFlags[i], alloc);
+		value.AddMember("bindingFlags", binding_flags, alloc);
+	}
+
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
 static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *out_value)
 {
 	Value nexts(kArrayType);
@@ -4502,6 +4548,11 @@ static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *o
 				return false;
 			break;
 
+		case VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT:
+			if (!json_value(*static_cast<const VkDescriptorSetLayoutBindingFlagsCreateInfoEXT *>(pNext), alloc, &next))
+				return false;
+			break;
+
 		default:
 			log_error_pnext_chain("Unsupported pNext found, cannot hash sType.", pNext);
 			return false;
@@ -4512,6 +4563,44 @@ static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *o
 	}
 
 	*out_value = nexts;
+	return true;
+}
+
+template <typename Allocator>
+static bool json_value(const VkDescriptorSetLayoutCreateInfo& layout, Allocator& alloc, Value *out_value)
+{
+	Value l(kObjectType);
+	l.AddMember("flags", layout.flags, alloc);
+
+	Value bindings(kArrayType);
+	for (uint32_t i = 0; i < layout.bindingCount; i++)
+	{
+		auto &b = layout.pBindings[i];
+		Value binding(kObjectType);
+		binding.AddMember("descriptorType", b.descriptorType, alloc);
+		binding.AddMember("descriptorCount", b.descriptorCount, alloc);
+		binding.AddMember("stageFlags", b.stageFlags, alloc);
+		binding.AddMember("binding", b.binding, alloc);
+		if (b.pImmutableSamplers)
+		{
+			Value immutables(kArrayType);
+			for (uint32_t j = 0; j < b.descriptorCount; j++)
+				immutables.PushBack(uint64_string(api_object_cast<uint64_t>(b.pImmutableSamplers[j]), alloc), alloc);
+			binding.AddMember("immutableSamplers", immutables, alloc);
+		}
+		bindings.PushBack(binding, alloc);
+	}
+	l.AddMember("bindings", bindings, alloc);
+
+	if (layout.pNext)
+	{
+		Value nexts;
+		if (!pnext_chain_json_value(layout.pNext, alloc, &nexts))
+			return false;
+		l.AddMember("pNext", nexts, alloc);
+	}
+
+	*out_value = l;
 	return true;
 }
 
