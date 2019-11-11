@@ -576,6 +576,14 @@ static void record_graphics_pipelines(StateRecorder &recorder)
 	conservative_state.conservativeRasterizationMode = VK_CONSERVATIVE_RASTERIZATION_MODE_OVERESTIMATE_EXT;
 	stream_state.pNext = &conservative_state;
 
+	VkPipelineRasterizationLineStateCreateInfoEXT line_state =
+			{ VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_LINE_STATE_CREATE_INFO_EXT };
+	line_state.lineRasterizationMode = VK_LINE_RASTERIZATION_MODE_BRESENHAM_EXT;
+	line_state.lineStippleFactor = 2;
+	line_state.lineStipplePattern = 3;
+	line_state.stippledLineEnable = VK_TRUE;
+	conservative_state.pNext = &line_state;
+
 	ia.topology = VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
 	ia.primitiveRestartEnable = VK_TRUE;
 
