@@ -647,6 +647,31 @@ static void validation_error_cb(ThreadedReplayer *replayer)
 	}
 }
 
+static void crash_handler(ThreadedReplayer &replayer, ThreadedReplayer::PerThreadData &per_thread)
+{
+	char buffer[64];
+
+	// Report to parent process which VkShaderModule's might have contributed to our untimely death.
+	// This allows a new process to ignore these modules.
+	for (unsigned i = 0; i < per_thread.num_failed_module_hashes; i++)
+	{
+		sprintf(buffer, "MODULE %" PRIx64 "\n", per_thread.failed_module_hashes[i]);
+		if (!write_all(crash_fd, buffer))
+			_exit(2);
+	}
+
+	// Report where we stopped, so we can continue.
+	sprintf(buffer, "GRAPHICS %d\n", per_thread.current_graphics_index);
+	if (!write_all(crash_fd, buffer))
+		_exit(2);
+
+	sprintf(buffer, "COMPUTE %d\n", per_thread.current_compute_index);
+	if (!write_all(crash_fd, buffer))
+		_exit(2);
+
+	replayer.emergency_teardown();
+}
+
 static void crash_handler(int)
 {
 	// stderr is reserved for generic logging.
@@ -664,33 +689,26 @@ static void crash_handler(int)
 	if (global_replayer)
 	{
 		auto &per_thread = global_replayer->get_per_thread_data();
-		char buffer[64];
-
-		// Report to parent process which VkShaderModule's might have contributed to our untimely death.
-		// This allows a new process to ignore these modules.
-		for (unsigned i = 0; i < per_thread.num_failed_module_hashes; i++)
-		{
-			sprintf(buffer, "MODULE %" PRIx64 "\n", per_thread.failed_module_hashes[i]);
-			if (!write_all(crash_fd, buffer))
-				_exit(2);
-		}
-
-		// Report where we stopped, so we can continue.
-		sprintf(buffer, "GRAPHICS %d\n", per_thread.current_graphics_index);
-		if (!write_all(crash_fd, buffer))
-			_exit(2);
-
-		sprintf(buffer, "COMPUTE %d\n", per_thread.current_compute_index);
-		if (!write_all(crash_fd, buffer))
-			_exit(2);
-
-		global_replayer->emergency_teardown();
+		crash_handler(*global_replayer, per_thread);
 	}
 
 	// Clean exit instead of reporting the segfault.
 	// _exit is async-signal safe, but not exit().
 	// Use exit code 2 to mark a segfaulted child.
 	_exit(2);
+}
+
+static void timeout_handler()
+{
+	if (!global_replayer || !global_replayer->robustness)
+	{
+		LOGE("Pipeline compilation timed out.\n");
+		_exit(2);
+	}
+
+	// Pretend we crashed in a safe way.
+	// Send a signal to the worker thread to make sure we tear down on that thread.
+	pthread_kill(global_replayer->thread_pool.front().native_handle(), SIGABRT);
 }
 
 static void thread_callback(void *)

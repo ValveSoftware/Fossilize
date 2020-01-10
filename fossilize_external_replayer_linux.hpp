@@ -410,6 +410,14 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 			argv.push_back(options.pipeline_stats_path);
 		}
 
+		char timeout[16];
+		if (options.timeout_seconds)
+		{
+			argv.push_back("--timeout-seconds");
+			sprintf(timeout, "%u", options.timeout_seconds);
+			argv.push_back(timeout);
+		}
+
 		argv.push_back(nullptr);
 
 		if (options.quiet)
