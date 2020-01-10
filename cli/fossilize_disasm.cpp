@@ -521,6 +521,7 @@ static void print_help()
 	     "\t[--enable-validation]\n"
 	     "\t[--output <path>]\n"
 	     "\t[--target asm/glsl/isa]\n"
+	     "\t[--module-only]\n"
 	     "state.json\n");
 }
 
