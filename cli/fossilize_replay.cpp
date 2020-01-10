@@ -205,6 +205,7 @@ struct EnqueuedWork
 };
 
 static void on_validation_error(void *userdata);
+static void timeout_handler();
 
 struct ThreadedReplayer : StateCreatorInterface
 {
@@ -240,6 +241,8 @@ struct ThreadedReplayer : StateCreatorInterface
 		void (*on_thread_callback)(void *userdata) = nullptr;
 		void *on_thread_callback_userdata = nullptr;
 		void (*on_validation_error_callback)(ThreadedReplayer *) = nullptr;
+
+		unsigned timeout_seconds = 0;
 	};
 
 	struct DeferredGraphicsInfo
@@ -414,10 +417,37 @@ struct ThreadedReplayer : StateCreatorInterface
 	{
 		assert(index < NUM_MEMORY_CONTEXTS);
 		unique_lock<mutex> lock(pipeline_work_queue_mutex);
-		work_done_condition[index].wait(lock, [&]() -> bool
+
+		if (queued_count[index] == completed_count[index])
+			return;
+
+		if (opts.timeout_seconds != 0)
 		{
-			return queued_count[index] == completed_count[index];
-		});
+			bool signalled;
+			unsigned current_completed = completed_count[index];
+			do
+			{
+				signalled = work_done_condition[index].wait_for(lock, std::chrono::seconds(opts.timeout_seconds),
+				                                                [&]() -> bool
+				                                                {
+					                                                return current_completed != completed_count[index];
+				                                                });
+				if (!signalled && completed_count[index] == current_completed)
+				{
+					// Timeout!
+					timeout_handler();
+				}
+
+				current_completed = completed_count[index];
+			} while (queued_count[index] != completed_count[index]);
+		}
+		else
+		{
+			work_done_condition[index].wait(lock, [&]() -> bool
+			{
+				return queued_count[index] == completed_count[index];
+			});
+		}
 	}
 
 	bool run_parse_work_item(StateReplayer &replayer, vector<uint8_t> &buffer, const PipelineWorkItem &work_item)
@@ -916,7 +946,11 @@ struct ThreadedReplayer : StateCreatorInterface
 				unsigned context_index = work_item.memory_context_index;
 				lock_guard<mutex> lock(pipeline_work_queue_mutex);
 				completed_count[context_index]++;
-				if (completed_count[context_index] == queued_count[context_index]) // Makes sense to signal main thread now.
+
+				// Makes sense to signal main thread now.
+				// If we have a timeout, we need to keep the dispatcher thread aware of the progress,
+				// so wake it up after each work item is complete.
+				if (opts.timeout_seconds != 0 || (completed_count[context_index] == queued_count[context_index]))
 					work_done_condition[context_index].notify_one();
 			}
 
@@ -2163,6 +2197,7 @@ static void print_help()
 	     "\t[--ignore-derived-pipelines]\n"
 	     "\t[--log-memory]\n"
 	     "\t[--null-device]\n"
+	     "\t[--timeout-seconds]\n"
 	     EXTRA_OPTIONS
 	     "\t<Database>\n");
 }
@@ -2274,6 +2309,7 @@ static int run_progress_process(const VulkanDevice::Options &device_opts,
 			(replayer_opts.end_graphics_index != ~0u) ||
 			(replayer_opts.start_compute_index != 0) ||
 			(replayer_opts.end_compute_index != ~0u);
+	opts.timeout_seconds = replayer_opts.timeout_seconds;
 
 	ExternalReplayer replayer;
 	if (!replayer.start(opts))
@@ -2871,6 +2907,7 @@ int main(int argc, char *argv[])
 	cbs.add("--ignore-derived-pipelines", [&](CLIParser &) { replayer_opts.ignore_derived_pipelines = true; });
 	cbs.add("--log-memory", [&](CLIParser &) { log_memory = true; });
 	cbs.add("--null-device", [&](CLIParser &) { opts.null_device = true; });
+	cbs.add("--timeout-seconds", [&](CLIParser &parser) { replayer_opts.timeout_seconds = parser.next_uint(); });
 
 	cbs.error_handler = [] { print_help(); };
 

@@ -94,6 +94,10 @@ public:
 
 		// Creates a dummy device, useful for benchmarking time and/or memory consumption in isolation.
 		bool null_device;
+
+		// If non-zero, enables a timeout for pipeline compilation to have forward progress on drivers
+		// which enter infinite loops during compilation.
+		unsigned timeout_seconds;
 	};
 
 	ExternalReplayer();

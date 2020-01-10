@@ -369,6 +369,12 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 		cmdline += "\"";
 	}
 
+	if (options.timeout_seconds)
+	{
+		cmdline += " --timeout-seconds ";
+		cmdline += std::to_string(options.timeout_seconds);
+	}
+
 	STARTUPINFO si = {};
 	si.cb = sizeof(STARTUPINFO);
 	si.dwFlags = STARTF_USESTDHANDLES;

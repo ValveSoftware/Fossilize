@@ -438,6 +438,12 @@ bool ProcessProgress::start_child_process()
 		cmdline += "\"";
 	}
 
+	if (Global::base_replayer_options.timeout_seconds)
+	{
+		cmdline += " --timeout-seconds ";
+		cmdline += std::to_string(Global::base_replayer_options.timeout_seconds);
+	}
+
 	// Create custom named pipes which can be inherited by our child processes.
 	SECURITY_ATTRIBUTES attrs = {};
 	attrs.bInheritHandle = TRUE;
@@ -829,50 +835,85 @@ static void validation_error_cb(ThreadedReplayer *replayer)
 	}
 }
 
-static LONG WINAPI crash_handler(_EXCEPTION_POINTERS *)
+static void crash_handler(ThreadedReplayer &replayer, ThreadedReplayer::PerThreadData &per_thread)
 {
-	// stderr is reserved for generic logging.
-	// stdout/stdin is for IPC with master process.
+	char buffer[32];
 
-	if (!write_all(crash_handle, "CRASH\n"))
-		ExitProcess(2);
-
-	// This might hang indefinitely if we are exceptionally unlucky,
-	// the parent will have a timeout after receiving the crash message.
-	// If that fails, it can TerminateProcess us.
-	// We want to make sure any database writing threads in the driver gets a chance to complete its work
-	// before we die.
-
-	if (global_replayer)
+	// Report to parent process which VkShaderModule's might have contributed to our untimely death.
+	// This allows a new process to ignore these modules.
+	for (unsigned i = 0; i < per_thread.num_failed_module_hashes; i++)
 	{
-		auto &per_thread = global_replayer->get_per_thread_data();
-		char buffer[32];
-
-		// Report to parent process which VkShaderModule's might have contributed to our untimely death.
-		// This allows a new process to ignore these modules.
-		for (unsigned i = 0; i < per_thread.num_failed_module_hashes; i++)
-		{
-			sprintf(buffer, "MODULE %" PRIx64 "\n", per_thread.failed_module_hashes[i]);
-			if (!write_all(crash_handle, buffer))
-				ExitProcess(2);
-		}
-
-		// Report where we stopped, so we can continue.
-		sprintf(buffer, "GRAPHICS %u\n", per_thread.current_graphics_index);
+		sprintf(buffer, "MODULE %" PRIx64 "\n", per_thread.failed_module_hashes[i]);
 		if (!write_all(crash_handle, buffer))
 			ExitProcess(2);
-
-		sprintf(buffer, "COMPUTE %u\n", per_thread.current_compute_index);
-		if (!write_all(crash_handle, buffer))
-			ExitProcess(2);
-
-		global_replayer->emergency_teardown();
 	}
 
-	// Clean exit instead of reporting the segfault.
-	// Use exit code 2 to mark a segfaulted child.
-	ExitProcess(2);
+	// Report where we stopped, so we can continue.
+	sprintf(buffer, "GRAPHICS %u\n", per_thread.current_graphics_index);
+	if (!write_all(crash_handle, buffer))
+		ExitProcess(2);
+
+	sprintf(buffer, "COMPUTE %u\n", per_thread.current_compute_index);
+	if (!write_all(crash_handle, buffer))
+		ExitProcess(2);
+
+	replayer.emergency_teardown();
+}
+
+static std::atomic_flag crash_handler_flag;
+
+static LONG WINAPI crash_handler(_EXCEPTION_POINTERS *)
+{
+	if (!crash_handler_flag.test_and_set())
+	{
+		// stderr is reserved for generic logging.
+		// stdout/stdin is for IPC with master process.
+
+		if (!write_all(crash_handle, "CRASH\n"))
+			ExitProcess(2);
+
+		// This might hang indefinitely if we are exceptionally unlucky,
+		// the parent will have a timeout after receiving the crash message.
+		// If that fails, it can TerminateProcess us.
+		// We want to make sure any database writing threads in the driver gets a chance to complete its work
+		// before we die.
+
+		if (global_replayer)
+		{
+			auto &per_thread = global_replayer->get_per_thread_data();
+			crash_handler(*global_replayer, per_thread);
+		}
+
+		// Clean exit instead of reporting the segfault.
+		// Use exit code 2 to mark a segfaulted child.
+		ExitProcess(2);
+	}
 	return EXCEPTION_EXECUTE_HANDLER;
+}
+
+static void timeout_handler()
+{
+	if (!global_replayer || !global_replayer->robustness)
+	{
+		LOGE("Pipeline compilation timed out.\n");
+		ExitProcess(2);
+	}
+
+	if (!crash_handler_flag.test_and_set())
+	{
+		if (!write_all(crash_handle, "CRASH\n"))
+			ExitProcess(2);
+
+		if (global_replayer)
+		{
+			auto &per_thread = global_replayer->per_thread_data.back();
+			crash_handler(*global_replayer, per_thread);
+		}
+
+		// Clean exit instead of reporting the segfault.
+		// Use exit code 2 to mark a segfaulted child.
+		ExitProcess(2);
+	}
 }
 
 static void abort_handler(int)
