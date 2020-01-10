@@ -205,7 +205,9 @@ struct EnqueuedWork
 };
 
 static void on_validation_error(void *userdata);
+#ifndef NO_ROBUST_REPLAYER
 static void timeout_handler();
+#endif
 
 struct ThreadedReplayer : StateCreatorInterface
 {
@@ -434,8 +436,12 @@ struct ThreadedReplayer : StateCreatorInterface
 				                                                });
 				if (!signalled && completed_count[index] == current_completed)
 				{
-					// Timeout!
+#ifndef NO_ROBUST_REPLAYER
 					timeout_handler();
+#else
+					LOGE("Timed out replaying pipelines!\n");
+					exit(2);
+#endif
 				}
 
 				current_completed = completed_count[index];
