@@ -61,6 +61,8 @@ struct ExternalReplayer::Impl
 	size_t shm_block_size = 0;
 	int wstatus = 0;
 	std::unordered_set<Hash> faulty_spirv_modules;
+	std::vector<std::pair<unsigned, Hash>> faulty_graphics_pipelines;
+	std::vector<std::pair<unsigned, Hash>> faulty_compute_pipelines;
 	std::unordered_set<Hash> graphics_failed_validation;
 	std::unordered_set<Hash> compute_failed_validation;
 
@@ -73,9 +75,13 @@ struct ExternalReplayer::Impl
 
 	void parse_message(const char *msg);
 	bool get_faulty_spirv_modules(size_t *count, Hash *hashes) const;
+	bool get_faulty_graphics_pipelines(size_t *count, unsigned *indices, Hash *hashes) const;
+	bool get_faulty_compute_pipelines(size_t *count, unsigned *indices, Hash *hashes) const;
 	bool get_graphics_failed_validation(size_t *count, Hash *hashes) const;
 	bool get_compute_failed_validation(size_t *count, Hash *hashes) const;
 	bool get_failed(const std::unordered_set<Hash> &failed, size_t *count, Hash *hashes) const;
+	bool get_failed(const std::vector<std::pair<unsigned, Hash>> &failed, size_t *count,
+	                unsigned *indices, Hash *hashes) const;
 };
 
 ExternalReplayer::Impl::~Impl()
@@ -156,6 +162,26 @@ void ExternalReplayer::Impl::parse_message(const char *msg)
 		auto hash = strtoull(msg + 12, nullptr, 16);
 		compute_failed_validation.insert(hash);
 	}
+	else if (strncmp(msg, "GRAPHICS", 8) == 0)
+	{
+		char *end = nullptr;
+		int index = int(strtol(msg + 8, &end, 0));
+		if (index >= 0 && end)
+		{
+			Hash graphics_pipeline = strtoull(end, nullptr, 16);
+			faulty_graphics_pipelines.push_back({ unsigned(index), graphics_pipeline });
+		}
+	}
+	else if (strncmp(msg, "COMPUTE", 7) == 0)
+	{
+		char *end = nullptr;
+		int index = int(strtol(msg + 7, &end, 0));
+		if (index >= 0 && end)
+		{
+			Hash compute_pipeline = strtoull(end, nullptr, 16);
+			faulty_compute_pipelines.push_back({ unsigned(index), compute_pipeline });
+		}
+	}
 }
 
 bool ExternalReplayer::Impl::is_process_complete(int *return_status)
@@ -224,9 +250,41 @@ bool ExternalReplayer::Impl::get_failed(const std::unordered_set<Hash> &failed, 
 	}
 }
 
+bool ExternalReplayer::Impl::get_failed(const std::vector<std::pair<unsigned, Hash>> &failed,
+                                        size_t *count, unsigned *indices, Hash *hashes) const
+{
+	if (hashes)
+	{
+		if (*count != failed.size())
+			return false;
+
+		for (auto &mod : failed)
+		{
+			*indices++ = mod.first;
+			*hashes++ = mod.second;
+		}
+		return true;
+	}
+	else
+	{
+		*count = failed.size();
+		return true;
+	}
+}
+
 bool ExternalReplayer::Impl::get_faulty_spirv_modules(size_t *count, Hash *hashes) const
 {
 	return get_failed(faulty_spirv_modules, count, hashes);
+}
+
+bool ExternalReplayer::Impl::get_faulty_graphics_pipelines(size_t *count, unsigned int *indices, Hash *hashes) const
+{
+	return get_failed(faulty_graphics_pipelines, count, indices, hashes);
+}
+
+bool ExternalReplayer::Impl::get_faulty_compute_pipelines(size_t *count, unsigned *indices, Hash *hashes) const
+{
+	return get_failed(faulty_compute_pipelines, count, indices, hashes);
 }
 
 bool ExternalReplayer::Impl::get_graphics_failed_validation(size_t *count, Hash *hashes) const

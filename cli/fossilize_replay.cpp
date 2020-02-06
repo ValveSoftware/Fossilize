@@ -2257,6 +2257,20 @@ static void log_faulty_graphics(ExternalReplayer &replayer)
 		// Ad-hoc hack to test automatic pruning ideas ...
 		//printf("--skip-graphics %016llx ", static_cast<unsigned long long>(h));
 	}
+
+	vector<unsigned> indices;
+	if (!replayer.get_faulty_graphics_pipelines(&count, nullptr, nullptr))
+		return;
+	indices.resize(count);
+	hashes.resize(count);
+	if (!replayer.get_faulty_graphics_pipelines(&count, indices.data(), hashes.data()))
+		return;
+
+	for (unsigned i = 0; i < count; i++)
+	{
+		LOGI("Graphics pipeline crashed or hung: %016" PRIx64 ". Repro with: --graphics-pipeline-range %u %u\n",
+		     hashes[i], indices[i], indices[i] + 1);
+	}
 }
 
 static void log_faulty_compute(ExternalReplayer &replayer)
@@ -2276,6 +2290,20 @@ static void log_faulty_compute(ExternalReplayer &replayer)
 
 		// Ad-hoc hack to test automatic pruning ideas ...
 		//printf("--skip-compute %016llx ", static_cast<unsigned long long>(h));
+	}
+
+	vector<unsigned> indices;
+	if (!replayer.get_faulty_compute_pipelines(&count, nullptr, nullptr))
+		return;
+	indices.resize(count);
+	hashes.resize(count);
+	if (!replayer.get_faulty_compute_pipelines(&count, indices.data(), hashes.data()))
+		return;
+
+	for (unsigned i = 0; i < count; i++)
+	{
+		LOGI("Compute pipeline crashed or hung: %016" PRIx64 ". Repro with: --compute-pipeline-range %u %u\n",
+		     hashes[i], indices[i], indices[i] + 1);
 	}
 }
 
@@ -2542,6 +2570,10 @@ static void dump_stats(const std::string &stats_path)
 	stats_to_csv(stats_path, doc);
 	remove(foz_path.c_str());
 }
+
+#ifndef NO_ROBUST_REPLAYER
+static void install_trivial_crash_handlers(ThreadedReplayer &replayer);
+#endif
 
 static int run_normal_process(ThreadedReplayer &replayer, const vector<const char *> &databases)
 {
@@ -2980,6 +3012,9 @@ int main(int argc, char *argv[])
 #endif
 	{
 		ThreadedReplayer replayer(opts, replayer_opts);
+#ifndef NO_ROBUST_REPLAYER
+		install_trivial_crash_handlers(replayer);
+#endif
 		ret = run_normal_process(replayer, databases);
 #ifndef NO_ROBUST_REPLAYER
 		if (log_memory)

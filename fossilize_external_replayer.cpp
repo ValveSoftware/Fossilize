@@ -77,6 +77,16 @@ bool ExternalReplayer::get_faulty_spirv_modules(size_t *num_hashes, Hash *hashes
 	return impl->get_faulty_spirv_modules(num_hashes, hashes);
 }
 
+bool ExternalReplayer::get_faulty_graphics_pipelines(size_t *num_hashes, unsigned *indices, Hash *hashes) const
+{
+	return impl->get_faulty_graphics_pipelines(num_hashes, indices, hashes);
+}
+
+bool ExternalReplayer::get_faulty_compute_pipelines(size_t *num_hashes, unsigned *indices, Hash *hashes) const
+{
+	return impl->get_faulty_compute_pipelines(num_hashes, indices, hashes);
+}
+
 bool ExternalReplayer::get_graphics_failed_validation(size_t *num_hashes, Hash *hashes) const
 {
 	return impl->get_graphics_failed_validation(num_hashes, hashes);
