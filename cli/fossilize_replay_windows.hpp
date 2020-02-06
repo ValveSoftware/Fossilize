@@ -662,11 +662,20 @@ static int run_master_process(const VulkanDevice::Options &opts,
 	Global::base_replayer_options = replayer_opts;
 	Global::databases = databases;
 	unsigned processes = replayer_opts.num_threads;
+
+	// We need to poll for up to 3 handles per process.
+	constexpr unsigned max_num_processes = MAXIMUM_WAIT_OBJECTS / 3;
+	if (Global::base_replayer_options.num_threads > max_num_processes)
+	{
+		LOGE("Will hit MAXIMUM_WAIT_OBJECTS limit, restricting number of processes to %u.\n", max_num_processes);
+		processes = max_num_processes;
+	}
+
 	Global::shm_name = shm_name;
 	Global::shm_mutex_name = shm_mutex_name;
 
 	// Split shader cache overhead across all processes.
-	Global::base_replayer_options.shader_cache_size_mb /= max(Global::base_replayer_options.num_threads, 1u);
+	Global::base_replayer_options.shader_cache_size_mb /= max(processes, 1u);
 	Global::base_replayer_options.num_threads = 1;
 
 	Global::job_handle = CreateJobObjectA(nullptr, nullptr);
