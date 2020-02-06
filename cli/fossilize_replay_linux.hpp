@@ -730,7 +730,7 @@ static void crash_handler(int)
 	_exit(2);
 }
 
-static void crash_handler_trivial(int)
+static void report_failed_pipeline()
 {
 	if (global_replayer)
 	{
@@ -738,16 +738,21 @@ static void crash_handler_trivial(int)
 		if (per_thread.current_graphics_pipeline)
 		{
 			unsigned index = per_thread.current_graphics_index - 1;
-			fprintf(stderr, "Graphics pipeline crashed, hash: %" PRIx64 ". Rerun with: --graphics-pipeline-range %u %u.\n",
-					per_thread.current_graphics_pipeline, index, index + 1);
+			fprintf(stderr, "Graphics pipeline crashed or hung, hash: %" PRIx64 ". Rerun with: --graphics-pipeline-range %u %u.\n",
+			        per_thread.current_graphics_pipeline, index, index + 1);
 		}
 		else if (per_thread.current_compute_pipeline)
 		{
 			unsigned index = per_thread.current_compute_index - 1;
-			fprintf(stderr, "Compute pipeline crashed, hash: %" PRIx64 ". Rerun with: --compute-pipeline-range %u %u.\n",
+			fprintf(stderr, "Compute pipeline crashed or hung, hash: %" PRIx64 ". Rerun with: --compute-pipeline-range %u %u.\n",
 			        per_thread.current_compute_pipeline, index, index + 1);
 		}
 	}
+}
+
+static void crash_handler_trivial(int)
+{
+	report_failed_pipeline();
 	fprintf(stderr, "Crashed while replaying.\n");
 	_exit(1);
 }
@@ -771,12 +776,6 @@ static void install_trivial_crash_handlers(ThreadedReplayer &replayer)
 
 static void timeout_handler()
 {
-	if (!global_replayer || !global_replayer->robustness)
-	{
-		LOGE("Pipeline compilation timed out.\n");
-		_exit(2);
-	}
-
 	// Pretend we crashed in a safe way.
 	// Send a signal to the worker thread to make sure we tear down on that thread.
 	pthread_kill(global_replayer->thread_pool.front().native_handle(), SIGABRT);

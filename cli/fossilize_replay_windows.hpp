@@ -145,9 +145,47 @@ void ProcessProgress::parse(const char *cmd)
 		}
 	}
 	else if (strncmp(cmd, "GRAPHICS", 8) == 0)
-		graphics_progress = int(strtol(cmd + 8, nullptr, 0));
+	{
+		char *end = nullptr;
+		graphics_progress = int(strtol(cmd + 8, &end, 0));
+		if (end)
+		{
+			Hash graphics_pipeline = strtoull(end, nullptr, 16);
+			// graphics_progress tells us where to start on next iteration, but -1 was actually the pipeline index that crashed.
+			if (Global::control_block && graphics_progress > 0 && graphics_pipeline != 0)
+			{
+				char buffer[ControlBlockMessageSize];
+				sprintf(buffer, "GRAPHICS %d %" PRIx64 "\n", graphics_progress - 1, graphics_pipeline);
+
+				if (WaitForSingleObject(Global::shared_mutex, INFINITE) == WAIT_OBJECT_0)
+				{
+					shared_control_block_write(Global::control_block, buffer, sizeof(buffer));
+					ReleaseMutex(Global::shared_mutex);
+				}
+			}
+		}
+	}
 	else if (strncmp(cmd, "COMPUTE", 7) == 0)
-		compute_progress = int(strtol(cmd + 7, nullptr, 0));
+	{
+		char *end = nullptr;
+		compute_progress = int(strtol(cmd + 7, &end, 0));
+		if (end)
+		{
+			Hash compute_pipeline = strtoull(end, nullptr, 16);
+			// compute_progress tells us where to start on next iteration, but -1 was actually the pipeline index that crashed.
+			if (Global::control_block && compute_progress > 0 && compute_pipeline)
+			{
+				char buffer[ControlBlockMessageSize];
+				sprintf(buffer, "COMPUTE %d %" PRIx64 "\n", compute_progress - 1, compute_pipeline);
+
+				if (WaitForSingleObject(Global::shared_mutex, INFINITE) == WAIT_OBJECT_0)
+				{
+					shared_control_block_write(Global::control_block, buffer, sizeof(buffer));
+					ReleaseMutex(Global::shared_mutex);
+				}
+			}
+		}
+	}
 	else if (strncmp(cmd, "MODULE", 6) == 0)
 	{
 		auto hash = strtoull(cmd + 6, nullptr, 16);
@@ -849,11 +887,11 @@ static void crash_handler(ThreadedReplayer &replayer, ThreadedReplayer::PerThrea
 	}
 
 	// Report where we stopped, so we can continue.
-	sprintf(buffer, "GRAPHICS %u\n", per_thread.current_graphics_index);
+	sprintf(buffer, "GRAPHICS %d %" PRIx64 "\n", per_thread.current_graphics_index, per_thread.current_graphics_pipeline);
 	if (!write_all(crash_handle, buffer))
 		ExitProcess(2);
 
-	sprintf(buffer, "COMPUTE %u\n", per_thread.current_compute_index);
+	sprintf(buffer, "COMPUTE %d %" PRIx64 "\n", per_thread.current_compute_index, per_thread.current_compute_pipeline);
 	if (!write_all(crash_handle, buffer))
 		ExitProcess(2);
 
@@ -891,28 +929,77 @@ static LONG WINAPI crash_handler(_EXCEPTION_POINTERS *)
 	return EXCEPTION_EXECUTE_HANDLER;
 }
 
+static void report_failed_pipeline()
+{
+	if (global_replayer)
+	{
+		auto &per_thread = global_replayer->get_per_thread_data();
+		if (per_thread.current_graphics_pipeline)
+		{
+			unsigned index = per_thread.current_graphics_index - 1;
+			fprintf(stderr, "Graphics pipeline crashed or hung: %" PRIx64 ". Rerun with: --graphics-pipeline-range %u %u.\n",
+					per_thread.current_graphics_pipeline, index, index + 1);
+		}
+		else if (per_thread.current_compute_pipeline)
+		{
+			unsigned index = per_thread.current_compute_index - 1;
+			fprintf(stderr, "Compute pipeline crashed or hung, hash: %" PRIx64 ". Rerun with: --compute-pipeline-range %u %u.\n",
+					per_thread.current_compute_pipeline, index, index + 1);
+		}
+	}
+}
+
+static LONG WINAPI crash_handler_trivial(_EXCEPTION_POINTERS *)
+{
+	if (!crash_handler_flag.test_and_set())
+	{
+		report_failed_pipeline();
+		fprintf(stderr, "Crashed while replaying.\n");
+		ExitProcess(1);
+	}
+	return EXCEPTION_EXECUTE_HANDLER;
+}
+
+static void abort_handler_trivial(int)
+{
+	crash_handler_trivial(nullptr);
+}
+
+static void install_trivial_crash_handlers(ThreadedReplayer &replayer)
+{
+	global_replayer = &replayer;
+	SetErrorMode(SEM_NOGPFAULTERRORBOX | SEM_FAILCRITICALERRORS);
+	SetUnhandledExceptionFilter(crash_handler_trivial);
+	signal(SIGABRT, abort_handler_trivial);
+}
+
 static void timeout_handler()
 {
-	if (!global_replayer || !global_replayer->robustness)
-	{
-		LOGE("Pipeline compilation timed out.\n");
-		ExitProcess(2);
-	}
+	bool robustness = global_replayer && global_replayer->robustness;
 
 	if (!crash_handler_flag.test_and_set())
 	{
-		if (!write_all(crash_handle, "CRASH\n"))
-			ExitProcess(2);
-
-		if (global_replayer)
+		if (robustness)
 		{
-			auto &per_thread = global_replayer->per_thread_data.back();
-			crash_handler(*global_replayer, per_thread);
-		}
+			if (!write_all(crash_handle, "CRASH\n"))
+				ExitProcess(2);
 
-		// Clean exit instead of reporting the segfault.
-		// Use exit code 2 to mark a segfaulted child.
-		ExitProcess(2);
+			if (global_replayer)
+			{
+				auto &per_thread = global_replayer->per_thread_data.back();
+				crash_handler(*global_replayer, per_thread);
+			}
+
+			// Clean exit instead of reporting the segfault.
+			// Use exit code 2 to mark a segfaulted child.
+			ExitProcess(2);
+		}
+		else
+		{
+			report_failed_pipeline();
+			LOGE("Pipeline compilation timed out.\n");
+			ExitProcess(1);
+		}
 	}
 }
 
