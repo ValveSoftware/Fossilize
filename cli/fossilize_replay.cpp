@@ -2268,7 +2268,7 @@ static void log_faulty_graphics(ExternalReplayer &replayer)
 
 	for (unsigned i = 0; i < count; i++)
 	{
-		LOGI("Graphics pipeline crashed: %016" PRIx64 ". Repro with: --graphics-pipeline-range %u %u\n",
+		LOGI("Graphics pipeline crashed or hung: %016" PRIx64 ". Repro with: --graphics-pipeline-range %u %u\n",
 		     hashes[i], indices[i], indices[i] + 1);
 	}
 }
@@ -2302,7 +2302,7 @@ static void log_faulty_compute(ExternalReplayer &replayer)
 
 	for (unsigned i = 0; i < count; i++)
 	{
-		LOGI("Compute pipeline crashed: %016" PRIx64 ". Repro with: --compute-pipeline-range %u %u\n",
+		LOGI("Compute pipeline crashed or hung: %016" PRIx64 ". Repro with: --compute-pipeline-range %u %u\n",
 		     hashes[i], indices[i], indices[i] + 1);
 	}
 }
@@ -2596,10 +2596,6 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 	state_replayer.set_resolve_shader_module_handles(false);
 	replayer.global_replayer = &state_replayer;
 	replayer.global_database = resolver.get();
-
-#ifndef NO_ROBUST_REPLAYER
-	install_trivial_crash_handlers(replayer);
-#endif
 
 	vector<Hash> resource_hashes;
 	vector<uint8_t> state_json;
@@ -3016,6 +3012,9 @@ int main(int argc, char *argv[])
 #endif
 	{
 		ThreadedReplayer replayer(opts, replayer_opts);
+#ifndef NO_ROBUST_REPLAYER
+		install_trivial_crash_handlers(replayer);
+#endif
 		ret = run_normal_process(replayer, databases);
 #ifndef NO_ROBUST_REPLAYER
 		if (log_memory)

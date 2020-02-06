@@ -933,18 +933,26 @@ static void report_failed_pipeline()
 {
 	if (global_replayer)
 	{
-		auto &per_thread = global_replayer->get_per_thread_data();
-		if (per_thread.current_graphics_pipeline)
+		auto *per_thread = &global_replayer->get_per_thread_data();
+		// Main thread failed, generally because of timeout handling. We cannot send signal to worker thread.
+		if (Global::worker_thread_index == 0)
 		{
-			unsigned index = per_thread.current_graphics_index - 1;
-			fprintf(stderr, "Graphics pipeline crashed or hung: %" PRIx64 ". Rerun with: --graphics-pipeline-range %u %u.\n",
-					per_thread.current_graphics_pipeline, index, index + 1);
+			per_thread = &global_replayer->per_thread_data.back();
+			if (global_replayer->thread_pool.size() > 1)
+				LOGE("Handling error on main thread, but there is more than one worker thread. Report might not be accurate.\n");
 		}
-		else if (per_thread.current_compute_pipeline)
+
+		if (per_thread->current_graphics_pipeline)
 		{
-			unsigned index = per_thread.current_compute_index - 1;
-			fprintf(stderr, "Compute pipeline crashed or hung, hash: %" PRIx64 ". Rerun with: --compute-pipeline-range %u %u.\n",
-					per_thread.current_compute_pipeline, index, index + 1);
+			unsigned index = per_thread->current_graphics_index - 1;
+			LOGE("Graphics pipeline crashed or hung: %" PRIx64 ". Rerun with: --graphics-pipeline-range %u %u.\n",
+			     per_thread->current_graphics_pipeline, index, index + 1);
+		}
+		else if (per_thread->current_compute_pipeline)
+		{
+			unsigned index = per_thread->current_compute_index - 1;
+			LOGE("Compute pipeline crashed or hung, hash: %" PRIx64 ". Rerun with: --compute-pipeline-range %u %u.\n",
+			     per_thread->current_compute_pipeline, index, index + 1);
 		}
 	}
 }
@@ -954,7 +962,8 @@ static LONG WINAPI crash_handler_trivial(_EXCEPTION_POINTERS *)
 	if (!crash_handler_flag.test_and_set())
 	{
 		report_failed_pipeline();
-		fprintf(stderr, "Crashed while replaying.\n");
+		LOGE("Crashed or hung while replaying.\n");
+		fflush(stderr);
 		ExitProcess(1);
 	}
 	return EXCEPTION_EXECUTE_HANDLER;

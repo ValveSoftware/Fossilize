@@ -734,18 +734,19 @@ static void report_failed_pipeline()
 {
 	if (global_replayer)
 	{
-		auto &per_thread = global_replayer->get_per_thread_data();
-		if (per_thread.current_graphics_pipeline)
+		auto *per_thread = &global_replayer->get_per_thread_data();
+
+		if (per_thread->current_graphics_pipeline)
 		{
-			unsigned index = per_thread.current_graphics_index - 1;
-			fprintf(stderr, "Graphics pipeline crashed or hung, hash: %" PRIx64 ". Rerun with: --graphics-pipeline-range %u %u.\n",
-			        per_thread.current_graphics_pipeline, index, index + 1);
+			unsigned index = per_thread->current_graphics_index - 1;
+			LOGE("Graphics pipeline crashed or hung: %" PRIx64 ". Rerun with: --graphics-pipeline-range %u %u.\n",
+			     per_thread->current_graphics_pipeline, index, index + 1);
 		}
-		else if (per_thread.current_compute_pipeline)
+		else if (per_thread->current_compute_pipeline)
 		{
-			unsigned index = per_thread.current_compute_index - 1;
-			fprintf(stderr, "Compute pipeline crashed or hung, hash: %" PRIx64 ". Rerun with: --compute-pipeline-range %u %u.\n",
-			        per_thread.current_compute_pipeline, index, index + 1);
+			unsigned index = per_thread->current_compute_index - 1;
+			LOGE("Compute pipeline crashed or hung, hash: %" PRIx64 ". Rerun with: --compute-pipeline-range %u %u.\n",
+			     per_thread->current_compute_pipeline, index, index + 1);
 		}
 	}
 }
@@ -753,7 +754,8 @@ static void report_failed_pipeline()
 static void crash_handler_trivial(int)
 {
 	report_failed_pipeline();
-	fprintf(stderr, "Crashed while replaying.\n");
+	LOGE("Crashed or hung while replaying.\n");
+	fflush(stderr);
 	_exit(1);
 }
 
@@ -776,9 +778,18 @@ static void install_trivial_crash_handlers(ThreadedReplayer &replayer)
 
 static void timeout_handler()
 {
-	// Pretend we crashed in a safe way.
-	// Send a signal to the worker thread to make sure we tear down on that thread.
-	pthread_kill(global_replayer->thread_pool.front().native_handle(), SIGABRT);
+	if (global_replayer->thread_pool.size() > 1)
+	{
+		LOGE("Using timeout handling with more than one worker thread, cannot know which thread is the culprit.\n");
+		// Just send signal to main thread so we don't emit any false positives.
+		pthread_kill(pthread_self(), SIGABRT);
+	}
+	else
+	{
+		// Pretend we crashed in a safe way.
+		// Send a signal to the worker thread to make sure we tear down on that thread.
+		pthread_kill(global_replayer->thread_pool.front().native_handle(), SIGABRT);
+	}
 }
 
 static void thread_callback(void *)
