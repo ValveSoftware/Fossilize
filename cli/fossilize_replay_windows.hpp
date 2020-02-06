@@ -884,7 +884,7 @@ static void validation_error_cb(ThreadedReplayer *replayer)
 
 static void crash_handler(ThreadedReplayer &replayer, ThreadedReplayer::PerThreadData &per_thread)
 {
-	char buffer[32];
+	char buffer[64];
 
 	// Report to parent process which VkShaderModule's might have contributed to our untimely death.
 	// This allows a new process to ignore these modules.
