@@ -134,9 +134,41 @@ void ProcessProgress::parse(const char *cmd)
 		}
 	}
 	else if (strncmp(cmd, "GRAPHICS", 8) == 0)
-		graphics_progress = int(strtol(cmd + 8, nullptr, 0));
+	{
+		char *end = nullptr;
+		graphics_progress = int(strtol(cmd + 8, &end, 0));
+		if (end)
+		{
+			Hash graphics_pipeline = strtoull(end, nullptr, 16);
+			// graphics_progress tells us where to start on next iteration, but -1 was actually the pipeline index that crashed.
+			if (Global::control_block && graphics_progress > 0 && graphics_pipeline != 0)
+			{
+				char buffer[ControlBlockMessageSize];
+				sprintf(buffer, "GRAPHICS %d %" PRIx64 "\n", graphics_progress - 1, graphics_pipeline);
+				futex_wrapper_lock(&Global::control_block->futex_lock);
+				shared_control_block_write(Global::control_block, buffer, sizeof(buffer));
+				futex_wrapper_unlock(&Global::control_block->futex_lock);
+			}
+		}
+	}
 	else if (strncmp(cmd, "COMPUTE", 7) == 0)
-		compute_progress = int(strtol(cmd + 7, nullptr, 0));
+	{
+		char *end = nullptr;
+		compute_progress = int(strtol(cmd + 7, &end, 0));
+		if (end)
+		{
+			Hash compute_pipeline = strtoull(end, nullptr, 16);
+			// compute_progress tells us where to start on next iteration, but -1 was actually the pipeline index that crashed.
+			if (Global::control_block && compute_progress > 0 && compute_pipeline)
+			{
+				char buffer[ControlBlockMessageSize];
+				sprintf(buffer, "COMPUTE %d %" PRIx64 "\n", compute_progress - 1, compute_pipeline);
+				futex_wrapper_lock(&Global::control_block->futex_lock);
+				shared_control_block_write(Global::control_block, buffer, sizeof(buffer));
+				futex_wrapper_unlock(&Global::control_block->futex_lock);
+			}
+		}
+	}
 	else if (strncmp(cmd, "MODULE", 6) == 0)
 	{
 		auto hash = strtoull(cmd + 6, nullptr, 16);
@@ -661,11 +693,11 @@ static void crash_handler(ThreadedReplayer &replayer, ThreadedReplayer::PerThrea
 	}
 
 	// Report where we stopped, so we can continue.
-	sprintf(buffer, "GRAPHICS %d\n", per_thread.current_graphics_index);
+	sprintf(buffer, "GRAPHICS %d %" PRIx64 "\n", per_thread.current_graphics_index, per_thread.current_graphics_pipeline);
 	if (!write_all(crash_fd, buffer))
 		_exit(2);
 
-	sprintf(buffer, "COMPUTE %d\n", per_thread.current_compute_index);
+	sprintf(buffer, "COMPUTE %d %" PRIx64 "\n", per_thread.current_compute_index, per_thread.current_compute_pipeline);
 	if (!write_all(crash_fd, buffer))
 		_exit(2);
 

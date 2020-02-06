@@ -2257,6 +2257,20 @@ static void log_faulty_graphics(ExternalReplayer &replayer)
 		// Ad-hoc hack to test automatic pruning ideas ...
 		//printf("--skip-graphics %016llx ", static_cast<unsigned long long>(h));
 	}
+
+	vector<unsigned> indices;
+	if (!replayer.get_faulty_graphics_pipelines(&count, nullptr, nullptr))
+		return;
+	indices.resize(count);
+	hashes.resize(count);
+	if (!replayer.get_faulty_graphics_pipelines(&count, indices.data(), hashes.data()))
+		return;
+
+	for (unsigned i = 0; i < count; i++)
+	{
+		LOGI("Graphics pipeline crashed: %016" PRIx64 ". Repro with: --graphics-pipeline-range %u %u\n",
+		     hashes[i], indices[i], indices[i] + 1);
+	}
 }
 
 static void log_faulty_compute(ExternalReplayer &replayer)
@@ -2276,6 +2290,20 @@ static void log_faulty_compute(ExternalReplayer &replayer)
 
 		// Ad-hoc hack to test automatic pruning ideas ...
 		//printf("--skip-compute %016llx ", static_cast<unsigned long long>(h));
+	}
+
+	vector<unsigned> indices;
+	if (!replayer.get_faulty_compute_pipelines(&count, nullptr, nullptr))
+		return;
+	indices.resize(count);
+	hashes.resize(count);
+	if (!replayer.get_faulty_compute_pipelines(&count, indices.data(), hashes.data()))
+		return;
+
+	for (unsigned i = 0; i < count; i++)
+	{
+		LOGI("Compute pipeline crashed: %016" PRIx64 ". Repro with: --compute-pipeline-range %u %u\n",
+		     hashes[i], indices[i], indices[i] + 1);
 	}
 }
 

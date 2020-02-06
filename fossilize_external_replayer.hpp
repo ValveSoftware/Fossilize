@@ -132,6 +132,11 @@ public:
 	// This allows the caller to later investigate what these modules are doing.
 	bool get_faulty_spirv_modules(size_t *num_hashes, Hash *hashes) const;
 
+	// Report pipelines which actually crashed. The indices are useful for replaying an archive
+	// with a given pipeline range.
+	bool get_faulty_graphics_pipelines(size_t *num_pipelines, unsigned *indices, Hash *hashes) const;
+	bool get_faulty_compute_pipelines(size_t *num_pipelines, unsigned *indices, Hash *hashes) const;
+
 	// If validation is enabled, gets a list of all pipelines which failed validation.
 	bool get_graphics_failed_validation(size_t *num_hashes, Hash *hashes) const;
 	bool get_compute_failed_validation(size_t *num_hashes, Hash *hashes) const;
