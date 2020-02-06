@@ -739,13 +739,13 @@ static void report_failed_pipeline()
 		if (per_thread->current_graphics_pipeline)
 		{
 			unsigned index = per_thread->current_graphics_index - 1;
-			LOGE("Graphics pipeline crashed or hung: %" PRIx64 ". Rerun with: --graphics-pipeline-range %u %u.\n",
+			LOGE("Graphics pipeline crashed or hung: %016" PRIx64 ". Rerun with: --graphics-pipeline-range %u %u.\n",
 			     per_thread->current_graphics_pipeline, index, index + 1);
 		}
 		else if (per_thread->current_compute_pipeline)
 		{
 			unsigned index = per_thread->current_compute_index - 1;
-			LOGE("Compute pipeline crashed or hung, hash: %" PRIx64 ". Rerun with: --compute-pipeline-range %u %u.\n",
+			LOGE("Compute pipeline crashed or hung, hash: %016" PRIx64 ". Rerun with: --compute-pipeline-range %u %u.\n",
 			     per_thread->current_compute_pipeline, index, index + 1);
 		}
 	}
