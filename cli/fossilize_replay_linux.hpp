@@ -730,6 +730,45 @@ static void crash_handler(int)
 	_exit(2);
 }
 
+static void crash_handler_trivial(int)
+{
+	if (global_replayer)
+	{
+		auto &per_thread = global_replayer->get_per_thread_data();
+		if (per_thread.current_graphics_pipeline)
+		{
+			unsigned index = per_thread.current_graphics_index - 1;
+			fprintf(stderr, "Graphics pipeline crashed, hash: %" PRIx64 ". Rerun with: --graphics-pipeline-range %u %u.\n",
+					per_thread.current_graphics_pipeline, index, index + 1);
+		}
+		else if (per_thread.current_compute_pipeline)
+		{
+			unsigned index = per_thread.current_compute_index - 1;
+			fprintf(stderr, "Compute pipeline crashed, hash: %" PRIx64 ". Rerun with: --compute-pipeline-range %u %u.\n",
+			        per_thread.current_compute_pipeline, index, index + 1);
+		}
+	}
+	fprintf(stderr, "Crashed while replaying.\n");
+	_exit(1);
+}
+
+static void install_trivial_crash_handlers(ThreadedReplayer &replayer)
+{
+	global_replayer = &replayer;
+
+	struct sigaction act;
+	memset(&act, 0, sizeof(act));
+	sigemptyset(&act.sa_mask);
+	act.sa_handler = crash_handler_trivial;
+	act.sa_flags = SA_RESETHAND;
+
+	sigaction(SIGSEGV, &act, nullptr);
+	sigaction(SIGFPE, &act, nullptr);
+	sigaction(SIGILL, &act, nullptr);
+	sigaction(SIGBUS, &act, nullptr);
+	sigaction(SIGABRT, &act, nullptr);
+}
+
 static void timeout_handler()
 {
 	if (!global_replayer || !global_replayer->robustness)

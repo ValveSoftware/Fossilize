@@ -2571,6 +2571,10 @@ static void dump_stats(const std::string &stats_path)
 	remove(foz_path.c_str());
 }
 
+#ifndef NO_ROBUST_REPLAYER
+static void install_trivial_crash_handlers(ThreadedReplayer &replayer);
+#endif
+
 static int run_normal_process(ThreadedReplayer &replayer, const vector<const char *> &databases)
 {
 	auto start_time = chrono::steady_clock::now();
@@ -2592,6 +2596,10 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 	state_replayer.set_resolve_shader_module_handles(false);
 	replayer.global_replayer = &state_replayer;
 	replayer.global_database = resolver.get();
+
+#ifndef NO_ROBUST_REPLAYER
+	install_trivial_crash_handlers(replayer);
+#endif
 
 	vector<Hash> resource_hashes;
 	vector<uint8_t> state_json;
