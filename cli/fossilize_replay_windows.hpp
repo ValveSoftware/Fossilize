@@ -957,15 +957,18 @@ static void report_failed_pipeline()
 	}
 }
 
+static std::mutex trivial_crash_handler_lock;
+
 static LONG WINAPI crash_handler_trivial(_EXCEPTION_POINTERS *)
 {
-	if (!crash_handler_flag.test_and_set())
-	{
-		report_failed_pipeline();
-		LOGE("Crashed or hung while replaying.\n");
-		fflush(stderr);
-		ExitProcess(1);
-	}
+	// Need to hold a lock here in case multiple threads crash simultaneously.
+	// One of the failing threads will kill the process anyways.
+	std::lock_guard<std::mutex> holder{trivial_crash_handler_lock};
+
+	report_failed_pipeline();
+	LOGE("Crashed or hung while replaying.\n");
+	fflush(stderr);
+	ExitProcess(1);
 	return EXCEPTION_EXECUTE_HANDLER;
 }
 
