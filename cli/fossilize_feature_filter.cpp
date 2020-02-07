@@ -109,6 +109,7 @@ void *build_pnext_chain(VulkanProperties &props)
 	P(SUBGROUP, subgroup);
 	P(FLOAT_CONTROLS, float_control);
 	PE(SUBGROUP_SIZE_CONTROL, subgroup_size_control, EXT);
+	PE(INLINE_UNIFORM_BLOCK, inline_uniform_block, EXT);
 
 #undef CHAIN
 #undef P
@@ -241,6 +242,7 @@ void FeatureFilter::Impl::init_properties(const void *pNext)
 		P(SUBGROUP, subgroup);
 		P(FLOAT_CONTROLS, float_control);
 		PE(SUBGROUP_SIZE_CONTROL, subgroup_size_control, EXT);
+		PE(INLINE_UNIFORM_BLOCK, inline_uniform_block, EXT);
 		default:
 			break;
 		}
@@ -408,6 +410,8 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 	return true;
 }
 
+// The most basic validation, can be extended as required.
+
 bool FeatureFilter::Impl::sampler_is_supported(const VkSamplerCreateInfo *info) const
 {
 	return pnext_chain_is_supported(info->pNext);
@@ -415,11 +419,35 @@ bool FeatureFilter::Impl::sampler_is_supported(const VkSamplerCreateInfo *info) 
 
 bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorSetLayoutCreateInfo *info) const
 {
+	for (unsigned i = 0; i < info->bindingCount; i++)
+	{
+		if (info->pBindings[i].descriptorType == VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK_EXT)
+		{
+			if (features.inline_uniform_block.inlineUniformBlock == VK_FALSE)
+				return false;
+			if (info->pBindings[i].descriptorCount > props.inline_uniform_block.maxInlineUniformBlockSize)
+				return false;
+		}
+	}
 	return pnext_chain_is_supported(info->pNext);
 }
 
 bool FeatureFilter::Impl::pipeline_layout_is_supported(const VkPipelineLayoutCreateInfo *info) const
 {
+	unsigned max_push_constant_size = 0;
+	for (unsigned i = 0; i < info->pushConstantRangeCount; i++)
+	{
+		unsigned required_size = info->pPushConstantRanges[i].offset + info->pPushConstantRanges[i].size;
+		if (required_size > max_push_constant_size)
+			max_push_constant_size = required_size;
+	}
+
+	if (max_push_constant_size > props2.properties.limits.maxPushConstantsSize)
+		return false;
+
+	if (info->setLayoutCount > props2.properties.limits.maxBoundDescriptorSets)
+		return false;
+
 	return pnext_chain_is_supported(info->pNext);
 }
 
@@ -750,11 +778,57 @@ bool FeatureFilter::Impl::render_pass_is_supported(const VkRenderPassCreateInfo 
 
 bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelineCreateInfo *info) const
 {
+	if (info->pColorBlendState && !pnext_chain_is_supported(info->pColorBlendState->pNext))
+		return false;
+	if (info->pVertexInputState && !pnext_chain_is_supported(info->pVertexInputState->pNext))
+		return false;
+	if (info->pDepthStencilState && !pnext_chain_is_supported(info->pDepthStencilState->pNext))
+		return false;
+	if (info->pInputAssemblyState && !pnext_chain_is_supported(info->pInputAssemblyState->pNext))
+		return false;
+	if (info->pDynamicState && !pnext_chain_is_supported(info->pDynamicState->pNext))
+		return false;
+	if (info->pMultisampleState && !pnext_chain_is_supported(info->pMultisampleState->pNext))
+		return false;
+	if (info->pTessellationState && !pnext_chain_is_supported(info->pTessellationState->pNext))
+		return false;
+	if (info->pViewportState && !pnext_chain_is_supported(info->pViewportState->pNext))
+		return false;
+	if (info->pRasterizationState && !pnext_chain_is_supported(info->pRasterizationState->pNext))
+		return false;
+
+	for (uint32_t i = 0; i < info->stageCount; i++)
+	{
+		if ((info->pStages[i].flags & VK_PIPELINE_SHADER_STAGE_CREATE_ALLOW_VARYING_SUBGROUP_SIZE_BIT_EXT) != 0 &&
+		    features.subgroup_size_control.subgroupSizeControl == VK_FALSE)
+		{
+			return false;
+		}
+
+		if (!pnext_chain_is_supported(info->pStages[i].pNext))
+			return false;
+	}
+
 	return pnext_chain_is_supported(info->pNext);
 }
 
 bool FeatureFilter::Impl::compute_pipeline_is_supported(const VkComputePipelineCreateInfo *info) const
 {
+	if (!pnext_chain_is_supported(info->stage.pNext))
+		return false;
+
+	if ((info->stage.flags & VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT_EXT) != 0 &&
+	    features.subgroup_size_control.computeFullSubgroups == VK_FALSE)
+	{
+		return false;
+	}
+
+	if ((info->stage.flags & VK_PIPELINE_SHADER_STAGE_CREATE_ALLOW_VARYING_SUBGROUP_SIZE_BIT_EXT) != 0 &&
+	    features.subgroup_size_control.subgroupSizeControl == VK_FALSE)
+	{
+		return false;
+	}
+
 	return pnext_chain_is_supported(info->pNext);
 }
 

@@ -74,6 +74,7 @@ struct VulkanProperties
 	VkPhysicalDeviceSubgroupProperties subgroup;
 	VkPhysicalDeviceFloatControlsProperties float_control;
 	VkPhysicalDeviceSubgroupSizeControlPropertiesEXT subgroup_size_control;
+	VkPhysicalDeviceInlineUniformBlockPropertiesEXT inline_uniform_block;
 };
 
 void *build_pnext_chain(VulkanProperties &properties);
