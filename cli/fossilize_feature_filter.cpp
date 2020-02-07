@@ -24,8 +24,9 @@
 #include "fossilize_feature_filter.hpp"
 #include "spirv.hpp"
 #include "logging.hpp"
-#include <unordered_set>
 #include <string.h>
+#include <unordered_set>
+#include <string>
 
 namespace Fossilize
 {
@@ -764,10 +765,8 @@ bool FeatureFilter::Impl::validate_module_capabilities(const uint32_t *data, siz
 
 bool FeatureFilter::Impl::shader_module_is_supported(const VkShaderModuleCreateInfo *info) const
 {
-	std::unordered_set<spv::Capability> caps;
 	if (!validate_module_capabilities(info->pCode, info->codeSize))
 		return false;
-
 	return pnext_chain_is_supported(info->pNext);
 }
 
