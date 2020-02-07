@@ -30,6 +30,8 @@ namespace Fossilize
 {
 struct VulkanFeatures
 {
+	VkPhysicalDeviceVulkan11Features vulkan11;
+	VkPhysicalDeviceVulkan12Features vulkan12;
 	VkPhysicalDevice16BitStorageFeatures storage_16bit;
 	VkPhysicalDeviceMultiviewFeatures multiview;
 	VkPhysicalDeviceVariablePointersFeatures variable_pointers;
@@ -51,6 +53,15 @@ struct VulkanFeatures
 	VkPhysicalDeviceVertexAttributeDivisorFeaturesEXT attribute_divisor;
 	VkPhysicalDeviceShaderDemoteToHelperInvocationFeaturesEXT demote_to_helper;
 	VkPhysicalDeviceFragmentShaderInterlockFeaturesEXT shader_interlock;
+	VkPhysicalDeviceFragmentDensityMapFeaturesEXT fragment_density;
+	VkPhysicalDeviceBufferDeviceAddressFeaturesEXT buffer_device_address_ext;
+	VkPhysicalDeviceComputeShaderDerivativesFeaturesNV compute_shader_derivatives;
+	VkPhysicalDeviceFragmentShaderBarycentricFeaturesNV barycentric_nv;
+	VkPhysicalDeviceShaderImageFootprintFeaturesNV image_footprint_nv;
+	VkPhysicalDeviceShadingRateImageFeaturesNV shading_rate_nv;
+	VkPhysicalDeviceCooperativeMatrixFeaturesNV cooperative_matrix_nv;
+	VkPhysicalDeviceShaderSMBuiltinsFeaturesNV sm_builtins_nv;
+	VkPhysicalDeviceShaderIntegerFunctions2FeaturesINTEL integer_functions2_intel;
 };
 
 void *build_pnext_chain(VulkanFeatures &features);
@@ -58,6 +69,8 @@ void *build_pnext_chain(VulkanFeatures &features);
 struct VulkanProperties
 {
 	VkPhysicalDeviceDescriptorIndexingProperties descriptor_indexing;
+	VkPhysicalDeviceSubgroupProperties subgroup;
+	VkPhysicalDeviceFloatControlsProperties float_control;
 };
 
 void *build_pnext_chain(VulkanProperties &properties);

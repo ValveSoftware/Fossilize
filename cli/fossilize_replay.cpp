@@ -1395,6 +1395,22 @@ struct ThreadedReplayer : StateCreatorInterface
 		}
 #endif
 
+		if (!device->get_feature_filter().shader_module_is_supported(create_info))
+		{
+			LOGE("Shader module %0" PRIx64 " is not supported on this device.\n", hash);
+			*module = VK_NULL_HANDLE;
+
+			lock_guard<mutex> lock(internal_enqueue_mutex);
+			//LOGI("Inserting shader module %016llx.\n", static_cast<unsigned long long>(hash));
+			shader_modules.insert_object(hash, VK_NULL_HANDLE, 1);
+			shader_module_count.fetch_add(1, std::memory_order_relaxed);
+
+			if (opts.control_block)
+				opts.control_block->module_validation_failures.fetch_add(1, std::memory_order_relaxed);
+
+			return true;
+		}
+
 		auto &per_thread = get_per_thread_data();
 		per_thread.triggered_validation_error = false;
 

@@ -30,6 +30,7 @@ function(add_fossilize_cli NAME)
 endfunction()
 
 add_fossilize_cli(fossilize-replay fossilize_replay.cpp fossilize_feature_filter.hpp fossilize_feature_filter.cpp)
+target_include_directories(fossilize-replay PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/SPIRV-Headers/include/spirv/unified1)
 if (WIN32)
 	target_sources(fossilize-replay PRIVATE fossilize_replay_windows.hpp)
 else()

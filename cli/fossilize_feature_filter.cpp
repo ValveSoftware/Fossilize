@@ -22,6 +22,8 @@
 
 #include "volk.h"
 #include "fossilize_feature_filter.hpp"
+#include "spirv.hpp"
+#include "logging.hpp"
 #include <unordered_set>
 #include <string.h>
 
@@ -41,9 +43,11 @@ void *build_pnext_chain(VulkanFeatures &features)
 
 #define F(struct_type, member) \
 	CHAIN(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_FEATURES, features.member)
-#define F_EXT(struct_type, member) \
-	CHAIN(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_FEATURES_EXT, features.member)
+#define FE(struct_type, member, ext) \
+	CHAIN(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_FEATURES_##ext, features.member)
 
+	F(VULKAN_1_1, vulkan11);
+	F(VULKAN_1_2, vulkan12);
 	F(16BIT_STORAGE, storage_16bit);
 	F(MULTIVIEW, multiview);
 	F(VARIABLE_POINTERS, variable_pointers);
@@ -58,17 +62,26 @@ void *build_pnext_chain(VulkanFeatures &features)
 	F(SHADER_SUBGROUP_EXTENDED_TYPES, subgroup_extended_types);
 	F(SEPARATE_DEPTH_STENCIL_LAYOUTS, separate_ds_layout);
 	F(BUFFER_DEVICE_ADDRESS, buffer_device_address);
-	F_EXT(TRANSFORM_FEEDBACK, transform_feedback);
-	F_EXT(DEPTH_CLIP_ENABLE, depth_clip);
-	F_EXT(INLINE_UNIFORM_BLOCK, inline_uniform_block);
-	F_EXT(BLEND_OPERATION_ADVANCED, blend_operation_advanced);
-	F_EXT(VERTEX_ATTRIBUTE_DIVISOR, attribute_divisor);
-	F_EXT(SHADER_DEMOTE_TO_HELPER_INVOCATION, demote_to_helper);
-	F_EXT(FRAGMENT_SHADER_INTERLOCK, shader_interlock);
+	FE(TRANSFORM_FEEDBACK, transform_feedback, EXT);
+	FE(DEPTH_CLIP_ENABLE, depth_clip, EXT);
+	FE(INLINE_UNIFORM_BLOCK, inline_uniform_block, EXT);
+	FE(BLEND_OPERATION_ADVANCED, blend_operation_advanced, EXT);
+	FE(VERTEX_ATTRIBUTE_DIVISOR, attribute_divisor, EXT);
+	FE(SHADER_DEMOTE_TO_HELPER_INVOCATION, demote_to_helper, EXT);
+	FE(FRAGMENT_SHADER_INTERLOCK, shader_interlock, EXT);
+	FE(FRAGMENT_DENSITY_MAP, fragment_density, EXT);
+	FE(BUFFER_DEVICE_ADDRESS, buffer_device_address_ext, EXT);
+	FE(COMPUTE_SHADER_DERIVATIVES, compute_shader_derivatives, NV);
+	FE(FRAGMENT_SHADER_BARYCENTRIC, barycentric_nv, NV);
+	FE(SHADER_IMAGE_FOOTPRINT, image_footprint_nv, NV);
+	FE(SHADING_RATE_IMAGE, shading_rate_nv, NV);
+	FE(COOPERATIVE_MATRIX, cooperative_matrix_nv, NV);
+	FE(SHADER_SM_BUILTINS, sm_builtins_nv, NV);
+	FE(SHADER_INTEGER_FUNCTIONS_2, integer_functions2_intel, INTEL);
 
 #undef CHAIN
 #undef F
-#undef F_EXT
+#undef FE
 
 	return pNext;
 }
@@ -89,6 +102,8 @@ void *build_pnext_chain(VulkanProperties &props)
 	CHAIN(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_PROPERTIES, props.member)
 
 	P(DESCRIPTOR_INDEXING, descriptor_indexing);
+	P(SUBGROUP, subgroup);
+	P(FLOAT_CONTROLS, float_control);
 
 #undef CHAIN
 #undef P
@@ -120,6 +135,9 @@ struct FeatureFilter::Impl
 
 	void init_features(const void *pNext);
 	void init_properties(const void *pNext);
+	bool pnext_chain_is_supported(const void *pNext) const;
+	bool validate_module_capabilities(const uint32_t *data, size_t size) const;
+	bool validate_module_capability(spv::Capability cap) const;
 };
 
 FeatureFilter::FeatureFilter()
@@ -143,13 +161,15 @@ void FeatureFilter::Impl::init_features(const void *pNext)
 		features.member.pNext = nullptr; \
 		break
 
-#define F_EXT(struct_type, member) case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_FEATURES_EXT: \
+#define FE(struct_type, member, ext) case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_FEATURES_##ext: \
 		memcpy(&features.member, base, sizeof(features.member)); \
 		features.member.pNext = nullptr; \
 		break
 
 		switch (base->sType)
 		{
+		F(VULKAN_1_1, vulkan11);
+		F(VULKAN_1_2, vulkan12);
 		F(16BIT_STORAGE, storage_16bit);
 		F(MULTIVIEW, multiview);
 		F(VARIABLE_POINTERS, variable_pointers);
@@ -164,19 +184,28 @@ void FeatureFilter::Impl::init_features(const void *pNext)
 		F(SHADER_SUBGROUP_EXTENDED_TYPES, subgroup_extended_types);
 		F(SEPARATE_DEPTH_STENCIL_LAYOUTS, separate_ds_layout);
 		F(BUFFER_DEVICE_ADDRESS, buffer_device_address);
-		F_EXT(TRANSFORM_FEEDBACK, transform_feedback);
-		F_EXT(DEPTH_CLIP_ENABLE, depth_clip);
-		F_EXT(INLINE_UNIFORM_BLOCK, inline_uniform_block);
-		F_EXT(BLEND_OPERATION_ADVANCED, blend_operation_advanced);
-		F_EXT(VERTEX_ATTRIBUTE_DIVISOR, attribute_divisor);
-		F_EXT(SHADER_DEMOTE_TO_HELPER_INVOCATION, demote_to_helper);
-		F_EXT(FRAGMENT_SHADER_INTERLOCK, shader_interlock);
+		FE(TRANSFORM_FEEDBACK, transform_feedback, EXT);
+		FE(DEPTH_CLIP_ENABLE, depth_clip, EXT);
+		FE(INLINE_UNIFORM_BLOCK, inline_uniform_block, EXT);
+		FE(BLEND_OPERATION_ADVANCED, blend_operation_advanced, EXT);
+		FE(VERTEX_ATTRIBUTE_DIVISOR, attribute_divisor, EXT);
+		FE(SHADER_DEMOTE_TO_HELPER_INVOCATION, demote_to_helper, EXT);
+		FE(FRAGMENT_SHADER_INTERLOCK, shader_interlock, EXT);
+		FE(FRAGMENT_DENSITY_MAP, fragment_density, EXT);
+		FE(BUFFER_DEVICE_ADDRESS, buffer_device_address_ext, EXT);
+		FE(COMPUTE_SHADER_DERIVATIVES, compute_shader_derivatives, NV);
+		FE(FRAGMENT_SHADER_BARYCENTRIC, barycentric_nv, NV);
+		FE(SHADER_IMAGE_FOOTPRINT, image_footprint_nv, NV);
+		FE(SHADING_RATE_IMAGE, shading_rate_nv, NV);
+		FE(COOPERATIVE_MATRIX, cooperative_matrix_nv, NV);
+		FE(SHADER_SM_BUILTINS, sm_builtins_nv, NV);
+		FE(SHADER_INTEGER_FUNCTIONS_2, integer_functions2_intel, INTEL);
 		default:
 			break;
 		}
 
 #undef F
-#undef F_EXT
+#undef FE
 
 		pNext = base->pNext;
 	}
@@ -196,6 +225,8 @@ void FeatureFilter::Impl::init_properties(const void *pNext)
 		switch (base->sType)
 		{
 		P(DESCRIPTOR_INDEXING, descriptor_indexing);
+		P(SUBGROUP, subgroup);
+		P(FLOAT_CONTROLS, float_control);
 		default:
 			break;
 		}
@@ -229,39 +260,359 @@ bool FeatureFilter::init(uint32_t api_version, const char **device_exts, unsigne
 	return impl->init(api_version, device_exts, count, enabled_features, props);
 }
 
-bool FeatureFilter::Impl::sampler_is_supported(const VkSamplerCreateInfo *info) const
+bool FeatureFilter::Impl::pnext_chain_is_supported(const void *) const
 {
 	return true;
+}
+
+bool FeatureFilter::Impl::sampler_is_supported(const VkSamplerCreateInfo *info) const
+{
+	return pnext_chain_is_supported(info->pNext);
 }
 
 bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorSetLayoutCreateInfo *info) const
 {
-	return true;
+	return pnext_chain_is_supported(info->pNext);
 }
 
 bool FeatureFilter::Impl::pipeline_layout_is_supported(const VkPipelineLayoutCreateInfo *info) const
 {
+	return pnext_chain_is_supported(info->pNext);
+}
+
+bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
+{
+	// From table 75 in Vulkan spec.
+
+	switch (cap)
+	{
+	case spv::CapabilityMatrix:
+	case spv::CapabilityShader:
+	case spv::CapabilityInputAttachment:
+	case spv::CapabilitySampled1D:
+	case spv::CapabilityImage1D:
+	case spv::CapabilitySampledBuffer:
+	case spv::CapabilityImageBuffer:
+	case spv::CapabilityImageQuery:
+	case spv::CapabilityDerivativeControl:
+	case spv::CapabilityStorageImageExtendedFormats:
+	case spv::CapabilityDeviceGroup:
+		return true;
+
+	case spv::CapabilityGeometry:
+		return features2.features.geometryShader == VK_TRUE;
+	case spv::CapabilityTessellation:
+		return features2.features.tessellationShader == VK_TRUE;
+	case spv::CapabilityFloat64:
+		return features2.features.shaderFloat64 == VK_TRUE;
+	case spv::CapabilityInt64:
+		return features2.features.shaderInt64 == VK_TRUE;
+	case spv::CapabilityInt64Atomics:
+		return features.atomic_int64.shaderBufferInt64Atomics == VK_TRUE ||
+		       features.atomic_int64.shaderSharedInt64Atomics == VK_TRUE;
+	case spv::CapabilityInt16:
+		return features2.features.shaderInt16 == VK_TRUE;
+	case spv::CapabilityTessellationPointSize:
+	case spv::CapabilityGeometryPointSize:
+		return features2.features.shaderTessellationAndGeometryPointSize == VK_TRUE;
+	case spv::CapabilityImageGatherExtended:
+		return features2.features.shaderImageGatherExtended == VK_TRUE;
+	case spv::CapabilityStorageImageMultisample:
+		return features2.features.shaderStorageImageMultisample == VK_TRUE;
+	case spv::CapabilityUniformBufferArrayDynamicIndexing:
+		return features2.features.shaderUniformBufferArrayDynamicIndexing == VK_TRUE;
+	case spv::CapabilitySampledImageArrayDynamicIndexing:
+		return features2.features.shaderSampledImageArrayDynamicIndexing == VK_TRUE;
+	case spv::CapabilityStorageBufferArrayDynamicIndexing:
+		return features2.features.shaderStorageBufferArrayDynamicIndexing == VK_TRUE;
+	case spv::CapabilityStorageImageArrayDynamicIndexing:
+		return features2.features.shaderStorageImageArrayDynamicIndexing == VK_TRUE;
+	case spv::CapabilityClipDistance:
+		return features2.features.shaderClipDistance == VK_TRUE;
+	case spv::CapabilityCullDistance:
+		return features2.features.shaderCullDistance == VK_TRUE;
+	case spv::CapabilityImageCubeArray:
+		return features2.features.imageCubeArray == VK_TRUE;
+	case spv::CapabilitySampleRateShading:
+		return features2.features.sampleRateShading == VK_TRUE;
+	case spv::CapabilitySparseResidency:
+		return features2.features.shaderResourceResidency == VK_TRUE;
+	case spv::CapabilityMinLod:
+		return features2.features.shaderResourceMinLod == VK_TRUE;
+	case spv::CapabilitySampledCubeArray:
+		return features2.features.imageCubeArray == VK_TRUE;
+	case spv::CapabilityImageMSArray:
+		return features2.features.shaderStorageImageMultisample == VK_TRUE;
+	case spv::CapabilityInterpolationFunction:
+		return features2.features.sampleRateShading == VK_TRUE;
+	case spv::CapabilityStorageImageReadWithoutFormat:
+		return features2.features.shaderStorageImageReadWithoutFormat == VK_TRUE;
+	case spv::CapabilityStorageImageWriteWithoutFormat:
+		return features2.features.shaderStorageImageWriteWithoutFormat == VK_TRUE;
+	case spv::CapabilityMultiViewport:
+		return features2.features.multiViewport == VK_TRUE;
+	case spv::CapabilityDrawParameters:
+		return features.draw_parameters.shaderDrawParameters == VK_TRUE ||
+		       enabled_extensions.count(VK_KHR_SHADER_DRAW_PARAMETERS_EXTENSION_NAME) != 0;
+	case spv::CapabilityMultiView:
+		return features.multiview.multiview == VK_TRUE;
+	case spv::CapabilityVariablePointersStorageBuffer:
+		return features.variable_pointers.variablePointersStorageBuffer == VK_TRUE;
+	case spv::CapabilityVariablePointers:
+		return features.variable_pointers.variablePointers == VK_TRUE;
+	case spv::CapabilityShaderClockKHR:
+		return enabled_extensions.count(VK_KHR_SHADER_CLOCK_EXTENSION_NAME) != 0;
+	case spv::CapabilityStencilExportEXT:
+		return enabled_extensions.count(VK_EXT_SHADER_STENCIL_EXPORT_EXTENSION_NAME) != 0;
+	case spv::CapabilitySubgroupBallotKHR:
+		return enabled_extensions.count(VK_EXT_SHADER_SUBGROUP_BALLOT_EXTENSION_NAME) != 0;
+	case spv::CapabilitySubgroupVoteKHR:
+		return enabled_extensions.count(VK_EXT_SHADER_SUBGROUP_VOTE_EXTENSION_NAME) != 0;
+	case spv::CapabilityImageReadWriteLodAMD:
+		return enabled_extensions.count(VK_AMD_SHADER_IMAGE_LOAD_STORE_LOD_EXTENSION_NAME) != 0;
+	case spv::CapabilityImageGatherBiasLodAMD:
+		return enabled_extensions.count(VK_AMD_TEXTURE_GATHER_BIAS_LOD_EXTENSION_NAME) != 0;
+	case spv::CapabilityFragmentMaskAMD:
+		return enabled_extensions.count(VK_AMD_SHADER_FRAGMENT_MASK_EXTENSION_NAME) != 0;
+	case spv::CapabilitySampleMaskOverrideCoverageNV:
+		return enabled_extensions.count(VK_NV_SAMPLE_MASK_OVERRIDE_COVERAGE_EXTENSION_NAME) != 0;
+	case spv::CapabilityGeometryShaderPassthroughNV:
+		return enabled_extensions.count(VK_NV_GEOMETRY_SHADER_PASSTHROUGH_EXTENSION_NAME) != 0;
+	case spv::CapabilityShaderViewportIndex:
+		return features.vulkan12.shaderOutputViewportIndex;
+	case spv::CapabilityShaderLayer:
+		return features.vulkan12.shaderOutputLayer;
+	case spv::CapabilityShaderViewportIndexLayerEXT:
+		// NV version is a cloned enum.
+		return enabled_extensions.count(VK_EXT_SHADER_VIEWPORT_INDEX_LAYER_EXTENSION_NAME) != 0 ||
+		       enabled_extensions.count(VK_NV_VIEWPORT_ARRAY2_EXTENSION_NAME) != 0;
+	case spv::CapabilityShaderViewportMaskNV:
+		return enabled_extensions.count(VK_NV_VIEWPORT_ARRAY2_EXTENSION_NAME) != 0;
+	case spv::CapabilityPerViewAttributesNV:
+		return enabled_extensions.count(VK_NVX_MULTIVIEW_PER_VIEW_ATTRIBUTES_EXTENSION_NAME) != 0;
+	case spv::CapabilityStorageBuffer16BitAccess:
+		return features.storage_16bit.storageBuffer16BitAccess == VK_TRUE;
+	case spv::CapabilityUniformAndStorageBuffer16BitAccess:
+		return features.storage_16bit.uniformAndStorageBuffer16BitAccess == VK_TRUE;
+	case spv::CapabilityStoragePushConstant16:
+		return features.storage_16bit.storagePushConstant16 == VK_TRUE;
+	case spv::CapabilityStorageInputOutput16:
+		return features.storage_16bit.storageInputOutput16 == VK_TRUE;
+	case spv::CapabilityGroupNonUniform:
+		return (props.subgroup.supportedOperations & VK_SUBGROUP_FEATURE_BASIC_BIT) != 0;
+	case spv::CapabilityGroupNonUniformVote:
+		return (props.subgroup.supportedOperations & VK_SUBGROUP_FEATURE_VOTE_BIT) != 0;
+	case spv::CapabilityGroupNonUniformArithmetic:
+		return (props.subgroup.supportedOperations & VK_SUBGROUP_FEATURE_ARITHMETIC_BIT) != 0;
+	case spv::CapabilityGroupNonUniformBallot:
+		return (props.subgroup.supportedOperations & VK_SUBGROUP_FEATURE_BALLOT_BIT) != 0;
+	case spv::CapabilityGroupNonUniformShuffle:
+		return (props.subgroup.supportedOperations & VK_SUBGROUP_FEATURE_SHUFFLE_BIT) != 0;
+	case spv::CapabilityGroupNonUniformShuffleRelative:
+		return (props.subgroup.supportedOperations & VK_SUBGROUP_FEATURE_SHUFFLE_RELATIVE_BIT) != 0;
+	case spv::CapabilityGroupNonUniformClustered:
+		return (props.subgroup.supportedOperations & VK_SUBGROUP_FEATURE_CLUSTERED_BIT) != 0;
+	case spv::CapabilityGroupNonUniformQuad:
+		return (props.subgroup.supportedOperations & VK_SUBGROUP_FEATURE_QUAD_BIT) != 0;
+	case spv::CapabilityGroupNonUniformPartitionedNV:
+		return (props.subgroup.supportedOperations & VK_SUBGROUP_FEATURE_PARTITIONED_BIT_NV) != 0;
+	case spv::CapabilitySampleMaskPostDepthCoverage:
+		return enabled_extensions.count(VK_EXT_POST_DEPTH_COVERAGE_EXTENSION_NAME) != 0;
+	case spv::CapabilityShaderNonUniform:
+		return enabled_extensions.count(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME) != 0 || api_version >= VK_API_VERSION_1_2;
+	case spv::CapabilityRuntimeDescriptorArray:
+		return features.descriptor_indexing.runtimeDescriptorArray == VK_TRUE;
+	case spv::CapabilityInputAttachmentArrayDynamicIndexing:
+		return features.descriptor_indexing.shaderInputAttachmentArrayDynamicIndexing == VK_TRUE;
+	case spv::CapabilityUniformTexelBufferArrayDynamicIndexing:
+		return features.descriptor_indexing.shaderUniformTexelBufferArrayDynamicIndexing == VK_TRUE;
+	case spv::CapabilityStorageTexelBufferArrayDynamicIndexing:
+		return features.descriptor_indexing.shaderStorageTexelBufferArrayDynamicIndexing == VK_TRUE;
+	case spv::CapabilityUniformBufferArrayNonUniformIndexing:
+		return features.descriptor_indexing.shaderUniformBufferArrayNonUniformIndexing == VK_TRUE;
+	case spv::CapabilitySampledImageArrayNonUniformIndexing:
+		return features.descriptor_indexing.shaderSampledImageArrayNonUniformIndexing == VK_TRUE;
+	case spv::CapabilityStorageBufferArrayNonUniformIndexing:
+		return features.descriptor_indexing.shaderStorageBufferArrayNonUniformIndexing == VK_TRUE;
+	case spv::CapabilityStorageImageArrayNonUniformIndexing:
+		return features.descriptor_indexing.shaderStorageImageArrayNonUniformIndexing == VK_TRUE;
+	case spv::CapabilityInputAttachmentArrayNonUniformIndexing:
+		return features.descriptor_indexing.shaderInputAttachmentArrayNonUniformIndexing == VK_TRUE;
+	case spv::CapabilityStorageTexelBufferArrayNonUniformIndexing:
+		return features.descriptor_indexing.shaderStorageTexelBufferArrayNonUniformIndexing == VK_TRUE;
+	case spv::CapabilityFloat16:
+		return features.float16_int8.shaderFloat16 == VK_TRUE || enabled_extensions.count(VK_AMD_GPU_SHADER_HALF_FLOAT_EXTENSION_NAME) == 0;
+	case spv::CapabilityInt8:
+		return features.float16_int8.shaderInt8 == VK_TRUE;
+	case spv::CapabilityStorageBuffer8BitAccess:
+		return features.storage_8bit.storageBuffer8BitAccess == VK_TRUE;
+	case spv::CapabilityUniformAndStorageBuffer8BitAccess:
+		return features.storage_8bit.uniformAndStorageBuffer8BitAccess == VK_TRUE;
+	case spv::CapabilityStoragePushConstant8:
+		return features.storage_8bit.storagePushConstant8 == VK_TRUE;
+	case spv::CapabilityVulkanMemoryModel:
+		return features.memory_model.vulkanMemoryModel == VK_TRUE;
+	case spv::CapabilityVulkanMemoryModelDeviceScope:
+		return features.memory_model.vulkanMemoryModelDeviceScope == VK_TRUE;
+	case spv::CapabilityDenormPreserve:
+		// Not sure if we have to inspect every possible type. Assume compiler won't barf if at least one property is set.
+		return props.float_control.shaderDenormPreserveFloat16 == VK_TRUE ||
+		       props.float_control.shaderDenormPreserveFloat32 == VK_TRUE ||
+		       props.float_control.shaderDenormPreserveFloat64 == VK_TRUE;
+	case spv::CapabilityDenormFlushToZero:
+		// Not sure if we have to inspect every possible type. Assume compiler won't barf if at least one property is set.
+		return props.float_control.shaderDenormFlushToZeroFloat16 == VK_TRUE ||
+		       props.float_control.shaderDenormFlushToZeroFloat32 == VK_TRUE ||
+		       props.float_control.shaderDenormFlushToZeroFloat64 == VK_TRUE;
+	case spv::CapabilitySignedZeroInfNanPreserve:
+		// Not sure if we have to inspect every possible type. Assume compiler won't barf if at least one property is set.
+		return props.float_control.shaderSignedZeroInfNanPreserveFloat16 == VK_TRUE ||
+		       props.float_control.shaderSignedZeroInfNanPreserveFloat32 == VK_TRUE ||
+		       props.float_control.shaderSignedZeroInfNanPreserveFloat64 == VK_TRUE;
+	case spv::CapabilityRoundingModeRTE:
+		// Not sure if we have to inspect every possible type. Assume compiler won't barf if at least one property is set.
+		return props.float_control.shaderRoundingModeRTEFloat16 == VK_TRUE ||
+		       props.float_control.shaderRoundingModeRTEFloat32 == VK_TRUE ||
+		       props.float_control.shaderRoundingModeRTEFloat64 == VK_TRUE;
+	case spv::CapabilityRoundingModeRTZ:
+		// Not sure if we have to inspect every possible type. Assume compiler won't barf if at least one property is set.
+		return props.float_control.shaderRoundingModeRTZFloat16 == VK_TRUE ||
+		       props.float_control.shaderRoundingModeRTZFloat32 == VK_TRUE ||
+		       props.float_control.shaderRoundingModeRTZFloat64 == VK_TRUE;
+	case spv::CapabilityComputeDerivativeGroupQuadsNV:
+		return features.compute_shader_derivatives.computeDerivativeGroupQuads == VK_TRUE;
+	case spv::CapabilityComputeDerivativeGroupLinearNV:
+		return features.compute_shader_derivatives.computeDerivativeGroupLinear == VK_TRUE;
+	case spv::CapabilityFragmentBarycentricNV:
+		return features.barycentric_nv.fragmentShaderBarycentric == VK_TRUE;
+	case spv::CapabilityImageFootprintNV:
+		return features.image_footprint_nv.imageFootprint == VK_TRUE;
+	case spv::CapabilityFragmentDensityEXT:
+		// Spec mentions ShadingRateImageNV, but that does not appear to exist?
+		return features.shading_rate_nv.shadingRateImage == VK_TRUE ||
+		       features.fragment_density.fragmentDensityMap == VK_TRUE;
+	case spv::CapabilityMeshShadingNV:
+		return enabled_extensions.count(VK_NV_MESH_SHADER_EXTENSION_NAME) == VK_TRUE;
+	case spv::CapabilityRayTracingNV:
+		return enabled_extensions.count(VK_NV_RAY_TRACING_EXTENSION_NAME) == VK_TRUE;
+	case spv::CapabilityTransformFeedback:
+		return features.transform_feedback.transformFeedback == VK_TRUE;
+	case spv::CapabilityGeometryStreams:
+		return features.transform_feedback.geometryStreams == VK_TRUE;
+	case spv::CapabilityPhysicalStorageBufferAddresses:
+		// Apparently these are different types?
+		return features.buffer_device_address.bufferDeviceAddress == VK_TRUE ||
+		       features.vulkan12.bufferDeviceAddress == VK_TRUE ||
+		       features.buffer_device_address_ext.bufferDeviceAddress == VK_TRUE;
+	case spv::CapabilityCooperativeMatrixNV:
+		return features.cooperative_matrix_nv.cooperativeMatrix == VK_TRUE;
+	case spv::CapabilityIntegerFunctions2INTEL:
+		return features.integer_functions2_intel.shaderIntegerFunctions2 == VK_TRUE;
+	case spv::CapabilityShaderSMBuiltinsNV:
+		return features.sm_builtins_nv.shaderSMBuiltins == VK_TRUE;
+	case spv::CapabilityFragmentShaderSampleInterlockEXT:
+		return features.shader_interlock.fragmentShaderSampleInterlock == VK_TRUE;
+	case spv::CapabilityFragmentShaderPixelInterlockEXT:
+		return features.shader_interlock.fragmentShaderPixelInterlock == VK_TRUE;
+	case spv::CapabilityFragmentShaderShadingRateInterlockEXT:
+		return features.shader_interlock.fragmentShaderShadingRateInterlock == VK_TRUE ||
+		       features.shading_rate_nv.shadingRateImage == VK_TRUE;
+	case spv::CapabilityDemoteToHelperInvocationEXT:
+		return features.demote_to_helper.shaderDemoteToHelperInvocation == VK_TRUE;
+
+	default:
+		LOGE("Unrecognized SPIR-V capability %u, treating as unsupported.\n", unsigned(cap));
+		return false;
+	}
+}
+
+bool FeatureFilter::Impl::validate_module_capabilities(const uint32_t *data, size_t size) const
+{
+	// Trivial SPIR-V parser, just need to poke at Capability opcodes.
+	if (size & 3)
+	{
+		LOGE("SPIR-V module size is not aligned to 4 bytes.\n");
+		return false;
+	}
+
+	if (size < 20)
+	{
+		LOGE("SPIR-V module size is impossibly small.\n");
+		return false;
+	}
+
+	unsigned num_words = size >> 2;
+	if (data[0] != spv::MagicNumber)
+	{
+		LOGE("Invalid magic number of module.\n");
+		return false;
+	}
+
+	unsigned offset = 5;
+	while (offset < num_words)
+	{
+		auto op = static_cast<spv::Op>(data[offset] & 0xffff);
+		unsigned count = (data[offset] >> 16) & 0xffff;
+
+		if (count == 0)
+		{
+			LOGE("SPIR-V opcodes cannot consume 0 words.\n");
+			return false;
+		}
+
+		if (offset + count > num_words)
+		{
+			LOGE("Opcode overflows module.\n");
+			return false;
+		}
+
+		if (op == spv::OpCapability)
+		{
+			if (count != 2)
+			{
+				LOGE("Instruction length for OpCapability is wrong.\n");
+				return false;
+			}
+
+			if (!validate_module_capability(static_cast<spv::Capability>(data[offset + 1])))
+			{
+				LOGE("Capability %u is not supported on this device, ignoring shader module.\n", data[offset + 1]);
+				return false;
+			}
+		}
+		else if (op == spv::OpFunction)
+		{
+			// We're now declaring code, so just stop parsing, there cannot be any capability ops after this.
+			break;
+		}
+		offset += count;
+	}
+
 	return true;
 }
 
 bool FeatureFilter::Impl::shader_module_is_supported(const VkShaderModuleCreateInfo *info) const
 {
-	return true;
+	std::unordered_set<spv::Capability> caps;
+	if (!validate_module_capabilities(info->pCode, info->codeSize))
+		return false;
+
+	return pnext_chain_is_supported(info->pNext);
 }
 
 bool FeatureFilter::Impl::render_pass_is_supported(const VkRenderPassCreateInfo *info) const
 {
-	return true;
+	return pnext_chain_is_supported(info->pNext);
 }
 
 bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelineCreateInfo *info) const
 {
-	return true;
+	return pnext_chain_is_supported(info->pNext);
 }
 
 bool FeatureFilter::Impl::compute_pipeline_is_supported(const VkComputePipelineCreateInfo *info) const
 {
-	return true;
+	return pnext_chain_is_supported(info->pNext);
 }
 
 bool FeatureFilter::sampler_is_supported(const VkSamplerCreateInfo *info) const
