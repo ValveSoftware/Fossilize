@@ -29,7 +29,7 @@ function(add_fossilize_cli NAME)
 	install(TARGETS ${NAME} DESTINATION bin)
 endfunction()
 
-add_fossilize_cli(fossilize-replay fossilize_replay.cpp)
+add_fossilize_cli(fossilize-replay fossilize_replay.cpp fossilize_feature_filter.hpp fossilize_feature_filter.cpp)
 if (WIN32)
 	target_sources(fossilize-replay PRIVATE fossilize_replay_windows.hpp)
 else()

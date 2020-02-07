@@ -23,6 +23,7 @@
 #pragma once
 
 #include "volk.h"
+#include "fossilize_feature_filter.hpp"
 
 namespace Fossilize
 {
@@ -84,6 +85,11 @@ public:
 		return amd_shader_info;
 	}
 
+	const FeatureFilter &get_feature_filter() const
+	{
+		return feature_filter;
+	}
+
 private:
 	VkInstance instance = VK_NULL_HANDLE;
 	VkPhysicalDevice gpu = VK_NULL_HANDLE;
@@ -100,5 +106,9 @@ private:
 	bool pipeline_stats = false;
 	bool validation_cache = false;
 	bool amd_shader_info = false;
+
+	VulkanFeatures features = {};
+	VulkanProperties props = {};
+	FeatureFilter feature_filter;
 };
 }

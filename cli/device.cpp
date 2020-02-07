@@ -239,12 +239,15 @@ bool VulkanDevice::init_device(const Options &opts)
 	bool has_device_features2 = find_extension(exts, VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
 
 	// FIXME: There are arbitrary features we can request here from physical_device_features2.
-	VkPhysicalDeviceFeatures2KHR gpu_features2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2_KHR };
+	VkPhysicalDeviceFeatures2 gpu_features2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
 	VkPhysicalDeviceFeatures *gpu_features = &gpu_features2.features;
-	VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR stats_feature = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR };
+	VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR stats_feature = {
+		VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR
+	};
 	gpu_features2.pNext = &stats_feature;
 	if (has_device_features2)
 	{
+		stats_feature.pNext = build_pnext_chain(features);
 		vkGetPhysicalDeviceFeatures2KHR(gpu, &gpu_features2);
 
 		pipeline_stats = stats_feature.pipelineExecutableInfo;
@@ -255,6 +258,15 @@ bool VulkanDevice::init_device(const Options &opts)
 	}
 	else
 		vkGetPhysicalDeviceFeatures(gpu, gpu_features);
+
+	VkPhysicalDeviceProperties2 gpu_props2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
+	if (has_device_features2)
+	{
+		gpu_props2.pNext = build_pnext_chain(props);
+		vkGetPhysicalDeviceProperties2KHR(gpu, &gpu_props2);
+	}
+	else
+		vkGetPhysicalDeviceProperties(gpu, &gpu_props2.properties);
 
 	// FIXME: Have some way to enable the right features that a repro-capture may want to use.
 	// FIXME: It is unlikely any feature other than robust access has any real impact on code-gen, but who knows.
@@ -275,11 +287,11 @@ bool VulkanDevice::init_device(const Options &opts)
 	static float one = 1.0f;
 	queue_info.pQueuePriorities = &one;
 	queue_info.queueCount = 1;
-	for (auto &props : queue_props)
+	for (auto &queue_prop : queue_props)
 	{
-		if ((props.queueCount > 0) && (props.queueFlags & VK_QUEUE_GRAPHICS_BIT))
+		if ((queue_prop.queueCount > 0) && (queue_prop.queueFlags & VK_QUEUE_GRAPHICS_BIT))
 		{
-			queue_info.queueFamilyIndex = uint32_t(&props - queue_props.data());
+			queue_info.queueFamilyIndex = uint32_t(&queue_prop - queue_props.data());
 			break;
 		}
 	}
@@ -352,6 +364,13 @@ bool VulkanDevice::init_device(const Options &opts)
 	if (vkCreateDevice(gpu, &device_info, nullptr, &device) != VK_NULL_HANDLE)
 	{
 		LOGE("Failed to create device.\n");
+		return false;
+	}
+
+	if (!feature_filter.init(api_version, active_device_extensions.data(), active_device_extensions.size(),
+	                         &gpu_features2, &gpu_props2))
+	{
+		LOGE("Failed to init feature filter.\n");
 		return false;
 	}
 
