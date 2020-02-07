@@ -71,6 +71,8 @@ void *build_pnext_chain(VulkanFeatures &features)
 	FE(FRAGMENT_SHADER_INTERLOCK, shader_interlock, EXT);
 	FE(FRAGMENT_DENSITY_MAP, fragment_density, EXT);
 	FE(BUFFER_DEVICE_ADDRESS, buffer_device_address_ext, EXT);
+	FE(LINE_RASTERIZATION, line_rasterization, EXT);
+	FE(SUBGROUP_SIZE_CONTROL, subgroup_size_control, EXT);
 	FE(COMPUTE_SHADER_DERIVATIVES, compute_shader_derivatives, NV);
 	FE(FRAGMENT_SHADER_BARYCENTRIC, barycentric_nv, NV);
 	FE(SHADER_IMAGE_FOOTPRINT, image_footprint_nv, NV);
@@ -100,13 +102,17 @@ void *build_pnext_chain(VulkanProperties &props)
 
 #define P(struct_type, member) \
 	CHAIN(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_PROPERTIES, props.member)
+#define PE(struct_type, member, ext) \
+	CHAIN(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_PROPERTIES_##ext, props.member)
 
 	P(DESCRIPTOR_INDEXING, descriptor_indexing);
 	P(SUBGROUP, subgroup);
 	P(FLOAT_CONTROLS, float_control);
+	PE(SUBGROUP_SIZE_CONTROL, subgroup_size_control, EXT);
 
 #undef CHAIN
 #undef P
+#undef PE
 
 	return pNext;
 }
@@ -193,6 +199,8 @@ void FeatureFilter::Impl::init_features(const void *pNext)
 		FE(FRAGMENT_SHADER_INTERLOCK, shader_interlock, EXT);
 		FE(FRAGMENT_DENSITY_MAP, fragment_density, EXT);
 		FE(BUFFER_DEVICE_ADDRESS, buffer_device_address_ext, EXT);
+		FE(LINE_RASTERIZATION, line_rasterization, EXT);
+		FE(SUBGROUP_SIZE_CONTROL, subgroup_size_control, EXT);
 		FE(COMPUTE_SHADER_DERIVATIVES, compute_shader_derivatives, NV);
 		FE(FRAGMENT_SHADER_BARYCENTRIC, barycentric_nv, NV);
 		FE(SHADER_IMAGE_FOOTPRINT, image_footprint_nv, NV);
@@ -222,16 +230,23 @@ void FeatureFilter::Impl::init_properties(const void *pNext)
 		props.member.pNext = nullptr; \
 		break
 
+#define PE(struct_type, member, ext) case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_PROPERTIES_##ext: \
+		memcpy(&props.member, base, sizeof(props.member)); \
+		props.member.pNext = nullptr; \
+		break
+
 		switch (base->sType)
 		{
 		P(DESCRIPTOR_INDEXING, descriptor_indexing);
 		P(SUBGROUP, subgroup);
 		P(FLOAT_CONTROLS, float_control);
+		PE(SUBGROUP_SIZE_CONTROL, subgroup_size_control, EXT);
 		default:
 			break;
 		}
 
 #undef P
+#undef PE
 
 		pNext = base->pNext;
 	}
@@ -260,8 +275,136 @@ bool FeatureFilter::init(uint32_t api_version, const char **device_exts, unsigne
 	return impl->init(api_version, device_exts, count, enabled_features, props);
 }
 
-bool FeatureFilter::Impl::pnext_chain_is_supported(const void *) const
+bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 {
+	while (pNext)
+	{
+		auto *base = static_cast<const VkBaseInStructure *>(pNext);
+
+		// These are the currently pNext structs which Fossilize serialize.
+
+		switch (base->sType)
+		{
+		case VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_DOMAIN_ORIGIN_STATE_CREATE_INFO:
+			return enabled_extensions.count(VK_KHR_MAINTENANCE2_EXTENSION_NAME) != 0 || api_version >= VK_API_VERSION_1_1;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_DIVISOR_STATE_CREATE_INFO_EXT:
+			return enabled_extensions.count(VK_EXT_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME) != 0;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_DEPTH_CLIP_STATE_CREATE_INFO_EXT:
+			return enabled_extensions.count(VK_EXT_DEPTH_CLIP_ENABLE_EXTENSION_NAME) != 0;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_STREAM_CREATE_INFO_EXT:
+			return features.transform_feedback.geometryStreams == VK_TRUE;
+
+		case VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO:
+			return features.multiview.multiview == VK_TRUE;
+
+		case VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT:
+		{
+			auto *flags = static_cast<const VkDescriptorSetLayoutBindingFlagsCreateInfo *>(pNext);
+			VkDescriptorBindingFlagsEXT flag_union = 0;
+			for (uint32_t i = 0; i < flags->bindingCount; i++)
+				flag_union |= flags->pBindingFlags[i];
+
+			// Should map to descriptor type here, but shouldn't cause any pipeline compilation if we do a basic sanity check.
+			if ((flag_union & VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT) != 0 &&
+			    features.descriptor_indexing.descriptorBindingSampledImageUpdateAfterBind == VK_FALSE &&
+			    features.descriptor_indexing.descriptorBindingStorageBufferUpdateAfterBind == VK_FALSE &&
+			    features.descriptor_indexing.descriptorBindingStorageImageUpdateAfterBind == VK_FALSE &&
+			    features.descriptor_indexing.descriptorBindingUniformTexelBufferUpdateAfterBind == VK_FALSE &&
+			    features.descriptor_indexing.descriptorBindingStorageTexelBufferUpdateAfterBind == VK_FALSE &&
+			    features.descriptor_indexing.descriptorBindingUniformBufferUpdateAfterBind == VK_FALSE)
+			{
+				return false;
+			}
+
+			if ((flag_union & VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT) != 0 &&
+			    features.descriptor_indexing.descriptorBindingUpdateUnusedWhilePending == VK_FALSE)
+			{
+				return false;
+			}
+
+			if ((flag_union & VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT) != 0 &&
+			    features.descriptor_indexing.descriptorBindingPartiallyBound == VK_FALSE)
+			{
+				return false;
+			}
+
+			if ((flag_union & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT) != 0 &&
+			    features.descriptor_indexing.descriptorBindingVariableDescriptorCount == VK_FALSE)
+			{
+				return false;
+			}
+
+			return true;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_ADVANCED_STATE_CREATE_INFO_EXT:
+			return features.blend_operation_advanced.advancedBlendCoherentOperations == VK_TRUE;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_CONSERVATIVE_STATE_CREATE_INFO_EXT:
+			return enabled_extensions.count(VK_EXT_CONSERVATIVE_RASTERIZATION_EXTENSION_NAME) != 0;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_LINE_STATE_CREATE_INFO_EXT:
+		{
+			auto *line = static_cast<const VkPipelineRasterizationLineStateCreateInfoEXT *>(pNext);
+			if (line->lineRasterizationMode == VK_LINE_RASTERIZATION_MODE_RECTANGULAR_EXT &&
+			    features.line_rasterization.rectangularLines == VK_FALSE)
+			{
+				return false;
+			}
+
+			if (line->lineRasterizationMode == VK_LINE_RASTERIZATION_MODE_BRESENHAM_EXT &&
+			    features.line_rasterization.bresenhamLines == VK_FALSE)
+			{
+				return false;
+			}
+
+			if (line->lineRasterizationMode == VK_LINE_RASTERIZATION_MODE_RECTANGULAR_SMOOTH_EXT &&
+			    features.line_rasterization.smoothLines == VK_FALSE)
+			{
+				return false;
+			}
+
+			if (line->stippledLineEnable == VK_TRUE)
+			{
+				if (line->lineRasterizationMode == VK_LINE_RASTERIZATION_MODE_RECTANGULAR_EXT &&
+				    features.line_rasterization.stippledRectangularLines == VK_FALSE)
+				{
+					return false;
+				}
+
+				if (line->lineRasterizationMode == VK_LINE_RASTERIZATION_MODE_BRESENHAM_EXT &&
+				    features.line_rasterization.stippledBresenhamLines == VK_FALSE)
+				{
+					return false;
+				}
+
+				if (line->lineRasterizationMode == VK_LINE_RASTERIZATION_MODE_RECTANGULAR_SMOOTH_EXT &&
+				    features.line_rasterization.stippledSmoothLines == VK_FALSE)
+				{
+					return false;
+				}
+			}
+
+			return true;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT:
+		{
+			// Should correlate with stage.
+			return features.subgroup_size_control.subgroupSizeControl == VK_FALSE &&
+			       props.subgroup_size_control.requiredSubgroupSizeStages != 0;
+		}
+
+		default:
+			LOGE("Unrecognized pNext sType: %u. Treating as unsupported.\n", unsigned(base->sType));
+			return false;
+		}
+
+		pNext = base->pNext;
+	}
 	return true;
 }
 
