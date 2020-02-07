@@ -1270,6 +1270,11 @@ bool StateReplayer::Impl::parse_immutable_samplers(const Value &samplers, const 
 				log_missing_resource("Immutable sampler", index);
 				return false;
 			}
+			else if (sampler_itr->second == VK_NULL_HANDLE)
+			{
+				log_invalid_resource("Immutable sampler", index);
+				return false;
+			}
 			else
 				*samps = sampler_itr->second;
 		}
@@ -1345,6 +1350,11 @@ bool StateReplayer::Impl::parse_set_layouts(const Value &layouts, const VkDescri
 			if (set_itr == end(replayed_descriptor_set_layouts))
 			{
 				log_missing_resource("Descriptor set layout", index);
+				return false;
+			}
+			else if (set_itr->second == VK_NULL_HANDLE)
+			{
+				log_invalid_resource("Descriptor set layout", index);
 				return false;
 			}
 			else
@@ -1881,6 +1891,11 @@ bool StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, D
 			log_missing_resource("Pipeline layout", layout);
 			return false;
 		}
+		else if (layout_itr->second == VK_NULL_HANDLE)
+		{
+			log_invalid_resource("Pipeline layout", layout);
+			return false;
+		}
 		else
 			info.layout = layout_itr->second;
 	}
@@ -2379,6 +2394,11 @@ bool StateReplayer::Impl::parse_graphics_pipeline(StateCreatorInterface &iface, 
 				log_missing_resource("Base pipeline", pipeline);
 				return false;
 			}
+			else if (pipeline_iter->second == VK_NULL_HANDLE)
+			{
+				log_invalid_resource("Base pipeline", pipeline);
+				return false;
+			}
 		}
 		info.basePipelineHandle = pipeline_iter->second;
 	}
@@ -2394,6 +2414,11 @@ bool StateReplayer::Impl::parse_graphics_pipeline(StateCreatorInterface &iface, 
 			log_missing_resource("Pipeline layout", layout);
 			return false;
 		}
+		else if (layout_itr->second == VK_NULL_HANDLE)
+		{
+			log_invalid_resource("Pipeline layout", layout);
+			return false;
+		}
 		else
 			info.layout = layout_itr->second;
 	}
@@ -2405,6 +2430,11 @@ bool StateReplayer::Impl::parse_graphics_pipeline(StateCreatorInterface &iface, 
 		if (rp_itr == end(replayed_render_passes))
 		{
 			log_missing_resource("Render pass", render_pass);
+			return false;
+		}
+		else if (rp_itr->second == VK_NULL_HANDLE)
+		{
+			log_invalid_resource("Render pass", render_pass);
 			return false;
 		}
 		else

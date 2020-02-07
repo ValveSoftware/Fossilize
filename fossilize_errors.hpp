@@ -55,6 +55,11 @@ static inline void log_missing_resource(const char *type, Hash hash)
 	LOGE("Referenced %s %016" PRIx64 ", but it does not exist.\n", type, hash);
 }
 
+static inline void log_invalid_resource(const char *type, Hash hash)
+{
+	LOGE("Referenced %s %016" PRIx64 ", but it is VK_NULL_HANDLE.\n", type, hash);
+}
+
 template <typename T>
 static inline void log_failed_hash(const char *type, T object)
 {
