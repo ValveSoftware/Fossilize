@@ -674,6 +674,15 @@ struct ThreadedReplayer : StateCreatorInterface
 				break;
 			}
 
+			if (!device->get_feature_filter().graphics_pipeline_is_supported(work_item.create_info.graphics_create_info))
+			{
+				*work_item.output.pipeline = VK_NULL_HANDLE;
+				LOGE("Graphics pipeline %016" PRIx64 " is not supported by current device, skipping.\n", work_item.hash);
+				if (opts.control_block)
+					opts.control_block->skipped_graphics.fetch_add(1, std::memory_order_relaxed);
+				break;
+			}
+
 			for (unsigned i = 0; i < loop_count; i++)
 			{
 				// Avoid leak.
@@ -800,6 +809,15 @@ struct ThreadedReplayer : StateCreatorInterface
 			{
 				*work_item.output.pipeline = VK_NULL_HANDLE;
 				LOGE("Resource is blacklisted, ignoring.\n");
+				if (opts.control_block)
+					opts.control_block->skipped_compute.fetch_add(1, std::memory_order_relaxed);
+				break;
+			}
+
+			if (!device->get_feature_filter().compute_pipeline_is_supported(work_item.create_info.compute_create_info))
+			{
+				*work_item.output.pipeline = VK_NULL_HANDLE;
+				LOGE("Compute pipeline %016" PRIx64 " is not supported by current device, skipping.\n", work_item.hash);
 				if (opts.control_block)
 					opts.control_block->skipped_compute.fetch_add(1, std::memory_order_relaxed);
 				break;
