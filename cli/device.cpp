@@ -46,11 +46,34 @@ static bool find_extension(const vector<VkExtensionProperties> &exts, const char
 	return itr != end(exts);
 }
 
-static bool filter_extension(const char *ext, bool want_amd_shader_info)
+static bool filter_extension(const char *ext, bool want_amd_shader_info,
+                             const vector<VkExtensionProperties> &all_exts, uint32_t api_version)
 {
-	// Ban certain extensions, because they conflict with others.
+	bool ext_is_vulkan_11_only =
+			strcmp(ext, VK_KHR_SURFACE_PROTECTED_CAPABILITIES_EXTENSION_NAME) == 0 ||
+			strcmp(ext, VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME) == 0 ||
+			strcmp(ext, VK_NV_SHADER_SM_BUILTINS_EXTENSION_NAME) == 0 ||
+			strcmp(ext, VK_NV_SHADER_SUBGROUP_PARTITIONED_EXTENSION_NAME) == 0 ||
+			strcmp(ext, VK_KHR_SHADER_SUBGROUP_EXTENDED_TYPES_EXTENSION_NAME) == 0 ||
+			strcmp(ext, VK_KHR_SPIRV_1_4_EXTENSION_NAME) == 0 ||
+			strcmp(ext, VK_KHR_SHARED_PRESENTABLE_IMAGE_EXTENSION_NAME) == 0 ||
+			strcmp(ext, VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME) == 0;
+
 	if (strcmp(ext, VK_AMD_NEGATIVE_VIEWPORT_HEIGHT_EXTENSION_NAME) == 0)
+	{
+		// Obsolete, illegal to enable along maintenance1.
 		return false;
+	}
+	else if (strcmp(ext, VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME) == 0 &&
+	         find_extension(all_exts, VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME))
+	{
+		// Cannot enable both EXT and KHR versions, validation complains.
+		return false;
+	}
+	else if (api_version < VK_API_VERSION_1_1 && ext_is_vulkan_11_only)
+	{
+		return false;
+	}
 	else if (strcmp(ext, VK_AMD_SHADER_INFO_EXTENSION_NAME) == 0 && !want_amd_shader_info)
 	{
 		// Mesa disables the pipeline cache when VK_AMD_shader_info is used, so disable this extension unless we need it.
@@ -331,7 +354,7 @@ bool VulkanDevice::init_device(const Options &opts)
 
 	for (auto &ext : device_ext_props)
 	{
-		if (filter_extension(ext.extensionName, opts.want_amd_shader_info))
+		if (filter_extension(ext.extensionName, opts.want_amd_shader_info, device_ext_props, api_version))
 			active_device_extensions.push_back(ext.extensionName);
 	}
 

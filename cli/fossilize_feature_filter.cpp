@@ -47,8 +47,6 @@ void *build_pnext_chain(VulkanFeatures &features)
 #define FE(struct_type, member, ext) \
 	CHAIN(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_FEATURES_##ext, features.member)
 
-	F(VULKAN_1_1, vulkan11);
-	F(VULKAN_1_2, vulkan12);
 	F(16BIT_STORAGE, storage_16bit);
 	F(MULTIVIEW, multiview);
 	F(VARIABLE_POINTERS, variable_pointers);
@@ -176,8 +174,6 @@ void FeatureFilter::Impl::init_features(const void *pNext)
 
 		switch (base->sType)
 		{
-		F(VULKAN_1_1, vulkan11);
-		F(VULKAN_1_2, vulkan12);
 		F(16BIT_STORAGE, storage_16bit);
 		F(MULTIVIEW, multiview);
 		F(VARIABLE_POINTERS, variable_pointers);
@@ -551,9 +547,9 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 	case spv::CapabilityGeometryShaderPassthroughNV:
 		return enabled_extensions.count(VK_NV_GEOMETRY_SHADER_PASSTHROUGH_EXTENSION_NAME) != 0;
 	case spv::CapabilityShaderViewportIndex:
-		return features.vulkan12.shaderOutputViewportIndex;
 	case spv::CapabilityShaderLayer:
-		return features.vulkan12.shaderOutputLayer;
+		// Vulkan 1.2 feature struct. Validation layer complains when we use 1_2 feature struct along other similar structs.
+		return false;
 	case spv::CapabilityShaderViewportIndexLayerEXT:
 		// NV version is a cloned enum.
 		return enabled_extensions.count(VK_EXT_SHADER_VIEWPORT_INDEX_LAYER_EXTENSION_NAME) != 0 ||
@@ -674,7 +670,6 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 	case spv::CapabilityPhysicalStorageBufferAddresses:
 		// Apparently these are different types?
 		return features.buffer_device_address.bufferDeviceAddress == VK_TRUE ||
-		       features.vulkan12.bufferDeviceAddress == VK_TRUE ||
 		       features.buffer_device_address_ext.bufferDeviceAddress == VK_TRUE;
 	case spv::CapabilityCooperativeMatrixNV:
 		return features.cooperative_matrix_nv.cooperativeMatrix == VK_TRUE;

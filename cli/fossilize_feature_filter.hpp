@@ -30,8 +30,6 @@ namespace Fossilize
 {
 struct VulkanFeatures
 {
-	VkPhysicalDeviceVulkan11Features vulkan11;
-	VkPhysicalDeviceVulkan12Features vulkan12;
 	VkPhysicalDevice16BitStorageFeatures storage_16bit;
 	VkPhysicalDeviceMultiviewFeatures multiview;
 	VkPhysicalDeviceVariablePointersFeatures variable_pointers;
