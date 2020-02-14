@@ -715,6 +715,37 @@ bool FeatureFilter::Impl::validate_module_capabilities(const uint32_t *data, siz
 		return false;
 	}
 
+	unsigned version = data[1];
+	if (version > 0x10500)
+	{
+		LOGE("SPIR-V version above 1.5 not recognized.\n");
+		return false;
+	}
+	else if (version == 0x10500)
+	{
+		if (api_version < VK_API_VERSION_1_2)
+		{
+			LOGE("SPIR-V 1.5 is only supported in Vulkan 1.2 and up.\n");
+			return false;
+		}
+	}
+	else if (version >= 0x10400)
+	{
+		if (api_version < VK_API_VERSION_1_2 && enabled_extensions.count(VK_KHR_SPIRV_1_4_EXTENSION_NAME) == 0)
+		{
+			LOGE("Need VK_KHR_spirv_1_4 or Vulkan 1.2 for SPIR-V 1.4.\n");
+			return false;
+		}
+	}
+	else if (version >= 0x10300)
+	{
+		if (api_version < VK_API_VERSION_1_1)
+		{
+			LOGE("Need Vulkan 1.1 for SPIR-V 1.3.\n");
+			return false;
+		}
+	}
+
 	unsigned offset = 5;
 	while (offset < num_words)
 	{
