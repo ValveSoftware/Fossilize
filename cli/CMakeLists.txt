@@ -11,9 +11,14 @@ set(SPIRV_WERROR OFF CACHE BOOL "" FORCE)
 add_subdirectory(SPIRV-Tools EXCLUDE_FROM_ALL)
 add_subdirectory(SPIRV-Cross EXCLUDE_FROM_ALL)
 
-add_library(cli-utils STATIC cli_parser.cpp cli_parser.hpp device.hpp device.cpp file.hpp file.cpp)
+add_library(cli-utils STATIC
+		cli_parser.cpp cli_parser.hpp
+		device.hpp device.cpp
+		file.hpp file.cpp
+		fossilize_feature_filter.hpp fossilize_feature_filter.cpp)
 target_compile_options(cli-utils PRIVATE ${FOSSILIZE_CXX_FLAGS})
 target_include_directories(cli-utils PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(cli-utils PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/SPIRV-Headers/include/spirv/unified1)
 target_link_libraries(cli-utils volk)
 if (ANDROID)
 	target_link_libraries(cli-utils log)

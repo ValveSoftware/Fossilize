@@ -479,7 +479,27 @@ struct ThreadedReplayer : StateCreatorInterface
 		per_thread.memory_context_index = work_item.memory_context_index;
 
 		if (!replayer.parse(*this, global_database, buffer.data(), buffer.size()))
+		{
 			LOGE("Failed to parse blob (tag: %d, hash: 0x%016" PRIx64 ").\n", work_item.tag, work_item.hash);
+
+			// If we failed to parse, we need to at least clear out the state to something sensible.
+			unsigned index = per_thread.current_parse_index;
+			unsigned memory_index = per_thread.memory_context_index;
+			bool force_outside_range = per_thread.force_outside_range;
+			if (!force_outside_range)
+			{
+				if (work_item.tag == RESOURCE_GRAPHICS_PIPELINE)
+				{
+					assert(index < deferred_graphics[memory_index].size());
+					deferred_graphics[memory_index][index] = {};
+				}
+				else if (work_item.tag == RESOURCE_COMPUTE_PIPELINE)
+				{
+					assert(index < deferred_compute[memory_index].size());
+					deferred_compute[memory_index][index] = {};
+				}
+			}
+		}
 
 		if (work_item.tag == RESOURCE_SHADER_MODULE)
 		{
@@ -674,6 +694,15 @@ struct ThreadedReplayer : StateCreatorInterface
 				break;
 			}
 
+			if (!device->get_feature_filter().graphics_pipeline_is_supported(work_item.create_info.graphics_create_info))
+			{
+				*work_item.output.pipeline = VK_NULL_HANDLE;
+				LOGE("Graphics pipeline %016" PRIx64 " is not supported by current device, skipping.\n", work_item.hash);
+				if (opts.control_block)
+					opts.control_block->skipped_graphics.fetch_add(1, std::memory_order_relaxed);
+				break;
+			}
+
 			for (unsigned i = 0; i < loop_count; i++)
 			{
 				// Avoid leak.
@@ -800,6 +829,15 @@ struct ThreadedReplayer : StateCreatorInterface
 			{
 				*work_item.output.pipeline = VK_NULL_HANDLE;
 				LOGE("Resource is blacklisted, ignoring.\n");
+				if (opts.control_block)
+					opts.control_block->skipped_compute.fetch_add(1, std::memory_order_relaxed);
+				break;
+			}
+
+			if (!device->get_feature_filter().compute_pipeline_is_supported(work_item.create_info.compute_create_info))
+			{
+				*work_item.output.pipeline = VK_NULL_HANDLE;
+				LOGE("Compute pipeline %016" PRIx64 " is not supported by current device, skipping.\n", work_item.hash);
 				if (opts.control_block)
 					opts.control_block->skipped_compute.fetch_add(1, std::memory_order_relaxed);
 				break;
@@ -1304,10 +1342,16 @@ struct ThreadedReplayer : StateCreatorInterface
 
 	bool enqueue_create_sampler(Hash index, const VkSamplerCreateInfo *create_info, VkSampler *sampler) override
 	{
+		if (!device->get_feature_filter().sampler_is_supported(create_info))
+		{
+			LOGE("Sampler %016" PRIx64 " is not supported. Skipping.\n", index);
+			return false;
+		}
+
 		// Playback in-order.
 		if (vkCreateSampler(device->get_device(), create_info, nullptr, sampler) != VK_SUCCESS)
 		{
-			LOGE("Creating sampler %0" PRIX64 " Failed!\n", index);
+			LOGE("Creating sampler %016" PRIx64 " Failed!\n", index);
 			return false;
 		}
 		samplers[index] = *sampler;
@@ -1316,10 +1360,16 @@ struct ThreadedReplayer : StateCreatorInterface
 
 	bool enqueue_create_descriptor_set_layout(Hash index, const VkDescriptorSetLayoutCreateInfo *create_info, VkDescriptorSetLayout *layout) override
 	{
+		if (!device->get_feature_filter().descriptor_set_layout_is_supported(create_info))
+		{
+			LOGE("Descriptor set layout %016" PRIx64 " is not supported. Skipping.\n", index);
+			return false;
+		}
+
 		// Playback in-order.
 		if (vkCreateDescriptorSetLayout(device->get_device(), create_info, nullptr, layout) != VK_SUCCESS)
 		{
-			LOGE("Creating descriptor set layout %0" PRIX64 " Failed!\n", index);
+			LOGE("Creating descriptor set layout %016" PRIx64 " Failed!\n", index);
 			return false;
 		}
 		layouts[index] = *layout;
@@ -1328,6 +1378,12 @@ struct ThreadedReplayer : StateCreatorInterface
 
 	bool enqueue_create_pipeline_layout(Hash index, const VkPipelineLayoutCreateInfo *create_info, VkPipelineLayout *layout) override
 	{
+		if (!device->get_feature_filter().pipeline_layout_is_supported(create_info))
+		{
+			LOGE("Pipeline layout %016" PRIx64 " is not supported. Skipping.\n", index);
+			return false;
+		}
+
 		// Playback in-order.
 		if (vkCreatePipelineLayout(device->get_device(), create_info, nullptr, layout) != VK_SUCCESS)
 		{
@@ -1340,6 +1396,12 @@ struct ThreadedReplayer : StateCreatorInterface
 
 	bool enqueue_create_render_pass(Hash index, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass) override
 	{
+		if (!device->get_feature_filter().render_pass_is_supported(create_info))
+		{
+			LOGE("Render pass %016" PRIx64 " is not supported. Skipping.\n", index);
+			return false;
+		}
+
 		// Playback in-order.
 		if (vkCreateRenderPass(device->get_device(), create_info, nullptr, render_pass) != VK_SUCCESS)
 		{
@@ -1394,6 +1456,22 @@ struct ThreadedReplayer : StateCreatorInterface
 			}
 		}
 #endif
+
+		if (!device->get_feature_filter().shader_module_is_supported(create_info))
+		{
+			LOGE("Shader module %0" PRIx64 " is not supported on this device.\n", hash);
+			*module = VK_NULL_HANDLE;
+
+			lock_guard<mutex> lock(internal_enqueue_mutex);
+			//LOGI("Inserting shader module %016llx.\n", static_cast<unsigned long long>(hash));
+			shader_modules.insert_object(hash, VK_NULL_HANDLE, 1);
+			shader_module_count.fetch_add(1, std::memory_order_relaxed);
+
+			if (opts.control_block)
+				opts.control_block->module_validation_failures.fetch_add(1, std::memory_order_relaxed);
+
+			return true;
+		}
 
 		auto &per_thread = get_per_thread_data();
 		per_thread.triggered_validation_error = false;
@@ -1571,7 +1649,7 @@ struct ThreadedReplayer : StateCreatorInterface
 			graphics_parents[hash] = {
 				const_cast<VkGraphicsPipelineCreateInfo *>(create_info), hash, pipeline, index,
 			};
-		};
+		}
 
 		*pipeline = (VkPipeline)hash;
 		if (opts.control_block)
@@ -2671,7 +2749,7 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 			}
 
 			if (!state_replayer.parse(replayer, resolver.get(), state_json.data(), state_json.size()))
-				LOGE("Failed to parse blob (tag: %s, hash: %016" PRIx64 ").\n", tag_names[tag], hash);
+				LOGE("Failed to replay blob (tag: %s, hash: %016" PRIx64 ").\n", tag_names[tag], hash);
 		}
 
 		if (tag == RESOURCE_APPLICATION_INFO)

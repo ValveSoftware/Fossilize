@@ -46,11 +46,34 @@ static bool find_extension(const vector<VkExtensionProperties> &exts, const char
 	return itr != end(exts);
 }
 
-static bool filter_extension(const char *ext, bool want_amd_shader_info)
+static bool filter_extension(const char *ext, bool want_amd_shader_info,
+                             const vector<VkExtensionProperties> &all_exts, uint32_t api_version)
 {
-	// Ban certain extensions, because they conflict with others.
+	bool ext_is_vulkan_11_only =
+			strcmp(ext, VK_KHR_SURFACE_PROTECTED_CAPABILITIES_EXTENSION_NAME) == 0 ||
+			strcmp(ext, VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME) == 0 ||
+			strcmp(ext, VK_NV_SHADER_SM_BUILTINS_EXTENSION_NAME) == 0 ||
+			strcmp(ext, VK_NV_SHADER_SUBGROUP_PARTITIONED_EXTENSION_NAME) == 0 ||
+			strcmp(ext, VK_KHR_SHADER_SUBGROUP_EXTENDED_TYPES_EXTENSION_NAME) == 0 ||
+			strcmp(ext, VK_KHR_SPIRV_1_4_EXTENSION_NAME) == 0 ||
+			strcmp(ext, VK_KHR_SHARED_PRESENTABLE_IMAGE_EXTENSION_NAME) == 0 ||
+			strcmp(ext, VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME) == 0;
+
 	if (strcmp(ext, VK_AMD_NEGATIVE_VIEWPORT_HEIGHT_EXTENSION_NAME) == 0)
+	{
+		// Obsolete, illegal to enable along maintenance1.
 		return false;
+	}
+	else if (strcmp(ext, VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME) == 0 &&
+	         find_extension(all_exts, VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME))
+	{
+		// Cannot enable both EXT and KHR versions, validation complains.
+		return false;
+	}
+	else if (api_version < VK_API_VERSION_1_1 && ext_is_vulkan_11_only)
+	{
+		return false;
+	}
 	else if (strcmp(ext, VK_AMD_SHADER_INFO_EXTENSION_NAME) == 0 && !want_amd_shader_info)
 	{
 		// Mesa disables the pipeline cache when VK_AMD_shader_info is used, so disable this extension unless we need it.
@@ -239,12 +262,15 @@ bool VulkanDevice::init_device(const Options &opts)
 	bool has_device_features2 = find_extension(exts, VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
 
 	// FIXME: There are arbitrary features we can request here from physical_device_features2.
-	VkPhysicalDeviceFeatures2KHR gpu_features2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2_KHR };
+	VkPhysicalDeviceFeatures2 gpu_features2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
 	VkPhysicalDeviceFeatures *gpu_features = &gpu_features2.features;
-	VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR stats_feature = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR };
+	VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR stats_feature = {
+		VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR
+	};
 	gpu_features2.pNext = &stats_feature;
 	if (has_device_features2)
 	{
+		stats_feature.pNext = build_pnext_chain(features);
 		vkGetPhysicalDeviceFeatures2KHR(gpu, &gpu_features2);
 
 		pipeline_stats = stats_feature.pipelineExecutableInfo;
@@ -255,6 +281,15 @@ bool VulkanDevice::init_device(const Options &opts)
 	}
 	else
 		vkGetPhysicalDeviceFeatures(gpu, gpu_features);
+
+	VkPhysicalDeviceProperties2 gpu_props2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
+	if (has_device_features2)
+	{
+		gpu_props2.pNext = build_pnext_chain(props);
+		vkGetPhysicalDeviceProperties2KHR(gpu, &gpu_props2);
+	}
+	else
+		vkGetPhysicalDeviceProperties(gpu, &gpu_props2.properties);
 
 	// FIXME: Have some way to enable the right features that a repro-capture may want to use.
 	// FIXME: It is unlikely any feature other than robust access has any real impact on code-gen, but who knows.
@@ -275,11 +310,11 @@ bool VulkanDevice::init_device(const Options &opts)
 	static float one = 1.0f;
 	queue_info.pQueuePriorities = &one;
 	queue_info.queueCount = 1;
-	for (auto &props : queue_props)
+	for (auto &queue_prop : queue_props)
 	{
-		if ((props.queueCount > 0) && (props.queueFlags & VK_QUEUE_GRAPHICS_BIT))
+		if ((queue_prop.queueCount > 0) && (queue_prop.queueFlags & VK_QUEUE_GRAPHICS_BIT))
 		{
-			queue_info.queueFamilyIndex = uint32_t(&props - queue_props.data());
+			queue_info.queueFamilyIndex = uint32_t(&queue_prop - queue_props.data());
 			break;
 		}
 	}
@@ -319,7 +354,7 @@ bool VulkanDevice::init_device(const Options &opts)
 
 	for (auto &ext : device_ext_props)
 	{
-		if (filter_extension(ext.extensionName, opts.want_amd_shader_info))
+		if (filter_extension(ext.extensionName, opts.want_amd_shader_info, device_ext_props, api_version))
 			active_device_extensions.push_back(ext.extensionName);
 	}
 
@@ -352,6 +387,13 @@ bool VulkanDevice::init_device(const Options &opts)
 	if (vkCreateDevice(gpu, &device_info, nullptr, &device) != VK_NULL_HANDLE)
 	{
 		LOGE("Failed to create device.\n");
+		return false;
+	}
+
+	if (!feature_filter.init(api_version, active_device_extensions.data(), active_device_extensions.size(),
+	                         &gpu_features2, &gpu_props2))
+	{
+		LOGE("Failed to init feature filter.\n");
 		return false;
 	}
 
