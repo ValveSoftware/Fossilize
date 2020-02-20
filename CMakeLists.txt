@@ -39,6 +39,8 @@ if (FOSSILIZE_SANITIZE_THREADS)
     set(FOSSILIZE_LINK_FLAGS "${FOSSILIZE_LINK_FLAGS} -fsanitize=thread")
 endif()
 
+include(GNUInstallDirs)
+
 add_library(miniz STATIC miniz/miniz.h miniz/miniz.c)
 set_target_properties(miniz PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(miniz PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/miniz)
