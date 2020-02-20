@@ -10,7 +10,9 @@ add_library(VkLayer_fossilize SHARED
 target_include_directories(VkLayer_fossilize PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_options(VkLayer_fossilize PRIVATE ${FOSSILIZE_CXX_FLAGS})
 set_target_properties(VkLayer_fossilize PROPERTIES LINK_FLAGS "${FOSSILIZE_LINK_FLAGS}")
-install(TARGETS VkLayer_fossilize DESTINATION lib)
+install(TARGETS VkLayer_fossilize
+	RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+	LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
 
 option(FOSSILIZE_LAYER_CAPTURE_SIGSEGV "Support capturing segfaults." ON)
 if (FOSSILIZE_LAYER_CAPTURE_SIGSEGV)
@@ -39,6 +41,10 @@ if (WIN32)
 			set_target_properties(VkLayer_fossilize PROPERTIES LINK_FLAGS "${FOSSILIZE_LINK_FLAGS} -Wl,--no-undefined -static")
 		endif()
 	endif()
+	# Normally, we would have to install the layer into the registry, but that is way too annoying for something like this.
+	# Just place the layer along the dll on Windows if we're actually bothering to install.
+	configure_file(${CMAKE_CURRENT_SOURCE_DIR}/VkLayer_fossilize.json.in ${CMAKE_BINARY_DIR}/VkLayer_fossilize.json @ONLY)
+	install(FILES ${CMAKE_BINARY_DIR}/VkLayer_fossilize.json DESTINATION ${CMAKE_INSTALL_BINDIR})
 else()
 	if (CMAKE_COMPILER_IS_GNUCXX OR (${CMAKE_CXX_COMPILER_ID} MATCHES "Clang"))
 		target_compile_options(VkLayer_fossilize PRIVATE -fvisibility=hidden)
@@ -53,7 +59,7 @@ else()
 			set(FOSSILIZE_LAYER_PATH "${CMAKE_INSTALL_PREFIX}/lib/libVkLayer_fossilize.so")
 		endif()
 		configure_file(${CMAKE_CURRENT_SOURCE_DIR}/VkLayer_fossilize.json.in ${CMAKE_BINARY_DIR}/VkLayer_fossilize.json @ONLY)
-		install(FILES ${CMAKE_BINARY_DIR}/VkLayer_fossilize.json DESTINATION share/vulkan/explicit_layer.d)
+		install(FILES ${CMAKE_BINARY_DIR}/VkLayer_fossilize.json DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/vulkan/explicit_layer.d)
 	endif()
 	if (${CMAKE_BUILD_TYPE} MATCHES "Release")
 		if (APPLE)
