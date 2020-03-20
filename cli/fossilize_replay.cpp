@@ -1189,9 +1189,10 @@ struct ThreadedReplayer : StateCreatorInterface
 
 	void set_application_info(Hash, const VkApplicationInfo *app, const VkPhysicalDeviceFeatures2 *features) override
 	{
-		// TODO: Could use this to create multiple VkDevices for replay as necessary if app changes.
+		if (device_was_init)
+			sync_threads();
 
-		if (!device_was_init)
+		if (1 || !device_was_init)
 		{
 			// Now we can init the device with correct app info.
 			device_was_init = true;
