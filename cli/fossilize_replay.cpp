@@ -1192,152 +1192,149 @@ struct ThreadedReplayer : StateCreatorInterface
 		if (device_was_init)
 			sync_threads();
 
-		if (1 || !device_was_init)
+		// Now we can init the device with correct app info.
+		device_was_init = true;
+		device.reset(new VulkanDevice);
+		device_opts.application_info = app;
+		device_opts.features = features;
+		device_opts.want_pipeline_stats = opts.pipeline_stats;
+		auto start_device = chrono::steady_clock::now();
+		if (!device->init_device(device_opts))
 		{
-			// Now we can init the device with correct app info.
-			device_was_init = true;
-			device.reset(new VulkanDevice);
-			device_opts.application_info = app;
-			device_opts.features = features;
-			device_opts.want_pipeline_stats = opts.pipeline_stats;
-			auto start_device = chrono::steady_clock::now();
-			if (!device->init_device(device_opts))
-			{
-				LOGE("Failed to create Vulkan device, bailing ...\n");
-				exit(EXIT_FAILURE);
-			}
+			LOGE("Failed to create Vulkan device, bailing ...\n");
+			exit(EXIT_FAILURE);
+		}
 
-			device->set_validation_error_callback(on_validation_error, this);
+		device->set_validation_error_callback(on_validation_error, this);
 
-			if (opts.pipeline_stats && !device->has_pipeline_stats())
+		if (opts.pipeline_stats && !device->has_pipeline_stats())
+		{
+			LOGI("Requested pipeline stats, but device does not support them. Disabling.\n");
+			opts.pipeline_stats = false;
+		}
+
+		if (opts.pipeline_stats)
+		{
+			auto foz_path = opts.pipeline_stats_path + ".__tmp.foz";
+			pipeline_stats_db.reset(create_stream_archive_database(foz_path.c_str(), DatabaseMode::Append));
+			if (!pipeline_stats_db->prepare())
 			{
-				LOGI("Requested pipeline stats, but device does not support them. Disabling.\n");
+				LOGE("Failed to prepare stats database. Disabling pipeline stats.\n");
+				pipeline_stats_db.reset();
 				opts.pipeline_stats = false;
 			}
+		}
 
-			if (opts.pipeline_stats)
+		if (opts.pipeline_cache)
+		{
+			VkPipelineCacheCreateInfo info = { VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO };
+			vector<uint8_t> on_disk_cache;
+
+			// Try to load on-disk cache.
+			if (!opts.on_disk_pipeline_cache_path.empty())
 			{
-				auto foz_path = opts.pipeline_stats_path + ".__tmp.foz";
-				pipeline_stats_db.reset(create_stream_archive_database(foz_path.c_str(), DatabaseMode::Append));
-				if (!pipeline_stats_db->prepare())
+				FILE *file = fopen(opts.on_disk_pipeline_cache_path.c_str(), "rb");
+				if (file)
 				{
-					LOGE("Failed to prepare stats database. Disabling pipeline stats.\n");
-					pipeline_stats_db.reset();
-					opts.pipeline_stats = false;
-				}
-			}
+					fseek(file, 0, SEEK_END);
+					size_t len = ftell(file);
+					rewind(file);
 
-			if (opts.pipeline_cache)
-			{
-				VkPipelineCacheCreateInfo info = { VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO };
-				vector<uint8_t> on_disk_cache;
-
-				// Try to load on-disk cache.
-				if (!opts.on_disk_pipeline_cache_path.empty())
-				{
-					FILE *file = fopen(opts.on_disk_pipeline_cache_path.c_str(), "rb");
-					if (file)
+					if (len != 0)
 					{
-						fseek(file, 0, SEEK_END);
-						size_t len = ftell(file);
-						rewind(file);
-
-						if (len != 0)
+						on_disk_cache.resize(len);
+						if (fread(on_disk_cache.data(), 1, len, file) == len)
 						{
-							on_disk_cache.resize(len);
-							if (fread(on_disk_cache.data(), 1, len, file) == len)
+							if (validate_pipeline_cache_header(on_disk_cache))
 							{
-								if (validate_pipeline_cache_header(on_disk_cache))
-								{
-									info.pInitialData = on_disk_cache.data();
-									info.initialDataSize = on_disk_cache.size();
-								}
-								else
-									LOGI("Failed to validate pipeline cache. Creating a blank one.\n");
+								info.pInitialData = on_disk_cache.data();
+								info.initialDataSize = on_disk_cache.size();
 							}
+							else
+								LOGI("Failed to validate pipeline cache. Creating a blank one.\n");
 						}
 					}
 				}
+			}
 
+			if (vkCreatePipelineCache(device->get_device(), &info, nullptr, &pipeline_cache) != VK_SUCCESS)
+			{
+				LOGE("Failed to create pipeline cache, trying to create a blank one.\n");
+				info.initialDataSize = 0;
+				info.pInitialData = nullptr;
 				if (vkCreatePipelineCache(device->get_device(), &info, nullptr, &pipeline_cache) != VK_SUCCESS)
 				{
-					LOGE("Failed to create pipeline cache, trying to create a blank one.\n");
+					LOGE("Failed to create pipeline cache.\n");
+					pipeline_cache = VK_NULL_HANDLE;
+				}
+			}
+		}
+
+		if (!opts.on_disk_validation_cache_path.empty())
+		{
+			if (device->has_validation_cache())
+			{
+				VkValidationCacheCreateInfoEXT info = {VK_STRUCTURE_TYPE_VALIDATION_CACHE_CREATE_INFO_EXT };
+				vector<uint8_t> on_disk_cache;
+
+				FILE *file = fopen(opts.on_disk_validation_cache_path.c_str(), "rb");
+				if (file)
+				{
+					fseek(file, 0, SEEK_END);
+					size_t len = ftell(file);
+					rewind(file);
+
+					if (len != 0)
+					{
+						on_disk_cache.resize(len);
+						if (fread(on_disk_cache.data(), 1, len, file) == len)
+						{
+							if (validate_validation_cache_header(on_disk_cache))
+							{
+								info.pInitialData = on_disk_cache.data();
+								info.initialDataSize = on_disk_cache.size();
+							}
+							else
+								LOGI("Failed to validate validation cache. Creating a blank one.\n");
+						}
+					}
+				}
+
+				if (vkCreateValidationCacheEXT(device->get_device(), &info, nullptr, &validation_cache) != VK_SUCCESS)
+				{
+					LOGE("Failed to create validation cache, trying to create a blank one.\n");
 					info.initialDataSize = 0;
 					info.pInitialData = nullptr;
-					if (vkCreatePipelineCache(device->get_device(), &info, nullptr, &pipeline_cache) != VK_SUCCESS)
-					{
-						LOGE("Failed to create pipeline cache.\n");
-						pipeline_cache = VK_NULL_HANDLE;
-					}
-				}
-			}
-
-			if (!opts.on_disk_validation_cache_path.empty())
-			{
-				if (device->has_validation_cache())
-				{
-					VkValidationCacheCreateInfoEXT info = {VK_STRUCTURE_TYPE_VALIDATION_CACHE_CREATE_INFO_EXT };
-					vector<uint8_t> on_disk_cache;
-
-					FILE *file = fopen(opts.on_disk_validation_cache_path.c_str(), "rb");
-					if (file)
-					{
-						fseek(file, 0, SEEK_END);
-						size_t len = ftell(file);
-						rewind(file);
-
-						if (len != 0)
-						{
-							on_disk_cache.resize(len);
-							if (fread(on_disk_cache.data(), 1, len, file) == len)
-							{
-								if (validate_validation_cache_header(on_disk_cache))
-								{
-									info.pInitialData = on_disk_cache.data();
-									info.initialDataSize = on_disk_cache.size();
-								}
-								else
-									LOGI("Failed to validate validation cache. Creating a blank one.\n");
-							}
-						}
-					}
-
 					if (vkCreateValidationCacheEXT(device->get_device(), &info, nullptr, &validation_cache) != VK_SUCCESS)
 					{
-						LOGE("Failed to create validation cache, trying to create a blank one.\n");
-						info.initialDataSize = 0;
-						info.pInitialData = nullptr;
-						if (vkCreateValidationCacheEXT(device->get_device(), &info, nullptr, &validation_cache) != VK_SUCCESS)
-						{
-							LOGE("Failed to create validation cache.\n");
-							validation_cache = VK_NULL_HANDLE;
-						}
+						LOGE("Failed to create validation cache.\n");
+						validation_cache = VK_NULL_HANDLE;
 					}
 				}
-				else
-				{
-					LOGE("Requested validation cache, but validation layers do not support this extension.\n");
-				}
 			}
-
-			auto end_device = chrono::steady_clock::now();
-			long time_ms = chrono::duration_cast<chrono::milliseconds>(end_device - start_device).count();
-			LOGI("Creating Vulkan device took: %ld ms\n", time_ms);
-
-			if (app)
+			else
 			{
-				LOGI("Replaying for application:\n");
-				LOGI("  apiVersion: %u.%u.%u\n",
-				     VK_VERSION_MAJOR(app->apiVersion),
-				     VK_VERSION_MINOR(app->apiVersion),
-				     VK_VERSION_PATCH(app->apiVersion));
-				LOGI("  engineVersion: %u\n", app->engineVersion);
-				LOGI("  applicationVersion: %u\n", app->applicationVersion);
-				if (app->pEngineName)
-					LOGI("  engineName: %s\n", app->pEngineName);
-				if (app->pApplicationName)
-					LOGI("  applicationName: %s\n", app->pApplicationName);
+				LOGE("Requested validation cache, but validation layers do not support this extension.\n");
 			}
+		}
+
+		auto end_device = chrono::steady_clock::now();
+		long time_ms = chrono::duration_cast<chrono::milliseconds>(end_device - start_device).count();
+		LOGI("Creating Vulkan device took: %ld ms\n", time_ms);
+
+		if (app)
+		{
+			LOGI("Replaying for application:\n");
+			LOGI("  apiVersion: %u.%u.%u\n",
+			     VK_VERSION_MAJOR(app->apiVersion),
+			     VK_VERSION_MINOR(app->apiVersion),
+			     VK_VERSION_PATCH(app->apiVersion));
+			LOGI("  engineVersion: %u\n", app->engineVersion);
+			LOGI("  applicationVersion: %u\n", app->applicationVersion);
+			if (app->pEngineName)
+				LOGI("  engineName: %s\n", app->pEngineName);
+			if (app->pApplicationName)
+				LOGI("  applicationName: %s\n", app->pApplicationName);
 		}
 	}
 
