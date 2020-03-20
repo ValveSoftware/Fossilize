@@ -285,19 +285,29 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 		switch (base->sType)
 		{
 		case VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_DOMAIN_ORIGIN_STATE_CREATE_INFO:
-			return enabled_extensions.count(VK_KHR_MAINTENANCE2_EXTENSION_NAME) != 0 || api_version >= VK_API_VERSION_1_1;
+			if (!enabled_extensions.count(VK_KHR_MAINTENANCE2_EXTENSION_NAME) && api_version < VK_API_VERSION_1_1)
+				return false;
+			break;
 
 		case VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_DIVISOR_STATE_CREATE_INFO_EXT:
-			return enabled_extensions.count(VK_EXT_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME) != 0;
+			if (!enabled_extensions.count(VK_EXT_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME))
+				return false;
+			break;
 
 		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_DEPTH_CLIP_STATE_CREATE_INFO_EXT:
-			return enabled_extensions.count(VK_EXT_DEPTH_CLIP_ENABLE_EXTENSION_NAME) != 0;
+			if (!enabled_extensions.count(VK_EXT_DEPTH_CLIP_ENABLE_EXTENSION_NAME))
+				return false;
+			break;
 
 		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_STREAM_CREATE_INFO_EXT:
-			return features.transform_feedback.geometryStreams == VK_TRUE;
+			if (features.transform_feedback.geometryStreams == VK_FALSE)
+				return false;
+			break;
 
 		case VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO:
-			return features.multiview.multiview == VK_TRUE;
+			if (features.multiview.multiview == VK_FALSE)
+				return false;
+			break;
 
 		case VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT:
 		{
@@ -340,10 +350,14 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 		}
 
 		case VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_ADVANCED_STATE_CREATE_INFO_EXT:
-			return features.blend_operation_advanced.advancedBlendCoherentOperations == VK_TRUE;
+			if (features.blend_operation_advanced.advancedBlendCoherentOperations == VK_FALSE)
+				return false;
+			break;
 
 		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_CONSERVATIVE_STATE_CREATE_INFO_EXT:
-			return enabled_extensions.count(VK_EXT_CONSERVATIVE_RASTERIZATION_EXTENSION_NAME) != 0;
+			if (!enabled_extensions.count(VK_EXT_CONSERVATIVE_RASTERIZATION_EXTENSION_NAME))
+				return false;
+			break;
 
 		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_LINE_STATE_CREATE_INFO_EXT:
 		{
@@ -393,8 +407,10 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 		case VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT:
 		{
 			// Should correlate with stage.
-			return features.subgroup_size_control.subgroupSizeControl == VK_FALSE &&
-			       props.subgroup_size_control.requiredSubgroupSizeStages != 0;
+			if (features.subgroup_size_control.subgroupSizeControl == VK_FALSE ||
+			    !props.subgroup_size_control.requiredSubgroupSizeStages)
+				return false;
+			break;
 		}
 
 		default:
@@ -478,6 +494,8 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 	case spv::CapabilityInt64Atomics:
 		return features.atomic_int64.shaderBufferInt64Atomics == VK_TRUE ||
 		       features.atomic_int64.shaderSharedInt64Atomics == VK_TRUE;
+	case spv::CapabilityGroups:
+		return enabled_extensions.count(VK_AMD_SHADER_BALLOT_EXTENSION_NAME);
 	case spv::CapabilityInt16:
 		return features2.features.shaderInt16 == VK_TRUE;
 	case spv::CapabilityTessellationPointSize:
