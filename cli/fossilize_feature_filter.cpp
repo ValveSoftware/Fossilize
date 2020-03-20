@@ -478,6 +478,8 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 	case spv::CapabilityInt64Atomics:
 		return features.atomic_int64.shaderBufferInt64Atomics == VK_TRUE ||
 		       features.atomic_int64.shaderSharedInt64Atomics == VK_TRUE;
+	case spv::CapabilityGroups:
+		return enabled_extensions.count(VK_AMD_SHADER_BALLOT_EXTENSION_NAME);
 	case spv::CapabilityInt16:
 		return features2.features.shaderInt16 == VK_TRUE;
 	case spv::CapabilityTessellationPointSize:
