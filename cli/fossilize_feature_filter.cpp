@@ -407,7 +407,7 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 		case VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT:
 		{
 			// Should correlate with stage.
-			if (features.subgroup_size_control.subgroupSizeControl == VK_TRUE ||
+			if (features.subgroup_size_control.subgroupSizeControl == VK_FALSE ||
 			    !props.subgroup_size_control.requiredSubgroupSizeStages)
 				return false;
 			break;
