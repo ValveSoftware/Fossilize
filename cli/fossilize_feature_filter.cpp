@@ -618,6 +618,8 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 		return features.descriptor_indexing.shaderUniformBufferArrayNonUniformIndexing == VK_TRUE;
 	case spv::CapabilitySampledImageArrayNonUniformIndexing:
 		return features.descriptor_indexing.shaderSampledImageArrayNonUniformIndexing == VK_TRUE;
+	case spv::CapabilityUniformTexelBufferArrayNonUniformIndexing:
+		return features.descriptor_indexing.shaderUniformTexelBufferArrayNonUniformIndexing == VK_TRUE;
 	case spv::CapabilityStorageBufferArrayNonUniformIndexing:
 		return features.descriptor_indexing.shaderStorageBufferArrayNonUniformIndexing == VK_TRUE;
 	case spv::CapabilityStorageImageArrayNonUniformIndexing:
