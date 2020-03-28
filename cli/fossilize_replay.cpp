@@ -231,6 +231,9 @@ struct ThreadedReplayer : StateCreatorInterface
 
 		unsigned shader_cache_size_mb = 256;
 
+		// Hash for replaying a single pipeline
+		Hash pipeline_hash = 0;
+
 		// Carve out a range of which pipelines to replay.
 		// Used for multi-process replays where each process gets its own slice to churn through.
 		unsigned start_graphics_index = 0;
@@ -2275,6 +2278,7 @@ static void print_help()
 	     "\t[--on-disk-validation-cache <path>]\n"
 	     "\t[--on-disk-validation-whitelist <path>]\n"
 	     "\t[--on-disk-validation-blacklist <path>]\n"
+	     "\t[--pipeline-hash <hash>]\n"
 	     "\t[--graphics-pipeline-range <start> <end>]\n"
 	     "\t[--compute-pipeline-range <start> <end>]\n"
 	     "\t[--shader-cache-size <value (MiB)>]\n"
@@ -2776,76 +2780,105 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 	unsigned graphics_start_index = 0;
 	unsigned compute_start_index = 0;
 
-	for (auto &tag : threaded_playback_order)
+	if (replayer.opts.pipeline_hash != 0)
 	{
-		size_t tag_total_size = 0;
-		size_t tag_total_size_compressed = 0;
-		size_t resource_hash_count = 0;
-
-		if (!resolver->get_hash_list_for_resource_tag(tag, &resource_hash_count, nullptr))
-		{
-			LOGE("Failed to get list of resource hashes.\n");
-			return EXIT_FAILURE;
-		}
-
-		unsigned start_index = 0;
-		unsigned end_index = resource_hash_count;
-
-		vector<Hash> *hashes = nullptr;
-
-		if (tag == RESOURCE_GRAPHICS_PIPELINE)
-		{
-			hashes = &graphics_hashes;
-
-			end_index = min(end_index, replayer.opts.end_graphics_index);
-			start_index = max(start_index, replayer.opts.start_graphics_index);
-			start_index = min(end_index, start_index);
-			graphics_start_index = start_index;
-
-		}
-		else if (tag == RESOURCE_COMPUTE_PIPELINE)
-		{
-			hashes = &compute_hashes;
-
-			end_index = min(end_index, replayer.opts.end_compute_index);
-			start_index = max(start_index, replayer.opts.start_compute_index);
-			start_index = min(end_index, start_index);
-			compute_start_index = start_index;
-		}
-
-		assert(hashes);
-		hashes->resize(resource_hash_count);
-
-		if (!resolver->get_hash_list_for_resource_tag(tag, &resource_hash_count, hashes->data()))
-		{
-			LOGE("Failed to get list of resource hashes.\n");
-			return EXIT_FAILURE;
-		}
-
-		move(begin(*hashes) + start_index, begin(*hashes) + end_index, begin(*hashes));
-		hashes->erase(begin(*hashes) + (end_index - start_index), end(*hashes));
-
-		for (auto &hash : *hashes)
+		for (auto &tag : threaded_playback_order)
 		{
 			size_t state_json_size = 0;
-			if (!resolver->read_entry(tag, hash, &state_json_size, nullptr, PAYLOAD_READ_RAW_FOSSILIZE_DB_BIT))
+			if (resolver->read_entry(tag, replayer.opts.pipeline_hash, &state_json_size, nullptr, 0))
 			{
-				LOGE("Failed to load blob from cache.\n");
-				return EXIT_FAILURE;
-			}
-			tag_total_size_compressed += state_json_size;
+				if (tag == RESOURCE_GRAPHICS_PIPELINE)
+				{
+					graphics_hashes.push_back(replayer.opts.pipeline_hash);
 
-			if (!resolver->read_entry(tag, hash, &state_json_size, nullptr, 0))
-			{
-				LOGE("Failed to load blob from cache.\n");
-				return EXIT_FAILURE;
+				}
+				else if (tag == RESOURCE_COMPUTE_PIPELINE)
+				{
+					compute_hashes.push_back(replayer.opts.pipeline_hash);
+				}
 			}
-			tag_total_size += state_json_size;
 		}
 
-		LOGI("Total binary size for %s: %" PRIu64 " (%" PRIu64 " compressed)\n", tag_names[tag],
-		     uint64_t(tag_total_size),
-		     uint64_t(tag_total_size_compressed));
+		if (graphics_hashes.empty() && compute_hashes.empty())
+		{
+			LOGE("Specified pipeline hash %016" PRIx64 " not found on database.\n",
+			     replayer.opts.pipeline_hash);
+			return EXIT_FAILURE;
+		}
+	}
+	else
+	{
+		for (auto &tag : threaded_playback_order)
+		{
+			size_t tag_total_size = 0;
+			size_t tag_total_size_compressed = 0;
+			size_t resource_hash_count = 0;
+
+			if (!resolver->get_hash_list_for_resource_tag(tag, &resource_hash_count, nullptr))
+			{
+				LOGE("Failed to get list of resource hashes.\n");
+				return EXIT_FAILURE;
+			}
+
+			unsigned start_index = 0;
+			unsigned end_index = resource_hash_count;
+
+			vector<Hash> *hashes = nullptr;
+
+			if (tag == RESOURCE_GRAPHICS_PIPELINE)
+			{
+				hashes = &graphics_hashes;
+
+				end_index = min(end_index, replayer.opts.end_graphics_index);
+				start_index = max(start_index, replayer.opts.start_graphics_index);
+				start_index = min(end_index, start_index);
+				graphics_start_index = start_index;
+
+			}
+			else if (tag == RESOURCE_COMPUTE_PIPELINE)
+			{
+				hashes = &compute_hashes;
+
+				end_index = min(end_index, replayer.opts.end_compute_index);
+				start_index = max(start_index, replayer.opts.start_compute_index);
+				start_index = min(end_index, start_index);
+				compute_start_index = start_index;
+			}
+
+			assert(hashes);
+			hashes->resize(resource_hash_count);
+
+			if (!resolver->get_hash_list_for_resource_tag(tag, &resource_hash_count, hashes->data()))
+			{
+				LOGE("Failed to get list of resource hashes.\n");
+				return EXIT_FAILURE;
+			}
+
+			move(begin(*hashes) + start_index, begin(*hashes) + end_index, begin(*hashes));
+			hashes->erase(begin(*hashes) + (end_index - start_index), end(*hashes));
+
+			for (auto &hash : *hashes)
+			{
+				size_t state_json_size = 0;
+				if (!resolver->read_entry(tag, hash, &state_json_size, nullptr, PAYLOAD_READ_RAW_FOSSILIZE_DB_BIT))
+				{
+					LOGE("Failed to load blob from cache.\n");
+					return EXIT_FAILURE;
+				}
+				tag_total_size_compressed += state_json_size;
+
+				if (!resolver->read_entry(tag, hash, &state_json_size, nullptr, 0))
+				{
+					LOGE("Failed to load blob from cache.\n");
+					return EXIT_FAILURE;
+				}
+				tag_total_size += state_json_size;
+			}
+
+			LOGI("Total binary size for %s: %" PRIu64 " (%" PRIu64 " compressed)\n", tag_names[tag],
+			     uint64_t(tag_total_size),
+			     uint64_t(tag_total_size_compressed));
+		}
 	}
 
 	// Done parsing static objects.
@@ -2994,6 +3027,16 @@ int main(int argc, char *argv[])
 	});
 	cbs.add("--num-threads", [&](CLIParser &parser) { replayer_opts.num_threads = parser.next_uint(); });
 	cbs.add("--loop", [&](CLIParser &parser) { replayer_opts.loop_count = parser.next_uint(); });
+	cbs.add("--pipeline-hash", [&](CLIParser &parser) {
+		const char *hash_str = parser.next_string();
+		char *end;
+		replayer_opts.pipeline_hash = strtoull(hash_str, &end, 16);
+		if (*end != '\0')
+		{
+			LOGE("Not a valid pipeline hash: \"%s\"", hash_str);
+			exit(EXIT_FAILURE);
+		}
+	});
 	cbs.add("--graphics-pipeline-range", [&](CLIParser &parser) {
 		replayer_opts.start_graphics_index = parser.next_uint();
 		replayer_opts.end_graphics_index = parser.next_uint();
@@ -3038,6 +3081,22 @@ int main(int argc, char *argv[])
 		LOGE("No path to serialized state provided.\n");
 		print_help();
 		return EXIT_FAILURE;
+	}
+
+	if (replayer_opts.pipeline_hash != 0)
+	{
+		if (replayer_opts.start_graphics_index != 0u ||
+		    replayer_opts.end_graphics_index != ~0u ||
+		    replayer_opts.start_compute_index != 0u ||
+		    replayer_opts.end_compute_index != ~0u)
+		{
+			LOGE("--pipeline-hash cannot be used together with pipeline ranges.\n");
+			print_help();
+			return EXIT_FAILURE;
+		}
+
+		// We don't need threading for a single pipeline
+		replayer_opts.num_threads = 1;
 	}
 
 #ifndef NO_ROBUST_REPLAYER
