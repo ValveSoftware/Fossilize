@@ -1,54 +1,102 @@
 cmake_minimum_required(VERSION 3.5)
-set(CMAKE_CXX_STANDARD 14)
-set(CMAKE_C_STANDARD 99)
+set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
+set(CMAKE_POLICY_DEFAULT_CMP0063 NEW)
 project(Fossilize LANGUAGES CXX C)
 
-option(FOSSILIZE_MSVC_ANALYZE "Enable /analyze" OFF)
-option(FOSSILIZE_ENABLE_EXCEPTIONS "Compile Fossilize with exception support." OFF)
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+set(CMAKE_THREA_PREFER_PTHREAD ON)
 
-if (CMAKE_COMPILER_IS_GNUCXX OR (${CMAKE_CXX_COMPILER_ID} MATCHES "Clang"))
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fvisibility=hidden")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fvisibility=hidden")
-    if (NOT FOSSILIZE_ENABLE_EXCEPTIONS)
-        set(FOSSILIZE_EXCEPTION_FLAGS "-fno-exceptions")
-    else()
-        set(FOSSILIZE_EXCEPTION_FLAGS "")
-    endif()
-    set(FOSSILIZE_CXX_FLAGS -Wall -Wextra -Wunused-result -Wno-missing-field-initializers -Wno-empty-body -Wshadow ${FOSSILIZE_EXCEPTION_FLAGS})
-elseif (MSVC)
-    if (FOSSILIZE_MSVC_ANALYZE)
-        set(FOSSILIZE_ANALYZE_FLAGS "/analyze")
-    else()
-        set(FOSSILIZE_ANALYZE_FLAGS "")
-    endif()
-    # Disabling exceptions in MSVC without a ton of scary warnings is quite finicky.
-    # Don't bother. We can verify no exceptions are present with -fno-exceptions on GCC/Clang.
-    set(FOSSILIZE_CXX_FLAGS ${FOSSILIZE_ANALYZE_FLAGS} /D_CRT_SECURE_NO_WARNINGS /D_SCL_SECURE_NO_WARNINGS /wd4267 /wd4244 /wd4309 /wd4005 /MP /DNOMINMAX)
+include(CMakeDependentOption)
+include(GNUInstallDirs)
+include(CTest)
+
+find_package(Threads REQUIRED)
+find_package(Vulkan)
+
+if (NOT DEFINED CMAKE_CXX_STANDARD OR CMAKE_CXX_STANDARD LESS 14)
+  set(CMAKE_CXX_STANDARD 14)
 endif()
+if (NOT DEFINED CMAKE_C_STANDARD OR CMAKE_C_STANDARD LESS 99)
+  set(CMAKE_C_STANDARD 99)
+endif()
+
+if (NOT DEFINED CMAKE_CXX_VISIBILITY_PRESET)
+  set(CMAKE_CXX_VISIBILITY_PRESET hidden)
+endif()
+
+if (NOT DEFINED CMAKE_C_VISIBILITY_PRESET)
+  set(CMAKE_C_VISIBILITY_PRESET hidden)
+endif()
+
+cmake_dependent_option(FOSSILIZE_TESTS
+  "Enable Fossilize tests" ON
+  "CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME;BUILD_TESTING" OFF)
+
+option(FOSSILIZE_ENABLE_EXCEPTIONS "Compile Fossilize with exception support." OFF)
+option(FOSSILIZE_MSVC_ANALYZE "Enable /analyze" OFF)
+# Not needed for position-independent-code, as its always turned on
+option(FOSSILIZE_VULKAN_LAYER "Build Vulkan layer." ON) 
+option(FOSSILIZE_CLI "Enable Fossilize CLI support." ON)
 
 option(FOSSILIZE_SANITIZE_ADDRESS "Sanitize address" OFF)
-set(FOSSILIZE_LINK_FLAGS)
-if (FOSSILIZE_SANITIZE_ADDRESS)
-    set(FOSSILIZE_CXX_FLAGS ${FOSSILIZE_CXX_FLAGS} -fsanitize=address)
-    set(FOSSILIZE_LINK_FLAGS "${FOSSILIZE_LINK_FLAGS} -fsanitize=address")
-endif()
-
 option(FOSSILIZE_SANITIZE_THREADS "Sanitize threads" OFF)
-if (FOSSILIZE_SANITIZE_THREADS)
-    set(FOSSILIZE_CXX_FLAGS ${FOSSILIZE_CXX_FLAGS} -fsanitize=thread)
-    set(FOSSILIZE_LINK_FLAGS "${FOSSILIZE_LINK_FLAGS} -fsanitize=thread")
+
+# option() cannot technically be used in newer CMake versions for non-boolean values
+# warnings will be thrown and this can be annoying otherwise.
+set(FOSSILIZE_VULKAN_INCLUDE_PATH "${PROJECT_SOURCE_DIR}/khronos/vulkan"
+  CACHE PATH "include path for vulkan headers")
+set(FOSSILIZE_RAPIDJSON_INCLUDE_PATH "${PROJECT_SOURCE_DIR}/rapidjson/include"
+  CACHE PATH "include path for rapidjson headers")
+
+# TODO: Gate all of this behind a better generator expression
+if (CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    list(APPEND FOSSILIZE_CXX_FLAGS
+      -Wall -Wextra -Wunused-result -Wno-missing-field-initializers -Wno-empty-body -Wshadow
+      $<$<NOT:$<BOOL:${FOSSILIZE_ENABLE_EXCEPTIONS}>>:-fno-exceptions>)
+elseif (MSVC)
+    # XXX: This can be done, and safely, but will require more work and a more recent version of CMake
+    # Disabling exceptions in MSVC without a ton of scary warnings is quite finicky.
+    # Don't bother. We can verify no exceptions are present with -fno-exceptions on GCC/Clang.
+    list(APPEND FOSSILIZE_CXX_FLAGS
+      $<$<BOOL:${FOSSILIZE_MSVC_ANALYZE}>:/analyze>
+      /wd4267
+      /wd4244
+      /wd4309
+      /wd4005
+      /MP)
 endif()
 
-include(GNUInstallDirs)
+# TODO: This does not currently support the MSVC support for AddressSanitizer
+if (FOSSILIZE_SANITIZE_ADDRESS)
+    list(APPEND FOSSILIZE_CXX_FLAGS -fsanitize=address)
+    list(APPEND FOSSILIZE_LINK_FLAGS -fsanitize=address)
+endif()
 
-add_library(miniz STATIC miniz/miniz.h miniz/miniz.c)
-set_target_properties(miniz PROPERTIES POSITION_INDEPENDENT_CODE ON)
-target_include_directories(miniz PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/miniz)
-if (CMAKE_COMPILER_IS_GNUCXX OR (${CMAKE_CXX_COMPILER_ID} MATCHES "Clang"))
-    target_compile_options(miniz PRIVATE -fvisibility=hidden)
-    if (NOT APPLE AND NOT ANDROID)
-        target_compile_definitions(miniz PRIVATE _LARGEFILE64_SOURCE)
-    endif()
+if (FOSSILIZE_SANITIZE_THREADS)
+    list(APPEND FOSSILIZE_CXX_FLAGS -fsanitize=thread)
+    list(APPEND FOSSILIZE_LINK_FLAGS -fsanitize=thread)
+endif()
+
+if (NOT TARGET miniz)
+  add_library(miniz STATIC miniz/miniz.h miniz/miniz.c)
+  set_target_properties(miniz PROPERTIES POSITION_INDEPENDENT_CODE ON)
+  target_include_directories(miniz
+    PUBLIC
+      $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/miniz>)
+  string(CONCAT largefile $<AND:
+    $<OR:
+      $<CXX_COMPILER_ID:GNU>,
+      $<CXX_COMPILER_ID:Clang>,
+      $<CXX_COMPILER_ID:AppleClang>
+    >,
+    $<NOT:
+      $<AND:
+        $<PLATFORM_ID:Darwin>,
+        $<PLATFORM_ID:Android>
+      >
+    >
+  >)
+  target_compile_definitions(miniz PRIVATE $<${largefile}:_LARGEFILE64_SOURCE>)
 endif()
 
 add_library(fossilize STATIC
@@ -63,75 +111,51 @@ add_library(fossilize STATIC
         path.hpp path.cpp)
 set_target_properties(fossilize PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-if (WIN32 AND CMAKE_COMPILER_IS_GNUCXX)
-	target_compile_definitions(fossilize PUBLIC __USE_MINGW_ANSI_STDIO=1)
-endif()
-
-if (NOT ANDROID)
-    target_sources(fossilize PRIVATE fossilize_external_replayer.cpp fossilize_external_replayer.hpp)
-endif()
-
-if (WIN32)
-    target_sources(fossilize PRIVATE fossilize_external_replayer_windows.hpp)
-else()
-    target_sources(fossilize PRIVATE fossilize_external_replayer_linux.hpp)
-    if (APPLE)
-        target_sources(fossilize PRIVATE platform/gcc_clang_spinlock.hpp)
-    else()
-        target_sources(fossilize PRIVATE platform/futex_wrapper_linux.hpp)
-    endif()
-endif()
-
-target_include_directories(fossilize PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(fossilize
+  PUBLIC
+    $<$<CXX_COMPILER_ID:MSVC>:_CRT_SECURE_NO_WARNINGS>
+    $<$<CXX_COMPILER_ID:MSVC>:_SCL_SECURE_NO_WARNINGS>
+    $<$<CXX_COMPILER_ID:MSVC>:NOMINMAX>
+    $<$<AND:$<PLATFORM_ID:Windows>,$<CXX_COMPILER_ID:GNU>>:__USE_MINGW_ANSI_STDIO=1>)
+target_sources(fossilize
+  PRIVATE
+    $<$<NOT:$<PLATFORM_ID:Android>>:fossilize_external_replayer.cpp>
+    $<$<NOT:$<PLATFORM_ID:Android>>:fossilize_external_replayer.hpp>
+    $<$<NOT:$<PLATFORM_ID:Windows>>:fossilize_external_replayer_linux.hpp>
+    $<$<PLATFORM_ID:Windows>:fossilize_external_replayer_windows.hpp>
+    $<$<PLATFORM_ID:Darwin>:platform/gcc_clang_spinlock.hpp>
+    $<$<PLATFORM_ID:Linux>:platform/futex_wrapper_linux.hpp>)
+target_include_directories(fossilize
+  PUBLIC
+    $<BUILD_INTERFACE:$<$<PLATFORM_ID:Windows>:${PROJECT_SOURCE_DIR}/cli/dirent/include>>
+    $<BUILD_INTERFACE:${FOSSILIZE_RAPIDJSON_INCLUDE_PATH}>
+    $<BUILD_INTERFACE:${FOSSILIZE_VULKAN_INCLUDE_PATH}>
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_compile_options(fossilize PRIVATE ${FOSSILIZE_CXX_FLAGS})
-if (NOT WIN32)
-    target_link_libraries(fossilize -pthread)
-    target_compile_options(fossilize PUBLIC -pthread)
-    if (NOT APPLE)
-        if (ANDROID)
-            target_link_libraries(fossilize android log)
-        else()
-            target_link_libraries(fossilize rt)
-        endif()
-    endif()
-endif()
-target_link_libraries(fossilize miniz)
+target_link_libraries(fossilize
+  PRIVATE
+    $<TARGET_NAME_IF_EXISTS:Vulkan::Vulkan>
+    Threads::Threads
+    $<$<PLATFORM_ID:Android>:android>
+    $<$<PLATFORM_ID:Android>:log>
+    $<$<PLATFORM_ID:Linux>:rt>
+    miniz)
 
-if (WIN32)
-    target_include_directories(fossilize PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/cli/dirent/include)
-endif()
-
-option(FOSSILIZE_VULKAN_LAYER "Build Vulkan layer." ON)
-if (FOSSILIZE_VULKAN_LAYER)
-    set_target_properties(fossilize PROPERTIES POSITION_INDEPENDENT_CODE ON)
-endif()
-
-option(FOSSILIZE_RAPIDJSON_INCLUDE_PATH "Optional custom include path for rapidjson.")
-if (FOSSILIZE_RAPIDJSON_INCLUDE_PATH)
-    target_include_directories(fossilize PUBLIC ${FOSSILIZE_RAPIDJSON_INCLUDE_PATH})
+if (CMAKE_VERSION LESS 3.13)
+  set_property(TARGET fossilize APPEND_STRING PROPERTY LINK_FLAGS ${FOSSILIZE_LINK_FLAGS})
 else()
-    target_include_directories(fossilize PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/rapidjson/include)
-endif()
-
-option(FOSSILIZE_VULKAN_INCLUDE_PATH "Optional custom include path for Vulkan headers.")
-if (FOSSILIZE_VULKAN_INCLUDE_PATH)
-    target_include_directories(fossilize PUBLIC ${FOSSILIZE_VULKAN_INCLUDE_PATH})
-else()
-    target_include_directories(fossilize PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/khronos/vulkan)
+  target_link_options(fossilize PRIVATE ${FOSSILIZE_LINK_FLAGS})
 endif()
 
 if (FOSSILIZE_VULKAN_LAYER)
     add_subdirectory(layer)
 endif()
 
-option(FOSSILIZE_CLI "Enable Fossilize CLI support." ON)
 if (FOSSILIZE_CLI)
     add_subdirectory(cli)
 endif()
 
-option(FOSSILIZE_TESTS "Enable Fossilize tests." ON)
 if (FOSSILIZE_TESTS)
-    enable_testing()
     add_subdirectory(test)
 endif()
-

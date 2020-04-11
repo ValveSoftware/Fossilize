@@ -7,9 +7,11 @@ add_library(VkLayer_fossilize SHARED
 	dispatch_helper.hpp
 	dispatch_helper.cpp)
 
-target_include_directories(VkLayer_fossilize PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(VkLayer_fossilize
+  PRIVATE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>)
 target_compile_options(VkLayer_fossilize PRIVATE ${FOSSILIZE_CXX_FLAGS})
-set_target_properties(VkLayer_fossilize PROPERTIES LINK_FLAGS "${FOSSILIZE_LINK_FLAGS}")
+set_property(TARGET VkLayer_fossilize APPEND_STRING PROPERTY LINK_FLAGS ${FOSSILIZE_LINK_FLAGS})
 install(TARGETS VkLayer_fossilize
 	RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 	LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
@@ -78,6 +80,11 @@ set_target_properties(VkLayer_fossilize PROPERTIES RUNTIME_OUTPUT_DIRECTORY_RELE
 set_target_properties(VkLayer_fossilize PROPERTIES RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/layer")
 set_target_properties(VkLayer_fossilize PROPERTIES RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL "${CMAKE_BINARY_DIR}/layer")
 set_target_properties(VkLayer_fossilize PROPERTIES RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_BINARY_DIR}/layer")
+set(import-suffix "_imp.lib")
+if (NOT MSVC)
+  set(import-suffix "_imp.dll.a")
+endif()
+set_property(TARGET VkLayer_fossilize PROPERTY IMPORT_SUFFIX ${import-suffix})
 target_link_libraries(VkLayer_fossilize fossilize)
 
 if (ANDROID)
