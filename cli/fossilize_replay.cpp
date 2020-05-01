@@ -785,7 +785,7 @@ struct ThreadedReplayer : StateCreatorInterface
 				}
 			}
 
-			if (device_opts.enable_validation && !per_thread.triggered_validation_error)
+			if (!per_thread.triggered_validation_error)
 				whitelist_resource(work_item.tag, work_item.hash);
 
 			per_thread.current_graphics_pipeline = 0;
@@ -919,7 +919,7 @@ struct ThreadedReplayer : StateCreatorInterface
 				}
 			}
 
-			if (device_opts.enable_validation && !per_thread.triggered_validation_error)
+			if (!per_thread.triggered_validation_error)
 				whitelist_resource(work_item.tag, work_item.hash);
 
 			per_thread.current_compute_pipeline = 0;
@@ -1432,12 +1432,22 @@ struct ThreadedReplayer : StateCreatorInterface
 		if (opts.spirv_validate)
 		{
 			auto start_time = chrono::steady_clock::now();
-			spvtools::SpirvTools context(device->get_api_version() >= VK_VERSION_1_1 ? SPV_ENV_VULKAN_1_1 : SPV_ENV_VULKAN_1_0);
+			spv_target_env env;
+			if (device->get_api_version() >= VK_VERSION_1_2)
+				env = SPV_ENV_VULKAN_1_2;
+			else if (device->get_api_version() >= VK_VERSION_1_1)
+				env = SPV_ENV_VULKAN_1_1;
+			else
+				env = SPV_ENV_VULKAN_1_0;
+
+			spvtools::SpirvTools context(env);
+			spvtools::ValidatorOptions validation_opts;
+			validation_opts.SetScalarBlockLayout(device->get_feature_filter().supports_scalar_block_layout());
 			context.SetMessageConsumer([](spv_message_level_t, const char *, const spv_position_t &, const char *message) {
 				LOGE("spirv-val: %s\n", message);
 			});
 
-			bool ret = context.Validate(create_info->pCode, create_info->codeSize / 4);
+			bool ret = context.Validate(create_info->pCode, create_info->codeSize / 4, validation_opts);
 
 			auto end_time = chrono::steady_clock::now();
 			auto duration_ns = chrono::duration_cast<chrono::nanoseconds>(end_time - start_time).count();
@@ -1455,6 +1465,7 @@ struct ThreadedReplayer : StateCreatorInterface
 				if (opts.control_block)
 					opts.control_block->module_validation_failures.fetch_add(1, std::memory_order_relaxed);
 
+				blacklist_resource(RESOURCE_SHADER_MODULE, hash);
 				return true;
 			}
 		}
@@ -1524,13 +1535,10 @@ struct ThreadedReplayer : StateCreatorInterface
 
 		// vkCreateShaderModule doesn't generally crash anything, so just deal with blacklisting here
 		// rather than in an error callback.
-		if (device_opts.enable_validation)
-		{
-			if (!per_thread.triggered_validation_error)
-				whitelist_resource(RESOURCE_SHADER_MODULE, hash);
-			else
-				blacklist_resource(RESOURCE_SHADER_MODULE, hash);
-		}
+		if (!per_thread.triggered_validation_error)
+			whitelist_resource(RESOURCE_SHADER_MODULE, hash);
+		else
+			blacklist_resource(RESOURCE_SHADER_MODULE, hash);
 
 		return true;
 	}
@@ -3120,7 +3128,10 @@ int main(int argc, char *argv[])
 
 #ifndef FOSSILIZE_REPLAYER_SPIRV_VAL
 	if (replayer_opts.spirv_validate)
-		LOGE("--spirv-val is used, but SPIRV-Tools support was not enabled in fossilize-replay. Will be ignored.\n");
+	{
+		LOGE("--spirv-val is used, but SPIRV-Tools support was not enabled in fossilize-replay.\n");
+		return EXIT_FAILURE;
+	}
 #endif
 
 	int ret;
