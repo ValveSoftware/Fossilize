@@ -3130,7 +3130,10 @@ int main(int argc, char *argv[])
 
 #ifndef FOSSILIZE_REPLAYER_SPIRV_VAL
 	if (replayer_opts.spirv_validate)
-		LOGE("--spirv-val is used, but SPIRV-Tools support was not enabled in fossilize-replay. Will be ignored.\n");
+	{
+		LOGE("--spirv-val is used, but SPIRV-Tools support was not enabled in fossilize-replay.\n");
+		return EXIT_FAILURE;
+	}
 #endif
 
 	int ret;
