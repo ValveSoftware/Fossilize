@@ -785,7 +785,7 @@ struct ThreadedReplayer : StateCreatorInterface
 				}
 			}
 
-			if (device_opts.enable_validation && !per_thread.triggered_validation_error)
+			if (!per_thread.triggered_validation_error)
 				whitelist_resource(work_item.tag, work_item.hash);
 
 			per_thread.current_graphics_pipeline = 0;
@@ -919,7 +919,7 @@ struct ThreadedReplayer : StateCreatorInterface
 				}
 			}
 
-			if (device_opts.enable_validation && !per_thread.triggered_validation_error)
+			if (!per_thread.triggered_validation_error)
 				whitelist_resource(work_item.tag, work_item.hash);
 
 			per_thread.current_compute_pipeline = 0;
@@ -1465,6 +1465,7 @@ struct ThreadedReplayer : StateCreatorInterface
 				if (opts.control_block)
 					opts.control_block->module_validation_failures.fetch_add(1, std::memory_order_relaxed);
 
+				blacklist_resource(RESOURCE_SHADER_MODULE, hash);
 				return true;
 			}
 		}
@@ -1534,13 +1535,10 @@ struct ThreadedReplayer : StateCreatorInterface
 
 		// vkCreateShaderModule doesn't generally crash anything, so just deal with blacklisting here
 		// rather than in an error callback.
-		if (device_opts.enable_validation)
-		{
-			if (!per_thread.triggered_validation_error)
-				whitelist_resource(RESOURCE_SHADER_MODULE, hash);
-			else
-				blacklist_resource(RESOURCE_SHADER_MODULE, hash);
-		}
+		if (!per_thread.triggered_validation_error)
+			whitelist_resource(RESOURCE_SHADER_MODULE, hash);
+		else
+			blacklist_resource(RESOURCE_SHADER_MODULE, hash);
 
 		return true;
 	}
