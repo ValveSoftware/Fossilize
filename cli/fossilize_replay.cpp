@@ -1432,12 +1432,22 @@ struct ThreadedReplayer : StateCreatorInterface
 		if (opts.spirv_validate)
 		{
 			auto start_time = chrono::steady_clock::now();
-			spvtools::SpirvTools context(device->get_api_version() >= VK_VERSION_1_1 ? SPV_ENV_VULKAN_1_1 : SPV_ENV_VULKAN_1_0);
+			spv_target_env env;
+			if (device->get_api_version() >= VK_VERSION_1_2)
+				env = SPV_ENV_VULKAN_1_2;
+			else if (device->get_api_version() >= VK_VERSION_1_1)
+				env = SPV_ENV_VULKAN_1_1;
+			else
+				env = SPV_ENV_VULKAN_1_0;
+
+			spvtools::SpirvTools context(env);
+			spvtools::ValidatorOptions validation_opts;
+			validation_opts.SetScalarBlockLayout(device->get_feature_filter().supports_scalar_block_layout());
 			context.SetMessageConsumer([](spv_message_level_t, const char *, const spv_position_t &, const char *message) {
 				LOGE("spirv-val: %s\n", message);
 			});
 
-			bool ret = context.Validate(create_info->pCode, create_info->codeSize / 4);
+			bool ret = context.Validate(create_info->pCode, create_info->codeSize / 4, validation_opts);
 
 			auto end_time = chrono::steady_clock::now();
 			auto duration_ns = chrono::duration_cast<chrono::nanoseconds>(end_time - start_time).count();
