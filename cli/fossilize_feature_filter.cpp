@@ -138,6 +138,7 @@ struct FeatureFilter::Impl
 	VkPhysicalDeviceFeatures2 features2 = {};
 	VulkanFeatures features = {};
 	VulkanProperties props = {};
+	bool supports_scalar_block_layout = false;
 
 	void init_features(const void *pNext);
 	void init_properties(const void *pNext);
@@ -256,7 +257,11 @@ bool FeatureFilter::Impl::init(uint32_t api_version_, const char **device_exts, 
                                const VkPhysicalDeviceProperties2 *properties)
 {
 	for (unsigned i = 0; i < count; i++)
+	{
 		enabled_extensions.insert(device_exts[i]);
+		if (strcmp(device_exts[i], VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME) == 0)
+			supports_scalar_block_layout = true;
+	}
 
 	api_version = api_version_;
 	props2 = *properties;
@@ -912,4 +917,8 @@ bool FeatureFilter::compute_pipeline_is_supported(const VkComputePipelineCreateI
 	return impl->compute_pipeline_is_supported(info);
 }
 
+bool FeatureFilter::supports_scalar_block_layout() const
+{
+	return impl->supports_scalar_block_layout;
+}
 }

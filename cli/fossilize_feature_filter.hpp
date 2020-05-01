@@ -97,6 +97,8 @@ public:
 	bool graphics_pipeline_is_supported(const VkGraphicsPipelineCreateInfo *info) const;
 	bool compute_pipeline_is_supported(const VkComputePipelineCreateInfo *info) const;
 
+	bool supports_scalar_block_layout() const;
+
 private:
 	struct Impl;
 	Impl *impl;
