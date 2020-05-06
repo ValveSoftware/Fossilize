@@ -46,6 +46,8 @@ static void print_help()
 	     "\t[--skip-compute hash]\n"
 	     "\t[--skip-module hash]\n"
 	     "\t[--skip-application-info-links]\n"
+	     "\t[--whitelist whitelist.foz]\n"
+	     "\t[--blacklist blacklist.foz]\n"
 	     "\t[--invert-module-pruning]\n");
 }
 
@@ -318,6 +320,7 @@ int main(int argc, char *argv[])
 	CLICallbacks cbs;
 	string input_db_path;
 	string output_db_path;
+	string whitelist, blacklist;
 	Hash application_hash = 0;
 	bool should_filter_application_hash = false;
 	bool skip_application_info_links = false;
@@ -362,7 +365,12 @@ int main(int argc, char *argv[])
 	cbs.add("--invert-module-pruning", [&](CLIParser &) {
 		invert_module_pruning = true;
 	});
-
+	cbs.add("--whitelist", [&](CLIParser &parser) {
+		whitelist = parser.next_string();
+	});
+	cbs.add("--blacklist", [&](CLIParser &parser) {
+		blacklist = parser.next_string();
+	});
 	cbs.error_handler = [] { print_help(); };
 
 	CLIParser parser(move(cbs), argc - 1, argv + 1);
@@ -379,6 +387,25 @@ int main(int argc, char *argv[])
 
 	auto input_db = std::unique_ptr<DatabaseInterface>(create_database(input_db_path.c_str(), DatabaseMode::ReadOnly));
 	auto output_db = std::unique_ptr<DatabaseInterface>(create_database(output_db_path.c_str(), DatabaseMode::OverWrite));
+
+	if (input_db && !whitelist.empty())
+	{
+		if (!input_db->load_whitelist_database(whitelist.c_str()))
+		{
+			LOGE("Failed to install whitelist database %s.\n", whitelist.c_str());
+			return EXIT_FAILURE;
+		}
+	}
+
+	if (input_db && !blacklist.empty())
+	{
+		if (!input_db->load_blacklist_database(blacklist.c_str()))
+		{
+			LOGE("Failed to install blacklist database %s.\n", blacklist.c_str());
+			return EXIT_FAILURE;
+		}
+	}
+
 	if (!input_db || !input_db->prepare())
 	{
 		LOGE("Failed to load database: %s\n", argv[1]);
