@@ -14,8 +14,6 @@ $macro TARGETCOPYNAME $_IMPLIB_DLL_PREFIX$OUTBINNAME
 
 $include "$SRCDIR\vpc_scripts\steam_dll_base.vpc"
 $include "$SRCDIR\vpc_scripts\steam_copy_target_client_dll.vpc"
-$include "$SRCDIR\vstdlib\vstdlib_s_exclude.vpc"
-$include "$SRCDIR\tier0\tier0_s_exclude.vpc"
 
 $macro OUTBINDIR "$SRCDIR\..\bin/$(ConfigurationName)"
 
@@ -34,7 +32,7 @@ $Configuration
 	$Compiler
 	{
 		$PreprocessorDefinitions			"$BASE;NOMINMAX=1";VK_LAYER_fossilize="VK_LAYER_steam_fossilize";FOSSILIZE_DUMP_PATH_ENV="STEAM_FOSSILIZE_DUMP_PATH";FOSSILIZE_DUMP_PATH_READ_ONLY_ENV="STEAM_FOSSILIZE_DUMP_PATH_READ_ONLY" [$WINDOWS]
-		$PreprocessorDefinitions			"$BASE;DONT_WRAP_FILEIO";VK_LAYER_fossilize=\"VK_LAYER_steam_fossilize\";FOSSILIZE_DUMP_PATH_ENV=\"STEAM_FOSSILIZE_DUMP_PATH\";FOSSILIZE_DUMP_PATH_READ_ONLY_ENV=\"STEAM_FOSSILIZE_DUMP_PATH_READ_ONLY\" [$POSIX]
+		$PreprocessorDefinitions			"$BASE;DONT_WRAP_FILEIO";__STDC_FORMAT_MACROS;VK_LAYER_fossilize=\"VK_LAYER_steam_fossilize\";FOSSILIZE_DUMP_PATH_ENV=\"STEAM_FOSSILIZE_DUMP_PATH\";FOSSILIZE_DUMP_PATH_READ_ONLY_ENV=\"STEAM_FOSSILIZE_DUMP_PATH_READ_ONLY\" [$POSIX]
 		$AdditionalIncludeDirectories		"$BASE;.\rapidjson\include"
 		$AdditionalIncludeDirectories		"$BASE;.\khronos\vulkan"
 		$AdditionalIncludeDirectories		"$BASE;.\miniz"
@@ -45,6 +43,7 @@ $Configuration
 		$GCC_ExtraCompilerFlags				"$BASE -Wno-shadow" [$LINUXALL]
 		$GCC_ExtraCompilerFlags				"$BASE -Wno-unused-variable" [$LINUXALL]
 		$GCC_ExtraCompilerFlags				"$BASE -Wno-format" [$LINUXALL]
+		$GCC_ExtraCompilerFlags				"$BASE -Wno-format-security" [$LINUXALL]
 		$GCC_ExtraCompilerFlags				"$BASE -fvisibility=hidden" [$LINUXALL]
 		$DisableSpecificWarnings			"$BASE;6313" [$ANALYZE] // Disable C6313: Incorrect operator: zero-valued flag cannot be tested with bitwise-and for rapidjson code
 	}
