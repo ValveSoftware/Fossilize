@@ -13,9 +13,6 @@ $macro OUTBINNAME "fossilize-replay64" [$WIN64]
 
 $include "$SRCDIR\vpc_scripts\steam_exe_con_win32_base.vpc"	[$WINDOWS]
 $include "$SRCDIR\vpc_scripts\steam_exe_posix_base.vpc"		[$POSIX]
-$include "$SRCDIR\vstdlib\vstdlib_s_exclude.vpc"
-$include "$SRCDIR\tier0\tier0_s_exclude.vpc"
-
 
 $Configuration
 {
@@ -33,11 +30,17 @@ $Configuration
 	$Compiler
 	{
 		$PreprocessorDefinitions			"$BASE;NOMINMAX=1" [$WINDOWS]
-		$PreprocessorDefinitions			"$BASE;DONT_WRAP_FILEIO" [$POSIX]
+		$PreprocessorDefinitions			"$BASE;DONT_WRAP_FILEIO;__STDC_FORMAT_MACROS" [$POSIX]
+		$PreprocessorDefinitions			"$BASE;FOSSILIZE_REPLAYER_SPIRV_VAL" // enable spirv-tools validation
 		$AdditionalIncludeDirectories		"$BASE;.\rapidjson\include"
 		$AdditionalIncludeDirectories		"$BASE;.\khronos;.\khronos\vulkan"
 		$AdditionalIncludeDirectories		"$BASE;.\cli\volk"
 		$AdditionalIncludeDirectories		"$BASE;.\miniz"
+		$AdditionalIncludeDirectories		"$BASE;.\cli\SPIRV-Headers\include\spirv\unified1"
+		$AdditionalIncludeDirectories		"$BASE;.\cli\SPIRV-Headers\include"
+		$AdditionalIncludeDirectories		"$BASE;.\cli\SPIRV-Tools\generated"
+		$AdditionalIncludeDirectories		"$BASE;.\cli\SPIRV-Tools\include"
+		$AdditionalIncludeDirectories		"$BASE;.\cli\SPIRV-Tools"
 		$AdditionalIncludeDirectories		"$BASE;.\cli\dirent\include" [$WINDOWS]
 		$AdditionalIncludeDirectories		"$BASE;..;."
 
@@ -47,6 +50,7 @@ $Configuration
 		$GCC_ExtraCompilerFlags				"$BASE -Wno-shadow" [$LINUXALL]
 		$GCC_ExtraCompilerFlags				"$BASE -Wno-unused-variable" [$LINUXALL]
 		$GCC_ExtraCompilerFlags				"$BASE -Wno-format" [$LINUXALL]
+		$GCC_ExtraCompilerFlags				"$BASE -Wno-format-security" [$LINUXALL]
 		$DisableSpecificWarnings			"$BASE;6313" [$ANALYZE] // Disable C6313: Incorrect operator: zero-valued flag cannot be tested with bitwise-and for rapidjson code
 	}
 	$Linker
@@ -76,6 +80,8 @@ $Project "fossilize_replay"
 		$File ".\cli\device.hpp"
 		$File ".\cli\file.cpp"
 		$File ".\cli\file.hpp"
+		$File ".\cli\fossilize_feature_filter.cpp"
+		$File ".\cli\fossilize_feature_filter.hpp"
 	}
 
 	$Folder "volk"
@@ -103,5 +109,75 @@ $Project "fossilize_replay"
 	{
 		$File ".\miniz\miniz.c"
 		$File ".\miniz\miniz.h"
+	}
+	
+	$Folder "SPIRV-Tools"
+	{
+		$File ".\cli\SPIRV-Tools\source\util\bit_vector.cpp"
+		$File ".\cli\SPIRV-Tools\source\util\parse_number.cpp"
+		$File ".\cli\SPIRV-Tools\source\util\string_utils.cpp"
+		$File ".\cli\SPIRV-Tools\source\assembly_grammar.cpp"
+		$File ".\cli\SPIRV-Tools\source\binary.cpp"
+		$File ".\cli\SPIRV-Tools\source\diagnostic.cpp"
+		$File ".\cli\SPIRV-Tools\source\disassemble.cpp"
+		$File ".\cli\SPIRV-Tools\source\enum_string_mapping.cpp"
+		$File ".\cli\SPIRV-Tools\source\ext_inst.cpp"
+		$File ".\cli\SPIRV-Tools\source\extensions.cpp"
+		$File ".\cli\SPIRV-Tools\source\libspirv.cpp"
+		$File ".\cli\SPIRV-Tools\source\name_mapper.cpp"
+		$File ".\cli\SPIRV-Tools\source\opcode.cpp"
+		$File ".\cli\SPIRV-Tools\source\operand.cpp"
+		$File ".\cli\SPIRV-Tools\source\parsed_operand.cpp"
+		$File ".\cli\SPIRV-Tools\source\print.cpp"
+		$File ".\cli\SPIRV-Tools\source\software_version.cpp"
+		$File ".\cli\SPIRV-Tools\source\spirv_endian.cpp"
+		$File ".\cli\SPIRV-Tools\source\spirv_fuzzer_options.cpp"
+		$File ".\cli\SPIRV-Tools\source\spirv_optimizer_options.cpp"
+		$File ".\cli\SPIRV-Tools\source\spirv_reducer_options.cpp"
+		$File ".\cli\SPIRV-Tools\source\spirv_target_env.cpp"
+		$File ".\cli\SPIRV-Tools\source\spirv_validator_options.cpp"
+		$File ".\cli\SPIRV-Tools\source\table.cpp"
+		$File ".\cli\SPIRV-Tools\source\text.cpp"
+		$File ".\cli\SPIRV-Tools\source\text_handler.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_adjacency.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_annotation.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_arithmetics.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_atomics.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_barriers.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_bitwise.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_builtins.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_capability.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_cfg.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_composites.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_constants.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_conversion.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_debug.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_decorations.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_derivatives.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_extensions.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_execution_limitations.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_function.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_id.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_image.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_interfaces.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_instruction.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_layout.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_literals.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_logicals.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_memory.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_memory_semantics.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_misc.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_mode_setting.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_non_uniform.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_primitives.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_scopes.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_small_type_uses.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_type.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\basic_block.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\construct.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\function.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\instruction.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validation_state.cpp"
 	}
 }
