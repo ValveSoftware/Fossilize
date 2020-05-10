@@ -4,14 +4,13 @@ set(CMAKE_POLICY_DEFAULT_CMP0063 NEW)
 project(Fossilize LANGUAGES CXX C)
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
-set(CMAKE_THREA_PREFER_PTHREAD ON)
+set(CMAKE_THREAD_PREFER_PTHREAD ON)
 
 include(CMakeDependentOption)
 include(GNUInstallDirs)
 include(CTest)
 
 find_package(Threads REQUIRED)
-find_package(Vulkan)
 
 if (NOT DEFINED CMAKE_CXX_STANDARD OR CMAKE_CXX_STANDARD LESS 14)
   set(CMAKE_CXX_STANDARD 14)
@@ -77,24 +76,28 @@ if (FOSSILIZE_SANITIZE_THREADS)
     list(APPEND FOSSILIZE_LINK_FLAGS -fsanitize=thread)
 endif()
 
+# Temporary variables to mmake some generator expressions more readable
+
+
 if (NOT TARGET miniz)
   add_library(miniz STATIC miniz/miniz.h miniz/miniz.c)
   set_target_properties(miniz PROPERTIES POSITION_INDEPENDENT_CODE ON)
   target_include_directories(miniz
     PUBLIC
       $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/miniz>)
+  string(CONCAT cxx-is-clang $<OR:
+    $<CXX_COMPILER_ID:AppleClang>,
+    $<CXX_COMPILER_ID:Clang>
+  >)
+  set(cxx-is-gcc $<CXX_COMPILER_ID:GNU>)
+  string(CONCAT is-darwin-or-android $<OR:
+    $<PLATFORM_ID:Darwin>,
+    $<PLATFORM_ID:Android>
+  >)
+
   string(CONCAT largefile $<AND:
-    $<OR:
-      $<CXX_COMPILER_ID:GNU>,
-      $<CXX_COMPILER_ID:Clang>,
-      $<CXX_COMPILER_ID:AppleClang>
-    >,
-    $<NOT:
-      $<AND:
-        $<PLATFORM_ID:Darwin>,
-        $<PLATFORM_ID:Android>
-      >
-    >
+    $<OR:${cxx-is-clang},${cxx-is-gcc}>,
+    $<NOT:${is-darwin-or-android}>
   >)
   target_compile_definitions(miniz PRIVATE $<${largefile}:_LARGEFILE64_SOURCE>)
 endif()
@@ -135,15 +138,15 @@ target_include_directories(fossilize
 target_compile_options(fossilize PRIVATE ${FOSSILIZE_CXX_FLAGS})
 target_link_libraries(fossilize
   PRIVATE
-    $<TARGET_NAME_IF_EXISTS:Vulkan::Vulkan>
     Threads::Threads
     $<$<PLATFORM_ID:Android>:android>
     $<$<PLATFORM_ID:Android>:log>
     $<$<PLATFORM_ID:Linux>:rt>
     miniz)
 
-if (CMAKE_VERSION LESS 3.13)
-  set_property(TARGET fossilize APPEND_STRING PROPERTY LINK_FLAGS ${FOSSILIZE_LINK_FLAGS})
+if (CMAKE_VERSION VERSION_LESS 3.13)
+  string(REPLACE ";" " " FOSSILIZE_LINK_FLAGS "${FOSSILIZE_LINK_FLAGS}")
+  set_property(TARGET fossilize APPEND_STRING PROPERTY LINK_FLAGS " ${FOSSILIZE_LINK_FLAGS}")
 else()
   target_link_options(fossilize PRIVATE ${FOSSILIZE_LINK_FLAGS})
 endif()
