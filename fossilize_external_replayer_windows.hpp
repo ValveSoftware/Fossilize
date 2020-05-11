@@ -28,6 +28,9 @@
 #include <string>
 #include <atomic>
 #include <unordered_set>
+#include <memory>
+#include <vector>
+#include <algorithm>
 #include "fossilize_external_replayer_control_block.hpp"
 #include "path.hpp"
 
@@ -288,6 +291,86 @@ bool ExternalReplayer::Impl::get_compute_failed_validation(size_t *count, Hash *
 	return get_failed(compute_failed_validation, count, hashes);
 }
 
+static char *create_modified_environment(unsigned num_environment_variables, const ExternalReplayer::Environment *environment_variables)
+{
+	if (!num_environment_variables)
+		return nullptr;
+
+	char *environment = GetEnvironmentStringsA();
+	if (!environment)
+	{
+		LOGE("Failed to obtain current environment for process.\n");
+		return nullptr;
+	}
+
+	char *base_environment = environment;
+
+	std::vector<std::unique_ptr<std::string>> allocated_envs;
+	std::vector<const char *> env;
+	while (*environment != '\0')
+	{
+		env.push_back(environment);
+		environment += strlen(environment) + 1;
+	}
+
+	for (unsigned i = 0; i < num_environment_variables; i++)
+	{
+		bool override_environment = false;
+
+		std::string key_value = environment_variables[i].key;
+		key_value += "=";
+		key_value += environment_variables[i].value;
+		allocated_envs.emplace_back(new std::string(std::move(key_value)));
+		const char *new_env = allocated_envs.back()->c_str();
+
+		for (auto &e : env)
+		{
+			size_t key_len = strlen(environment_variables[i].key);
+			if (strncmp(e, environment_variables[i].key, key_len) == 0 &&
+			    ((e[key_len] == '=') || (e[key_len] == '\0')))
+			{
+				e = new_env;
+				override_environment = true;
+				break;
+			}
+		}
+
+		if (!override_environment)
+			env.push_back(new_env);
+	}
+
+	// Apparently need to sort the environment block alphabetically.
+	std::sort(env.begin(), env.end(), [](const char *a, const char *b) {
+		return strcmp(a, b) < 0;
+	});
+
+	size_t environment_block_size = 0;
+	for (auto &e : env)
+		environment_block_size += strlen(e) + 1;
+	environment_block_size++;
+
+	char *new_block = static_cast<char *>(malloc(environment_block_size));
+	if (!new_block)
+	{
+		LOGE("Failed to allocate memory for new environment block.\n");
+		return nullptr;
+	}
+
+	char *block = new_block;
+
+	for (auto &e : env)
+	{
+		size_t len = strlen(e);
+		memcpy(block, e, len);
+		block += len;
+		*block++ = '\0';
+	}
+	*block = '\0';
+
+	FreeEnvironmentStringsA(base_environment);
+	return new_block;
+}
+
 bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 {
 	// Reserve 4 kB for control data, and 64 kB for a cross-process SHMEM ring buffer.
@@ -492,16 +575,29 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 		}
 	}
 
+	// Modifying the environment for a child process on Windows is an ordeal since we have no intermediate fork
+	// we can modify environment in.
+	char *modified_environment = create_modified_environment(options.num_environment_variables, options.environment_variables);
+	if (!modified_environment && options.num_environment_variables != 0)
+	{
+		LOGE("Failed to create modified environment.\n");
+		return false;
+	}
+
 	// For whatever reason, this string must be mutable. Dupe it.
 	char *duped_string = _strdup(cmdline.c_str());
 	PROCESS_INFORMATION pi = {};
-	if (!CreateProcessA(nullptr, duped_string, nullptr, nullptr, TRUE, CREATE_NO_WINDOW | CREATE_SUSPENDED, nullptr, nullptr,
+	if (!CreateProcessA(nullptr, duped_string, nullptr, nullptr, TRUE, CREATE_NO_WINDOW | CREATE_SUSPENDED,
+	                    modified_environment, nullptr,
 	                    &si, &pi))
 	{
 		LOGE("Failed to create child process.\n");
 		free(duped_string);
+		free(modified_environment);
 		return false;
 	}
+
+	free(modified_environment);
 
 	if (job_handle && !AssignProcessToJobObject(job_handle, pi.hProcess))
 	{

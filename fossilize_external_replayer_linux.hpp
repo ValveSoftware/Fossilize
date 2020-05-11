@@ -489,6 +489,10 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 			}
 		}
 
+		// We're now in the child process, so it's safe to override environment here.
+		for (unsigned i = 0; i < options.num_environment_variables; i++)
+			setenv(options.environment_variables[i].key, options.environment_variables[i].value, 1);
+
 		if (execv(options.external_replayer_path ? options.external_replayer_path : self_path.c_str(),
 		          const_cast<char * const*>(argv.data())) < 0)
 		{

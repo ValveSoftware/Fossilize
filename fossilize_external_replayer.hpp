@@ -30,6 +30,12 @@ namespace Fossilize
 class ExternalReplayer
 {
 public:
+	struct Environment
+	{
+		const char *key;
+		const char *value;
+	};
+
 	struct Options
 	{
 		// Path to the fossilize-replay executable.
@@ -54,6 +60,11 @@ public:
 
 		// Path to store pipeline stats in.
 		const char *pipeline_stats_path;
+
+		// Extra environment variables which will be added to the child process tree.
+		// Will not modify environment of caller.
+		const Environment *environment_variables;
+		unsigned num_environment_variables;
 
 		// Maps to --num-threads. If 0, no argument for --num-threads is passed.
 		unsigned num_threads;
