@@ -634,6 +634,17 @@ struct ThreadedReplayer : StateCreatorInterface
 		}
 	}
 
+	bool has_resource_in_whitelist(ResourceTag tag, Hash hash)
+	{
+		if (validation_whitelist_db)
+		{
+			lock_guard<mutex> holder{validation_db_mutex};
+			return validation_whitelist_db->has_entry(tag, hash);
+		}
+		else
+			return false;
+	}
+
 	bool resource_is_blacklisted(ResourceTag tag, Hash hash)
 	{
 		if (validation_blacklist_db)
@@ -1429,7 +1440,7 @@ struct ThreadedReplayer : StateCreatorInterface
 		}
 
 #ifdef FOSSILIZE_REPLAYER_SPIRV_VAL
-		if (opts.spirv_validate)
+		if (opts.spirv_validate && !has_resource_in_whitelist(RESOURCE_SHADER_MODULE, hash))
 		{
 			auto start_time = chrono::steady_clock::now();
 			spv_target_env env;
