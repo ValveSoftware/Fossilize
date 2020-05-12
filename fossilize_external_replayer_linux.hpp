@@ -67,6 +67,7 @@ struct ExternalReplayer::Impl
 	std::unordered_set<Hash> compute_failed_validation;
 
 	bool start(const ExternalReplayer::Options &options);
+	void start_replayer_process(const ExternalReplayer::Options &options);
 	ExternalReplayer::PollResult poll_progress(Progress &progress);
 	uintptr_t get_process_handle() const;
 	int wait();
@@ -297,6 +298,143 @@ bool ExternalReplayer::Impl::get_compute_failed_validation(size_t *count, Hash *
 	return get_failed(compute_failed_validation, count, hashes);
 }
 
+void ExternalReplayer::Impl::start_replayer_process(const ExternalReplayer::Options &options)
+{
+	char fd_name[16];
+	sprintf(fd_name, "%d", fd);
+	char num_thread_holder[16];
+
+	std::string self_path;
+	if (!options.external_replayer_path)
+		self_path = Path::get_executable_path();
+
+	std::vector<const char *> argv;
+	if (options.external_replayer_path)
+		argv.push_back(options.external_replayer_path);
+	else
+		argv.push_back(self_path.c_str());
+
+	for (unsigned i = 0; i < options.num_databases; i++)
+		argv.push_back(options.databases[i]);
+
+	argv.push_back("--master-process");
+	if (options.quiet)
+		argv.push_back("--quiet-slave");
+	argv.push_back("--shmem-fd");
+	argv.push_back(fd_name);
+
+	if (options.pipeline_cache)
+		argv.push_back("--pipeline-cache");
+	if (options.spirv_validate)
+		argv.push_back("--spirv-val");
+
+	if (options.num_threads)
+	{
+		argv.push_back("--num-threads");
+		sprintf(num_thread_holder, "%u", options.num_threads);
+		argv.push_back(num_thread_holder);
+	}
+
+	if (options.on_disk_pipeline_cache)
+	{
+		argv.push_back("--on-disk-pipeline-cache");
+		argv.push_back(options.on_disk_pipeline_cache);
+	}
+
+	if (options.on_disk_validation_cache)
+	{
+		argv.push_back("--on-disk-validation-cache");
+		argv.push_back(options.on_disk_validation_cache);
+	}
+
+	if (options.on_disk_validation_whitelist)
+	{
+		argv.push_back("--on-disk-validation-whitelist");
+		argv.push_back(options.on_disk_validation_whitelist);
+	}
+
+	if (options.on_disk_validation_blacklist)
+	{
+		argv.push_back("--on-disk-validation-blacklist");
+		argv.push_back(options.on_disk_validation_blacklist);
+	}
+
+	if (options.enable_validation)
+		argv.push_back("--enable-validation");
+
+	if (options.ignore_derived_pipelines)
+		argv.push_back("--ignore-derived-pipelines");
+
+	if (options.null_device)
+		argv.push_back("--null-device");
+
+	argv.push_back("--device-index");
+	char index_name[16];
+	sprintf(index_name, "%u", options.device_index);
+	argv.push_back(index_name);
+
+	char graphics_range_start[16], graphics_range_end[16];
+	char compute_range_start[16], compute_range_end[16];
+
+	if (options.use_pipeline_range)
+	{
+		argv.push_back("--graphics-pipeline-range");
+		sprintf(graphics_range_start, "%u", options.start_graphics_index);
+		sprintf(graphics_range_end, "%u", options.end_graphics_index);
+		argv.push_back(graphics_range_start);
+		argv.push_back(graphics_range_end);
+
+		argv.push_back("--compute-pipeline-range");
+		sprintf(compute_range_start, "%u", options.start_compute_index);
+		sprintf(compute_range_end, "%u", options.end_compute_index);
+		argv.push_back(compute_range_start);
+		argv.push_back(compute_range_end);
+	}
+
+	if (options.pipeline_stats_path)
+	{
+		argv.push_back("--enable-pipeline-stats");
+		argv.push_back(options.pipeline_stats_path);
+	}
+
+	char timeout[16];
+	if (options.timeout_seconds)
+	{
+		argv.push_back("--timeout-seconds");
+		sprintf(timeout, "%u", options.timeout_seconds);
+		argv.push_back(timeout);
+	}
+
+	argv.push_back(nullptr);
+
+	if (options.quiet)
+	{
+		int null_fd = open("/dev/null", O_WRONLY);
+		if (null_fd >= 0)
+		{
+			dup2(null_fd, STDOUT_FILENO);
+			dup2(null_fd, STDERR_FILENO);
+			close(null_fd);
+		}
+	}
+
+	// We're now in the child process, so it's safe to override environment here.
+	for (unsigned i = 0; i < options.num_environment_variables; i++)
+		setenv(options.environment_variables[i].key, options.environment_variables[i].value, 1);
+
+	if (execv(options.external_replayer_path ? options.external_replayer_path : self_path.c_str(),
+	          const_cast<char * const*>(argv.data())) < 0)
+	{
+		LOGE("Failed to start external process %s with execv.\n", options.external_replayer_path);
+		exit(errno);
+	}
+	else
+	{
+		LOGE("Failed to start external process %s with execv.\n", options.external_replayer_path);
+		exit(1);
+	}
+}
+
 bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 {
 	char shm_name[256];
@@ -371,139 +509,7 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 			}
 		}
 
-		char fd_name[16];
-		sprintf(fd_name, "%d", fd);
-		char num_thread_holder[16];
-
-		std::string self_path;
-		if (!options.external_replayer_path)
-			self_path = Path::get_executable_path();
-
-		std::vector<const char *> argv;
-		if (options.external_replayer_path)
-			argv.push_back(options.external_replayer_path);
-		else
-			argv.push_back(self_path.c_str());
-
-		for (unsigned i = 0; i < options.num_databases; i++)
-			argv.push_back(options.databases[i]);
-
-		argv.push_back("--master-process");
-		if (options.quiet)
-			argv.push_back("--quiet-slave");
-		argv.push_back("--shmem-fd");
-		argv.push_back(fd_name);
-
-		if (options.pipeline_cache)
-			argv.push_back("--pipeline-cache");
-		if (options.spirv_validate)
-			argv.push_back("--spirv-val");
-
-		if (options.num_threads)
-		{
-			argv.push_back("--num-threads");
-			sprintf(num_thread_holder, "%u", options.num_threads);
-			argv.push_back(num_thread_holder);
-		}
-
-		if (options.on_disk_pipeline_cache)
-		{
-			argv.push_back("--on-disk-pipeline-cache");
-			argv.push_back(options.on_disk_pipeline_cache);
-		}
-
-		if (options.on_disk_validation_cache)
-		{
-			argv.push_back("--on-disk-validation-cache");
-			argv.push_back(options.on_disk_validation_cache);
-		}
-
-		if (options.on_disk_validation_whitelist)
-		{
-			argv.push_back("--on-disk-validation-whitelist");
-			argv.push_back(options.on_disk_validation_whitelist);
-		}
-
-		if (options.on_disk_validation_blacklist)
-		{
-			argv.push_back("--on-disk-validation-blacklist");
-			argv.push_back(options.on_disk_validation_blacklist);
-		}
-
-		if (options.enable_validation)
-			argv.push_back("--enable-validation");
-
-		if (options.ignore_derived_pipelines)
-			argv.push_back("--ignore-derived-pipelines");
-
-		if (options.null_device)
-			argv.push_back("--null-device");
-
-		argv.push_back("--device-index");
-		char index_name[16];
-		sprintf(index_name, "%u", options.device_index);
-		argv.push_back(index_name);
-
-		char graphics_range_start[16], graphics_range_end[16];
-		char compute_range_start[16], compute_range_end[16];
-
-		if (options.use_pipeline_range)
-		{
-			argv.push_back("--graphics-pipeline-range");
-			sprintf(graphics_range_start, "%u", options.start_graphics_index);
-			sprintf(graphics_range_end, "%u", options.end_graphics_index);
-			argv.push_back(graphics_range_start);
-			argv.push_back(graphics_range_end);
-
-			argv.push_back("--compute-pipeline-range");
-			sprintf(compute_range_start, "%u", options.start_compute_index);
-			sprintf(compute_range_end, "%u", options.end_compute_index);
-			argv.push_back(compute_range_start);
-			argv.push_back(compute_range_end);
-		}
-
-		if (options.pipeline_stats_path)
-		{
-			argv.push_back("--enable-pipeline-stats");
-			argv.push_back(options.pipeline_stats_path);
-		}
-
-		char timeout[16];
-		if (options.timeout_seconds)
-		{
-			argv.push_back("--timeout-seconds");
-			sprintf(timeout, "%u", options.timeout_seconds);
-			argv.push_back(timeout);
-		}
-
-		argv.push_back(nullptr);
-
-		if (options.quiet)
-		{
-			int null_fd = open("/dev/null", O_WRONLY);
-			if (null_fd >= 0)
-			{
-				dup2(null_fd, STDOUT_FILENO);
-				dup2(null_fd, STDERR_FILENO);
-				close(null_fd);
-			}
-		}
-
-		// We're now in the child process, so it's safe to override environment here.
-		for (unsigned i = 0; i < options.num_environment_variables; i++)
-			setenv(options.environment_variables[i].key, options.environment_variables[i].value, 1);
-
-		if (execv(options.external_replayer_path ? options.external_replayer_path : self_path.c_str(),
-		          const_cast<char * const*>(argv.data())) < 0)
-		{
-			LOGE("Failed to start external process %s with execv.\n", options.external_replayer_path);
-			exit(errno);
-		}
-		else
-		{
-			LOGE("Failed to start external process %s with execv.\n", options.external_replayer_path);
-			exit(1);
-		}
+		start_replayer_process(options);
 	}
 	else
 	{
