@@ -155,9 +155,13 @@ bool VulkanDevice::init_device(const Options &opts)
 		if (vkEnumerateInstanceLayerProperties(&layer_count, layers.data()) != VK_SUCCESS)
 			return false;
 
-		// FIXME: This will not work on Android, use "shopping list of layers" method. :(
-		if (find_layer(layers, "VK_LAYER_LUNARG_standard_validation"))
-			active_layers.push_back("VK_LAYER_LUNARG_standard_validation");
+		if (find_layer(layers, "VK_LAYER_KHRONOS_validation"))
+			active_layers.push_back("VK_LAYER_KHRONOS_validation");
+		else
+		{
+			LOGE("Cannot find VK_LAYER_KHRONOS_validation layer.\n");
+			return false;
+		}
 	}
 
 	bool use_debug_callback = find_extension(exts, VK_EXT_DEBUG_REPORT_EXTENSION_NAME);
@@ -330,18 +334,22 @@ bool VulkanDevice::init_device(const Options &opts)
 		if (device_layer_count && vkEnumerateDeviceLayerProperties(gpu, &device_layer_count, device_layers.data()) != VK_SUCCESS)
 			return false;
 
-		// FIXME: This will not work on Android, use "shopping list of layers" method. :(
-		if (find_layer(device_layers, "VK_LAYER_LUNARG_standard_validation"))
+		if (find_layer(device_layers, "VK_LAYER_KHRONOS_validation"))
 		{
-			active_device_layers.push_back("VK_LAYER_LUNARG_standard_validation");
+			active_device_layers.push_back("VK_LAYER_KHRONOS_validation");
 
 			uint32_t validation_ext_count = 0;
-			vkEnumerateDeviceExtensionProperties(gpu, "VK_LAYER_LUNARG_standard_validation", &validation_ext_count, nullptr);
+			vkEnumerateDeviceExtensionProperties(gpu, "VK_LAYER_KHRONOS_validation", &validation_ext_count, nullptr);
 			vector<VkExtensionProperties> validation_extensions(validation_ext_count);
-			vkEnumerateDeviceExtensionProperties(gpu, "VK_LAYER_LUNARG_standard_validation", &validation_ext_count, validation_extensions.data());
+			vkEnumerateDeviceExtensionProperties(gpu, "VK_LAYER_KHRONOS_validation", &validation_ext_count, validation_extensions.data());
 			validation_cache = find_extension(validation_extensions, VK_EXT_VALIDATION_CACHE_EXTENSION_NAME);
 			if (validation_cache)
 				active_device_extensions.push_back(VK_EXT_VALIDATION_CACHE_EXTENSION_NAME);
+		}
+		else
+		{
+			LOGE("Cannot find VK_LAYER_KHRONOS_validation layer.\n");
+			return false;
 		}
 	}
 
