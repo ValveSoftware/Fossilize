@@ -173,7 +173,11 @@ void ExternalReplayer::Impl::parse_message(const char *msg)
 bool ExternalReplayer::Impl::is_process_complete(int *return_status)
 {
 	if (!process)
-		return exit_code;
+	{
+		if (return_status)
+			*return_status = exit_code;
+		return true;
+	}
 
 	if (WaitForSingleObject(process, 0) == WAIT_OBJECT_0)
 	{
