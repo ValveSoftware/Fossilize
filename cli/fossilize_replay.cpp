@@ -3038,11 +3038,9 @@ int main(int argc, char *argv[])
 	});
 	cbs.add("--on-disk-validation-blacklist", [&](CLIParser &parser) {
 		replayer_opts.on_disk_validation_blacklist_path = parser.next_string();
-		opts.enable_validation = true;
 	});
 	cbs.add("--on-disk-validation-whitelist", [&](CLIParser &parser) {
 		replayer_opts.on_disk_validation_whitelist_path = parser.next_string();
-		opts.enable_validation = true;
 	});
 	cbs.add("--num-threads", [&](CLIParser &parser) { replayer_opts.num_threads = parser.next_uint(); });
 	cbs.add("--loop", [&](CLIParser &parser) { replayer_opts.loop_count = parser.next_uint(); });
