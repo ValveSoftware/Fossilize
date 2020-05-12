@@ -172,7 +172,7 @@ bool is_abspath(const string &path)
 
 #ifdef _WIN32
 	{
-		auto index = std::min(path.find(":/"), path.find(":\\"));
+		auto index = (std::min)(path.find(":/"), path.find(":\\"));
 		if (index != string::npos)
 			return true;
 	}
@@ -191,7 +191,7 @@ bool is_root_path(const string &path)
 
 #ifdef _WIN32
 	{
-		auto index = std::min(path.find(":/"), path.find(":\\"));
+		auto index = (std::min)(path.find(":/"), path.find(":\\"));
 		if (index != string::npos && (index + 2) == path.size())
 			return true;
 	}

@@ -384,7 +384,7 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 	char shm_mutex_name[256];
 	sprintf(shm_name, "fossilize-external-%lu-%d", GetCurrentProcessId(), shm_index.fetch_add(1, std::memory_order_relaxed));
 	sprintf(shm_mutex_name, "fossilize-external-%lu-%d", GetCurrentProcessId(), shm_index.fetch_add(1, std::memory_order_relaxed));
-	mapping_handle = CreateFileMapping(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, shm_block_size, shm_name);
+	mapping_handle = CreateFileMapping(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, (DWORD)shm_block_size, shm_name);
 
 	if (!mapping_handle)
 	{
