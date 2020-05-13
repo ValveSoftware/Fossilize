@@ -163,8 +163,11 @@ public:
 	struct TypeProgress
 	{
 		uint32_t parsed;
+		uint32_t parsed_fail;
 		uint32_t completed;
 		uint32_t skipped;
+
+		// This value is dynamic and will be incremented as pipelines are queued up for parsing.
 		uint32_t total;
 	};
 
@@ -174,15 +177,21 @@ public:
 		TypeProgress graphics;
 
 		uint32_t completed_modules;
+		uint32_t missing_modules;
 		uint32_t total_modules;
 		uint32_t banned_modules;
 		uint32_t module_validation_failures;
 
 		uint32_t clean_crashes;
 		uint32_t dirty_crashes;
+
+		// These values are static and represents the total amount pipelines in the archive that we expect to replay.
+		uint32_t total_graphics_pipeline_blobs;
+		uint32_t total_compute_pipeline_blobs;
 	};
 
 	PollResult poll_progress(Progress &progress);
+	static void compute_condensed_progress(const Progress &progress, unsigned &completed, unsigned &total);
 
 private:
 	struct Impl;

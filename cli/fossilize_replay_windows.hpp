@@ -705,6 +705,12 @@ static int run_master_process(const VulkanDevice::Options &opts,
 
 	size_t num_graphics_pipelines;
 	size_t num_compute_pipelines;
+
+	size_t requested_graphic_pipelines = replayer_opts.end_graphics_index - replayer_opts.start_graphics_index;
+	size_t graphics_pipeline_offset = 0;
+	size_t requested_compute_pipelines = replayer_opts.end_compute_index - replayer_opts.start_compute_index;
+	size_t compute_pipeline_offset = 0;
+
 	{
 		auto db = create_database(databases);
 		if (!db->prepare())
@@ -727,6 +733,24 @@ static int run_master_process(const VulkanDevice::Options &opts,
 				LOGE("Failed to parse database %s.\n", path);
 			return EXIT_FAILURE;
 		}
+
+		if (requested_graphic_pipelines < num_graphics_pipelines)
+		{
+			num_graphics_pipelines = requested_graphic_pipelines;
+			graphics_pipeline_offset = replayer_opts.start_graphics_index;
+		}
+
+		if (requested_compute_pipelines < num_compute_pipelines)
+		{
+			num_compute_pipelines = requested_compute_pipelines;
+			compute_pipeline_offset = replayer_opts.start_compute_index;
+		}
+
+		if (Global::control_block)
+		{
+			Global::control_block->static_total_count_graphics = num_graphics_pipelines;
+			Global::control_block->static_total_count_compute = num_compute_pipelines;
+		}
 	}
 
 	if (Global::control_block)
@@ -735,23 +759,6 @@ static int run_master_process(const VulkanDevice::Options &opts,
 	Global::active_processes = 0;
 	vector<ProcessProgress> child_processes(processes);
 	vector<HANDLE> wait_handles;
-
-	size_t requested_graphic_pipelines = replayer_opts.end_graphics_index - replayer_opts.start_graphics_index;
-	size_t graphics_pipeline_offset = 0;
-	size_t requested_compute_pipelines = replayer_opts.end_compute_index - replayer_opts.start_compute_index;
-	size_t compute_pipeline_offset = 0;
-
-	if (requested_graphic_pipelines < num_graphics_pipelines)
-	{
-		num_graphics_pipelines = requested_graphic_pipelines;
-		graphics_pipeline_offset = replayer_opts.start_graphics_index;
-	}
-
-	if (requested_compute_pipelines < num_compute_pipelines)
-	{
-		num_compute_pipelines = requested_compute_pipelines;
-		compute_pipeline_offset = replayer_opts.start_compute_index;
-	}
 
 	// CreateProcess for our children.
 	for (unsigned i = 0; i < processes; i++)
