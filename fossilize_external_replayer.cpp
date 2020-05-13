@@ -21,6 +21,7 @@
  */
 
 #include "fossilize_external_replayer.hpp"
+#include <algorithm>
 
 #if defined(_WIN32)
 #include "fossilize_external_replayer_windows.hpp"
@@ -65,6 +66,33 @@ bool ExternalReplayer::start(const Options &options)
 ExternalReplayer::PollResult ExternalReplayer::poll_progress(Progress &progress)
 {
 	return impl->poll_progress(progress);
+}
+
+void ExternalReplayer::compute_condensed_progress(const Progress &progress, unsigned &completed, unsigned &total)
+{
+	// Pipelines go through parsing and then compilation, each of which stage gets a report.
+	// Some pipelines might be compiled twice if they are derivable pipelines especially when using multi-process replays.
+	// There are also shenanigans when pipelines are compiled multiple times as a result of crash recoveries.
+	// We do not know ahead of time how many modules we are going to compile from the archive.
+	// This depends entirely on which modules the pipelines refer to.
+	// Due to all these quirks, it is somewhat complicated to provide an accurate metric on completion.
+	unsigned total_actions = 2 * progress.total_graphics_pipeline_blobs +
+	                         2 * progress.total_compute_pipeline_blobs +
+	                         progress.total_modules;
+
+	// If we have crashes or other unexpected behavior, these values might increase beyond the expected value.
+	// Just clamp it to never report obviously wrong values.
+	// The only glitch we risk is that we're stuck at "100%" a bit longer,
+	// but UI can always report something here when we know we're not done yet.
+	unsigned parsed_graphics = (std::min)(progress.graphics.parsed + progress.graphics.parsed_fail, progress.total_graphics_pipeline_blobs);
+	unsigned parsed_compute = (std::min)(progress.compute.parsed + progress.compute.parsed_fail, progress.total_compute_pipeline_blobs);
+	unsigned compiled_graphics = (std::min)(progress.graphics.completed + progress.graphics.skipped, progress.total_graphics_pipeline_blobs);
+	unsigned compiled_compute = (std::min)(progress.compute.completed + progress.compute.skipped, progress.total_compute_pipeline_blobs);
+	unsigned decompressed_modules = (std::min)(progress.completed_modules + progress.module_validation_failures +
+	                                           progress.banned_modules + progress.missing_modules, progress.total_modules);
+
+	completed = parsed_graphics + parsed_compute + compiled_graphics + compiled_compute + decompressed_modules;
+	total = total_actions;
 }
 
 bool ExternalReplayer::is_process_complete(int *return_status)

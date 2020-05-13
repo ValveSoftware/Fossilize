@@ -111,18 +111,24 @@ ExternalReplayer::PollResult ExternalReplayer::Impl::poll_progress(ExternalRepla
 
 	progress.compute.total = shm_block->total_compute.load(std::memory_order_relaxed);
 	progress.compute.parsed = shm_block->parsed_compute.load(std::memory_order_relaxed);
+	progress.compute.parsed_fail = shm_block->parsed_compute_failures.load(std::memory_order_relaxed);
 	progress.compute.skipped = shm_block->skipped_compute.load(std::memory_order_relaxed);
 	progress.compute.completed = shm_block->successful_compute.load(std::memory_order_relaxed);
 	progress.graphics.total = shm_block->total_graphics.load(std::memory_order_relaxed);
 	progress.graphics.parsed = shm_block->parsed_graphics.load(std::memory_order_relaxed);
+	progress.graphics.parsed_fail = shm_block->parsed_graphics_failures.load(std::memory_order_relaxed);
 	progress.graphics.skipped = shm_block->skipped_graphics.load(std::memory_order_relaxed);
 	progress.graphics.completed = shm_block->successful_graphics.load(std::memory_order_relaxed);
 	progress.completed_modules = shm_block->successful_modules.load(std::memory_order_relaxed);
+	progress.missing_modules = shm_block->parsed_module_failures.load(std::memory_order_relaxed);
 	progress.total_modules = shm_block->total_modules.load(std::memory_order_relaxed);
 	progress.banned_modules = shm_block->banned_modules.load(std::memory_order_relaxed);
 	progress.module_validation_failures = shm_block->module_validation_failures.load(std::memory_order_relaxed);
 	progress.clean_crashes = shm_block->clean_process_deaths.load(std::memory_order_relaxed);
 	progress.dirty_crashes = shm_block->dirty_process_deaths.load(std::memory_order_relaxed);
+
+	progress.total_graphics_pipeline_blobs = shm_block->static_total_count_graphics.load(std::memory_order_relaxed);
+	progress.total_compute_pipeline_blobs = shm_block->static_total_count_compute.load(std::memory_order_relaxed);
 
 	futex_wrapper_lock(&shm_block->futex_lock);
 	size_t read_avail = shared_control_block_read_avail(shm_block);

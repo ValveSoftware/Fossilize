@@ -445,6 +445,12 @@ static int run_master_process(const VulkanDevice::Options &opts,
 
 	size_t num_graphics_pipelines;
 	size_t num_compute_pipelines;
+
+	unsigned requested_graphic_pipelines = replayer_opts.end_graphics_index - replayer_opts.start_graphics_index;
+	unsigned graphics_pipeline_offset = 0;
+	unsigned requested_compute_pipelines = replayer_opts.end_compute_index - replayer_opts.start_compute_index;
+	unsigned compute_pipeline_offset = 0;
+
 	{
 		auto db = create_database(databases);
 		if (!db->prepare())
@@ -466,6 +472,24 @@ static int run_master_process(const VulkanDevice::Options &opts,
 			for (auto &path : databases)
 				LOGE("Failed to parse database %s.\n", path);
 			return EXIT_FAILURE;
+		}
+
+		if (requested_graphic_pipelines < num_graphics_pipelines)
+		{
+			num_graphics_pipelines = requested_graphic_pipelines;
+			graphics_pipeline_offset = replayer_opts.start_graphics_index;
+		}
+
+		if (requested_compute_pipelines < num_compute_pipelines)
+		{
+			num_compute_pipelines = requested_compute_pipelines;
+			compute_pipeline_offset = replayer_opts.start_compute_index;
+		}
+
+		if (Global::control_block)
+		{
+			Global::control_block->static_total_count_graphics = num_graphics_pipelines;
+			Global::control_block->static_total_count_compute = num_compute_pipelines;
 		}
 	}
 
@@ -517,23 +541,6 @@ static int run_master_process(const VulkanDevice::Options &opts,
 			LOGE("Failed to add signalfd to epoll.\n");
 			return EXIT_FAILURE;
 		}
-	}
-
-	unsigned requested_graphic_pipelines = replayer_opts.end_graphics_index - replayer_opts.start_graphics_index;
-	unsigned graphics_pipeline_offset = 0;
-	unsigned requested_compute_pipelines = replayer_opts.end_compute_index - replayer_opts.start_compute_index;
-	unsigned compute_pipeline_offset = 0;
-
-	if (requested_graphic_pipelines < num_graphics_pipelines)
-	{
-		num_graphics_pipelines = requested_graphic_pipelines;
-		graphics_pipeline_offset = replayer_opts.start_graphics_index;
-	}
-
-	if (requested_compute_pipelines < num_compute_pipelines)
-	{
-		num_compute_pipelines = requested_compute_pipelines;
-		compute_pipeline_offset = replayer_opts.start_compute_index;
 	}
 
 	// fork() and pipe() strategy.

@@ -32,7 +32,7 @@ static_assert(sizeof(std::atomic<uint32_t>) == sizeof(uint32_t), "Atomic size mi
 namespace Fossilize
 {
 enum { ControlBlockMessageSize = 64 };
-enum { ControlBlockMagic = 0x19bcde16 };
+enum { ControlBlockMagic = 0x19bcde17 };
 
 struct SharedControlBlock
 {
@@ -51,6 +51,9 @@ struct SharedControlBlock
 	std::atomic<uint32_t> dirty_process_deaths;
 	std::atomic<uint32_t> parsed_graphics;
 	std::atomic<uint32_t> parsed_compute;
+	std::atomic<uint32_t> parsed_graphics_failures;
+	std::atomic<uint32_t> parsed_compute_failures;
+	std::atomic<uint32_t> parsed_module_failures;
 	std::atomic<uint32_t> total_graphics;
 	std::atomic<uint32_t> total_compute;
 	std::atomic<uint32_t> total_modules;
@@ -58,6 +61,9 @@ struct SharedControlBlock
 	std::atomic<uint32_t> module_validation_failures;
 	std::atomic<uint32_t> progress_started;
 	std::atomic<uint32_t> progress_complete;
+
+	std::atomic<uint32_t> static_total_count_graphics;
+	std::atomic<uint32_t> static_total_count_compute;
 
 	// Ring buffer. Needs lock.
 	uint32_t write_count;

@@ -465,6 +465,8 @@ struct ThreadedReplayer : StateCreatorInterface
 		if (!global_database->read_entry(work_item.tag, work_item.hash, &json_size, nullptr, PAYLOAD_READ_CONCURRENT_BIT))
 		{
 			LOGE("Failed to read entry (%u: %016" PRIx64 ")\n", unsigned(work_item.tag), work_item.hash);
+			if (work_item.tag == RESOURCE_SHADER_MODULE && opts.control_block)
+				opts.control_block->parsed_module_failures.fetch_add(1, std::memory_order_relaxed);
 			return false;
 		}
 
@@ -484,6 +486,17 @@ struct ThreadedReplayer : StateCreatorInterface
 		if (!replayer.parse(*this, global_database, buffer.data(), buffer.size()))
 		{
 			LOGE("Failed to parse blob (tag: %d, hash: 0x%016" PRIx64 ").\n", work_item.tag, work_item.hash);
+
+			if (work_item.tag == RESOURCE_GRAPHICS_PIPELINE && opts.control_block)
+			{
+				opts.control_block->parsed_graphics_failures.fetch_add(1, std::memory_order_relaxed);
+				opts.control_block->skipped_graphics.fetch_add(1, std::memory_order_relaxed);
+			}
+			else if (work_item.tag == RESOURCE_COMPUTE_PIPELINE && opts.control_block)
+			{
+				opts.control_block->parsed_compute_failures.fetch_add(1, std::memory_order_relaxed);
+				opts.control_block->skipped_compute.fetch_add(1, std::memory_order_relaxed);
+			}
 
 			// If we failed to parse, we need to at least clear out the state to something sensible.
 			unsigned index = per_thread.current_parse_index;
@@ -2312,12 +2325,16 @@ static void print_help()
 #ifndef NO_ROBUST_REPLAYER
 static void log_progress(const ExternalReplayer::Progress &progress)
 {
+	unsigned current_actions, total_actions;
+	ExternalReplayer::compute_condensed_progress(progress, current_actions, total_actions);
+
 	LOGI("=================\n");
 	LOGI(" Progress report:\n");
-	LOGI("   Parsed graphics %u / %u\n", progress.graphics.parsed, progress.graphics.total);
-	LOGI("   Parsed compute %u / %u\n", progress.compute.parsed, progress.compute.total);
-	LOGI("   Decompress modules %u / %u, skipped %u, failed validation %u\n",
-	     progress.completed_modules, progress.total_modules, progress.banned_modules, progress.module_validation_failures);
+	LOGI("   Overall %u / %u\n", current_actions, total_actions);
+	LOGI("   Parsed graphics %u / %u, failed %u\n", progress.graphics.parsed, progress.graphics.total, progress.graphics.parsed_fail);
+	LOGI("   Parsed compute %u / %u, failed %u\n", progress.compute.parsed, progress.compute.total, progress.compute.parsed_fail);
+	LOGI("   Decompress modules %u / %u, skipped %u, failed validation %u, missing %u\n",
+	     progress.completed_modules, progress.total_modules, progress.banned_modules, progress.module_validation_failures, progress.missing_modules);
 	LOGI("   Compile graphics %u / %u, skipped %u\n", progress.graphics.completed, progress.graphics.total, progress.graphics.skipped);
 	LOGI("   Compile compute %u / %u, skipped %u\n", progress.compute.completed, progress.compute.total, progress.compute.skipped);
 	LOGI("   Clean crashes %u\n", progress.clean_crashes);
