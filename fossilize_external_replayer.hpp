@@ -137,6 +137,7 @@ public:
 	bool is_process_complete(int *return_status);
 
 	// Requests that process (and its children) are killed.
+	// Can only be used when inherit_process_group is false.
 	bool kill();
 
 	// As the replayer is progressing, it might find SPIR-V modules which might have contributed to a crash.
