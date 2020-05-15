@@ -29,6 +29,7 @@
 #include "file.hpp"
 #include <algorithm>
 #include <memory>
+#include <string.h>
 
 using namespace Fossilize;
 
@@ -41,7 +42,8 @@ static void print_help()
 	     "\t[--geom shader.spv]\n"
 	     "\t[--frag shader.spv]\n"
 	     "\t[--comp shader.spv]\n"
-	     "\t[--output out.foz]\n");
+	     "\t[--output out.foz]\n"
+	     "\t[--spec <ID> <f32/u32/i32> <value>\n");
 }
 
 enum ShaderStage
@@ -53,6 +55,12 @@ enum ShaderStage
 	STAGE_FRAG,
 	STAGE_COMP,
 	STAGE_COUNT
+};
+
+struct SpecConstant
+{
+	std::vector<uint32_t> data;
+	std::vector<VkSpecializationMapEntry> map_entries;
 };
 
 static bool load_shader_modules(const std::string *stages, std::vector<uint8_t> *modules)
@@ -550,7 +558,8 @@ static VkRenderPass synthesize_render_pass(StateRecorder &recorder, spvc_compile
 }
 
 static VkPipeline synthesize_compute_pipeline(StateRecorder &recorder,
-                                              const std::vector<uint8_t> *modules, VkPipelineLayout layout)
+                                              const std::vector<uint8_t> *modules, VkPipelineLayout layout,
+                                              const SpecConstant &specs)
 {
 	VkShaderModuleCreateInfo module_info = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
 	module_info.codeSize = modules[STAGE_COMP].size();
@@ -559,11 +568,19 @@ static VkPipeline synthesize_compute_pipeline(StateRecorder &recorder,
 		return VK_NULL_HANDLE;
 
 	VkComputePipelineCreateInfo info = { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
+	VkSpecializationInfo spec_info = {};
+
+	spec_info.dataSize = specs.data.size() * sizeof(uint32_t);
+	spec_info.pData = specs.data.data();
+	spec_info.mapEntryCount = specs.map_entries.size();
+	spec_info.pMapEntries = specs.map_entries.data();
 
 	info.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 	info.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
 	info.stage.module = (VkShaderModule)uint64_t(1);
 	info.stage.pName = "main";
+	if (spec_info.dataSize != 0)
+		info.stage.pSpecializationInfo = &spec_info;
 	info.layout = layout;
 
 	if (!recorder.record_compute_pipeline((VkPipeline)uint64_t(1), info, nullptr, 0))
@@ -636,10 +653,18 @@ static VkPipeline synthesize_graphics_pipeline(StateRecorder &recorder,
                                                spvc_compiler *compilers,
                                                VkPipelineLayout layout,
                                                VkRenderPass render_pass,
-                                               uint8_t active_rt_mask)
+                                               uint8_t active_rt_mask,
+                                               const SpecConstant &specs)
 {
 	std::vector<VkPipelineShaderStageCreateInfo> stages;
 	stages.reserve(STAGE_COUNT - 1);
+
+	VkSpecializationInfo spec_info = {};
+
+	spec_info.dataSize = specs.data.size() * sizeof(uint32_t);
+	spec_info.pData = specs.data.data();
+	spec_info.mapEntryCount = specs.map_entries.size();
+	spec_info.pMapEntries = specs.map_entries.data();
 
 	for (unsigned i = 0; i <= STAGE_FRAG; i++)
 	{
@@ -655,6 +680,8 @@ static VkPipeline synthesize_graphics_pipeline(StateRecorder &recorder,
 			stage.module = (VkShaderModule)uint64_t(1 + i);
 			stage.pName = "main";
 			stage.stage = VkShaderStageFlagBits(1u << i);
+			if (spec_info.dataSize != 0)
+				stage.pSpecializationInfo = &spec_info;
 			stages.push_back(stage);
 		}
 	}
@@ -749,6 +776,7 @@ int main(int argc, char *argv[])
 	CLICallbacks cbs;
 	std::string spv_paths[STAGE_COUNT];
 	std::string output_path;
+	SpecConstant spec_constants;
 
 	cbs.add("--vert", [&](CLIParser &parser) { spv_paths[STAGE_VERT] = parser.next_string(); });
 	cbs.add("--tesc", [&](CLIParser &parser) { spv_paths[STAGE_TESC] = parser.next_string(); });
@@ -758,6 +786,34 @@ int main(int argc, char *argv[])
 	cbs.add("--comp", [&](CLIParser &parser) { spv_paths[STAGE_COMP] = parser.next_string(); });
 	cbs.add("--output", [&](CLIParser &parser) { output_path = parser.next_string(); });
 	cbs.add("--help", [&](CLIParser &parser) { parser.end(); });
+	cbs.add("--spec", [&](CLIParser &parser) {
+		VkSpecializationMapEntry map_entry = {};
+		map_entry.size = sizeof(uint32_t);
+		map_entry.offset = spec_constants.data.size() * sizeof(uint32_t);
+		map_entry.constantID = parser.next_uint();
+		spec_constants.map_entries.push_back(map_entry);
+
+		uint32_t raw_data;
+
+		const char *type = parser.next_string();
+		if (strcmp(type, "f32") == 0)
+		{
+			auto f = float(parser.next_double());
+			memcpy(&raw_data, &f, sizeof(uint32_t));
+		}
+		else if (strcmp(type, "u32") == 0)
+			raw_data = parser.next_uint();
+		else if (strcmp(type, "i32") == 0)
+			raw_data = parser.next_sint();
+		else
+		{
+			LOGE("Invalid spec constant type.\n");
+			print_help();
+			exit(EXIT_FAILURE);
+		}
+
+		spec_constants.data.push_back(raw_data);
+	});
 
 	CLIParser parser(std::move(cbs), argc - 1, argv + 1);
 	if (!parser.parse())
@@ -817,9 +873,9 @@ int main(int argc, char *argv[])
 
 	VkPipeline pipeline;
 	if (compilers[STAGE_COMP])
-		pipeline = synthesize_compute_pipeline(recorder, modules, layout);
+		pipeline = synthesize_compute_pipeline(recorder, modules, layout, spec_constants);
 	else
-		pipeline = synthesize_graphics_pipeline(recorder, modules, compilers, layout, render_pass, active_rt_mask);
+		pipeline = synthesize_graphics_pipeline(recorder, modules, compilers, layout, render_pass, active_rt_mask, spec_constants);
 
 	if (pipeline == VK_NULL_HANDLE)
 		return EXIT_FAILURE;

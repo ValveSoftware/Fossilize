@@ -53,6 +53,7 @@ public:
 	void end();
 
 	unsigned next_uint();
+	int next_sint();
 
 	double next_double();
 

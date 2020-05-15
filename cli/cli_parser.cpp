@@ -72,6 +72,27 @@ void CLIParser::end()
 	ended_state = true;
 }
 
+int CLIParser::next_sint()
+{
+	if (!argc)
+	{
+		LOGE("Tried to parse sint, but nothing left in arguments.\n");
+		exit(EXIT_FAILURE);
+	}
+
+	auto val = stol(*argv);
+	if (val > numeric_limits<int>::max() || val < numeric_limits<int>::min())
+	{
+		LOGE("next_sint() out of range.\n");
+		exit(EXIT_FAILURE);
+	}
+
+	argc--;
+	argv++;
+
+	return int(val);
+}
+
 unsigned CLIParser::next_uint()
 {
 	if (!argc)
