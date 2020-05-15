@@ -57,6 +57,7 @@ struct ExternalReplayer::Impl
 
 	pid_t pid = -1;
 	int fd = -1;
+	int kill_fd = -1;
 	SharedControlBlock *shm_block = nullptr;
 	size_t shm_block_size = 0;
 	int wstatus = 0;
@@ -89,6 +90,8 @@ ExternalReplayer::Impl::~Impl()
 {
 	if (fd >= 0)
 		close(fd);
+	if (kill_fd >= 0)
+		close(kill_fd);
 
 	if (shm_block)
 		munmap(shm_block, shm_block_size);
@@ -203,11 +206,18 @@ bool ExternalReplayer::Impl::is_process_complete(int *return_status)
 	if (waitpid(pid, &wstatus, WNOHANG) <= 0)
 		return false;
 
+	// Child process can receive SIGCONT/SIGSTOP which is benign.
+	if (!WIFEXITED(wstatus) && !WIFSIGNALED(wstatus))
+		return false;
+
 	// Pump the fifo through.
 	ExternalReplayer::Progress progress = {};
 	poll_progress(progress);
 
 	pid = -1;
+	if (kill_fd >= 0)
+		close(kill_fd);
+	kill_fd = -1;
 
 	if (return_status)
 		*return_status = wstatus_to_return(wstatus);
@@ -223,12 +233,22 @@ int ExternalReplayer::Impl::wait()
 	ExternalReplayer::Progress progress = {};
 	poll_progress(progress);
 
-	if (waitpid(pid, &wstatus, 0) < 0)
-		return -1;
+	for (;;)
+	{
+		if (waitpid(pid, &wstatus, 0) < 0)
+			return -1;
+
+		// Child process can receive SIGCONT/SIGSTOP which is benign.
+		if (WIFEXITED(wstatus) || WIFSIGNALED(wstatus))
+			break;
+	}
 
 	// Pump the fifo through.
 	poll_progress(progress);
 	pid = -1;
+	if (kill_fd >= 0)
+		close(kill_fd);
+	kill_fd = -1;
 	return wstatus_to_return(wstatus);
 }
 
@@ -236,7 +256,27 @@ bool ExternalReplayer::Impl::kill()
 {
 	if (pid < 0)
 		return false;
-	return killpg(pid, SIGTERM) == 0;
+
+	if (kill_fd >= 0)
+	{
+		// Before we attempt to kill, we must make sure that the new process group has been created.
+		// This read will block until we close the FD in the forked process, ensuring that we
+		// can immediately call killpg() against it, since that close will only happen after setpgid().
+		char dummy;
+		if (::read(kill_fd, &dummy, sizeof(dummy)) < 0)
+		{
+			close(kill_fd);
+			kill_fd = -1;
+			return false;
+		}
+		close(kill_fd);
+		kill_fd = -1;
+	}
+
+	bool ret = killpg(pid, SIGTERM) == 0;
+	if (!ret)
+		LOGI("ExternalReplayer::Impl::kill(): Failed to kill: errno %d.\n", errno);
+	return ret;
 }
 
 bool ExternalReplayer::Impl::get_failed(const std::unordered_set<Hash> &failed, size_t *count, Hash *hashes) const
@@ -496,15 +536,22 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 		return false;
 	}
 
+	int fds[2];
+	if (pipe(fds) < 0)
+		return false;
+
 	pid_t new_pid = fork();
 	if (new_pid > 0)
 	{
 		close(fd);
+		close(fds[1]);
 		fd = -1;
 		pid = new_pid;
+		kill_fd = fds[0];
 	}
 	else if (new_pid == 0)
 	{
+		close(fds[0]);
 		if (!options.inherit_process_group)
 		{
 			// Set the process group ID so we can kill all the child processes as needed.
@@ -514,6 +561,9 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 				exit(1);
 			}
 		}
+
+		// Notify parent process that it can return.
+		close(fds[1]);
 
 		start_replayer_process(options);
 	}
