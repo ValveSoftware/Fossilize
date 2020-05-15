@@ -34,8 +34,12 @@
 
 extern "C"
 {
-VK_LAYER_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instance, const char *pName);
-VK_LAYER_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkDevice device, const char *pName);
+#ifdef ANDROID
+#define VK_LAYER_fossilize_GetInstanceProcAddr vkGetInstanceProcAddr
+#define VK_LAYER_fossilize_GetDeviceProcAddr vkGetDeviceProcAddr
+#endif
+VK_LAYER_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL VK_LAYER_fossilize_GetInstanceProcAddr(VkInstance instance, const char *pName);
+VK_LAYER_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL VK_LAYER_fossilize_GetDeviceProcAddr(VkDevice device, const char *pName);
 }
 
 using namespace std;
@@ -351,7 +355,7 @@ static PFN_vkVoidFunction interceptCoreInstanceCommand(const char *pName)
 	} coreInstanceCommands[] = {
 		{ "vkCreateInstance", reinterpret_cast<PFN_vkVoidFunction>(CreateInstance) },
 		{ "vkDestroyInstance", reinterpret_cast<PFN_vkVoidFunction>(DestroyInstance) },
-		{ "vkGetInstanceProcAddr", reinterpret_cast<PFN_vkVoidFunction>(vkGetInstanceProcAddr) },
+		{ "vkGetInstanceProcAddr", reinterpret_cast<PFN_vkVoidFunction>(VK_LAYER_fossilize_GetInstanceProcAddr) },
 		{ "vkCreateDevice", reinterpret_cast<PFN_vkVoidFunction>(CreateDevice) },
 	};
 
@@ -428,7 +432,7 @@ static PFN_vkVoidFunction interceptCoreDeviceCommand(const char *pName)
 		const char *name;
 		PFN_vkVoidFunction proc;
 	} coreDeviceCommands[] = {
-		{ "vkGetDeviceProcAddr", reinterpret_cast<PFN_vkVoidFunction>(vkGetDeviceProcAddr) },
+		{ "vkGetDeviceProcAddr", reinterpret_cast<PFN_vkVoidFunction>(VK_LAYER_fossilize_GetDeviceProcAddr) },
 		{ "vkDestroyDevice", reinterpret_cast<PFN_vkVoidFunction>(DestroyDevice) },
 
 		{ "vkCreateDescriptorSetLayout", reinterpret_cast<PFN_vkVoidFunction>(CreateDescriptorSetLayout) },
@@ -451,7 +455,7 @@ using namespace Fossilize;
 
 extern "C"
 {
-VK_LAYER_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkDevice device, const char *pName)
+VK_LAYER_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL VK_LAYER_fossilize_GetDeviceProcAddr(VkDevice device, const char *pName)
 {
 	auto proc = interceptCoreDeviceCommand(pName);
 	if (proc)
@@ -466,7 +470,7 @@ VK_LAYER_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkD
 	return layer->getTable()->GetDeviceProcAddr(device, pName);
 }
 
-VK_LAYER_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instance, const char *pName)
+VK_LAYER_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL VK_LAYER_fossilize_GetInstanceProcAddr(VkInstance instance, const char *pName)
 {
 	auto proc = interceptCoreInstanceCommand(pName);
 	if (proc)
@@ -485,6 +489,7 @@ VK_LAYER_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(V
 	return layer->getProcAddr(pName);
 }
 
+#ifdef ANDROID
 static const VkLayerProperties layerProps[] = {
 	{ VK_LAYER_fossilize, VK_MAKE_VERSION(1, 2, 136), 1, "Fossilize capture layer" },
 };
@@ -558,4 +563,5 @@ vkEnumerateDeviceLayerProperties(VkPhysicalDevice, uint32_t *pPropertyCount,
 		return VK_SUCCESS;
 	}
 }
+#endif
 }
