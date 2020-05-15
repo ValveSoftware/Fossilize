@@ -564,6 +564,7 @@ struct ThreadedReplayer : StateCreatorInterface
 			{
 				rapidjson::Value pe(rapidjson::kObjectType);
 				pe.AddMember("executable_name", rapidjson::StringRef(pipe_executables[exec].name), alloc);
+				pe.AddMember("subgroup_size", pipe_executables[exec].subgroupSize, alloc);
 
 				rapidjson::Value pe_stats(rapidjson::kArrayType);
 
@@ -2589,6 +2590,7 @@ static void stats_to_csv(const std::string &stats_path, rapidjson::Document &doc
 	header.push_back("Pipeline type");
 	header.push_back("Pipeline hash");
 	header.push_back("Executable name");
+	header.push_back("Subgroup size");
 
 	for (auto itr = doc.Begin(); itr != doc.End(); itr++)
 	{
@@ -2605,6 +2607,7 @@ static void stats_to_csv(const std::string &stats_path, rapidjson::Document &doc
 		{
 			auto &exec = *e_itr;
 			row[3] = exec["executable_name"].GetString();
+			row[4] = std::to_string(exec["subgroup_size"].GetUint());
 			for (auto st_itr = exec["stats"].Begin(); st_itr != exec["stats"].End(); st_itr++)
 			{
 				auto &stat = *st_itr;
