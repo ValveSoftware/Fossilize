@@ -24,6 +24,7 @@
 #include <memory>
 #include <vector>
 #include "layer/utils.hpp"
+#include <cstdlib>
 
 using namespace Fossilize;
 
