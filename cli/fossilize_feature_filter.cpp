@@ -139,6 +139,7 @@ struct FeatureFilter::Impl
 	VulkanFeatures features = {};
 	VulkanProperties props = {};
 	bool supports_scalar_block_layout = false;
+	bool null_device = false;
 
 	void init_features(const void *pNext);
 	void init_properties(const void *pNext);
@@ -277,6 +278,12 @@ bool FeatureFilter::init(uint32_t api_version, const char **device_exts, unsigne
                          const VkPhysicalDeviceFeatures2 *enabled_features, const VkPhysicalDeviceProperties2 *props)
 {
 	return impl->init(api_version, device_exts, count, enabled_features, props);
+}
+
+bool FeatureFilter::init_null_device()
+{
+	impl->null_device = true;
+	return true;
 }
 
 bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
@@ -432,11 +439,15 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 
 bool FeatureFilter::Impl::sampler_is_supported(const VkSamplerCreateInfo *info) const
 {
+	if (null_device)
+		return true;
 	return pnext_chain_is_supported(info->pNext);
 }
 
 bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorSetLayoutCreateInfo *info) const
 {
+	if (null_device)
+		return true;
 	for (unsigned i = 0; i < info->bindingCount; i++)
 	{
 		if (info->pBindings[i].descriptorType == VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK_EXT)
@@ -452,6 +463,8 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 
 bool FeatureFilter::Impl::pipeline_layout_is_supported(const VkPipelineLayoutCreateInfo *info) const
 {
+	if (null_device)
+		return true;
 	unsigned max_push_constant_size = 0;
 	for (unsigned i = 0; i < info->pushConstantRangeCount; i++)
 	{
@@ -816,6 +829,8 @@ bool FeatureFilter::Impl::validate_module_capabilities(const uint32_t *data, siz
 
 bool FeatureFilter::Impl::shader_module_is_supported(const VkShaderModuleCreateInfo *info) const
 {
+	if (null_device)
+		return true;
 	if (!validate_module_capabilities(info->pCode, info->codeSize))
 		return false;
 	return pnext_chain_is_supported(info->pNext);
@@ -823,11 +838,15 @@ bool FeatureFilter::Impl::shader_module_is_supported(const VkShaderModuleCreateI
 
 bool FeatureFilter::Impl::render_pass_is_supported(const VkRenderPassCreateInfo *info) const
 {
+	if (null_device)
+		return true;
 	return pnext_chain_is_supported(info->pNext);
 }
 
 bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelineCreateInfo *info) const
 {
+	if (null_device)
+		return true;
 	if (info->pColorBlendState && !pnext_chain_is_supported(info->pColorBlendState->pNext))
 		return false;
 	if (info->pVertexInputState && !pnext_chain_is_supported(info->pVertexInputState->pNext))
@@ -864,6 +883,8 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 
 bool FeatureFilter::Impl::compute_pipeline_is_supported(const VkComputePipelineCreateInfo *info) const
 {
+	if (null_device)
+		return true;
 	if (!pnext_chain_is_supported(info->stage.pNext))
 		return false;
 
@@ -919,6 +940,6 @@ bool FeatureFilter::compute_pipeline_is_supported(const VkComputePipelineCreateI
 
 bool FeatureFilter::supports_scalar_block_layout() const
 {
-	return impl->supports_scalar_block_layout;
+	return impl->null_device || impl->supports_scalar_block_layout;
 }
 }

@@ -89,6 +89,8 @@ public:
 	          const VkPhysicalDeviceFeatures2 *enabled_features,
 	          const VkPhysicalDeviceProperties2 *props);
 
+	bool init_null_device();
+
 	bool sampler_is_supported(const VkSamplerCreateInfo *info) const;
 	bool descriptor_set_layout_is_supported(const VkDescriptorSetLayoutCreateInfo *info) const;
 	bool pipeline_layout_is_supported(const VkPipelineLayoutCreateInfo *info) const;

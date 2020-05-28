@@ -582,5 +582,7 @@ void VulkanDevice::init_null_device()
 	vkGetPipelineCacheData = get_pipeline_cache_data;
 	vkGetPhysicalDeviceProperties = get_physical_device_properties;
 	is_null_device = true;
+
+	feature_filter.init_null_device();
 }
 }
