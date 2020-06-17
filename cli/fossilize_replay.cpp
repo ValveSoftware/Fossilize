@@ -213,7 +213,6 @@ struct ThreadedReplayer : StateCreatorInterface
 {
 	struct Options
 	{
-		bool pipeline_cache = false;
 		bool spirv_validate = false;
 		bool ignore_derived_pipelines = false;
 		bool pipeline_stats = false;
@@ -415,7 +414,27 @@ struct ThreadedReplayer : StateCreatorInterface
 	void sync_worker_threads()
 	{
 		for (unsigned i = 0; i < NUM_MEMORY_CONTEXTS; i++)
+		{
 			sync_worker_memory_context(i);
+			if (memory_context_pipeline_cache[i])
+				vkDestroyPipelineCache(device->get_device(), memory_context_pipeline_cache[i], nullptr);
+		}
+	}
+
+	void reset_memory_context_pipeline_cache(unsigned index)
+	{
+		if (memory_context_pipeline_cache[index])
+			vkDestroyPipelineCache(device->get_device(), memory_context_pipeline_cache[index], nullptr);
+		memory_context_pipeline_cache[index] = VK_NULL_HANDLE;
+
+		if (!disk_pipeline_cache)
+		{
+			// If we don't have an on-disk pipeline cache, try to limit memory by creating our own pipeline cache,
+			// which is regularly freed and recreated to keep memory usage under control.
+			// If we don't do this, drivers generally maintain their internal pipeline cache which grows unbound over time.
+			VkPipelineCacheCreateInfo info = {VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO};
+			vkCreatePipelineCache(device->get_device(), &info, nullptr, &memory_context_pipeline_cache[index]);
+		}
 	}
 
 	void sync_worker_memory_context(unsigned index)
@@ -424,7 +443,10 @@ struct ThreadedReplayer : StateCreatorInterface
 		unique_lock<mutex> lock(pipeline_work_queue_mutex);
 
 		if (queued_count[index] == completed_count[index])
+		{
+			reset_memory_context_pipeline_cache(index);
 			return;
+		}
 
 		if (opts.timeout_seconds != 0)
 		{
@@ -457,6 +479,7 @@ struct ThreadedReplayer : StateCreatorInterface
 				return queued_count[index] == completed_count[index];
 			});
 		}
+		reset_memory_context_pipeline_cache(index);
 	}
 
 	bool run_parse_work_item(StateReplayer &replayer, vector<uint8_t> &buffer, const PipelineWorkItem &work_item)
@@ -731,6 +754,10 @@ struct ThreadedReplayer : StateCreatorInterface
 				break;
 			}
 
+			VkPipelineCache cache = disk_pipeline_cache;
+			if (!cache)
+				cache = memory_context_pipeline_cache[work_item.memory_context_index];
+
 			for (unsigned i = 0; i < loop_count; i++)
 			{
 				// Avoid leak.
@@ -751,10 +778,10 @@ struct ThreadedReplayer : StateCreatorInterface
 				feedback.pPipelineStageCreationFeedbacks = feedbacks;
 				feedback.pPipelineCreationFeedback = &primary_feedback;
 
-				if (opts.pipeline_cache && device->pipeline_feedback_enabled())
+				if (disk_pipeline_cache && device->pipeline_feedback_enabled())
 					const_cast<VkGraphicsPipelineCreateInfo *>(work_item.create_info.graphics_create_info)->pNext = &feedback;
 
-				if (vkCreateGraphicsPipelines(device->get_device(), pipeline_cache, 1, work_item.create_info.graphics_create_info,
+				if (vkCreateGraphicsPipelines(device->get_device(), cache, 1, work_item.create_info.graphics_create_info,
 				                              nullptr, work_item.output.pipeline) == VK_SUCCESS)
 				{
 					auto end_time = chrono::steady_clock::now();
@@ -781,7 +808,7 @@ struct ThreadedReplayer : StateCreatorInterface
 					if (opts.control_block && i == 0)
 						opts.control_block->successful_graphics.fetch_add(1, std::memory_order_relaxed);
 
-					if (opts.pipeline_cache && i == 0 && (primary_feedback.flags & VK_PIPELINE_CREATION_FEEDBACK_VALID_BIT_EXT) != 0)
+					if (disk_pipeline_cache && i == 0 && (primary_feedback.flags & VK_PIPELINE_CREATION_FEEDBACK_VALID_BIT_EXT) != 0)
 					{
 						bool cache_hit = (primary_feedback.flags & VK_PIPELINE_CREATION_FEEDBACK_APPLICATION_PIPELINE_CACHE_HIT_BIT_EXT) != 0;
 
@@ -871,6 +898,10 @@ struct ThreadedReplayer : StateCreatorInterface
 				break;
 			}
 
+			VkPipelineCache cache = disk_pipeline_cache;
+			if (!cache)
+				cache = memory_context_pipeline_cache[work_item.memory_context_index];
+
 			for (unsigned i = 0; i < loop_count; i++)
 			{
 				// Avoid leak.
@@ -890,10 +921,10 @@ struct ThreadedReplayer : StateCreatorInterface
 				feedback.pPipelineStageCreationFeedbacks = &feedbacks;
 				feedback.pPipelineCreationFeedback = &primary_feedback;
 
-				if (opts.pipeline_cache && device->pipeline_feedback_enabled())
+				if (disk_pipeline_cache && device->pipeline_feedback_enabled())
 					const_cast<VkComputePipelineCreateInfo *>(work_item.create_info.compute_create_info)->pNext = &feedback;
 
-				if (vkCreateComputePipelines(device->get_device(), pipeline_cache, 1,
+				if (vkCreateComputePipelines(device->get_device(), cache, 1,
 				                             work_item.create_info.compute_create_info,
 				                             nullptr, work_item.output.pipeline) == VK_SUCCESS)
 				{
@@ -921,7 +952,7 @@ struct ThreadedReplayer : StateCreatorInterface
 					if (opts.control_block && i == 0)
 						opts.control_block->successful_compute.fetch_add(1, std::memory_order_relaxed);
 
-					if (opts.pipeline_cache && i == 0 && (primary_feedback.flags & VK_PIPELINE_CREATION_FEEDBACK_VALID_BIT_EXT) != 0)
+					if (disk_pipeline_cache && i == 0 && (primary_feedback.flags & VK_PIPELINE_CREATION_FEEDBACK_VALID_BIT_EXT) != 0)
 					{
 						bool cache_hit = (primary_feedback.flags & VK_PIPELINE_CREATION_FEEDBACK_APPLICATION_PIPELINE_CACHE_HIT_BIT_EXT) != 0;
 
@@ -1045,15 +1076,15 @@ struct ThreadedReplayer : StateCreatorInterface
 
 	void flush_pipeline_cache()
 	{
-		if (device && pipeline_cache)
+		if (device && disk_pipeline_cache)
 		{
 			if (!opts.on_disk_pipeline_cache_path.empty())
 			{
 				size_t pipeline_cache_size = 0;
-				if (vkGetPipelineCacheData(device->get_device(), pipeline_cache, &pipeline_cache_size, nullptr) == VK_SUCCESS)
+				if (vkGetPipelineCacheData(device->get_device(), disk_pipeline_cache, &pipeline_cache_size, nullptr) == VK_SUCCESS)
 				{
 					vector<uint8_t> pipeline_buffer(pipeline_cache_size);
-					if (vkGetPipelineCacheData(device->get_device(), pipeline_cache, &pipeline_cache_size, pipeline_buffer.data()) == VK_SUCCESS)
+					if (vkGetPipelineCacheData(device->get_device(), disk_pipeline_cache, &pipeline_cache_size, pipeline_buffer.data()) == VK_SUCCESS)
 					{
 						// This isn't safe to do in a signal handler, but it's unlikely to be a problem in practice.
 						FILE *file = fopen(opts.on_disk_pipeline_cache_path.c_str(), "wb");
@@ -1064,8 +1095,8 @@ struct ThreadedReplayer : StateCreatorInterface
 					}
 				}
 			}
-			vkDestroyPipelineCache(device->get_device(), pipeline_cache, nullptr);
-			pipeline_cache = VK_NULL_HANDLE;
+			vkDestroyPipelineCache(device->get_device(), disk_pipeline_cache, nullptr);
+			disk_pipeline_cache = VK_NULL_HANDLE;
 		}
 	}
 
@@ -1254,47 +1285,44 @@ struct ThreadedReplayer : StateCreatorInterface
 				}
 			}
 
-			if (opts.pipeline_cache)
+			if (!opts.on_disk_pipeline_cache_path.empty())
 			{
 				VkPipelineCacheCreateInfo info = { VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO };
 				vector<uint8_t> on_disk_cache;
 
 				// Try to load on-disk cache.
-				if (!opts.on_disk_pipeline_cache_path.empty())
+				FILE *file = fopen(opts.on_disk_pipeline_cache_path.c_str(), "rb");
+				if (file)
 				{
-					FILE *file = fopen(opts.on_disk_pipeline_cache_path.c_str(), "rb");
-					if (file)
-					{
-						fseek(file, 0, SEEK_END);
-						size_t len = ftell(file);
-						rewind(file);
+					fseek(file, 0, SEEK_END);
+					size_t len = ftell(file);
+					rewind(file);
 
-						if (len != 0)
+					if (len != 0)
+					{
+						on_disk_cache.resize(len);
+						if (fread(on_disk_cache.data(), 1, len, file) == len)
 						{
-							on_disk_cache.resize(len);
-							if (fread(on_disk_cache.data(), 1, len, file) == len)
+							if (validate_pipeline_cache_header(on_disk_cache))
 							{
-								if (validate_pipeline_cache_header(on_disk_cache))
-								{
-									info.pInitialData = on_disk_cache.data();
-									info.initialDataSize = on_disk_cache.size();
-								}
-								else
-									LOGI("Failed to validate pipeline cache. Creating a blank one.\n");
+								info.pInitialData = on_disk_cache.data();
+								info.initialDataSize = on_disk_cache.size();
 							}
+							else
+								LOGI("Failed to validate pipeline cache. Creating a blank one.\n");
 						}
 					}
 				}
 
-				if (vkCreatePipelineCache(device->get_device(), &info, nullptr, &pipeline_cache) != VK_SUCCESS)
+				if (vkCreatePipelineCache(device->get_device(), &info, nullptr, &disk_pipeline_cache) != VK_SUCCESS)
 				{
 					LOGE("Failed to create pipeline cache, trying to create a blank one.\n");
 					info.initialDataSize = 0;
 					info.pInitialData = nullptr;
-					if (vkCreatePipelineCache(device->get_device(), &info, nullptr, &pipeline_cache) != VK_SUCCESS)
+					if (vkCreatePipelineCache(device->get_device(), &info, nullptr, &disk_pipeline_cache) != VK_SUCCESS)
 					{
 						LOGE("Failed to create pipeline cache.\n");
-						pipeline_cache = VK_NULL_HANDLE;
+						disk_pipeline_cache = VK_NULL_HANDLE;
 					}
 				}
 			}
@@ -2187,7 +2215,7 @@ struct ThreadedReplayer : StateCreatorInterface
 	std::unordered_set<Hash> masked_shader_modules;
 	std::unordered_map<VkShaderModule, Hash> shader_module_to_hash;
 	std::unordered_set<VkShaderModule> enqueued_shader_modules;
-	VkPipelineCache pipeline_cache = VK_NULL_HANDLE;
+	VkPipelineCache disk_pipeline_cache = VK_NULL_HANDLE;
 	VkValidationCacheEXT validation_cache = VK_NULL_HANDLE;
 
 	// VALVE: multi-threaded work queue for replayer
@@ -2227,6 +2255,7 @@ struct ThreadedReplayer : StateCreatorInterface
 	std::unordered_map<Hash, DeferredComputeInfo> compute_parents;
 	std::vector<DeferredGraphicsInfo> deferred_graphics[NUM_MEMORY_CONTEXTS];
 	std::vector<DeferredComputeInfo> deferred_compute[NUM_MEMORY_CONTEXTS];
+	VkPipelineCache memory_context_pipeline_cache[NUM_MEMORY_CONTEXTS] = {};
 
 	// Feed statistics from the worker threads.
 	std::atomic<std::uint64_t> graphics_pipeline_ns;
@@ -2303,7 +2332,6 @@ static void print_help()
 	     "\t[--device-index <index>]\n"
 	     "\t[--enable-validation]\n"
 	     "\t[--enable-pipeline-stats <path>]\n"
-	     "\t[--pipeline-cache]\n"
 	     "\t[--spirv-val]\n"
 	     "\t[--num-threads <count>]\n"
 	     "\t[--loop <count>]\n"
@@ -2441,7 +2469,6 @@ static int run_progress_process(const VulkanDevice::Options &device_opts,
 	                                    nullptr : replayer_opts.on_disk_validation_blacklist_path.c_str();
 	opts.pipeline_stats_path = replayer_opts.pipeline_stats_path.empty() ?
 	                           nullptr : replayer_opts.pipeline_stats_path.c_str();
-	opts.pipeline_cache = replayer_opts.pipeline_cache;
 	opts.num_threads = replayer_opts.num_threads;
 	opts.quiet = true;
 	opts.databases = databases.data();
@@ -2968,7 +2995,7 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 	LOGI("Opening archive took %ld ms:\n", elapsed_ms_read_archive);
 	LOGI("Parsing archive took %ld ms:\n", elapsed_ms_prepare);
 
-	if (replayer.opts.pipeline_cache && replayer.device->pipeline_feedback_enabled())
+	if (!replayer.opts.on_disk_pipeline_cache_path.empty() && replayer.device->pipeline_feedback_enabled())
 	{
 		LOGI("Pipeline cache hits reported: %u\n", replayer.pipeline_cache_hits.load());
 		LOGI("Pipeline cache misses reported: %u\n", replayer.pipeline_cache_misses.load());
@@ -3049,7 +3076,6 @@ int main(int argc, char *argv[])
 	cbs.add("--help", [](CLIParser &parser) { print_help(); parser.end(); });
 	cbs.add("--device-index", [&](CLIParser &parser) { opts.device_index = parser.next_uint(); });
 	cbs.add("--enable-validation", [&](CLIParser &) { opts.enable_validation = true; });
-	cbs.add("--pipeline-cache", [&](CLIParser &) { replayer_opts.pipeline_cache = true; });
 	cbs.add("--spirv-val", [&](CLIParser &) { replayer_opts.spirv_validate = true; });
 	cbs.add("--on-disk-pipeline-cache", [&](CLIParser &parser) { replayer_opts.on_disk_pipeline_cache_path = parser.next_string(); });
 	cbs.add("--on-disk-validation-cache", [&](CLIParser &parser) {
@@ -3147,9 +3173,6 @@ int main(int argc, char *argv[])
 
 	if (replayer_opts.num_threads < 1)
 		replayer_opts.num_threads = 1;
-
-	if (!replayer_opts.on_disk_pipeline_cache_path.empty())
-		replayer_opts.pipeline_cache = true;
 #endif
 
 	if (!replayer_opts.pipeline_stats_path.empty())

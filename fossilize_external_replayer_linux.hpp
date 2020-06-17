@@ -369,8 +369,6 @@ void ExternalReplayer::Impl::start_replayer_process(const ExternalReplayer::Opti
 	argv.push_back("--shmem-fd");
 	argv.push_back(fd_name);
 
-	if (options.pipeline_cache)
-		argv.push_back("--pipeline-cache");
 	if (options.spirv_validate)
 		argv.push_back("--spirv-val");
 
