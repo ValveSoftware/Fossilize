@@ -415,7 +415,27 @@ struct ThreadedReplayer : StateCreatorInterface
 	void sync_worker_threads()
 	{
 		for (unsigned i = 0; i < NUM_MEMORY_CONTEXTS; i++)
+		{
 			sync_worker_memory_context(i);
+			if (memory_context_pipeline_cache[i])
+				vkDestroyPipelineCache(device->get_device(), memory_context_pipeline_cache[i], nullptr);
+		}
+	}
+
+	void reset_memory_context_pipeline_cache(unsigned index)
+	{
+		if (memory_context_pipeline_cache[index])
+			vkDestroyPipelineCache(device->get_device(), memory_context_pipeline_cache[index], nullptr);
+		memory_context_pipeline_cache[index] = VK_NULL_HANDLE;
+
+		if (!opts.pipeline_cache)
+		{
+			// If we don't have an on-disk pipeline cache, try to limit memory by creating our own pipeline cache,
+			// which is regularly freed and recreated to keep memory usage under control.
+			// If we don't do this, drivers generally maintain their internal pipeline cache which grows unbound over time.
+			VkPipelineCacheCreateInfo info = {VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO};
+			vkCreatePipelineCache(device->get_device(), &info, nullptr, &memory_context_pipeline_cache[index]);
+		}
 	}
 
 	void sync_worker_memory_context(unsigned index)
@@ -424,7 +444,10 @@ struct ThreadedReplayer : StateCreatorInterface
 		unique_lock<mutex> lock(pipeline_work_queue_mutex);
 
 		if (queued_count[index] == completed_count[index])
+		{
+			reset_memory_context_pipeline_cache(index);
 			return;
+		}
 
 		if (opts.timeout_seconds != 0)
 		{
@@ -457,6 +480,7 @@ struct ThreadedReplayer : StateCreatorInterface
 				return queued_count[index] == completed_count[index];
 			});
 		}
+		reset_memory_context_pipeline_cache(index);
 	}
 
 	bool run_parse_work_item(StateReplayer &replayer, vector<uint8_t> &buffer, const PipelineWorkItem &work_item)
@@ -731,6 +755,10 @@ struct ThreadedReplayer : StateCreatorInterface
 				break;
 			}
 
+			VkPipelineCache cache = pipeline_cache;
+			if (!cache)
+				cache = memory_context_pipeline_cache[work_item.memory_context_index];
+
 			for (unsigned i = 0; i < loop_count; i++)
 			{
 				// Avoid leak.
@@ -754,7 +782,7 @@ struct ThreadedReplayer : StateCreatorInterface
 				if (opts.pipeline_cache && device->pipeline_feedback_enabled())
 					const_cast<VkGraphicsPipelineCreateInfo *>(work_item.create_info.graphics_create_info)->pNext = &feedback;
 
-				if (vkCreateGraphicsPipelines(device->get_device(), pipeline_cache, 1, work_item.create_info.graphics_create_info,
+				if (vkCreateGraphicsPipelines(device->get_device(), cache, 1, work_item.create_info.graphics_create_info,
 				                              nullptr, work_item.output.pipeline) == VK_SUCCESS)
 				{
 					auto end_time = chrono::steady_clock::now();
@@ -871,6 +899,10 @@ struct ThreadedReplayer : StateCreatorInterface
 				break;
 			}
 
+			VkPipelineCache cache = pipeline_cache;
+			if (!cache)
+				cache = memory_context_pipeline_cache[work_item.memory_context_index];
+
 			for (unsigned i = 0; i < loop_count; i++)
 			{
 				// Avoid leak.
@@ -893,7 +925,7 @@ struct ThreadedReplayer : StateCreatorInterface
 				if (opts.pipeline_cache && device->pipeline_feedback_enabled())
 					const_cast<VkComputePipelineCreateInfo *>(work_item.create_info.compute_create_info)->pNext = &feedback;
 
-				if (vkCreateComputePipelines(device->get_device(), pipeline_cache, 1,
+				if (vkCreateComputePipelines(device->get_device(), cache, 1,
 				                             work_item.create_info.compute_create_info,
 				                             nullptr, work_item.output.pipeline) == VK_SUCCESS)
 				{
@@ -2227,6 +2259,7 @@ struct ThreadedReplayer : StateCreatorInterface
 	std::unordered_map<Hash, DeferredComputeInfo> compute_parents;
 	std::vector<DeferredGraphicsInfo> deferred_graphics[NUM_MEMORY_CONTEXTS];
 	std::vector<DeferredComputeInfo> deferred_compute[NUM_MEMORY_CONTEXTS];
+	VkPipelineCache memory_context_pipeline_cache[NUM_MEMORY_CONTEXTS] = {};
 
 	// Feed statistics from the worker threads.
 	std::atomic<std::uint64_t> graphics_pipeline_ns;
