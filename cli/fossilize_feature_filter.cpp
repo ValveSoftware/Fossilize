@@ -647,7 +647,7 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 	case spv::CapabilityStorageTexelBufferArrayNonUniformIndexing:
 		return features.descriptor_indexing.shaderStorageTexelBufferArrayNonUniformIndexing == VK_TRUE;
 	case spv::CapabilityFloat16:
-		return features.float16_int8.shaderFloat16 == VK_TRUE || enabled_extensions.count(VK_AMD_GPU_SHADER_HALF_FLOAT_EXTENSION_NAME) == 0;
+		return features.float16_int8.shaderFloat16 == VK_TRUE || enabled_extensions.count(VK_AMD_GPU_SHADER_HALF_FLOAT_EXTENSION_NAME) != 0;
 	case spv::CapabilityInt8:
 		return features.float16_int8.shaderInt8 == VK_TRUE;
 	case spv::CapabilityStorageBuffer8BitAccess:
