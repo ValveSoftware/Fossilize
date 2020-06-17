@@ -444,8 +444,6 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 	cmdline += " --shm-mutex-name ";
 	cmdline += shm_mutex_name;
 
-	if (options.pipeline_cache)
-		cmdline += " --pipeline-cache";
 	if (options.spirv_validate)
 		cmdline += " --spirv-val";
 

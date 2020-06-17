@@ -80,9 +80,6 @@ public:
 		unsigned end_compute_index;
 		bool use_pipeline_range;
 
-		// Maps to --pipeline-cache
-		bool pipeline_cache;
-
 		// Redirect stdout and stderr to /dev/null or NUL.
 		bool quiet;
 

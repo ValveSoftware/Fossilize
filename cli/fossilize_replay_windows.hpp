@@ -405,8 +405,6 @@ bool ProcessProgress::start_child_process()
 		cmdline += Global::shm_mutex_name;
 	}
 
-	if (Global::base_replayer_options.pipeline_cache)
-		cmdline += " --pipeline-cache";
 	if (Global::base_replayer_options.spirv_validate)
 		cmdline += " --spirv-val";
 	if (Global::device_options.null_device)
