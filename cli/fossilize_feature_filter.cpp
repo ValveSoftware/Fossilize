@@ -61,6 +61,7 @@ void *build_pnext_chain(VulkanFeatures &features)
 	F(SHADER_SUBGROUP_EXTENDED_TYPES, subgroup_extended_types);
 	F(SEPARATE_DEPTH_STENCIL_LAYOUTS, separate_ds_layout);
 	F(BUFFER_DEVICE_ADDRESS, buffer_device_address);
+	FE(SHADER_CLOCK, shader_clock, KHR);
 	FE(TRANSFORM_FEEDBACK, transform_feedback, EXT);
 	FE(DEPTH_CLIP_ENABLE, depth_clip, EXT);
 	FE(INLINE_UNIFORM_BLOCK, inline_uniform_block, EXT);
@@ -190,6 +191,7 @@ void FeatureFilter::Impl::init_features(const void *pNext)
 		F(SHADER_SUBGROUP_EXTENDED_TYPES, subgroup_extended_types);
 		F(SEPARATE_DEPTH_STENCIL_LAYOUTS, separate_ds_layout);
 		F(BUFFER_DEVICE_ADDRESS, buffer_device_address);
+		FE(SHADER_CLOCK, shader_clock, KHR);
 		FE(TRANSFORM_FEEDBACK, transform_feedback, EXT);
 		FE(DEPTH_CLIP_ENABLE, depth_clip, EXT);
 		FE(INLINE_UNIFORM_BLOCK, inline_uniform_block, EXT);
@@ -565,7 +567,11 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 	case spv::CapabilityVariablePointers:
 		return features.variable_pointers.variablePointers == VK_TRUE;
 	case spv::CapabilityShaderClockKHR:
-		return enabled_extensions.count(VK_KHR_SHADER_CLOCK_EXTENSION_NAME) != 0;
+		// There aren't two separate capabilities, so we'd have to analyze all opcodes to deduce this.
+		// Just gate this on both feature bits being supported to be safe.
+		return enabled_extensions.count(VK_KHR_SHADER_CLOCK_EXTENSION_NAME) != 0 &&
+		       features.shader_clock.shaderDeviceClock == VK_TRUE &&
+		       features.shader_clock.shaderSubgroupClock == VK_TRUE;
 	case spv::CapabilityStencilExportEXT:
 		return enabled_extensions.count(VK_EXT_SHADER_STENCIL_EXPORT_EXTENSION_NAME) != 0;
 	case spv::CapabilitySubgroupBallotKHR:
