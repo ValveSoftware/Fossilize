@@ -73,6 +73,7 @@ void *build_pnext_chain(VulkanFeatures &features)
 	FE(BUFFER_DEVICE_ADDRESS, buffer_device_address_ext, EXT);
 	FE(LINE_RASTERIZATION, line_rasterization, EXT);
 	FE(SUBGROUP_SIZE_CONTROL, subgroup_size_control, EXT);
+	FE(EXTENDED_DYNAMIC_STATE, extended_dynamic_state, EXT);
 	FE(COMPUTE_SHADER_DERIVATIVES, compute_shader_derivatives, NV);
 	FE(FRAGMENT_SHADER_BARYCENTRIC, barycentric_nv, NV);
 	FE(SHADER_IMAGE_FOOTPRINT, image_footprint_nv, NV);
@@ -204,6 +205,7 @@ void FeatureFilter::Impl::init_features(const void *pNext)
 		FE(BUFFER_DEVICE_ADDRESS, buffer_device_address_ext, EXT);
 		FE(LINE_RASTERIZATION, line_rasterization, EXT);
 		FE(SUBGROUP_SIZE_CONTROL, subgroup_size_control, EXT);
+		FE(EXTENDED_DYNAMIC_STATE, extended_dynamic_state, EXT);
 		FE(COMPUTE_SHADER_DERIVATIVES, compute_shader_derivatives, NV);
 		FE(FRAGMENT_SHADER_BARYCENTRIC, barycentric_nv, NV);
 		FE(SHADER_IMAGE_FOOTPRINT, image_footprint_nv, NV);
@@ -902,6 +904,89 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 		return false;
 	if (info->pRasterizationState && !pnext_chain_is_supported(info->pRasterizationState->pNext))
 		return false;
+
+	if (info->pDynamicState)
+	{
+		auto &dyn = *info->pDynamicState;
+		for (uint32_t i = 0; i < dyn.dynamicStateCount; i++)
+		{
+			switch (dyn.pDynamicStates[i])
+			{
+			case VK_DYNAMIC_STATE_CULL_MODE_EXT:
+			case VK_DYNAMIC_STATE_FRONT_FACE_EXT:
+			case VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY_EXT:
+			case VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT_EXT:
+			case VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT_EXT:
+			case VK_DYNAMIC_STATE_VERTEX_INPUT_BINDING_STRIDE_EXT:
+			case VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE_EXT:
+			case VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE_EXT:
+			case VK_DYNAMIC_STATE_DEPTH_COMPARE_OP_EXT:
+			case VK_DYNAMIC_STATE_DEPTH_BOUNDS_TEST_ENABLE_EXT:
+			case VK_DYNAMIC_STATE_STENCIL_TEST_ENABLE_EXT:
+			case VK_DYNAMIC_STATE_STENCIL_OP_EXT:
+				if (!enabled_extensions.count(VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME))
+					return false;
+				if (!features.extended_dynamic_state.extendedDynamicState)
+					return false;
+				break;
+
+			case VK_DYNAMIC_STATE_VIEWPORT_W_SCALING_NV:
+				if (!enabled_extensions.count(VK_NV_CLIP_SPACE_W_SCALING_EXTENSION_NAME))
+					return false;
+				break;
+
+			case VK_DYNAMIC_STATE_DISCARD_RECTANGLE_EXT:
+				if (!enabled_extensions.count(VK_EXT_DISCARD_RECTANGLES_EXTENSION_NAME))
+					return false;
+				break;
+
+			case VK_DYNAMIC_STATE_SAMPLE_LOCATIONS_EXT:
+				if (!enabled_extensions.count(VK_EXT_SAMPLE_LOCATIONS_EXTENSION_NAME))
+					return false;
+				break;
+
+			case VK_DYNAMIC_STATE_VIEWPORT_SHADING_RATE_PALETTE_NV:
+				if (!enabled_extensions.count(VK_NV_SHADING_RATE_IMAGE_EXTENSION_NAME))
+					return false;
+				if (!features.shading_rate_nv.shadingRateImage)
+					return false;
+				break;
+
+			case VK_DYNAMIC_STATE_VIEWPORT_COARSE_SAMPLE_ORDER_NV:
+				if (!enabled_extensions.count(VK_NV_SHADING_RATE_IMAGE_EXTENSION_NAME))
+					return false;
+				if (!features.shading_rate_nv.shadingRateCoarseSampleOrder)
+					return false;
+				break;
+
+			case VK_DYNAMIC_STATE_EXCLUSIVE_SCISSOR_NV:
+				if (!enabled_extensions.count(VK_NV_SCISSOR_EXCLUSIVE_EXTENSION_NAME))
+					return false;
+				break;
+
+			case VK_DYNAMIC_STATE_LINE_STIPPLE_EXT:
+				if (!enabled_extensions.count(VK_EXT_LINE_RASTERIZATION_EXTENSION_NAME))
+					return false;
+				break;
+
+			case VK_DYNAMIC_STATE_VIEWPORT:
+			case VK_DYNAMIC_STATE_SCISSOR:
+			case VK_DYNAMIC_STATE_LINE_WIDTH:
+			case VK_DYNAMIC_STATE_DEPTH_BIAS:
+			case VK_DYNAMIC_STATE_BLEND_CONSTANTS:
+			case VK_DYNAMIC_STATE_DEPTH_BOUNDS:
+			case VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK:
+			case VK_DYNAMIC_STATE_STENCIL_WRITE_MASK:
+			case VK_DYNAMIC_STATE_STENCIL_REFERENCE:
+				// Part of core.
+				break;
+
+			default:
+				// Unrecognized dynamic state, we almost certainly have not enabled the feature.
+				return false;
+			}
+		}
+	}
 
 	for (uint32_t i = 0; i < info->stageCount; i++)
 	{
