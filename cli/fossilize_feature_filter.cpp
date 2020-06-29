@@ -335,9 +335,14 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 		}
 
 		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_DEPTH_CLIP_STATE_CREATE_INFO_EXT:
+		{
 			if (!enabled_extensions.count(VK_EXT_DEPTH_CLIP_ENABLE_EXTENSION_NAME))
 				return false;
+			auto *clip = static_cast<const VkPipelineRasterizationDepthClipStateCreateInfoEXT *>(pNext);
+			if (clip->depthClipEnable && !features.depth_clip.depthClipEnable)
+				return false;
 			break;
+		}
 
 		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_STREAM_CREATE_INFO_EXT:
 			if (features.transform_feedback.geometryStreams == VK_FALSE)
