@@ -56,6 +56,7 @@ struct VulkanFeatures
 	VkPhysicalDeviceBufferDeviceAddressFeaturesEXT buffer_device_address_ext;
 	VkPhysicalDeviceLineRasterizationFeaturesEXT line_rasterization;
 	VkPhysicalDeviceSubgroupSizeControlFeaturesEXT subgroup_size_control;
+	VkPhysicalDeviceExtendedDynamicStateFeaturesEXT extended_dynamic_state;
 	VkPhysicalDeviceComputeShaderDerivativesFeaturesNV compute_shader_derivatives;
 	VkPhysicalDeviceFragmentShaderBarycentricFeaturesNV barycentric_nv;
 	VkPhysicalDeviceShaderImageFootprintFeaturesNV image_footprint_nv;
@@ -74,6 +75,7 @@ struct VulkanProperties
 	VkPhysicalDeviceFloatControlsProperties float_control;
 	VkPhysicalDeviceSubgroupSizeControlPropertiesEXT subgroup_size_control;
 	VkPhysicalDeviceInlineUniformBlockPropertiesEXT inline_uniform_block;
+	VkPhysicalDeviceVertexAttributeDivisorPropertiesEXT attribute_divisor;
 };
 
 void *build_pnext_chain(VulkanProperties &properties);
