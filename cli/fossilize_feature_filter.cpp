@@ -110,6 +110,7 @@ void *build_pnext_chain(VulkanProperties &props)
 	P(FLOAT_CONTROLS, float_control);
 	PE(SUBGROUP_SIZE_CONTROL, subgroup_size_control, EXT);
 	PE(INLINE_UNIFORM_BLOCK, inline_uniform_block, EXT);
+	PE(VERTEX_ATTRIBUTE_DIVISOR, attribute_divisor, EXT);
 
 #undef CHAIN
 #undef P
@@ -244,6 +245,7 @@ void FeatureFilter::Impl::init_properties(const void *pNext)
 		P(FLOAT_CONTROLS, float_control);
 		PE(SUBGROUP_SIZE_CONTROL, subgroup_size_control, EXT);
 		PE(INLINE_UNIFORM_BLOCK, inline_uniform_block, EXT);
+		PE(VERTEX_ATTRIBUTE_DIVISOR, attribute_divisor, EXT);
 		default:
 			break;
 		}
@@ -304,9 +306,33 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 			break;
 
 		case VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_DIVISOR_STATE_CREATE_INFO_EXT:
+		{
 			if (!enabled_extensions.count(VK_EXT_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME))
 				return false;
+
+			auto *divisor = static_cast<const VkPipelineVertexInputDivisorStateCreateInfoEXT *>(pNext);
+			bool use_zero_divisor = false;
+			bool use_non_identity_divisor = false;
+			uint32_t max_divisor = 0;
+
+			for (uint32_t i = 0; i < divisor->vertexBindingDivisorCount; i++)
+			{
+				if (divisor->pVertexBindingDivisors[i].divisor != 1)
+					use_non_identity_divisor = true;
+				if (divisor->pVertexBindingDivisors[i].divisor == 0)
+					use_zero_divisor = true;
+				max_divisor = std::max(max_divisor, divisor->pVertexBindingDivisors[i].divisor);
+			}
+
+			if (max_divisor > props.attribute_divisor.maxVertexAttribDivisor)
+				return false;
+			if (use_zero_divisor && !features.attribute_divisor.vertexAttributeInstanceRateZeroDivisor)
+				return false;
+			if (use_non_identity_divisor && !features.attribute_divisor.vertexAttributeInstanceRateDivisor)
+				return false;
+
 			break;
+		}
 
 		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_DEPTH_CLIP_STATE_CREATE_INFO_EXT:
 			if (!enabled_extensions.count(VK_EXT_DEPTH_CLIP_ENABLE_EXTENSION_NAME))
