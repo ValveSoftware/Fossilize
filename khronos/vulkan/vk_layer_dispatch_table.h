@@ -1,10 +1,10 @@
 // *** THIS FILE IS GENERATED - DO NOT EDIT ***
-// See loader_extension_generator.py for modifications
+// See layer_dispatch_table_generator.py for modifications
 
 /*
- * Copyright (c) 2015-2017 The Khronos Group Inc.
- * Copyright (c) 2015-2017 Valve Corporation
- * Copyright (c) 2015-2017 LunarG, Inc.
+ * Copyright (c) 2015-2020 The Khronos Group Inc.
+ * Copyright (c) 2015-2020 Valve Corporation
+ * Copyright (c) 2015-2020 LunarG, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -106,14 +106,6 @@ typedef struct VkLayerInstanceDispatchTable_ {
     PFN_vkGetPhysicalDeviceWaylandPresentationSupportKHR GetPhysicalDeviceWaylandPresentationSupportKHR;
 #endif // VK_USE_PLATFORM_WAYLAND_KHR
 
-    // ---- VK_KHR_mir_surface extension commands
-#ifdef VK_USE_PLATFORM_MIR_KHR
-    PFN_vkCreateMirSurfaceKHR CreateMirSurfaceKHR;
-#endif // VK_USE_PLATFORM_MIR_KHR
-#ifdef VK_USE_PLATFORM_MIR_KHR
-    PFN_vkGetPhysicalDeviceMirPresentationSupportKHR GetPhysicalDeviceMirPresentationSupportKHR;
-#endif // VK_USE_PLATFORM_MIR_KHR
-
     // ---- VK_KHR_android_surface extension commands
 #ifdef VK_USE_PLATFORM_ANDROID_KHR
     PFN_vkCreateAndroidSurfaceKHR CreateAndroidSurfaceKHR;
@@ -148,14 +140,29 @@ typedef struct VkLayerInstanceDispatchTable_ {
     // ---- VK_KHR_external_fence_capabilities extension commands
     PFN_vkGetPhysicalDeviceExternalFencePropertiesKHR GetPhysicalDeviceExternalFencePropertiesKHR;
 
+    // ---- VK_KHR_performance_query extension commands
+    PFN_vkEnumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR EnumeratePhysicalDeviceQueueFamilyPerformanceQueryCountersKHR;
+    PFN_vkGetPhysicalDeviceQueueFamilyPerformanceQueryPassesKHR GetPhysicalDeviceQueueFamilyPerformanceQueryPassesKHR;
+
     // ---- VK_KHR_get_surface_capabilities2 extension commands
     PFN_vkGetPhysicalDeviceSurfaceCapabilities2KHR GetPhysicalDeviceSurfaceCapabilities2KHR;
     PFN_vkGetPhysicalDeviceSurfaceFormats2KHR GetPhysicalDeviceSurfaceFormats2KHR;
+
+    // ---- VK_KHR_get_display_properties2 extension commands
+    PFN_vkGetPhysicalDeviceDisplayProperties2KHR GetPhysicalDeviceDisplayProperties2KHR;
+    PFN_vkGetPhysicalDeviceDisplayPlaneProperties2KHR GetPhysicalDeviceDisplayPlaneProperties2KHR;
+    PFN_vkGetDisplayModeProperties2KHR GetDisplayModeProperties2KHR;
+    PFN_vkGetDisplayPlaneCapabilities2KHR GetDisplayPlaneCapabilities2KHR;
 
     // ---- VK_EXT_debug_report extension commands
     PFN_vkCreateDebugReportCallbackEXT CreateDebugReportCallbackEXT;
     PFN_vkDestroyDebugReportCallbackEXT DestroyDebugReportCallbackEXT;
     PFN_vkDebugReportMessageEXT DebugReportMessageEXT;
+
+    // ---- VK_GGP_stream_descriptor_surface extension commands
+#ifdef VK_USE_PLATFORM_GGP
+    PFN_vkCreateStreamDescriptorSurfaceGGP CreateStreamDescriptorSurfaceGGP;
+#endif // VK_USE_PLATFORM_GGP
 
     // ---- VK_NV_external_memory_capabilities extension commands
     PFN_vkGetPhysicalDeviceExternalImageFormatPropertiesNV GetPhysicalDeviceExternalImageFormatPropertiesNV;
@@ -164,9 +171,6 @@ typedef struct VkLayerInstanceDispatchTable_ {
 #ifdef VK_USE_PLATFORM_VI_NN
     PFN_vkCreateViSurfaceNN CreateViSurfaceNN;
 #endif // VK_USE_PLATFORM_VI_NN
-
-    // ---- VK_NVX_device_generated_commands extension commands
-    PFN_vkGetPhysicalDeviceGeneratedCommandsPropertiesNVX GetPhysicalDeviceGeneratedCommandsPropertiesNVX;
 
     // ---- VK_EXT_direct_mode_display extension commands
     PFN_vkReleaseDisplayEXT ReleaseDisplayEXT;
@@ -199,6 +203,36 @@ typedef struct VkLayerInstanceDispatchTable_ {
 
     // ---- VK_EXT_sample_locations extension commands
     PFN_vkGetPhysicalDeviceMultisamplePropertiesEXT GetPhysicalDeviceMultisamplePropertiesEXT;
+
+    // ---- VK_EXT_calibrated_timestamps extension commands
+    PFN_vkGetPhysicalDeviceCalibrateableTimeDomainsEXT GetPhysicalDeviceCalibrateableTimeDomainsEXT;
+
+    // ---- VK_FUCHSIA_imagepipe_surface extension commands
+#ifdef VK_USE_PLATFORM_FUCHSIA
+    PFN_vkCreateImagePipeSurfaceFUCHSIA CreateImagePipeSurfaceFUCHSIA;
+#endif // VK_USE_PLATFORM_FUCHSIA
+
+    // ---- VK_EXT_metal_surface extension commands
+#ifdef VK_USE_PLATFORM_METAL_EXT
+    PFN_vkCreateMetalSurfaceEXT CreateMetalSurfaceEXT;
+#endif // VK_USE_PLATFORM_METAL_EXT
+
+    // ---- VK_EXT_tooling_info extension commands
+    PFN_vkGetPhysicalDeviceToolPropertiesEXT GetPhysicalDeviceToolPropertiesEXT;
+
+    // ---- VK_NV_cooperative_matrix extension commands
+    PFN_vkGetPhysicalDeviceCooperativeMatrixPropertiesNV GetPhysicalDeviceCooperativeMatrixPropertiesNV;
+
+    // ---- VK_NV_coverage_reduction_mode extension commands
+    PFN_vkGetPhysicalDeviceSupportedFramebufferMixedSamplesCombinationsNV GetPhysicalDeviceSupportedFramebufferMixedSamplesCombinationsNV;
+
+    // ---- VK_EXT_full_screen_exclusive extension commands
+#ifdef VK_USE_PLATFORM_WIN32_KHR
+    PFN_vkGetPhysicalDeviceSurfacePresentModes2EXT GetPhysicalDeviceSurfacePresentModes2EXT;
+#endif // VK_USE_PLATFORM_WIN32_KHR
+
+    // ---- VK_EXT_headless_surface extension commands
+    PFN_vkCreateHeadlessSurfaceEXT CreateHeadlessSurfaceEXT;
 } VkLayerInstanceDispatchTable;
 
 // Device function pointer dispatch table
@@ -345,6 +379,21 @@ typedef struct VkLayerDispatchTable_ {
     PFN_vkUpdateDescriptorSetWithTemplate UpdateDescriptorSetWithTemplate;
     PFN_vkGetDescriptorSetLayoutSupport GetDescriptorSetLayoutSupport;
 
+    // ---- Core 1_2 commands
+    PFN_vkCmdDrawIndirectCount CmdDrawIndirectCount;
+    PFN_vkCmdDrawIndexedIndirectCount CmdDrawIndexedIndirectCount;
+    PFN_vkCreateRenderPass2 CreateRenderPass2;
+    PFN_vkCmdBeginRenderPass2 CmdBeginRenderPass2;
+    PFN_vkCmdNextSubpass2 CmdNextSubpass2;
+    PFN_vkCmdEndRenderPass2 CmdEndRenderPass2;
+    PFN_vkResetQueryPool ResetQueryPool;
+    PFN_vkGetSemaphoreCounterValue GetSemaphoreCounterValue;
+    PFN_vkWaitSemaphores WaitSemaphores;
+    PFN_vkSignalSemaphore SignalSemaphore;
+    PFN_vkGetBufferDeviceAddress GetBufferDeviceAddress;
+    PFN_vkGetBufferOpaqueCaptureAddress GetBufferOpaqueCaptureAddress;
+    PFN_vkGetDeviceMemoryOpaqueCaptureAddress GetDeviceMemoryOpaqueCaptureAddress;
+
     // ---- VK_KHR_swapchain extension commands
     PFN_vkCreateSwapchainKHR CreateSwapchainKHR;
     PFN_vkDestroySwapchainKHR DestroySwapchainKHR;
@@ -399,6 +448,12 @@ typedef struct VkLayerDispatchTable_ {
     PFN_vkDestroyDescriptorUpdateTemplateKHR DestroyDescriptorUpdateTemplateKHR;
     PFN_vkUpdateDescriptorSetWithTemplateKHR UpdateDescriptorSetWithTemplateKHR;
 
+    // ---- VK_KHR_create_renderpass2 extension commands
+    PFN_vkCreateRenderPass2KHR CreateRenderPass2KHR;
+    PFN_vkCmdBeginRenderPass2KHR CmdBeginRenderPass2KHR;
+    PFN_vkCmdNextSubpass2KHR CmdNextSubpass2KHR;
+    PFN_vkCmdEndRenderPass2KHR CmdEndRenderPass2KHR;
+
     // ---- VK_KHR_shared_presentable_image extension commands
     PFN_vkGetSwapchainStatusKHR GetSwapchainStatusKHR;
 
@@ -413,6 +468,10 @@ typedef struct VkLayerDispatchTable_ {
     // ---- VK_KHR_external_fence_fd extension commands
     PFN_vkImportFenceFdKHR ImportFenceFdKHR;
     PFN_vkGetFenceFdKHR GetFenceFdKHR;
+
+    // ---- VK_KHR_performance_query extension commands
+    PFN_vkAcquireProfilingLockKHR AcquireProfilingLockKHR;
+    PFN_vkReleaseProfilingLockKHR ReleaseProfilingLockKHR;
 
     // ---- VK_KHR_get_memory_requirements2 extension commands
     PFN_vkGetImageMemoryRequirements2KHR GetImageMemoryRequirements2KHR;
@@ -430,12 +489,60 @@ typedef struct VkLayerDispatchTable_ {
     // ---- VK_KHR_maintenance3 extension commands
     PFN_vkGetDescriptorSetLayoutSupportKHR GetDescriptorSetLayoutSupportKHR;
 
+    // ---- VK_KHR_draw_indirect_count extension commands
+    PFN_vkCmdDrawIndirectCountKHR CmdDrawIndirectCountKHR;
+    PFN_vkCmdDrawIndexedIndirectCountKHR CmdDrawIndexedIndirectCountKHR;
+
+    // ---- VK_KHR_timeline_semaphore extension commands
+    PFN_vkGetSemaphoreCounterValueKHR GetSemaphoreCounterValueKHR;
+    PFN_vkWaitSemaphoresKHR WaitSemaphoresKHR;
+    PFN_vkSignalSemaphoreKHR SignalSemaphoreKHR;
+
+    // ---- VK_KHR_buffer_device_address extension commands
+    PFN_vkGetBufferDeviceAddressKHR GetBufferDeviceAddressKHR;
+    PFN_vkGetBufferOpaqueCaptureAddressKHR GetBufferOpaqueCaptureAddressKHR;
+    PFN_vkGetDeviceMemoryOpaqueCaptureAddressKHR GetDeviceMemoryOpaqueCaptureAddressKHR;
+
+    // ---- VK_KHR_deferred_host_operations extension commands
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+    PFN_vkCreateDeferredOperationKHR CreateDeferredOperationKHR;
+#endif // VK_ENABLE_BETA_EXTENSIONS
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+    PFN_vkDestroyDeferredOperationKHR DestroyDeferredOperationKHR;
+#endif // VK_ENABLE_BETA_EXTENSIONS
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+    PFN_vkGetDeferredOperationMaxConcurrencyKHR GetDeferredOperationMaxConcurrencyKHR;
+#endif // VK_ENABLE_BETA_EXTENSIONS
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+    PFN_vkGetDeferredOperationResultKHR GetDeferredOperationResultKHR;
+#endif // VK_ENABLE_BETA_EXTENSIONS
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+    PFN_vkDeferredOperationJoinKHR DeferredOperationJoinKHR;
+#endif // VK_ENABLE_BETA_EXTENSIONS
+
+    // ---- VK_KHR_pipeline_executable_properties extension commands
+    PFN_vkGetPipelineExecutablePropertiesKHR GetPipelineExecutablePropertiesKHR;
+    PFN_vkGetPipelineExecutableStatisticsKHR GetPipelineExecutableStatisticsKHR;
+    PFN_vkGetPipelineExecutableInternalRepresentationsKHR GetPipelineExecutableInternalRepresentationsKHR;
+
     // ---- VK_EXT_debug_marker extension commands
     PFN_vkDebugMarkerSetObjectTagEXT DebugMarkerSetObjectTagEXT;
     PFN_vkDebugMarkerSetObjectNameEXT DebugMarkerSetObjectNameEXT;
     PFN_vkCmdDebugMarkerBeginEXT CmdDebugMarkerBeginEXT;
     PFN_vkCmdDebugMarkerEndEXT CmdDebugMarkerEndEXT;
     PFN_vkCmdDebugMarkerInsertEXT CmdDebugMarkerInsertEXT;
+
+    // ---- VK_EXT_transform_feedback extension commands
+    PFN_vkCmdBindTransformFeedbackBuffersEXT CmdBindTransformFeedbackBuffersEXT;
+    PFN_vkCmdBeginTransformFeedbackEXT CmdBeginTransformFeedbackEXT;
+    PFN_vkCmdEndTransformFeedbackEXT CmdEndTransformFeedbackEXT;
+    PFN_vkCmdBeginQueryIndexedEXT CmdBeginQueryIndexedEXT;
+    PFN_vkCmdEndQueryIndexedEXT CmdEndQueryIndexedEXT;
+    PFN_vkCmdDrawIndirectByteCountEXT CmdDrawIndirectByteCountEXT;
+
+    // ---- VK_NVX_image_view_handle extension commands
+    PFN_vkGetImageViewHandleNVX GetImageViewHandleNVX;
+    PFN_vkGetImageViewAddressNVX GetImageViewAddressNVX;
 
     // ---- VK_AMD_draw_indirect_count extension commands
     PFN_vkCmdDrawIndirectCountAMD CmdDrawIndirectCountAMD;
@@ -449,15 +556,9 @@ typedef struct VkLayerDispatchTable_ {
     PFN_vkGetMemoryWin32HandleNV GetMemoryWin32HandleNV;
 #endif // VK_USE_PLATFORM_WIN32_KHR
 
-    // ---- VK_NVX_device_generated_commands extension commands
-    PFN_vkCmdProcessCommandsNVX CmdProcessCommandsNVX;
-    PFN_vkCmdReserveSpaceForCommandsNVX CmdReserveSpaceForCommandsNVX;
-    PFN_vkCreateIndirectCommandsLayoutNVX CreateIndirectCommandsLayoutNVX;
-    PFN_vkDestroyIndirectCommandsLayoutNVX DestroyIndirectCommandsLayoutNVX;
-    PFN_vkCreateObjectTableNVX CreateObjectTableNVX;
-    PFN_vkDestroyObjectTableNVX DestroyObjectTableNVX;
-    PFN_vkRegisterObjectsNVX RegisterObjectsNVX;
-    PFN_vkUnregisterObjectsNVX UnregisterObjectsNVX;
+    // ---- VK_EXT_conditional_rendering extension commands
+    PFN_vkCmdBeginConditionalRenderingEXT CmdBeginConditionalRenderingEXT;
+    PFN_vkCmdEndConditionalRenderingEXT CmdEndConditionalRenderingEXT;
 
     // ---- VK_NV_clip_space_w_scaling extension commands
     PFN_vkCmdSetViewportWScalingNV CmdSetViewportWScalingNV;
@@ -488,8 +589,19 @@ typedef struct VkLayerDispatchTable_ {
     PFN_vkCmdEndDebugUtilsLabelEXT CmdEndDebugUtilsLabelEXT;
     PFN_vkCmdInsertDebugUtilsLabelEXT CmdInsertDebugUtilsLabelEXT;
 
+    // ---- VK_ANDROID_external_memory_android_hardware_buffer extension commands
+#ifdef VK_USE_PLATFORM_ANDROID_KHR
+    PFN_vkGetAndroidHardwareBufferPropertiesANDROID GetAndroidHardwareBufferPropertiesANDROID;
+#endif // VK_USE_PLATFORM_ANDROID_KHR
+#ifdef VK_USE_PLATFORM_ANDROID_KHR
+    PFN_vkGetMemoryAndroidHardwareBufferANDROID GetMemoryAndroidHardwareBufferANDROID;
+#endif // VK_USE_PLATFORM_ANDROID_KHR
+
     // ---- VK_EXT_sample_locations extension commands
     PFN_vkCmdSetSampleLocationsEXT CmdSetSampleLocationsEXT;
+
+    // ---- VK_EXT_image_drm_format_modifier extension commands
+    PFN_vkGetImageDrmFormatModifierPropertiesEXT GetImageDrmFormatModifierPropertiesEXT;
 
     // ---- VK_EXT_validation_cache extension commands
     PFN_vkCreateValidationCacheEXT CreateValidationCacheEXT;
@@ -497,11 +609,153 @@ typedef struct VkLayerDispatchTable_ {
     PFN_vkMergeValidationCachesEXT MergeValidationCachesEXT;
     PFN_vkGetValidationCacheDataEXT GetValidationCacheDataEXT;
 
+    // ---- VK_NV_shading_rate_image extension commands
+    PFN_vkCmdBindShadingRateImageNV CmdBindShadingRateImageNV;
+    PFN_vkCmdSetViewportShadingRatePaletteNV CmdSetViewportShadingRatePaletteNV;
+    PFN_vkCmdSetCoarseSampleOrderNV CmdSetCoarseSampleOrderNV;
+
+    // ---- VK_NV_ray_tracing extension commands
+    PFN_vkCreateAccelerationStructureNV CreateAccelerationStructureNV;
+    PFN_vkDestroyAccelerationStructureKHR DestroyAccelerationStructureKHR;
+    PFN_vkDestroyAccelerationStructureNV DestroyAccelerationStructureNV;
+    PFN_vkGetAccelerationStructureMemoryRequirementsNV GetAccelerationStructureMemoryRequirementsNV;
+    PFN_vkBindAccelerationStructureMemoryKHR BindAccelerationStructureMemoryKHR;
+    PFN_vkBindAccelerationStructureMemoryNV BindAccelerationStructureMemoryNV;
+    PFN_vkCmdBuildAccelerationStructureNV CmdBuildAccelerationStructureNV;
+    PFN_vkCmdCopyAccelerationStructureNV CmdCopyAccelerationStructureNV;
+    PFN_vkCmdTraceRaysNV CmdTraceRaysNV;
+    PFN_vkCreateRayTracingPipelinesNV CreateRayTracingPipelinesNV;
+    PFN_vkGetRayTracingShaderGroupHandlesKHR GetRayTracingShaderGroupHandlesKHR;
+    PFN_vkGetRayTracingShaderGroupHandlesNV GetRayTracingShaderGroupHandlesNV;
+    PFN_vkGetAccelerationStructureHandleNV GetAccelerationStructureHandleNV;
+    PFN_vkCmdWriteAccelerationStructuresPropertiesKHR CmdWriteAccelerationStructuresPropertiesKHR;
+    PFN_vkCmdWriteAccelerationStructuresPropertiesNV CmdWriteAccelerationStructuresPropertiesNV;
+    PFN_vkCompileDeferredNV CompileDeferredNV;
+
     // ---- VK_EXT_external_memory_host extension commands
     PFN_vkGetMemoryHostPointerPropertiesEXT GetMemoryHostPointerPropertiesEXT;
 
     // ---- VK_AMD_buffer_marker extension commands
     PFN_vkCmdWriteBufferMarkerAMD CmdWriteBufferMarkerAMD;
+
+    // ---- VK_EXT_calibrated_timestamps extension commands
+    PFN_vkGetCalibratedTimestampsEXT GetCalibratedTimestampsEXT;
+
+    // ---- VK_NV_mesh_shader extension commands
+    PFN_vkCmdDrawMeshTasksNV CmdDrawMeshTasksNV;
+    PFN_vkCmdDrawMeshTasksIndirectNV CmdDrawMeshTasksIndirectNV;
+    PFN_vkCmdDrawMeshTasksIndirectCountNV CmdDrawMeshTasksIndirectCountNV;
+
+    // ---- VK_NV_scissor_exclusive extension commands
+    PFN_vkCmdSetExclusiveScissorNV CmdSetExclusiveScissorNV;
+
+    // ---- VK_NV_device_diagnostic_checkpoints extension commands
+    PFN_vkCmdSetCheckpointNV CmdSetCheckpointNV;
+    PFN_vkGetQueueCheckpointDataNV GetQueueCheckpointDataNV;
+
+    // ---- VK_INTEL_performance_query extension commands
+    PFN_vkInitializePerformanceApiINTEL InitializePerformanceApiINTEL;
+    PFN_vkUninitializePerformanceApiINTEL UninitializePerformanceApiINTEL;
+    PFN_vkCmdSetPerformanceMarkerINTEL CmdSetPerformanceMarkerINTEL;
+    PFN_vkCmdSetPerformanceStreamMarkerINTEL CmdSetPerformanceStreamMarkerINTEL;
+    PFN_vkCmdSetPerformanceOverrideINTEL CmdSetPerformanceOverrideINTEL;
+    PFN_vkAcquirePerformanceConfigurationINTEL AcquirePerformanceConfigurationINTEL;
+    PFN_vkReleasePerformanceConfigurationINTEL ReleasePerformanceConfigurationINTEL;
+    PFN_vkQueueSetPerformanceConfigurationINTEL QueueSetPerformanceConfigurationINTEL;
+    PFN_vkGetPerformanceParameterINTEL GetPerformanceParameterINTEL;
+
+    // ---- VK_AMD_display_native_hdr extension commands
+    PFN_vkSetLocalDimmingAMD SetLocalDimmingAMD;
+
+    // ---- VK_EXT_buffer_device_address extension commands
+    PFN_vkGetBufferDeviceAddressEXT GetBufferDeviceAddressEXT;
+
+    // ---- VK_EXT_full_screen_exclusive extension commands
+#ifdef VK_USE_PLATFORM_WIN32_KHR
+    PFN_vkAcquireFullScreenExclusiveModeEXT AcquireFullScreenExclusiveModeEXT;
+#endif // VK_USE_PLATFORM_WIN32_KHR
+#ifdef VK_USE_PLATFORM_WIN32_KHR
+    PFN_vkReleaseFullScreenExclusiveModeEXT ReleaseFullScreenExclusiveModeEXT;
+#endif // VK_USE_PLATFORM_WIN32_KHR
+#ifdef VK_USE_PLATFORM_WIN32_KHR
+    PFN_vkGetDeviceGroupSurfacePresentModes2EXT GetDeviceGroupSurfacePresentModes2EXT;
+#endif // VK_USE_PLATFORM_WIN32_KHR
+
+    // ---- VK_EXT_line_rasterization extension commands
+    PFN_vkCmdSetLineStippleEXT CmdSetLineStippleEXT;
+
+    // ---- VK_EXT_host_query_reset extension commands
+    PFN_vkResetQueryPoolEXT ResetQueryPoolEXT;
+
+    // ---- VK_NV_device_generated_commands extension commands
+    PFN_vkGetGeneratedCommandsMemoryRequirementsNV GetGeneratedCommandsMemoryRequirementsNV;
+    PFN_vkCmdPreprocessGeneratedCommandsNV CmdPreprocessGeneratedCommandsNV;
+    PFN_vkCmdExecuteGeneratedCommandsNV CmdExecuteGeneratedCommandsNV;
+    PFN_vkCmdBindPipelineShaderGroupNV CmdBindPipelineShaderGroupNV;
+    PFN_vkCreateIndirectCommandsLayoutNV CreateIndirectCommandsLayoutNV;
+    PFN_vkDestroyIndirectCommandsLayoutNV DestroyIndirectCommandsLayoutNV;
+
+    // ---- VK_EXT_private_data extension commands
+    PFN_vkCreatePrivateDataSlotEXT CreatePrivateDataSlotEXT;
+    PFN_vkDestroyPrivateDataSlotEXT DestroyPrivateDataSlotEXT;
+    PFN_vkSetPrivateDataEXT SetPrivateDataEXT;
+    PFN_vkGetPrivateDataEXT GetPrivateDataEXT;
+
+    // ---- VK_KHR_ray_tracing extension commands
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+    PFN_vkCreateAccelerationStructureKHR CreateAccelerationStructureKHR;
+#endif // VK_ENABLE_BETA_EXTENSIONS
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+    PFN_vkGetAccelerationStructureMemoryRequirementsKHR GetAccelerationStructureMemoryRequirementsKHR;
+#endif // VK_ENABLE_BETA_EXTENSIONS
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+    PFN_vkCmdBuildAccelerationStructureKHR CmdBuildAccelerationStructureKHR;
+#endif // VK_ENABLE_BETA_EXTENSIONS
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+    PFN_vkCmdBuildAccelerationStructureIndirectKHR CmdBuildAccelerationStructureIndirectKHR;
+#endif // VK_ENABLE_BETA_EXTENSIONS
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+    PFN_vkBuildAccelerationStructureKHR BuildAccelerationStructureKHR;
+#endif // VK_ENABLE_BETA_EXTENSIONS
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+    PFN_vkCopyAccelerationStructureKHR CopyAccelerationStructureKHR;
+#endif // VK_ENABLE_BETA_EXTENSIONS
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+    PFN_vkCopyAccelerationStructureToMemoryKHR CopyAccelerationStructureToMemoryKHR;
+#endif // VK_ENABLE_BETA_EXTENSIONS
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+    PFN_vkCopyMemoryToAccelerationStructureKHR CopyMemoryToAccelerationStructureKHR;
+#endif // VK_ENABLE_BETA_EXTENSIONS
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+    PFN_vkWriteAccelerationStructuresPropertiesKHR WriteAccelerationStructuresPropertiesKHR;
+#endif // VK_ENABLE_BETA_EXTENSIONS
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+    PFN_vkCmdCopyAccelerationStructureKHR CmdCopyAccelerationStructureKHR;
+#endif // VK_ENABLE_BETA_EXTENSIONS
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+    PFN_vkCmdCopyAccelerationStructureToMemoryKHR CmdCopyAccelerationStructureToMemoryKHR;
+#endif // VK_ENABLE_BETA_EXTENSIONS
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+    PFN_vkCmdCopyMemoryToAccelerationStructureKHR CmdCopyMemoryToAccelerationStructureKHR;
+#endif // VK_ENABLE_BETA_EXTENSIONS
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+    PFN_vkCmdTraceRaysKHR CmdTraceRaysKHR;
+#endif // VK_ENABLE_BETA_EXTENSIONS
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+    PFN_vkCreateRayTracingPipelinesKHR CreateRayTracingPipelinesKHR;
+#endif // VK_ENABLE_BETA_EXTENSIONS
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+    PFN_vkGetAccelerationStructureDeviceAddressKHR GetAccelerationStructureDeviceAddressKHR;
+#endif // VK_ENABLE_BETA_EXTENSIONS
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+    PFN_vkGetRayTracingCaptureReplayShaderGroupHandlesKHR GetRayTracingCaptureReplayShaderGroupHandlesKHR;
+#endif // VK_ENABLE_BETA_EXTENSIONS
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+    PFN_vkCmdTraceRaysIndirectKHR CmdTraceRaysIndirectKHR;
+#endif // VK_ENABLE_BETA_EXTENSIONS
+#ifdef VK_ENABLE_BETA_EXTENSIONS
+    PFN_vkGetDeviceAccelerationStructureCompatibilityKHR GetDeviceAccelerationStructureCompatibilityKHR;
+#endif // VK_ENABLE_BETA_EXTENSIONS
 } VkLayerDispatchTable;
 
 
