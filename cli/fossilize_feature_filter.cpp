@@ -323,7 +323,7 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 					use_non_identity_divisor = true;
 				if (divisor->pVertexBindingDivisors[i].divisor == 0)
 					use_zero_divisor = true;
-				max_divisor = std::max(max_divisor, divisor->pVertexBindingDivisors[i].divisor);
+				max_divisor = std::max<uint32_t>(max_divisor, divisor->pVertexBindingDivisors[i].divisor);
 			}
 
 			if (max_divisor > props.attribute_divisor.maxVertexAttribDivisor)
