@@ -61,6 +61,7 @@ struct ExternalReplayer::Impl
 	SharedControlBlock *shm_block = nullptr;
 	size_t shm_block_size = 0;
 	int wstatus = 0;
+	bool synthesized_exit_code = false;
 	std::unordered_set<Hash> faulty_spirv_modules;
 	std::vector<std::pair<unsigned, Hash>> faulty_graphics_pipelines;
 	std::vector<std::pair<unsigned, Hash>> faulty_compute_pipelines;
@@ -84,6 +85,7 @@ struct ExternalReplayer::Impl
 	bool get_failed(const std::unordered_set<Hash> &failed, size_t *count, Hash *hashes) const;
 	bool get_failed(const std::vector<std::pair<unsigned, Hash>> &failed, size_t *count,
 	                unsigned *indices, Hash *hashes) const;
+	void reset_pid();
 };
 
 ExternalReplayer::Impl::~Impl()
@@ -102,12 +104,44 @@ uintptr_t ExternalReplayer::Impl::get_process_handle() const
 	return uintptr_t(pid);
 }
 
+void ExternalReplayer::Impl::reset_pid()
+{
+	pid = -1;
+	if (kill_fd >= 0)
+		close(kill_fd);
+	kill_fd = -1;
+}
+
 ExternalReplayer::PollResult ExternalReplayer::Impl::poll_progress(ExternalReplayer::Progress &progress)
 {
 	bool complete = shm_block->progress_complete.load(std::memory_order_acquire) != 0;
 
 	if (pid < 0 && !complete)
 		return ExternalReplayer::PollResult::Error;
+
+	// Try to avoid a situation where we're endlessly polling, in case the application died too early during startup and we failed
+	// to catch it ending by receiving a completed wait through is_process_complete().
+	if (!complete && pid >= 0)
+	{
+		int ret;
+		// This serves as a check to see if process is still alive.
+		if ((ret = waitpid(pid, &wstatus, WNOHANG)) > 0)
+		{
+			// Child process can receive SIGCONT/SIGSTOP which is benign.
+			if (WIFEXITED(wstatus) || WIFSIGNALED(wstatus))
+				reset_pid();
+		}
+		else if (ret < 0)
+		{
+			// The child does not exist anymore, and we were unable to reap it.
+			// This can happen if the process installed a SIGCHLD handler behind our back.
+			wstatus = -errno;
+			synthesized_exit_code = true;
+			reset_pid();
+		}
+
+		// If ret is 0, that means the process is still alive and nothing happened to it yet.
+	}
 
 	if (shm_block->progress_started.load(std::memory_order_acquire) == 0)
 		return ExternalReplayer::PollResult::ResultNotReady;
@@ -145,9 +179,11 @@ ExternalReplayer::PollResult ExternalReplayer::Impl::poll_progress(ExternalRepla
 	return complete ? ExternalReplayer::PollResult::Complete : ExternalReplayer::PollResult::Running;
 }
 
-static int wstatus_to_return(int wstatus)
+static int wstatus_to_return(int wstatus, bool synthesized_exit_code)
 {
-	if (WIFEXITED(wstatus))
+	if (synthesized_exit_code)
+		return wstatus;
+	else if (WIFEXITED(wstatus))
 		return WEXITSTATUS(wstatus);
 	else if (WIFSIGNALED(wstatus))
 		return -WTERMSIG(wstatus);
@@ -199,35 +235,41 @@ bool ExternalReplayer::Impl::is_process_complete(int *return_status)
 	if (pid == -1)
 	{
 		if (return_status)
-			*return_status = wstatus_to_return(wstatus);
+			*return_status = wstatus_to_return(wstatus, synthesized_exit_code);
 		return true;
 	}
 
-	if (waitpid(pid, &wstatus, WNOHANG) <= 0)
+	int ret;
+	if ((ret = waitpid(pid, &wstatus, WNOHANG)) == 0)
 		return false;
 
 	// Child process can receive SIGCONT/SIGSTOP which is benign.
-	if (!WIFEXITED(wstatus) && !WIFSIGNALED(wstatus))
+	if (ret > 0 && !WIFEXITED(wstatus) && !WIFSIGNALED(wstatus))
 		return false;
+
+	if (ret < 0)
+	{
+		// If we error out here, we will not be able to receive a functioning return code, so
+		// just return -errno.
+		wstatus = -errno;
+		synthesized_exit_code = true;
+	}
 
 	// Pump the fifo through.
 	ExternalReplayer::Progress progress = {};
 	poll_progress(progress);
 
-	pid = -1;
-	if (kill_fd >= 0)
-		close(kill_fd);
-	kill_fd = -1;
+	reset_pid();
 
 	if (return_status)
-		*return_status = wstatus_to_return(wstatus);
+		*return_status = wstatus_to_return(wstatus, synthesized_exit_code);
 	return true;
 }
 
 int ExternalReplayer::Impl::wait()
 {
 	if (pid == -1)
-		return wstatus_to_return(wstatus);
+		return wstatus_to_return(wstatus, synthesized_exit_code);
 
 	// Pump the fifo through.
 	ExternalReplayer::Progress progress = {};
@@ -236,7 +278,11 @@ int ExternalReplayer::Impl::wait()
 	for (;;)
 	{
 		if (waitpid(pid, &wstatus, 0) < 0)
-			return -1;
+		{
+			wstatus = -errno;
+			synthesized_exit_code = true;
+			break;
+		}
 
 		// Child process can receive SIGCONT/SIGSTOP which is benign.
 		if (WIFEXITED(wstatus) || WIFSIGNALED(wstatus))
@@ -245,11 +291,8 @@ int ExternalReplayer::Impl::wait()
 
 	// Pump the fifo through.
 	poll_progress(progress);
-	pid = -1;
-	if (kill_fd >= 0)
-		close(kill_fd);
-	kill_fd = -1;
-	return wstatus_to_return(wstatus);
+	reset_pid();
+	return wstatus_to_return(wstatus, synthesized_exit_code);
 }
 
 bool ExternalReplayer::Impl::kill()
