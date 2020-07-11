@@ -360,6 +360,9 @@ void ExternalReplayer::Impl::start_replayer_process(const ExternalReplayer::Opti
 	else
 		argv.push_back(self_path.c_str());
 
+	if (options.external_replayer_extra_path)
+		argv.push_back(options.external_replayer_extra_path);
+
 	for (unsigned i = 0; i < options.num_databases; i++)
 		argv.push_back(options.databases[i]);
 

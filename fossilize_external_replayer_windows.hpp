@@ -429,6 +429,13 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 		cmdline += Path::get_executable_path();
 	cmdline += "\"";
 
+	if (options.external_replayer_extra_path)
+	{
+		cmdline += " \"";
+		cmdline += options.external_replayer_extra_path;
+		cmdline += "\"";
+	}
+
 	for (unsigned i = 0; i < options.num_databases; i++)
 	{
 		cmdline += " \"";
