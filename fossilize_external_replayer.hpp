@@ -42,6 +42,10 @@ public:
 		// May be null, in which case the calling process must be fossilize-replay itself.
 		const char *external_replayer_path;
 
+		// If external_replayer_path is a wrapper/runner script (must be executable),
+		// the extra_path can be used to pass an exec path to the wrapper script.
+		const char *external_replayer_extra_path;
+
 		// Paths to one or more Fossilize database to be replayed.
 		// Multiple paths may be used here in which case the replayer will treat
 		// the database as a union of all the databases in "databases".
