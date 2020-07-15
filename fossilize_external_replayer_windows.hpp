@@ -602,7 +602,8 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 	// For whatever reason, this string must be mutable. Dupe it.
 	char *duped_string = _strdup(cmdline.c_str());
 	PROCESS_INFORMATION pi = {};
-	if (!CreateProcessA(nullptr, duped_string, nullptr, nullptr, TRUE, CREATE_NO_WINDOW | CREATE_SUSPENDED,
+	// Replayer should have idle priority.
+	if (!CreateProcessA(nullptr, duped_string, nullptr, nullptr, TRUE, CREATE_NO_WINDOW | CREATE_SUSPENDED | IDLE_PRIORITY_CLASS,
 	                    modified_environment, nullptr,
 	                    &si, &pi))
 	{

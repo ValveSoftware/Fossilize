@@ -508,6 +508,13 @@ void ExternalReplayer::Impl::start_replayer_process(const ExternalReplayer::Opti
 		}
 	}
 
+	// Replayer should have idle priority.
+	// nice() can return -1 in valid scenarios, need to check errno.
+	errno = 0;
+	nice(19);
+	if (errno != 0)
+		LOGE("Failed to set nice value for external replayer!\n");
+
 	// We're now in the child process, so it's safe to override environment here.
 	for (unsigned i = 0; i < options.num_environment_variables; i++)
 		setenv(options.environment_variables[i].key, options.environment_variables[i].value, 1);
