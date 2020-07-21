@@ -984,6 +984,14 @@ static bool test_implicit_whitelist()
 			return false;
 		if (!db2->write_entry(RESOURCE_COMPUTE_PIPELINE, 4, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
 			return false;
+
+		// Should not return a database for Append mode.
+		if (db0->get_sub_database(0))
+			return false;
+		if (db1->get_sub_database(0))
+			return false;
+		if (db2->get_sub_database(0))
+			return false;
 	}
 
 	static const char *extra_paths[] = {
@@ -1036,6 +1044,18 @@ static bool test_implicit_whitelist()
 	if (hashes[0] != 3)
 		return false;
 	if (hashes[1] != 4)
+		return false;
+
+	// We have no primary database.
+	if (replay_db->get_sub_database(0))
+		return false;
+	if (!replay_db->get_sub_database(1))
+		return false;
+	if (!replay_db->get_sub_database(2))
+		return false;
+	if (!replay_db->get_sub_database(3))
+		return false;
+	if (replay_db->get_sub_database(4))
 		return false;
 
 	replay_db.reset();

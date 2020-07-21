@@ -87,6 +87,16 @@ DatabaseInterface::DatabaseInterface(DatabaseMode mode)
 	impl->mode = mode;
 }
 
+bool DatabaseInterface::has_sub_databases()
+{
+	return false;
+}
+
+DatabaseInterface *DatabaseInterface::get_sub_database(unsigned)
+{
+	return nullptr;
+}
+
 bool DatabaseInterface::load_whitelist_database(const char *path)
 {
 	if (impl->mode != DatabaseMode::ReadOnly)
@@ -1367,6 +1377,24 @@ struct ConcurrentDatabase : DatabaseInterface
 		}
 
 		return nullptr;
+	}
+
+	DatabaseInterface *get_sub_database(unsigned index) override
+	{
+		if (mode != DatabaseMode::ReadOnly)
+			return nullptr;
+
+		if (index == 0)
+			return readonly_interface.get();
+		else if (index <= extra_readonly.size())
+			return extra_readonly[index - 1].get();
+		else
+			return nullptr;
+	}
+
+	bool has_sub_databases() override
+	{
+		return true;
 	}
 
 	std::string base_path;
