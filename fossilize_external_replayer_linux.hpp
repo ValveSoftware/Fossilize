@@ -34,6 +34,7 @@
 #include "layer/utils.hpp"
 #include <atomic>
 #include <vector>
+#include <array>
 #include <unordered_set>
 #include <string>
 #include <signal.h>
@@ -493,6 +494,15 @@ void ExternalReplayer::Impl::start_replayer_process(const ExternalReplayer::Opti
 		argv.push_back("--timeout-seconds");
 		sprintf(timeout, "%u", options.timeout_seconds);
 		argv.push_back(timeout);
+	}
+
+	std::vector<std::array<char, 16>> implicit_indices;
+	implicit_indices.resize(options.num_implicit_whitelist_indices);
+	for (unsigned i = 0; i < options.num_implicit_whitelist_indices; i++)
+	{
+		argv.push_back("--implicit-whitelist");
+		sprintf(implicit_indices[i].data(), "%u", options.implicit_whitelist_indices[i]);
+		argv.push_back(implicit_indices[i].data());
 	}
 
 	argv.push_back(nullptr);
