@@ -1362,7 +1362,7 @@ struct ConcurrentDatabase : DatabaseInterface
 
 		for (auto &extra : extra_readonly)
 		{
-			if (extra->has_entry(tag, hash))
+			if (extra && extra->has_entry(tag, hash))
 				return extra->get_db_path_for_hash(tag, hash);
 		}
 
