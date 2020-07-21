@@ -1207,28 +1207,16 @@ struct ConcurrentDatabase : DatabaseInterface
 
 		if (!has_prepared_readonly)
 		{
+			// Prepare everything.
 			// It's okay if the database doesn't exist.
-			if (readonly_interface && readonly_interface->prepare())
-				prime_read_only_hashes(*readonly_interface);
-
-			if (mode != DatabaseMode::ReadOnly)
-			{
-				// We only need the database for priming purposes.
+			if (readonly_interface && !readonly_interface->prepare())
 				readonly_interface.reset();
-			}
 
 			for (auto &extra : extra_readonly)
-			{
-				if (extra && extra->prepare())
-					prime_read_only_hashes(*extra);
-			}
+				if (extra && !extra->prepare())
+					extra.reset();
 
-			if (mode != DatabaseMode::ReadOnly)
-			{
-				// We only need the database for priming purposes.
-				extra_readonly.clear();
-			}
-
+			// Promote databases to whitelist.
 			for (unsigned index : impl->sub_databases_in_whitelist)
 			{
 				DatabaseInterface *iface = nullptr;
@@ -1241,6 +1229,21 @@ struct ConcurrentDatabase : DatabaseInterface
 					return false;
 				if (!add_to_implicit_whitelist(*iface))
 					return false;
+			}
+
+			// Prime the hashmaps.
+			if (readonly_interface)
+				prime_read_only_hashes(*readonly_interface);
+
+			for (auto &extra : extra_readonly)
+				if (extra)
+					prime_read_only_hashes(*extra);
+
+			// We only need the database for priming purposes.
+			if (mode != DatabaseMode::ReadOnly)
+			{
+				readonly_interface.reset();
+				extra_readonly.clear();
 			}
 		}
 

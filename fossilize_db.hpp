@@ -99,7 +99,7 @@ public:
 
 	// Useful if also replaying a database which is known to contain valid data.
 	//
-	// Only supported for the concurrent database.
+	// Currently only supported for the concurrent database.
 	// This must be called before prepare().
 	// Can only be used for ReadOnly database mode.
 	//
