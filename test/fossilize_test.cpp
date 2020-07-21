@@ -935,6 +935,117 @@ static bool test_concurrent_database()
 	return true;
 }
 
+static bool test_implicit_whitelist()
+{
+	remove(".__test_concurrent.foz");
+	remove(".__test_concurrent.1.foz");
+	remove(".__test_concurrent.2.foz");
+	remove(".__test_concurrent.3.foz");
+	static const uint8_t blob[] = {1, 2, 3};
+
+	{
+		auto whitelist_db = std::unique_ptr<DatabaseInterface>(
+				create_stream_archive_database(".__test_concurrent_whitelist.foz", DatabaseMode::OverWrite));
+		if (!whitelist_db || !whitelist_db->prepare())
+			return false;
+
+		if (!whitelist_db->write_entry(RESOURCE_SHADER_MODULE, 1, nullptr, 0, PAYLOAD_WRITE_NO_FLAGS))
+			return false;
+	}
+
+	{
+		auto db0 = std::unique_ptr<DatabaseInterface>(
+				create_concurrent_database(".__test_concurrent",
+				                           DatabaseMode::Append, nullptr, 0));
+		auto db1 = std::unique_ptr<DatabaseInterface>(
+				create_concurrent_database(".__test_concurrent",
+				                           DatabaseMode::Append, nullptr, 0));
+		auto db2 = std::unique_ptr<DatabaseInterface>(
+				create_concurrent_database(".__test_concurrent",
+				                           DatabaseMode::Append, nullptr, 0));
+
+		if (!db0 || !db0->prepare())
+			return false;
+		if (!db1 || !db1->prepare())
+			return false;
+		if (!db2 || !db2->prepare())
+			return false;
+
+		if (!db0->write_entry(RESOURCE_SHADER_MODULE, 1, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
+			return false;
+		if (!db1->write_entry(RESOURCE_GRAPHICS_PIPELINE, 2, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
+			return false;
+		if (!db2->write_entry(RESOURCE_COMPUTE_PIPELINE, 3, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
+			return false;
+
+		if (!db0->write_entry(RESOURCE_SHADER_MODULE, 2, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
+			return false;
+		if (!db1->write_entry(RESOURCE_GRAPHICS_PIPELINE, 3, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
+			return false;
+		if (!db2->write_entry(RESOURCE_COMPUTE_PIPELINE, 4, blob, sizeof(blob), PAYLOAD_WRITE_NO_FLAGS))
+			return false;
+	}
+
+	static const char *extra_paths[] = {
+		".__test_concurrent.1.foz",
+		".__test_concurrent.2.foz",
+		".__test_concurrent.3.foz",
+	};
+	auto replay_db = std::unique_ptr<DatabaseInterface>(
+			create_concurrent_database(nullptr, DatabaseMode::ReadOnly, extra_paths, 3));
+
+	if (!replay_db->load_whitelist_database(".__test_concurrent_whitelist.foz"))
+		return false;
+	replay_db->promote_sub_database_to_whitelist(3);
+	if (!replay_db || !replay_db->prepare())
+		return false;
+
+	// This should be whitelisted by primary whitelist.
+	if (!replay_db->has_entry(RESOURCE_SHADER_MODULE, 1))
+		return false;
+	// Should not exist.
+	if (replay_db->has_entry(RESOURCE_SHADER_MODULE, 2))
+		return false;
+	if (replay_db->has_entry(RESOURCE_GRAPHICS_PIPELINE, 2))
+		return false;
+	if (replay_db->has_entry(RESOURCE_GRAPHICS_PIPELINE, 3))
+		return false;
+	// Should be whitelisted by implicit whitelist.
+	if (!replay_db->has_entry(RESOURCE_COMPUTE_PIPELINE, 3))
+		return false;
+	if (!replay_db->has_entry(RESOURCE_COMPUTE_PIPELINE, 4))
+		return false;
+
+	size_t size = 0;
+	Hash hashes[3];
+
+	if (!replay_db->get_hash_list_for_resource_tag(RESOURCE_SHADER_MODULE, &size, nullptr) || size != 1)
+		return false;
+	if (!replay_db->get_hash_list_for_resource_tag(RESOURCE_SHADER_MODULE, &size, hashes) || size != 1)
+		return false;
+	if (hashes[0] != 1)
+		return false;
+
+	if (!replay_db->get_hash_list_for_resource_tag(RESOURCE_GRAPHICS_PIPELINE, &size, nullptr) || size != 0)
+		return false;
+
+	if (!replay_db->get_hash_list_for_resource_tag(RESOURCE_COMPUTE_PIPELINE, &size, nullptr) || size != 2)
+		return false;
+	if (!replay_db->get_hash_list_for_resource_tag(RESOURCE_COMPUTE_PIPELINE, &size, hashes) || size != 2)
+		return false;
+	if (hashes[0] != 3)
+		return false;
+	if (hashes[1] != 4)
+		return false;
+
+	replay_db.reset();
+	remove(".__test_concurrent.1.foz");
+	remove(".__test_concurrent.2.foz");
+	remove(".__test_concurrent.3.foz");
+	remove(".__test_concurrent_whitelist.foz");
+	return true;
+}
+
 static bool test_filter()
 {
 	static const uint8_t blob[4] = { 1, 2, 3, 4 };
@@ -1091,6 +1202,8 @@ int main()
 	if (!test_concurrent_database_extra_paths())
 		return EXIT_FAILURE;
 	if (!test_concurrent_database())
+		return EXIT_FAILURE;
+	if (!test_implicit_whitelist())
 		return EXIT_FAILURE;
 	if (!test_database())
 		return EXIT_FAILURE;
