@@ -97,6 +97,20 @@ public:
 	bool load_whitelist_database(const char *path);
 	bool load_blacklist_database(const char *path);
 
+	// Useful if also replaying a database which is known to contain valid data.
+	//
+	// Currently only supported for the concurrent database.
+	// This must be called before prepare().
+	// Can only be used for ReadOnly database mode.
+	//
+	// In this mode, any resource in the denoted database will always pass the whitelist test.
+	// Index 0 refers to the primary read-only database,
+	// and index 1 and up refer to extra readonly databases which are passed in.
+	//
+	// Can be called multiple times to whitelist multiple databases.
+	// Using this is meaningless unless load_whitelist_database is also used.
+	void promote_sub_database_to_whitelist(unsigned index);
+
 	// Prepares the database. It can load in the off-line archive from disk.
 	virtual bool prepare() = 0;
 
@@ -121,8 +135,18 @@ public:
 
 	virtual const char *get_db_path_for_hash(ResourceTag tag, Hash hash) = 0;
 
+	// For the concurrent database, gets the sub-database, otherwise returns nullptr.
+	// Index 0 refers to the primary read-only database,
+	// and index 1 and up refer to extra readonly databases which are passed in.
+	// The sub-database is not subject to white- or blacklisting.
+	// This can only be used in read-only mode.
+	// For non-concurrent database types, index 0 returns this, nullptr otherwise.
+	virtual DatabaseInterface *get_sub_database(unsigned index);
+	virtual bool has_sub_databases();
+
 protected:
 	bool test_resource_filter(ResourceTag tag, Hash hash) const;
+	bool add_to_implicit_whitelist(DatabaseInterface &iface);
 	struct Impl;
 	Impl *impl;
 };

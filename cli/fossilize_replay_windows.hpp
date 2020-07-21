@@ -480,6 +480,12 @@ bool ProcessProgress::start_child_process()
 		cmdline += std::to_string(Global::base_replayer_options.timeout_seconds);
 	}
 
+	for (unsigned whitelist_index : Global::base_replayer_options.implicit_whitelist_database_indices)
+	{
+		cmdline += " --implicit-whitelist ";
+		cmdline += std::to_string(whitelist_index);
+	}
+
 	// Create custom named pipes which can be inherited by our child processes.
 	SECURITY_ATTRIBUTES attrs = {};
 	attrs.bInheritHandle = TRUE;

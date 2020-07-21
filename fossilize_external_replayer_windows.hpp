@@ -531,6 +531,12 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 		cmdline += std::to_string(options.timeout_seconds);
 	}
 
+	for (unsigned i = 0; i < options.num_implicit_whitelist_indices; i++)
+	{
+		cmdline += " --implicit-whitelist ";
+		cmdline += std::to_string(options.implicit_whitelist_indices[i]);
+	}
+
 	STARTUPINFO si = {};
 	si.cb = sizeof(STARTUPINFO);
 	si.dwFlags = STARTF_USESTDHANDLES;

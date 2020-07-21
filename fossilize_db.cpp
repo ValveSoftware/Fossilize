@@ -76,6 +76,8 @@ struct DatabaseInterface::Impl
 {
 	std::unique_ptr<DatabaseInterface> whitelist;
 	std::unique_ptr<DatabaseInterface> blacklist;
+	std::vector<unsigned> sub_databases_in_whitelist;
+	std::unordered_set<Hash> implicit_whitelisted[RESOURCE_COUNT];
 	DatabaseMode mode;
 };
 
@@ -83,6 +85,16 @@ DatabaseInterface::DatabaseInterface(DatabaseMode mode)
 {
 	impl = new Impl;
 	impl->mode = mode;
+}
+
+bool DatabaseInterface::has_sub_databases()
+{
+	return false;
+}
+
+DatabaseInterface *DatabaseInterface::get_sub_database(unsigned)
+{
+	return nullptr;
 }
 
 bool DatabaseInterface::load_whitelist_database(const char *path)
@@ -123,6 +135,40 @@ bool DatabaseInterface::load_blacklist_database(const char *path)
 	return true;
 }
 
+void DatabaseInterface::promote_sub_database_to_whitelist(unsigned index)
+{
+	if (impl->mode != DatabaseMode::ReadOnly)
+		return;
+
+	impl->sub_databases_in_whitelist.push_back(index);
+}
+
+bool DatabaseInterface::add_to_implicit_whitelist(DatabaseInterface &iface)
+{
+	std::vector<Hash> hashes;
+	size_t size = 0;
+
+	const auto promote = [&](ResourceTag tag) -> bool {
+		if (!iface.get_hash_list_for_resource_tag(tag, &size, nullptr))
+			return false;
+		hashes.resize(size);
+		if (!iface.get_hash_list_for_resource_tag(tag, &size, hashes.data()))
+			return false;
+		for (auto &h : hashes)
+			impl->implicit_whitelisted[tag].insert(h);
+		return true;
+	};
+
+	if (!promote(RESOURCE_SHADER_MODULE))
+		return false;
+	if (!promote(RESOURCE_GRAPHICS_PIPELINE))
+		return false;
+	if (!promote(RESOURCE_COMPUTE_PIPELINE))
+		return false;
+
+	return true;
+}
+
 DatabaseInterface::~DatabaseInterface()
 {
 	delete impl;
@@ -133,8 +179,9 @@ bool DatabaseInterface::test_resource_filter(ResourceTag tag, Hash hash) const
 	if (tag != RESOURCE_SHADER_MODULE && tag != RESOURCE_COMPUTE_PIPELINE && tag != RESOURCE_GRAPHICS_PIPELINE)
 		return true;
 
-	if (impl->whitelist && !impl->whitelist->has_entry(tag, hash))
+	if (impl->whitelist && impl->implicit_whitelisted[tag].count(hash) == 0 && !impl->whitelist->has_entry(tag, hash))
 		return false;
+
 	if (impl->blacklist && impl->blacklist->has_entry(tag, hash))
 		return false;
 
@@ -1165,27 +1212,47 @@ struct ConcurrentDatabase : DatabaseInterface
 		if (mode != DatabaseMode::Append && mode != DatabaseMode::ReadOnly)
 			return false;
 
+		if (mode != DatabaseMode::ReadOnly && !impl->sub_databases_in_whitelist.empty())
+			return false;
+
 		if (!has_prepared_readonly)
 		{
+			// Prepare everything.
 			// It's okay if the database doesn't exist.
-			if (readonly_interface && readonly_interface->prepare())
-				prime_read_only_hashes(*readonly_interface);
-
-			if (mode != DatabaseMode::ReadOnly)
-			{
-				// We only need the database for priming purposes.
+			if (readonly_interface && !readonly_interface->prepare())
 				readonly_interface.reset();
-			}
 
 			for (auto &extra : extra_readonly)
+				if (extra && !extra->prepare())
+					extra.reset();
+
+			// Promote databases to whitelist.
+			for (unsigned index : impl->sub_databases_in_whitelist)
 			{
-				if (extra && extra->prepare())
-					prime_read_only_hashes(*extra);
+				DatabaseInterface *iface = nullptr;
+				if (index == 0)
+					iface = readonly_interface.get();
+				else if (index <= extra_readonly.size())
+					iface = extra_readonly[index - 1].get();
+
+				if (!iface)
+					return false;
+				if (!add_to_implicit_whitelist(*iface))
+					return false;
 			}
 
+			// Prime the hashmaps.
+			if (readonly_interface)
+				prime_read_only_hashes(*readonly_interface);
+
+			for (auto &extra : extra_readonly)
+				if (extra)
+					prime_read_only_hashes(*extra);
+
+			// We only need the database for priming purposes.
 			if (mode != DatabaseMode::ReadOnly)
 			{
-				// We only need the database for priming purposes.
+				readonly_interface.reset();
 				extra_readonly.clear();
 			}
 		}
@@ -1305,11 +1372,29 @@ struct ConcurrentDatabase : DatabaseInterface
 
 		for (auto &extra : extra_readonly)
 		{
-			if (extra->has_entry(tag, hash))
+			if (extra && extra->has_entry(tag, hash))
 				return extra->get_db_path_for_hash(tag, hash);
 		}
 
 		return nullptr;
+	}
+
+	DatabaseInterface *get_sub_database(unsigned index) override
+	{
+		if (mode != DatabaseMode::ReadOnly)
+			return nullptr;
+
+		if (index == 0)
+			return readonly_interface.get();
+		else if (index <= extra_readonly.size())
+			return extra_readonly[index - 1].get();
+		else
+			return nullptr;
+	}
+
+	bool has_sub_databases() override
+	{
+		return true;
 	}
 
 	std::string base_path;

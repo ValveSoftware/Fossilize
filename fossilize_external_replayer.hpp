@@ -52,6 +52,13 @@ public:
 		const char * const *databases;
 		unsigned num_databases;
 
+		// Represents indices into databases array.
+		// All blobs in a selected database are marked as being implicitly whitelisted,
+		// and extra validation steps are avoided.
+		// Is only meaningful if used along on_disk_validation_whitelist.
+		const unsigned *implicit_whitelist_indices;
+		unsigned num_implicit_whitelist_indices;
+
 		// Path to an on-disk pipeline cache. Maps to --on-disk-pipeline-cache.
 		const char *on_disk_pipeline_cache;
 

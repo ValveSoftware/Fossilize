@@ -221,6 +221,7 @@ struct ThreadedReplayer : StateCreatorInterface
 		string on_disk_validation_whitelist_path;
 		string on_disk_validation_blacklist_path;
 		string pipeline_stats_path;
+		std::vector<unsigned> implicit_whitelist_database_indices;
 
 		// VALVE: Add multi-threaded pipeline creation
 		unsigned num_threads = thread::hardware_concurrency();
@@ -383,6 +384,53 @@ struct ThreadedReplayer : StateCreatorInterface
 				validation_blacklist_db.reset();
 			}
 		}
+	}
+
+	bool init_implicit_whitelist(DatabaseInterface &iface)
+	{
+		std::vector<Hash> hashes;
+		size_t size = 0;
+
+		const auto resolve = [&](ResourceTag tag) -> bool {
+			if (!iface.get_hash_list_for_resource_tag(tag, &size, nullptr))
+				return false;
+			hashes.resize(size);
+			if (!iface.get_hash_list_for_resource_tag(tag, &size, hashes.data()))
+				return false;
+			for (auto h : hashes)
+				implicit_whitelist[tag].insert(h);
+			return true;
+		};
+
+		return resolve(RESOURCE_SHADER_MODULE) &&
+		       resolve(RESOURCE_GRAPHICS_PIPELINE) &&
+		       resolve(RESOURCE_COMPUTE_PIPELINE);
+	}
+
+	bool init_implicit_whitelist()
+	{
+		if (!global_database)
+			return false;
+
+		for (unsigned index : opts.implicit_whitelist_database_indices)
+		{
+			DatabaseInterface *db = nullptr;
+			if (global_database->has_sub_databases())
+				db = global_database->get_sub_database(index + 1); // We use extra_path for concurrent data bases so index 0 is unused.
+			else if (index == 0)
+				db = global_database;
+
+			if (!db)
+			{
+				LOGE("Could not open sub database %u.\n", index);
+				return false;
+			}
+
+			if (!init_implicit_whitelist(*db))
+				return false;
+		}
+
+		return true;
 	}
 
 	void start_worker_threads()
@@ -675,6 +723,8 @@ struct ThreadedReplayer : StateCreatorInterface
 	{
 		if (validation_whitelist_db)
 		{
+			if (implicit_whitelist[tag].count(hash))
+				return true;
 			lock_guard<mutex> holder{validation_db_mutex};
 			return validation_whitelist_db->has_entry(tag, hash);
 		}
@@ -2249,6 +2299,7 @@ struct ThreadedReplayer : StateCreatorInterface
 	std::mutex validation_db_mutex;
 	std::unique_ptr<DatabaseInterface> validation_whitelist_db;
 	std::unique_ptr<DatabaseInterface> validation_blacklist_db;
+	std::unordered_set<Hash> implicit_whitelist[RESOURCE_COUNT];
 
 	std::mutex hash_lock;
 	std::unordered_map<Hash, DeferredGraphicsInfo> graphics_parents;
@@ -2347,6 +2398,7 @@ static void print_help()
 	     "\t[--log-memory]\n"
 	     "\t[--null-device]\n"
 	     "\t[--timeout-seconds]\n"
+	     "\t[--implicit-whitelist <index>]\n"
 	     EXTRA_OPTIONS
 	     "\t<Database>\n");
 }
@@ -2490,6 +2542,8 @@ static int run_progress_process(const VulkanDevice::Options &device_opts,
 			(replayer_opts.start_compute_index != 0) ||
 			(replayer_opts.end_compute_index != ~0u);
 	opts.timeout_seconds = replayer_opts.timeout_seconds;
+	opts.implicit_whitelist_indices = replayer_opts.implicit_whitelist_database_indices.data();
+	opts.num_implicit_whitelist_indices = replayer_opts.implicit_whitelist_database_indices.size();
 
 	ExternalReplayer replayer;
 	if (!replayer.start(opts))
@@ -2744,6 +2798,12 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 	state_replayer.set_resolve_shader_module_handles(false);
 	replayer.global_replayer = &state_replayer;
 	replayer.global_database = resolver.get();
+
+	if (!replayer.init_implicit_whitelist())
+	{
+		LOGE("Failed to initialize implicit whitelist.\n");
+		return EXIT_FAILURE;
+	}
 
 	vector<Hash> resource_hashes;
 	vector<uint8_t> state_json;
@@ -3130,6 +3190,9 @@ int main(int argc, char *argv[])
 	cbs.add("--log-memory", [&](CLIParser &) { log_memory = true; });
 	cbs.add("--null-device", [&](CLIParser &) { opts.null_device = true; });
 	cbs.add("--timeout-seconds", [&](CLIParser &parser) { replayer_opts.timeout_seconds = parser.next_uint(); });
+	cbs.add("--implicit-whitelist", [&](CLIParser &parser) {
+		replayer_opts.implicit_whitelist_database_indices.push_back(parser.next_uint());
+	});
 
 	cbs.error_handler = [] { print_help(); };
 
