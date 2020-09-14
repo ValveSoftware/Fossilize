@@ -525,7 +525,7 @@ static int run_master_process(const VulkanDevice::Options &opts,
 
 	// Create an epoll instance and add the signal fd to it.
 	// The signalfd will signal when SIGCHLD is pending.
-	Global::epoll_fd = epoll_create(2 * int(processes) + 1);
+	Global::epoll_fd = epoll_create(2 * int(processes) + 2);
 	if (Global::epoll_fd < 0)
 	{
 		LOGE("Failed to create epollfd. Too old Linux kernel?\n");
@@ -542,6 +542,25 @@ static int run_master_process(const VulkanDevice::Options &opts,
 			return EXIT_FAILURE;
 		}
 	}
+
+	// If the master process is the process group master, then STDIN is used as a sentinel.
+	// If it closes, treat this as the parent process having terminated without
+	// cleanly shutting down the Fossilize process and we should take down this process group.
+	if (getpgrp() == getpid())
+	{
+		LOGI("Using STDIN as sentinel FD.\n");
+
+		epoll_event event = {};
+		event.events = 0;
+		event.data.u32 = UINT32_MAX - 1;
+		if (epoll_ctl(Global::epoll_fd, EPOLL_CTL_ADD, STDIN_FILENO, &event) < 0)
+		{
+			LOGE("Failed to add STDIN_FILENO to epoll.\n");
+			return EXIT_FAILURE;
+		}
+	}
+	else
+		LOGI("Not using STDIN as sentinel FD.\n");
 
 	// fork() and pipe() strategy.
 	for (unsigned i = 0; i < processes; i++)
@@ -577,9 +596,9 @@ static int run_master_process(const VulkanDevice::Options &opts,
 		for (int i = 0; i < ret; i++)
 		{
 			auto &e = events[i];
-			if (e.events & (EPOLLIN | EPOLLRDHUP))
+			if (e.events & (EPOLLIN | EPOLLHUP | EPOLLRDHUP))
 			{
-				if (e.data.u32 != UINT32_MAX)
+				if (e.data.u32 < UINT32_MAX - 1)
 				{
 					auto &proc = child_processes[e.data.u32 & 0x7fffffffu];
 
@@ -604,7 +623,7 @@ static int run_master_process(const VulkanDevice::Options &opts,
 						}
 					}
 				}
-				else
+				else if (e.data.u32 == UINT32_MAX)
 				{
 					// Read from signalfd to clear the pending flag.
 					signalfd_siginfo info = {};
@@ -641,6 +660,16 @@ static int run_master_process(const VulkanDevice::Options &opts,
 							else
 								LOGE("Got SIGCHLD from unknown process PID %d.\n", pid);
 						}
+					}
+				}
+				else if (e.data.u32 == UINT32_MAX - 1)
+				{
+					LOGI("Parent process died, terminating early ...\n");
+					// STDIN in parent process was hung, kill every child process and ourselves and then exit.
+					if (killpg(getpid(), SIGKILL) < 0)
+					{
+						LOGE("Failed to kill process group ... This should not happen.\n");
+						abort();
 					}
 				}
 			}
