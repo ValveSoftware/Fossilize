@@ -102,12 +102,12 @@ void ProcessProgress::parse(const char *cmd)
 		// We crashed ... Set up a timeout in case the process hangs while trying to recover.
 		if (timer_fd >= 0)
 			close(timer_fd);
-		timer_fd = timerfd_create(CLOCK_MONOTONIC, 0);
+		timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC);
 
 		if (timer_fd >= 0)
 		{
 			struct itimerspec spec = {};
-			spec.it_value.tv_sec = 1;
+			spec.it_value.tv_sec = 3;
 			if (timerfd_settime(timer_fd, 0, &spec, nullptr) < 0)
 				LOGE("Failed to set time with timerfd_settime.\n");
 
@@ -589,6 +589,7 @@ static int run_master_process(const VulkanDevice::Options &opts,
 						// SIGCHLD handler should rearm the process as necessary.
 						if (proc.timer_fd >= 0)
 						{
+							LOGE("Timeout triggered for child process #%u.\n", e.data.u32 & 0x7fffffffu);
 							kill(proc.pid, SIGKILL);
 							close(proc.timer_fd);
 							proc.timer_fd = -1;
