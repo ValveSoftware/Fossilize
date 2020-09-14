@@ -32,7 +32,7 @@ static_assert(sizeof(std::atomic<uint32_t>) == sizeof(uint32_t), "Atomic size mi
 namespace Fossilize
 {
 enum { ControlBlockMessageSize = 64 };
-enum { ControlBlockMagic = 0x19bcde17 };
+enum { ControlBlockMagic = 0x19bcde18 };
 
 struct SharedControlBlock
 {
@@ -47,6 +47,8 @@ struct SharedControlBlock
 	std::atomic<uint32_t> successful_compute;
 	std::atomic<uint32_t> skipped_graphics;
 	std::atomic<uint32_t> skipped_compute;
+	std::atomic<uint32_t> cached_graphics;
+	std::atomic<uint32_t> cached_compute;
 	std::atomic<uint32_t> clean_process_deaths;
 	std::atomic<uint32_t> dirty_process_deaths;
 	std::atomic<uint32_t> parsed_graphics;

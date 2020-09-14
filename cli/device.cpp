@@ -218,7 +218,6 @@ bool VulkanDevice::init_device(const Options &opts)
 
 	for (uint32_t i = 0; i < gpu_count; i++)
 	{
-		VkPhysicalDeviceProperties gpu_props = {};
 		vkGetPhysicalDeviceProperties(gpus[i], &gpu_props);
 		LOGI("Enumerated GPU #%u:\n", i);
 		LOGI("  name: %s\n", gpu_props.deviceName);
@@ -241,7 +240,6 @@ bool VulkanDevice::init_device(const Options &opts)
 	else
 		gpu = gpus.front();
 
-	VkPhysicalDeviceProperties gpu_props = {};
 	vkGetPhysicalDeviceProperties(gpu, &gpu_props);
 	LOGI("Chose GPU:\n");
 	LOGI("  name: %s\n", gpu_props.deviceName);

@@ -72,6 +72,11 @@ public:
 		// Path to store pipeline stats in.
 		const char *pipeline_stats_path;
 
+		// Path to a replayer cache.
+		// path.$pipelineCacheUUID.*.foz will be written and any pipelines in
+		// path.$pipelineCacheUUID.foz will be skipped.
+		const char *replayer_cache_path;
+
 		// Extra environment variables which will be added to the child process tree.
 		// Will not modify environment of caller.
 		const Environment *environment_variables;
@@ -175,6 +180,7 @@ public:
 		uint32_t parsed_fail;
 		uint32_t completed;
 		uint32_t skipped;
+		uint32_t cached;
 
 		// This value is dynamic and will be incremented as pipelines are queued up for parsing.
 		uint32_t total;

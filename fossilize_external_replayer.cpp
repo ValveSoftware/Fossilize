@@ -84,10 +84,10 @@ void ExternalReplayer::compute_condensed_progress(const Progress &progress, unsi
 	// Just clamp it to never report obviously wrong values.
 	// The only glitch we risk is that we're stuck at "100%" a bit longer,
 	// but UI can always report something here when we know we're not done yet.
-	unsigned parsed_graphics = (std::min)(progress.graphics.parsed + progress.graphics.parsed_fail, progress.total_graphics_pipeline_blobs);
-	unsigned parsed_compute = (std::min)(progress.compute.parsed + progress.compute.parsed_fail, progress.total_compute_pipeline_blobs);
-	unsigned compiled_graphics = (std::min)(progress.graphics.completed + progress.graphics.skipped, progress.total_graphics_pipeline_blobs);
-	unsigned compiled_compute = (std::min)(progress.compute.completed + progress.compute.skipped, progress.total_compute_pipeline_blobs);
+	unsigned parsed_graphics = (std::min)(progress.graphics.parsed + progress.graphics.parsed_fail + progress.graphics.cached, progress.total_graphics_pipeline_blobs);
+	unsigned parsed_compute = (std::min)(progress.compute.parsed + progress.compute.parsed_fail + progress.compute.cached, progress.total_compute_pipeline_blobs);
+	unsigned compiled_graphics = (std::min)(progress.graphics.completed + progress.graphics.skipped + progress.graphics.cached, progress.total_graphics_pipeline_blobs);
+	unsigned compiled_compute = (std::min)(progress.compute.completed + progress.compute.skipped + progress.compute.cached, progress.total_compute_pipeline_blobs);
 	unsigned decompressed_modules = (std::min)(progress.completed_modules + progress.module_validation_failures +
 	                                           progress.banned_modules + progress.missing_modules, progress.total_modules);
 
