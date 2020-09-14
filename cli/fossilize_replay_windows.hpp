@@ -122,7 +122,7 @@ void ProcessProgress::parse(const char *cmd)
 		if (timer_handle)
 		{
 			LARGE_INTEGER due_time;
-			due_time.QuadPart = -10000000ll;
+			due_time.QuadPart = -30000000ll;
 			if (!SetWaitableTimer(timer_handle, &due_time, 0, nullptr, nullptr, 0))
 				LOGE("Failed to set waitable timer.\n");
 		}
