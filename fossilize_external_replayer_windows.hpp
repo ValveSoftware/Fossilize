@@ -575,24 +575,21 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 		si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
 	}
 
-	if (options.inherit_process_group)
+	job_handle = CreateJobObjectA(nullptr, nullptr);
+	if (!job_handle)
 	{
-		job_handle = CreateJobObjectA(nullptr, nullptr);
-		if (!job_handle)
+		LOGE("Failed to create job handle.\n");
+		// Not fatal, we just won't bother with this.
+	}
+	else
+	{
+		// Kill all child processes if the parent dies.
+		JOBOBJECT_EXTENDED_LIMIT_INFORMATION jeli = {};
+		jeli.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+		if (!SetInformationJobObject(job_handle, JobObjectExtendedLimitInformation, &jeli, sizeof(jeli)))
 		{
-			LOGE("Failed to create job handle.\n");
-			// Not fatal, we just won't bother with this.
-		}
-		else
-		{
-			// Kill all child processes if the parent dies.
-			JOBOBJECT_EXTENDED_LIMIT_INFORMATION jeli = {};
-			jeli.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-			if (!SetInformationJobObject(job_handle, JobObjectExtendedLimitInformation, &jeli, sizeof(jeli)))
-			{
-				LOGE("Failed to set information for job object.\n");
-				// Again, not fatal.
-			}
+			LOGE("Failed to set information for job object.\n");
+			// Again, not fatal.
 		}
 	}
 
