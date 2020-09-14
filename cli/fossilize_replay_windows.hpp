@@ -486,6 +486,14 @@ bool ProcessProgress::start_child_process()
 		cmdline += std::to_string(whitelist_index);
 	}
 
+	if (!Global::base_replayer_options.replayer_cache_path.empty())
+	{
+		cmdline += " --replayer-cache ";
+		cmdline += "\"";
+		cmdline += Global::base_replayer_options.replayer_cache_path;
+		cmdline += "\"";
+	}
+
 	// Create custom named pipes which can be inherited by our child processes.
 	SECURITY_ATTRIBUTES attrs = {};
 	attrs.bInheritHandle = TRUE;

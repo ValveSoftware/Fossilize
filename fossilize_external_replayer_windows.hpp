@@ -106,11 +106,13 @@ ExternalReplayer::PollResult ExternalReplayer::Impl::poll_progress(ExternalRepla
 	progress.compute.parsed = shm_block->parsed_compute.load(std::memory_order_relaxed);
 	progress.compute.parsed_fail = shm_block->parsed_compute_failures.load(std::memory_order_relaxed);
 	progress.compute.skipped = shm_block->skipped_compute.load(std::memory_order_relaxed);
+	progress.compute.cached = shm_block->cached_compute.load(std::memory_order_relaxed);
 	progress.compute.completed = shm_block->successful_compute.load(std::memory_order_relaxed);
 	progress.graphics.total = shm_block->total_graphics.load(std::memory_order_relaxed);
 	progress.graphics.parsed = shm_block->parsed_graphics.load(std::memory_order_relaxed);
 	progress.graphics.parsed_fail = shm_block->parsed_graphics_failures.load(std::memory_order_relaxed);
 	progress.graphics.skipped = shm_block->skipped_graphics.load(std::memory_order_relaxed);
+	progress.graphics.cached = shm_block->cached_graphics.load(std::memory_order_relaxed);
 	progress.graphics.completed = shm_block->successful_graphics.load(std::memory_order_relaxed);
 	progress.completed_modules = shm_block->successful_modules.load(std::memory_order_relaxed);
 	progress.missing_modules = shm_block->parsed_module_failures.load(std::memory_order_relaxed);
@@ -489,6 +491,14 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 		cmdline += " --on-disk-validation-blacklist ";
 		cmdline += "\"";
 		cmdline += options.on_disk_validation_blacklist;
+		cmdline += "\"";
+	}
+
+	if (options.replayer_cache_path)
+	{
+		cmdline += " --replayer-cache ";
+		cmdline += "\"";
+		cmdline += options.replayer_cache_path;
 		cmdline += "\"";
 	}
 

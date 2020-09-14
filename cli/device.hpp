@@ -90,11 +90,17 @@ public:
 		return feature_filter;
 	}
 
+	const VkPhysicalDeviceProperties &get_gpu_properties() const
+	{
+		return gpu_props;
+	}
+
 private:
 	VkInstance instance = VK_NULL_HANDLE;
 	VkPhysicalDevice gpu = VK_NULL_HANDLE;
 	VkDevice device = VK_NULL_HANDLE;
 	VkDebugReportCallbackEXT callback = VK_NULL_HANDLE;
+	VkPhysicalDeviceProperties gpu_props = {};
 	uint32_t api_version = 0;
 
 	void (*validation_callback)(void *) = nullptr;

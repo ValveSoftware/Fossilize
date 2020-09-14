@@ -221,6 +221,7 @@ struct ThreadedReplayer : StateCreatorInterface
 		string on_disk_validation_whitelist_path;
 		string on_disk_validation_blacklist_path;
 		string pipeline_stats_path;
+		string replayer_cache_path;
 		std::vector<unsigned> implicit_whitelist_database_indices;
 
 		// VALVE: Add multi-threaded pipeline creation
@@ -430,6 +431,34 @@ struct ThreadedReplayer : StateCreatorInterface
 				return false;
 		}
 
+		return true;
+	}
+
+	bool init_replayer_cache()
+	{
+		if (!device)
+			return false;
+
+		auto &props = device->get_gpu_properties();
+		char uuid[2 * VK_UUID_SIZE + 1];
+		uuid[2 * VK_UUID_SIZE] = '\0';
+
+		const auto to_hex = [](uint8_t v) -> char {
+			if (v < 10)
+				return char('0' + v);
+			else
+				return char('a' + (v - 10));
+		};
+
+		for (unsigned i = 0; i < VK_UUID_SIZE; i++)
+		{
+			uuid[2 * i + 0] = to_hex(props.pipelineCacheUUID[i] & 0xf);
+			uuid[2 * i + 1] = to_hex((props.pipelineCacheUUID[i] >> 4) & 0xf);
+		}
+
+		replayer_cache_db.reset(create_concurrent_database((opts.replayer_cache_path + "." + uuid).c_str(), DatabaseMode::Append, nullptr, 0));
+		if (!replayer_cache_db || !replayer_cache_db->prepare())
+			return false;
 		return true;
 	}
 
@@ -719,6 +748,15 @@ struct ThreadedReplayer : StateCreatorInterface
 		}
 	}
 
+	void mark_replayed_resource(ResourceTag tag, Hash hash)
+	{
+		if (replayer_cache_db)
+		{
+			lock_guard<mutex> holder{replayer_cache_mutex};
+			replayer_cache_db->write_entry(tag, hash, nullptr, 0, 0);
+		}
+	}
+
 	bool has_resource_in_whitelist(ResourceTag tag, Hash hash)
 	{
 		if (validation_whitelist_db)
@@ -890,6 +928,8 @@ struct ThreadedReplayer : StateCreatorInterface
 			if (!per_thread.triggered_validation_error)
 				whitelist_resource(work_item.tag, work_item.hash);
 
+			mark_replayed_resource(work_item.tag, work_item.hash);
+
 			per_thread.current_graphics_pipeline = 0;
 			per_thread.current_compute_pipeline = 0;
 			break;
@@ -1027,6 +1067,8 @@ struct ThreadedReplayer : StateCreatorInterface
 
 			if (!per_thread.triggered_validation_error)
 				whitelist_resource(work_item.tag, work_item.hash);
+
+			mark_replayed_resource(work_item.tag, work_item.hash);
 
 			per_thread.current_compute_pipeline = 0;
 			per_thread.current_graphics_pipeline = 0;
@@ -1424,6 +1466,10 @@ struct ThreadedReplayer : StateCreatorInterface
 					LOGE("Requested validation cache, but validation layers do not support this extension.\n");
 				}
 			}
+
+			if (!opts.replayer_cache_path.empty())
+				if (!init_replayer_cache())
+					LOGE("Failed to initialize replayer cache. Ignoring!\n");
 
 			auto end_device = chrono::steady_clock::now();
 			long time_ms = chrono::duration_cast<chrono::milliseconds>(end_device - start_device).count();
@@ -1985,7 +2031,29 @@ struct ThreadedReplayer : StateCreatorInterface
 				                 deferred[memory_index].resize(to_submit);
 				                 for (unsigned index = hash_offset; index < hash_offset + to_submit; index++)
 				                 {
-					                 if (pipelines.count(hashes[index]) == 0)
+					                 auto tag = DerivedInfo::get_tag();
+					                 if (cached_blobs[tag].count(hashes[index]) != 0)
+					                 {
+						                 // Do not do anything with this pipeline.
+						                 // Need to check here which is not optimal, since we need to maintain a stable pipeline index
+						                 // for the robust replayer mechanism.
+						                 // TODO: Consider pre-parsing various databases and emit a SHM block for child replayer processes.
+						                 deferred[memory_index][index - hash_offset] = {};
+						                 if (opts.control_block)
+						                 {
+							                 if (tag == RESOURCE_GRAPHICS_PIPELINE)
+							                 {
+								                 opts.control_block->total_graphics.fetch_add(1, std::memory_order_relaxed);
+								                 opts.control_block->cached_graphics.fetch_add(1, std::memory_order_relaxed);
+							                 }
+							                 else if (tag == RESOURCE_COMPUTE_PIPELINE)
+							                 {
+								                 opts.control_block->total_compute.fetch_add(1, std::memory_order_relaxed);
+								                 opts.control_block->cached_compute.fetch_add(1, std::memory_order_relaxed);
+							                 }
+						                 }
+					                 }
+					                 else if (pipelines.count(hashes[index]) == 0)
 					                 {
 						                 ThreadedReplayer::PipelineWorkItem work_item;
 						                 work_item.hash = hashes[index];
@@ -1994,7 +2062,6 @@ struct ThreadedReplayer : StateCreatorInterface
 						                 work_item.memory_context_index = memory_index;
 						                 work_item.index = index - hash_offset;
 
-						                 auto tag = DerivedInfo::get_tag();
 						                 if (opts.control_block)
 						                 {
 							                 if (tag == RESOURCE_GRAPHICS_PIPELINE)
@@ -2301,6 +2368,10 @@ struct ThreadedReplayer : StateCreatorInterface
 	std::unique_ptr<DatabaseInterface> validation_blacklist_db;
 	std::unordered_set<Hash> implicit_whitelist[RESOURCE_COUNT];
 
+	std::mutex replayer_cache_mutex;
+	std::unique_ptr<DatabaseInterface> replayer_cache_db;
+	std::unordered_set<Hash> cached_blobs[RESOURCE_COUNT];
+
 	std::mutex hash_lock;
 	std::unordered_map<Hash, DeferredGraphicsInfo> graphics_parents;
 	std::unordered_map<Hash, DeferredComputeInfo> compute_parents;
@@ -2399,6 +2470,7 @@ static void print_help()
 	     "\t[--null-device]\n"
 	     "\t[--timeout-seconds]\n"
 	     "\t[--implicit-whitelist <index>]\n"
+	     "\t[--replayer-cache <path>]\n"
 	     EXTRA_OPTIONS
 	     "\t<Database>\n");
 }
@@ -2412,12 +2484,16 @@ static void log_progress(const ExternalReplayer::Progress &progress)
 	LOGI("=================\n");
 	LOGI(" Progress report:\n");
 	LOGI("   Overall %u / %u\n", current_actions, total_actions);
-	LOGI("   Parsed graphics %u / %u, failed %u\n", progress.graphics.parsed, progress.graphics.total, progress.graphics.parsed_fail);
-	LOGI("   Parsed compute %u / %u, failed %u\n", progress.compute.parsed, progress.compute.total, progress.compute.parsed_fail);
+	LOGI("   Parsed graphics %u / %u, failed %u, cached %u\n",
+	     progress.graphics.parsed, progress.graphics.total, progress.graphics.parsed_fail, progress.graphics.cached);
+	LOGI("   Parsed compute %u / %u, failed %u, cached %u\n",
+	     progress.compute.parsed, progress.compute.total, progress.compute.parsed_fail, progress.compute.cached);
 	LOGI("   Decompress modules %u / %u, skipped %u, failed validation %u, missing %u\n",
 	     progress.completed_modules, progress.total_modules, progress.banned_modules, progress.module_validation_failures, progress.missing_modules);
-	LOGI("   Compile graphics %u / %u, skipped %u\n", progress.graphics.completed, progress.graphics.total, progress.graphics.skipped);
-	LOGI("   Compile compute %u / %u, skipped %u\n", progress.compute.completed, progress.compute.total, progress.compute.skipped);
+	LOGI("   Compile graphics %u / %u, skipped %u, cached %u\n",
+	     progress.graphics.completed, progress.graphics.total, progress.graphics.skipped, progress.graphics.cached);
+	LOGI("   Compile compute %u / %u, skipped %u, cached %u\n",
+	     progress.compute.completed, progress.compute.total, progress.compute.skipped, progress.compute.cached);
 	LOGI("   Clean crashes %u\n", progress.clean_crashes);
 	LOGI("   Dirty crashes %u\n", progress.dirty_crashes);
 	LOGI("=================\n");
@@ -2544,6 +2620,8 @@ static int run_progress_process(const VulkanDevice::Options &device_opts,
 	opts.timeout_seconds = replayer_opts.timeout_seconds;
 	opts.implicit_whitelist_indices = replayer_opts.implicit_whitelist_database_indices.data();
 	opts.num_implicit_whitelist_indices = replayer_opts.implicit_whitelist_database_indices.size();
+	opts.replayer_cache_path = replayer_opts.replayer_cache_path.empty() ?
+			nullptr : replayer_opts.replayer_cache_path.c_str();
 
 	ExternalReplayer replayer;
 	if (!replayer.start(opts))
@@ -2777,6 +2855,23 @@ static void dump_stats(const std::string &stats_path)
 static void install_trivial_crash_handlers(ThreadedReplayer &replayer);
 #endif
 
+static void populate_blob_hash_set(std::unordered_set<Hash> &hashes, ResourceTag tag, DatabaseInterface &iface)
+{
+	std::vector<Hash> remove_hashes;
+	size_t count;
+	if (!iface.get_hash_list_for_resource_tag(tag, &count, nullptr))
+		return;
+	if (count == 0)
+		return;
+	remove_hashes.resize(count);
+	if (!iface.get_hash_list_for_resource_tag(tag, &count, remove_hashes.data()))
+		return;
+
+	hashes.reserve(count);
+	for (auto h : remove_hashes)
+		hashes.insert(h);
+}
+
 static int run_normal_process(ThreadedReplayer &replayer, const vector<const char *> &databases)
 {
 	auto start_time = chrono::steady_clock::now();
@@ -2914,14 +3009,9 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 			if (resolver->read_entry(tag, replayer.opts.pipeline_hash, &state_json_size, nullptr, 0))
 			{
 				if (tag == RESOURCE_GRAPHICS_PIPELINE)
-				{
 					graphics_hashes.push_back(replayer.opts.pipeline_hash);
-
-				}
 				else if (tag == RESOURCE_COMPUTE_PIPELINE)
-				{
 					compute_hashes.push_back(replayer.opts.pipeline_hash);
-				}
 			}
 		}
 
@@ -2982,6 +3072,9 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 
 			move(begin(*hashes) + start_index, begin(*hashes) + end_index, begin(*hashes));
 			hashes->erase(begin(*hashes) + (end_index - start_index), end(*hashes));
+
+			if (replayer.replayer_cache_db)
+				populate_blob_hash_set(replayer.cached_blobs[tag], tag, *replayer.replayer_cache_db);
 
 			for (auto &hash : *hashes)
 			{
@@ -3192,6 +3285,9 @@ int main(int argc, char *argv[])
 	cbs.add("--timeout-seconds", [&](CLIParser &parser) { replayer_opts.timeout_seconds = parser.next_uint(); });
 	cbs.add("--implicit-whitelist", [&](CLIParser &parser) {
 		replayer_opts.implicit_whitelist_database_indices.push_back(parser.next_uint());
+	});
+	cbs.add("--replayer-cache", [&](CLIParser &parser) {
+		replayer_opts.replayer_cache_path = parser.next_string();
 	});
 
 	cbs.error_handler = [] { print_help(); };
