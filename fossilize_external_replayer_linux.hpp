@@ -59,6 +59,7 @@ struct ExternalReplayer::Impl
 	pid_t pid = -1;
 	int fd = -1;
 	int kill_fd = -1;
+	int close_fd = -1;
 	SharedControlBlock *shm_block = nullptr;
 	size_t shm_block_size = 0;
 	int wstatus = 0;
@@ -95,6 +96,8 @@ ExternalReplayer::Impl::~Impl()
 		close(fd);
 	if (kill_fd >= 0)
 		close(kill_fd);
+	if (close_fd >= 0)
+		close(close_fd);
 
 	if (shm_block)
 		munmap(shm_block, shm_block_size);
@@ -111,6 +114,9 @@ void ExternalReplayer::Impl::reset_pid()
 	if (kill_fd >= 0)
 		close(kill_fd);
 	kill_fd = -1;
+	if (close_fd >= 0)
+		close(close_fd);
+	close_fd = -1;
 }
 
 ExternalReplayer::PollResult ExternalReplayer::Impl::poll_progress(ExternalReplayer::Progress &progress)
@@ -601,6 +607,10 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 	if (pipe(fds) < 0)
 		return false;
 
+	int close_fds[2] = { -1, -1 };
+	if (!options.inherit_process_group && pipe(close_fds) < 0)
+		return false;
+
 	pid_t new_pid = fork();
 	if (new_pid > 0)
 	{
@@ -609,18 +619,34 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 		fd = -1;
 		pid = new_pid;
 		kill_fd = fds[0];
+
+		if (!options.inherit_process_group)
+		{
+			close(close_fds[0]);
+			close_fd = close_fds[1];
+		}
 	}
 	else if (new_pid == 0)
 	{
 		close(fds[0]);
 		if (!options.inherit_process_group)
 		{
+			close(close_fds[1]);
+
 			// Set the process group ID so we can kill all the child processes as needed.
 			if (setpgid(0, 0) < 0)
 			{
 				LOGE("Failed to set PGID in child.\n");
 				exit(1);
 			}
+
+			if (dup2(close_fds[0], STDIN_FILENO) < 0)
+			{
+				LOGE("Failed to dup FD to stdin in child process.\n");
+				exit(1);
+			}
+
+			close(close_fds[0]);
 		}
 
 		// Notify parent process that it can return.
