@@ -610,26 +610,58 @@ DatabaseInterface *create_zip_archive_database(const char *path, DatabaseMode mo
 	return db;
 }
 
+/* Fossilize StreamArchive database format version 6:
+ *
+ * The file consists of a header, followed by an unlimited series of "entries".
+ *
+ * All multi-byte entities are little-endian.
+ *
+ * The file header is as follows:
+ *
+ * Field           Type           Description
+ * -----           ----           -----------
+ * magic_number    uint8_t[12]    Constant value: "\x81""FOSSILIZEDB"
+ * unused1         uint8_t        Currently unused. Must be zero.
+ * unused2         uint8_t        Currently unused. Must be zero.
+ * unused3         uint8_t        Currently unused. Must be zero.
+ * version         uint8_t        StreamArchive version: 6
+ *
+ *
+ * Each entry follows this format:
+ *
+ * Field           Type                              Description
+ * -----           ----                              -----------
+ * tag             unsigned char[40 - hash_bytes]    Application-defined 'tag' which groups entry types. Stored as hexadecimal ASCII.
+ * hash            unsigned char[hash_bytes]         Application-defined 'hash' to identify this entry. Stored as hexadecimal ASCII.
+ * stored_size     uint32_t                          Size of the payload as stored in this file.
+ * flags           uint32_t                          Flags for this entry (e.g. compression). See below.
+ * crc32           uint32_t                          CRC32 of the payload as stored in this file. If zero, checksum is not checked when reading.
+ * payload_size    uint32_t                          Size of this payload after decompression.
+ * payload         uint8_t[stored_size]              Entry data.
+ *
+ * The flags field must contain one of:
+ *     0x1: No compression.
+ *     0x2: Deflate compression.
+ *
+ * Entries should have a unique tag and hash combination. Implementations may
+ * ignore duplicated tag and hash combinations.
+ *
+ * It is acceptable for the last entry to be truncated. In this case, that
+ * entry should be ignored.
+ */
+
 static const uint8_t stream_reference_magic_and_version[16] = {
 	0x81, 'F', 'O', 'S',
 	'S', 'I', 'L', 'I',
 	'Z', 'E', 'D', 'B',
-	0, 0, 0, FOSSILIZE_FORMAT_VERSION, // 4 bytes to use for versioning.
+	0, 0, 0,
+	FOSSILIZE_FORMAT_VERSION,
 };
 
 struct StreamArchive : DatabaseInterface
 {
 	enum { MagicSize = sizeof(stream_reference_magic_and_version) };
 	enum { FOSSILIZE_COMPRESSION_NONE = 1, FOSSILIZE_COMPRESSION_DEFLATE = 2 };
-
-	// All multi-byte entities are little-endian.
-
-	// A payload contains:
-	// 4 byte payload size (after the header).
-	// 4 byte identifier (compression type)
-	// 4 byte checksum of raw (compressed) payload (CRC32, from zlib)
-	// 4 byte uncompressed size
-	// raw payload uint8[payload size].
 
 	struct PayloadHeader
 	{
