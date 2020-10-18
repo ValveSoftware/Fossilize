@@ -298,15 +298,13 @@ string get_executable_path()
 	target[ret] = '\0';
 	return canonicalize_path(string(target));
 #else
-	pid_t pid = getpid();
 	static const char *exts[] = { "exe", "file", "a.out" };
 	char link_path[PATH_MAX];
 	char target[PATH_MAX];
 
 	for (auto *ext : exts)
 	{
-		snprintf(link_path, sizeof(link_path), "/proc/%u/%s",
-		         unsigned(pid), ext);
+		snprintf(link_path, sizeof(link_path), "/proc/self/%s", ext);
 		ssize_t ret = readlink(link_path, target, sizeof(target) - 1);
 		if (ret >= 0)
 			target[ret] = '\0';
