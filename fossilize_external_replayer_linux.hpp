@@ -49,8 +49,45 @@
 #include "platform/gcc_clang_spinlock.hpp"
 #endif
 
+#ifdef __linux__
+
 #ifndef SCHED_BATCH
 #define SCHED_BATCH 3
+#endif
+
+/**
+ * Define the syscall interface in Linux because it is missing from glibc
+ * https://www.kernel.org/doc/html/latest/block/ioprio.html
+ */
+
+#ifndef IOPRIO_CLASS_SHIFT
+#define IOPRIO_CLASS_SHIFT (13)
+#endif
+
+#ifndef IOPRIO_PRIO_VALUE
+#define IOPRIO_PRIO_VALUE(clazz, data) (((clazz) << IOPRIO_CLASS_SHIFT) | data)
+#endif
+
+enum
+{
+	IOPRIO_CLASS_NONE,
+	IOPRIO_CLASS_RT,
+	IOPRIO_CLASS_BE,
+	IOPRIO_CLASS_IDLE,
+};
+
+enum
+{
+	IOPRIO_WHO_PROCESS = 1,
+	IOPRIO_WHO_PGRP,
+	IOPRIO_WHO_USER,
+};
+
+static inline int ioprio_set(int which, int who, int ioprio)
+{
+	return (int)syscall(SYS_ioprio_set, which, who, ioprio);
+}
+
 #endif
 
 namespace Fossilize
@@ -556,6 +593,12 @@ void ExternalReplayer::Impl::start_replayer_process(const ExternalReplayer::Opti
 		if (sched_setscheduler(0, SCHED_BATCH, &p) < 0)
 			LOGE("Failed to set scheduling policy for external replayer!\n");
 	}
+
+	// Hint the IO scheduler that we don't want a fair share of the disk
+	// bandwidth.
+	// https://www.kernel.org/doc/html/latest/block/ioprio.html
+	if (ioprio_set(IOPRIO_WHO_PROCESS, 0, IOPRIO_PRIO_VALUE(IOPRIO_CLASS_IDLE, 0)) < 0)
+		LOGE("Failed to set IO priority for external replayer!\n");
 #endif
 
 	// We're now in the child process, so it's safe to override environment here.
