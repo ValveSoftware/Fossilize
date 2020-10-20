@@ -551,9 +551,9 @@ void ExternalReplayer::Impl::start_replayer_process(const ExternalReplayer::Opti
 	// better chance for the block layer to coalesce IO requests (more IO
 	// may be dispatched per time slice).
 	{
-		struct sched_param p = { .sched_priority = 0 };
+		struct sched_param p = {};
 		if (sched_setscheduler(0, SCHED_BATCH, &p) < 0)
-			LOGI("Failed to set scheduling policy for external replayer!\n");
+			LOGE("Failed to set scheduling policy for external replayer!\n");
 	}
 
 	// We're now in the child process, so it's safe to override environment here.
