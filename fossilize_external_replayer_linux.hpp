@@ -573,6 +573,60 @@ void ExternalReplayer::Impl::start_replayer_process(const ExternalReplayer::Opti
 	}
 }
 
+static bool create_low_priority_autogroup()
+{
+	pid_t group_pid;
+
+	// Set the process group ID so we can kill all the child processes as needed.
+	// Use a new session ID so that we get a new scheduling autogroup.
+	// This will also create a new process group.
+	if ((group_pid = setsid()) < 0)
+	{
+		LOGE("Failed to set PGID in child.\n");
+		return false;
+	}
+
+	// Sanity check that setsid did what we expected.
+	if (group_pid != getpgrp() || getpgrp() != getpid())
+	{
+		LOGE("Failed to validate PGID in child.\n");
+		return false;
+	}
+
+	bool autogroups_enabled = false;
+	{
+		FILE *file = fopen("/proc/sys/kernel/sched_autogroup_enabled", "rb");
+		if (file)
+		{
+			char buffer[2] = {};
+			if (fread(buffer, 1, sizeof(buffer), file) >= 1)
+				autogroups_enabled = buffer[0] == '1';
+			fclose(file);
+		}
+
+		// If the kernel does not enable autogroup scheduling support, don't bother.
+	}
+
+	if (autogroups_enabled)
+	{
+		// There is no API for setting the autogroup scheduling, so do it here.
+		// Reference: https://github.com/nlburgin/reallynice
+		FILE *file = fopen("/proc/self/autogroup", "w");
+		if (file)
+		{
+			LOGI("Setting autogroup scheduling.\n");
+			fputs("19", file);
+			fclose(file);
+		}
+		else
+			LOGE("/proc/self/autogroup does not exist on this system. Skipping autogrouping.\n");
+	}
+	else
+		LOGI("Autogroup scheduling is not enabled on this kernel. Will rely entirely on nice().\n");
+
+	return true;
+}
+
 bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 {
 	char shm_name[256];
@@ -658,10 +712,9 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 		{
 			close(close_fds[1]);
 
-			// Set the process group ID so we can kill all the child processes as needed.
-			if (setpgid(0, 0) < 0)
+			if (!create_low_priority_autogroup())
 			{
-				LOGE("Failed to set PGID in child.\n");
+				LOGE("Failed to create session.\n");
 				exit(1);
 			}
 
