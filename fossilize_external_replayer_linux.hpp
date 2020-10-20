@@ -27,6 +27,7 @@
 #include <sys/wait.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <sched.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -46,6 +47,10 @@
 #include "platform/futex_wrapper_linux.hpp"
 #else
 #include "platform/gcc_clang_spinlock.hpp"
+#endif
+
+#ifndef SCHED_BATCH
+#define SCHED_BATCH 3
 #endif
 
 namespace Fossilize
@@ -539,6 +544,20 @@ void ExternalReplayer::Impl::start_replayer_process(const ExternalReplayer::Opti
 	if (errno != 0)
 		LOGE("Failed to set nice value for external replayer!\n");
 
+#ifdef __linux__
+	// Replayer crunches a lot of numbers, hint the scheduler.
+	// This results in better throughput at the same or lower CPU usage (due
+	// to better CPU cache utilization with bigger time slices), it doesn't
+	// preempt interactive tasks (less impact on games), and it also makes a
+	// better chance for the block layer to coalesce IO requests (more IO
+	// may be dispatched per time slice).
+	{
+		struct sched_param p = {};
+		if (sched_setscheduler(0, SCHED_BATCH, &p) < 0)
+			LOGE("Failed to set scheduling policy for external replayer!\n");
+	}
+#endif
+
 	// We're now in the child process, so it's safe to override environment here.
 	for (unsigned i = 0; i < options.num_environment_variables; i++)
 		setenv(options.environment_variables[i].key, options.environment_variables[i].value, 1);
@@ -554,6 +573,62 @@ void ExternalReplayer::Impl::start_replayer_process(const ExternalReplayer::Opti
 		LOGE("Failed to start external process %s with execv.\n", options.external_replayer_path);
 		exit(1);
 	}
+}
+
+static bool create_low_priority_autogroup()
+{
+	pid_t group_pid;
+
+	// Set the process group ID so we can kill all the child processes as needed.
+	// Use a new session ID so that we get a new scheduling autogroup.
+	// This will also create a new process group.
+	if ((group_pid = setsid()) < 0)
+	{
+		LOGE("Failed to set PGID in child.\n");
+		return false;
+	}
+
+	// Sanity check that setsid did what we expected.
+	if (group_pid != getpgrp() || getpgrp() != getpid())
+	{
+		LOGE("Failed to validate PGID in child.\n");
+		return false;
+	}
+
+#ifdef __linux__
+	bool autogroups_enabled = false;
+	{
+		FILE *file = fopen("/proc/sys/kernel/sched_autogroup_enabled", "rb");
+		if (file)
+		{
+			char buffer[2] = {};
+			if (fread(buffer, 1, sizeof(buffer), file) >= 1)
+				autogroups_enabled = buffer[0] == '1';
+			fclose(file);
+		}
+
+		// If the kernel does not enable autogroup scheduling support, don't bother.
+	}
+
+	if (autogroups_enabled)
+	{
+		// There is no API for setting the autogroup scheduling, so do it here.
+		// Reference: https://github.com/nlburgin/reallynice
+		FILE *file = fopen("/proc/self/autogroup", "w");
+		if (file)
+		{
+			LOGI("Setting autogroup scheduling.\n");
+			fputs("19", file);
+			fclose(file);
+		}
+		else
+			LOGE("/proc/self/autogroup does not exist on this system. Skipping autogrouping.\n");
+	}
+	else
+		LOGI("Autogroup scheduling is not enabled on this kernel. Will rely entirely on nice().\n");
+#endif
+
+	return true;
 }
 
 bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
@@ -641,10 +716,9 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 		{
 			close(close_fds[1]);
 
-			// Set the process group ID so we can kill all the child processes as needed.
-			if (setpgid(0, 0) < 0)
+			if (!create_low_priority_autogroup())
 			{
-				LOGE("Failed to set PGID in child.\n");
+				LOGE("Failed to create session.\n");
 				exit(1);
 			}
 
