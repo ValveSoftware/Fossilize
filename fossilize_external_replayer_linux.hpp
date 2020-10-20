@@ -90,6 +90,10 @@ static inline int ioprio_set(int which, int who, int ioprio)
 
 #endif
 
+#ifdef __APPLE__
+#include <sys/resource.h>
+#endif
+
 namespace Fossilize
 {
 static std::atomic<int32_t> shm_index;
@@ -599,6 +603,14 @@ void ExternalReplayer::Impl::start_replayer_process(const ExternalReplayer::Opti
 	// https://www.kernel.org/doc/html/latest/block/ioprio.html
 	if (ioprio_set(IOPRIO_WHO_PROCESS, 0, IOPRIO_PRIO_VALUE(IOPRIO_CLASS_IDLE, 0)) < 0)
 		LOGE("Failed to set IO priority for external replayer!\n");
+#endif
+
+#ifdef __APPLE__
+	// Hint the IO scheduler that we don't want to impact foreground
+	// latency.
+	// https://www.unix.com/man-page/osx/3/setiopolicy_np/
+	if (setiopolicy_np(IOPOL_TYPE_DISK, IOPOL_SCOPE_PROCESS, IOPOL_UTILITY) < 0)
+		LOGE("Failed to set IO policy for external replayer!\n");
 #endif
 
 	// We're now in the child process, so it's safe to override environment here.
