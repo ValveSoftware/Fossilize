@@ -544,6 +544,7 @@ void ExternalReplayer::Impl::start_replayer_process(const ExternalReplayer::Opti
 	if (errno != 0)
 		LOGE("Failed to set nice value for external replayer!\n");
 
+#ifdef __linux__
 	// Replayer crunches a lot of numbers, hint the scheduler.
 	// This results in better throughput at the same or lower CPU usage (due
 	// to better CPU cache utilization with bigger time slices), it doesn't
@@ -555,6 +556,7 @@ void ExternalReplayer::Impl::start_replayer_process(const ExternalReplayer::Opti
 		if (sched_setscheduler(0, SCHED_BATCH, &p) < 0)
 			LOGE("Failed to set scheduling policy for external replayer!\n");
 	}
+#endif
 
 	// We're now in the child process, so it's safe to override environment here.
 	for (unsigned i = 0; i < options.num_environment_variables; i++)
@@ -593,6 +595,7 @@ static bool create_low_priority_autogroup()
 		return false;
 	}
 
+#ifdef __linux__
 	bool autogroups_enabled = false;
 	{
 		FILE *file = fopen("/proc/sys/kernel/sched_autogroup_enabled", "rb");
@@ -623,6 +626,7 @@ static bool create_low_priority_autogroup()
 	}
 	else
 		LOGI("Autogroup scheduling is not enabled on this kernel. Will rely entirely on nice().\n");
+#endif
 
 	return true;
 }
