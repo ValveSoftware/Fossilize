@@ -33,12 +33,42 @@
 #endif
 
 #ifdef __linux__
-#include <fcntl.h>
+
+/* Add a helper for cache hinting in Linux. References:
+ * https://insights.oetiker.ch/linux/fadvise.html
+ * https://stackoverflow.com/questions/3755765/what-posix-fadvise-args-for-sequential-file-write
+ * https://unix.stackexchange.com/questions/208237/is-posix-fadvice-posix-fadv-dontneedfunctional-in-linux
+ *
+ * Because we are the only user of the database at time of processing, it is
+ * safe to use as we won't remove cached data from foreign processes.
+ * Otherwise, we would need to use mincore() to get a map of which pages are
+ * in the cache and only discard our data. For simplicity, we can thus
+ * ignore that.
+ *
+ * This hint helps preventing fossilize-replay to dominate the cache while
+ * it processes shaders in the background. Currently, we cannot do much
+ * about the write pressure introduced by driver-side shader caches, tho.
+ *
+ * TODO: A future implementation could throttle calls to the driver shader
+ * compiler while watching iostat for amount of written data by issuing
+ * fsync() every few megabytes on the driver file descriptors.
+ *
+ * An alternative could be to use O_DIRECT instead but that would have a
+ * vastly negative effect on write behavior as it steals an opportunity for
+ * the kernel to reorder write requests. Also, tracing showed that most
+ * writes are injected from outside of the fossilize code, so we'd end with
+ * ONLY negative performance results.
+ */
+
 // Hints the Linux page cache we no longer need some data in the cache
+#include <fcntl.h>
 #define LINUX_fadvise(file, off, len, hint) posix_fadvise(fileno(file), off, len, hint)
+
 #else
+
 // No-op on other systems
 #define LINUX_fadvise(file, off, len, hint) do {} while(0)
+
 #endif
 
 #include "fossilize_db.hpp"
