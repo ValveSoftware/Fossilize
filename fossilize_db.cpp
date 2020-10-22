@@ -32,6 +32,15 @@
 #include <fcntl.h>
 #endif
 
+#ifdef __linux__
+#include <fcntl.h>
+// Hints the Linux page cache we no longer need some data in the cache
+#define LINUX_fadvise(file, off, len, hint) posix_fadvise(fileno(file), off, len, hint)
+#else
+// No-op on other systems
+#define LINUX_fadvise(file, off, len, hint) do {} while(0)
+#endif
+
 #include "fossilize_db.hpp"
 #include "path.hpp"
 #include "layer/utils.hpp"
@@ -593,16 +602,14 @@ struct DumbDirectoryDatabase : DatabaseInterface
 			return false;
 		}
 
+		bool success = false;
 		size_t file_size = size_t(ftell(file));
 		rewind(file);
 
 		if (blob)
 		{
 			if (*blob_size != file_size)
-			{
-				fclose(file);
-				return false;
-			}
+				goto discard_and_close;
 		}
 		else
 			*blob_size = file_size;
@@ -610,14 +617,15 @@ struct DumbDirectoryDatabase : DatabaseInterface
 		if (blob)
 		{
 			if (fread(blob, 1, file_size, file) != file_size)
-			{
-				fclose(file);
-				return false;
-			}
+				goto discard_and_close;
 		}
 
+		success = true;
+
+discard_and_close:
+		LINUX_fadvise(file, 0, file_size, POSIX_FADV_DONTNEED);
 		fclose(file);
-		return true;
+		return success;
 	}
 
 	bool write_entry(ResourceTag tag, Hash hash, const void *blob, size_t size, PayloadWriteFlags flags) override
@@ -645,10 +653,12 @@ struct DumbDirectoryDatabase : DatabaseInterface
 		if (fwrite(blob, 1, size, file) != size)
 		{
 			LOGE("Failed to write serialized state to disk.\n");
+			LINUX_fadvise(file, 0, size, POSIX_FADV_DONTNEED);
 			fclose(file);
 			return false;
 		}
 
+		LINUX_fadvise(file, 0, size, POSIX_FADV_DONTNEED);
 		fclose(file);
 		return true;
 	}
@@ -1006,7 +1016,17 @@ struct StreamArchive : DatabaseInterface
 	{
 		free(zlib_buffer);
 		if (file)
+		{
+#ifdef __linux__
+			/* Discard the file from cache, we won't need it any longer.
+			 * This will also trigger immediate writeback of dirty cache.
+			 */
+			fseek(file, 0, SEEK_END);
+			size_t len = ftell(file);
+			LINUX_fadvise(file, 0, len, POSIX_FADV_DONTNEED);
+#endif
 			fclose(file);
+		}
 	}
 
 	void flush() override
