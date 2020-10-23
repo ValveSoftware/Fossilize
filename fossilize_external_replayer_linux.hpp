@@ -409,7 +409,13 @@ void ExternalReplayer::Impl::start_replayer_process(const ExternalReplayer::Opti
 
 	std::string self_path;
 	if (!options.external_replayer_path)
+	{
+#ifdef __linux__
+		self_path = "/proc/self/exe";
+#else
 		self_path = Path::get_executable_path();
+#endif
+	}
 
 	std::vector<const char *> argv;
 	if (options.external_replayer_path)
