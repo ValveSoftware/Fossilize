@@ -632,27 +632,15 @@ struct DumbDirectoryDatabase : DatabaseInterface
 			return false;
 		}
 
-		bool success = false;
 		size_t file_size = size_t(ftell(file));
 		rewind(file);
 
+		bool success = true;
 		if (blob)
-		{
-			if (*blob_size != file_size)
-				goto discard_and_close;
-		}
+			success = (*blob_size == file_size) && (fread(blob, 1, file_size, file) == file_size);
 		else
 			*blob_size = file_size;
 
-		if (blob)
-		{
-			if (fread(blob, 1, file_size, file) != file_size)
-				goto discard_and_close;
-		}
-
-		success = true;
-
-discard_and_close:
 		LINUX_fadvise(file, 0, file_size, POSIX_FADV_DONTNEED);
 		fclose(file);
 		return success;
