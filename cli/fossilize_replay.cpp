@@ -56,6 +56,10 @@
 #include <map>
 #include <assert.h>
 
+#ifdef __linux__
+#include <cmath>
+#endif
+
 #ifdef FOSSILIZE_REPLAYER_SPIRV_VAL
 #include "spirv-tools/libspirv.hpp"
 #endif
@@ -918,6 +922,7 @@ struct ThreadedReplayer : StateCreatorInterface
 						else
 							pipeline_cache_misses.fetch_add(1, std::memory_order_relaxed);
 					}
+					maybe_throttle();
 				}
 				else
 				{
@@ -1058,6 +1063,7 @@ struct ThreadedReplayer : StateCreatorInterface
 						else
 							pipeline_cache_misses.fetch_add(1, std::memory_order_relaxed);
 					}
+					maybe_throttle();
 				}
 				else
 				{
@@ -2083,6 +2089,7 @@ struct ThreadedReplayer : StateCreatorInterface
 
 			if (memory_index == 0)
 			{
+				//TODO Q: Maybe flush write-back here somehow? -> A: No, GPU driver writes do not come from this thread
 				work.push_back({ get_order_index(MAINTAIN_SHADER_MODULE_LRU_CACHE),
 				                 [this]() {
 					                 // Now all worker threads are drained for any work which needs shader modules,
@@ -2343,6 +2350,47 @@ struct ThreadedReplayer : StateCreatorInterface
 		pipeline_work_queue.push(item);
 		work_available_condition.notify_one();
 		queued_count[item.memory_context_index]++;
+	}
+
+	double m_prev_loadavg;
+	inline void maybe_throttle()
+	{
+#ifdef __linux__
+		double loadavg[1];
+		// TODO Maybe use PSI on modern systems to measure the current IO latency?
+		const int rv = ::getloadavg(loadavg, 1);
+		if (rv != 1)
+		{
+			LOGE("Failed to query load average\n");
+			return;
+		}
+
+		static const double load_exp = exp(-5.0 / 60.0);
+
+		// Taken from github.com/Zygo/bees:
+		// Averages are fun, but want to know the load from the last 5 seconds.
+		// Invert the load average function:
+		// LA = LA * load_exp + N * (1 - load_exp)
+		// LA2 - LA1 = LA1 * load_exp + N * (1 - load_exp) - LA1
+		// LA2 - LA1 + LA1 = LA1 * load_exp + N * (1 - load_exp)
+		// LA2 - LA1 + LA1 - LA1 * load_exp = N * (1 - load_exp)
+		// LA2 - LA1 * load_exp = N * (1 - load_exp)
+		// LA2 / (1 - load_exp) - (LA1 * load_exp / 1 - load_exp) = N
+		// (LA2 - LA1 * load_exp) / (1 - load_exp) = N
+		// except for rounding error which might make this just a bit below zero.
+		const double current_load = max(0.0, (loadavg[0] - m_prev_loadavg * load_exp) / (1 - load_exp));
+
+		m_prev_loadavg = loadavg[0];
+
+		if (current_load > num_worker_threads)
+		{
+			// Interprets the current load as number of outstanding IO requests
+			// 20ms is the time we can expect an IO request to finish
+			uint32_t throttle_ms = (uint32_t)(current_load * 20.0 / num_worker_threads);
+			LOGI("Throttling threads %d load %0.2f throttle_ms %d\n", num_worker_threads, current_load, throttle_ms);
+			std::this_thread::sleep_for(std::chrono::milliseconds(throttle_ms));
+		}
+#endif
 	}
 
 	unsigned num_worker_threads = 0;
