@@ -25,6 +25,11 @@
 #include <windows.h>
 #include <io.h>
 #include <fcntl.h>
+#else
+#include <unistd.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 #endif
 
 #include "fossilize_db.hpp"
@@ -36,6 +41,7 @@
 #include <algorithm>
 #include <memory>
 #include <mutex>
+#include <atomic>
 #include <dirent.h>
 
 #include "fossilize_inttypes.h"
@@ -72,6 +78,46 @@ private:
 	bool enable;
 };
 
+struct PayloadHeader
+{
+	uint32_t payload_size;
+	uint32_t format;
+	uint32_t crc;
+	uint32_t uncompressed_size;
+};
+
+struct ExportedMetadataBlock
+{
+	Hash hash;
+	uint64_t file_offset;
+	PayloadHeader payload;
+};
+static_assert(sizeof(ExportedMetadataBlock) % 8 == 0, "Alignment of ExportedMetadataBlock must be 8.");
+
+// Encodes a unique list of hashes, so that we don't have to maintain per-process hashmaps
+// when replaying concurrent databases.
+using ExportedMetadataConcurrentPrimedBlock = Hash;
+static_assert(sizeof(ExportedMetadataConcurrentPrimedBlock) % 8 == 0, "Alignment of ExportedMetadataPrimedBlock must be 8.");
+
+struct ExportedMetadataList
+{
+	uint64_t offset;
+	uint64_t count;
+};
+static_assert(sizeof(ExportedMetadataList) % 8 == 0, "Alignment of ExportedMetadataList must be 8.");
+
+// Only for sanity checking when importing blobs, not a true file format.
+static const uint64_t ExportedMetadataMagic = 0xb10bf05511153ull;
+static const uint64_t ExportedMetadataMagicConcurrent = 0xb10b5f05511153ull;
+
+struct ExportedMetadataHeader
+{
+	uint64_t magic;
+	uint64_t size;
+	ExportedMetadataList lists[RESOURCE_COUNT];
+};
+static_assert(sizeof(ExportedMetadataHeader) % 8 == 0, "Alignment of ExportedMetadataHeader must be 8.");
+
 struct DatabaseInterface::Impl
 {
 	std::unique_ptr<DatabaseInterface> whitelist;
@@ -79,6 +125,14 @@ struct DatabaseInterface::Impl
 	std::vector<unsigned> sub_databases_in_whitelist;
 	std::unordered_set<Hash> implicit_whitelisted[RESOURCE_COUNT];
 	DatabaseMode mode;
+
+	const ExportedMetadataHeader *imported_concurrent_metadata = nullptr;
+
+	std::vector<const ExportedMetadataHeader *> imported_metadata;
+	const uint8_t *mapped_metadata = nullptr;
+	size_t mapped_metadata_size = 0;
+
+	bool parse_imported_metadata(const void *data, size_t size);
 };
 
 DatabaseInterface::DatabaseInterface(DatabaseMode mode)
@@ -102,6 +156,12 @@ bool DatabaseInterface::load_whitelist_database(const char *path)
 	if (impl->mode != DatabaseMode::ReadOnly)
 		return false;
 
+	if (!impl->imported_metadata.empty())
+	{
+		LOGE("Cannot use imported metadata together with whitelists.\n");
+		return false;
+	}
+
 	impl->whitelist.reset(create_stream_archive_database(path, DatabaseMode::ReadOnly));
 
 	if (!impl->whitelist)
@@ -120,6 +180,12 @@ bool DatabaseInterface::load_blacklist_database(const char *path)
 {
 	if (impl->mode != DatabaseMode::ReadOnly)
 		return false;
+
+	if (!impl->imported_metadata.empty())
+	{
+		LOGE("Cannot use imported metadata together with blacklists.\n");
+		return false;
+	}
 
 	impl->blacklist.reset(create_stream_archive_database(path, DatabaseMode::ReadOnly));
 
@@ -171,6 +237,13 @@ bool DatabaseInterface::add_to_implicit_whitelist(DatabaseInterface &iface)
 
 DatabaseInterface::~DatabaseInterface()
 {
+#ifdef _WIN32
+	if (impl->mapped_metadata)
+		UnmapViewOfFile(impl->mapped_metadata);
+#else
+	if (impl->mapped_metadata)
+		munmap(const_cast<uint8_t *>(impl->mapped_metadata), impl->mapped_metadata_size);
+#endif
 	delete impl;
 }
 
@@ -186,6 +259,239 @@ bool DatabaseInterface::test_resource_filter(ResourceTag tag, Hash hash) const
 		return false;
 
 	return true;
+}
+
+intptr_t DatabaseInterface::invalid_metadata_handle()
+{
+#ifdef _WIN32
+	return 0;
+#else
+	return -1;
+#endif
+}
+
+bool DatabaseInterface::metadata_handle_is_valid(intptr_t handle)
+{
+#ifdef _WIN32
+	return handle != 0;
+#else
+	return handle >= 0;
+#endif
+}
+
+static std::atomic<uint32_t> name_counter;
+void DatabaseInterface::get_unique_os_export_name(char *buffer, size_t size)
+{
+	unsigned counter_value = name_counter.fetch_add(1);
+#ifdef _WIN32
+	snprintf(buffer, size, "fossilize-replayer-%lu-%u", GetCurrentProcessId(), counter_value);
+#else
+	snprintf(buffer, size, "/fossilize-replayer-%d-%u", getpid(), counter_value);
+#endif
+}
+
+intptr_t DatabaseInterface::export_metadata_to_os_handle(const char *name)
+{
+	if (impl->mode != DatabaseMode::ReadOnly)
+		return invalid_metadata_handle();
+
+	size_t size = compute_exported_metadata_size();
+	if (!size)
+		return invalid_metadata_handle();
+
+#ifdef _WIN32
+	HANDLE mapping_handle = CreateFileMappingA(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, (DWORD)size, name);
+	if (!mapping_handle)
+		return invalid_metadata_handle();
+
+	void *mapped = MapViewOfFile(mapping_handle, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, size);
+	if (!mapped)
+	{
+		CloseHandle(mapping_handle);
+		return invalid_metadata_handle();
+	}
+
+	if (!write_exported_metadata(mapped, size))
+	{
+		LOGE("Failed to write metadata block.\n");
+		UnmapViewOfFile(mapped);
+		CloseHandle(mapping_handle);
+		return invalid_metadata_handle();
+	}
+
+	UnmapViewOfFile(mapped);
+	return reinterpret_cast<intptr_t>(mapping_handle);
+#else
+	int fd = shm_open(name, O_RDWR | O_CREAT | O_EXCL, 0600);
+	if (fd < 0)
+	{
+		LOGE("Failed to create shared memory.\n");
+		return invalid_metadata_handle();
+	}
+
+	if (shm_unlink(name) < 0)
+	{
+		LOGE("Failed to unlink SHM block.\n");
+		close(fd);
+		return invalid_metadata_handle();
+	}
+
+	if (ftruncate(fd, size) < 0)
+	{
+		LOGE("Failed to allocate space for metadata block.\n");
+		close(fd);
+		return invalid_metadata_handle();
+	}
+
+	void *mapped = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+	if (mapped == MAP_FAILED)
+	{
+		LOGE("Failed to map metadata block.\n");
+		close(fd);
+		return invalid_metadata_handle();
+	}
+
+	if (!write_exported_metadata(mapped, size))
+	{
+		LOGE("Failed to write metadata block.\n");
+		munmap(mapped, size);
+		close(fd);
+		return invalid_metadata_handle();
+	}
+
+	munmap(mapped, size);
+	return intptr_t(fd);
+#endif
+}
+
+size_t DatabaseInterface::compute_exported_metadata_size() const
+{
+	return 0;
+}
+
+bool DatabaseInterface::write_exported_metadata(void *, size_t) const
+{
+	return false;
+}
+
+void DatabaseInterface::add_imported_metadata(const ExportedMetadataHeader *header)
+{
+	impl->imported_metadata.push_back(header);
+}
+
+bool DatabaseInterface::Impl::parse_imported_metadata(const void *data_, size_t size_)
+{
+	std::vector<const ExportedMetadataHeader *> headers;
+	auto *data = static_cast<const uint8_t *>(data_);
+	size_t size = size_;
+
+	if (size < sizeof(ExportedMetadataHeader))
+		return false;
+
+	auto *concurrent_header = reinterpret_cast<const ExportedMetadataHeader *>(data);
+	if (concurrent_header->magic == ExportedMetadataMagicConcurrent)
+	{
+		data += concurrent_header->size;
+		size -= concurrent_header->size;
+	}
+	else
+		concurrent_header = nullptr;
+
+	while (size != 0)
+	{
+		if (size < sizeof(ExportedMetadataHeader))
+			return false;
+
+		auto *header = reinterpret_cast<const ExportedMetadataHeader *>(data);
+		if (header->magic != ExportedMetadataMagic)
+			return false;
+		if (header->size > size)
+			return false;
+
+		for (auto &list : header->lists)
+			if (list.offset + list.count * sizeof(ExportedMetadataBlock) > size)
+				return false;
+
+		data += header->size;
+		size -= header->size;
+		headers.push_back(header);
+	}
+
+#ifdef _WIN32
+	if (mapped_metadata)
+		UnmapViewOfFile(mapped_metadata);
+#else
+	if (mapped_metadata)
+		munmap(const_cast<uint8_t *>(mapped_metadata), mapped_metadata_size);
+#endif
+	mapped_metadata = static_cast<const uint8_t *>(data_);
+	mapped_metadata_size = size_;
+	imported_metadata = std::move(headers);
+	imported_concurrent_metadata = concurrent_header;
+	return true;
+}
+
+bool DatabaseInterface::import_metadata_from_os_handle(intptr_t handle)
+{
+	if (impl->whitelist || impl->blacklist)
+	{
+		LOGE("Cannot use imported metadata along with white- or blacklists.\n");
+		return false;
+	}
+
+#ifdef _WIN32
+	HANDLE mapping_handle = reinterpret_cast<HANDLE>(handle);
+	void *mapped = MapViewOfFile(mapping_handle, FILE_MAP_READ, 0, 0, 0);
+	if (!mapped)
+		return false;
+
+	// There is no documented way to query size of a file mapping handle in Windows (?!?!), so rely on parsing the metadata.
+	// As long as we find valid records within the bounds of the VirtualQuery, we will be fine.
+	MEMORY_BASIC_INFORMATION info;
+	if (!VirtualQuery(mapped, &info, sizeof(info)))
+	{
+		UnmapViewOfFile(mapped);
+		return false;
+	}
+
+	size_t total_size = 0;
+	while (total_size + sizeof(ExportedMetadataHeader) <= info.RegionSize)
+	{
+		auto *header = reinterpret_cast<const ExportedMetadataHeader *>(static_cast<const uint8_t *>(mapped) + total_size);
+		if (header->size + total_size > info.RegionSize)
+			break;
+		if (header->magic != ExportedMetadataMagic && header->magic != ExportedMetadataMagicConcurrent)
+			break;
+		total_size += header->size;
+	}
+
+	bool ret = impl->parse_imported_metadata(mapped, total_size);
+	if (ret)
+		CloseHandle(mapping_handle);
+	else
+		UnmapViewOfFile(mapped);
+	return ret;
+#else
+	int fd = int(handle);
+	struct stat s = {};
+	if (fstat(fd, &s) < 0)
+		return false;
+
+	if (s.st_size == 0)
+		return false;
+
+	void *mapped = mmap(nullptr, s.st_size, PROT_READ, MAP_SHARED, fd, 0);
+	if (mapped == MAP_FAILED)
+		return false;
+
+	bool ret = impl->parse_imported_metadata(mapped, s.st_size);
+	if (ret)
+		close(fd);
+	else
+		munmap(mapped, s.st_size);
+
+	return ret;
+#endif
 }
 
 struct DumbDirectoryDatabase : DatabaseInterface
@@ -663,17 +969,15 @@ struct StreamArchive : DatabaseInterface
 	enum { MagicSize = sizeof(stream_reference_magic_and_version) };
 	enum { FOSSILIZE_COMPRESSION_NONE = 1, FOSSILIZE_COMPRESSION_DEFLATE = 2 };
 
-	struct PayloadHeader
-	{
-		uint32_t payload_size;
-		uint32_t format;
-		uint32_t crc;
-		uint32_t uncompressed_size;
-	};
-
 	struct PayloadHeaderRaw
 	{
 		uint8_t data[4 * 4];
+	};
+
+	struct Entry
+	{
+		uint64_t offset;
+		PayloadHeader header;
 	};
 
 	StreamArchive(const string &path_, DatabaseMode mode_)
@@ -696,6 +1000,11 @@ struct StreamArchive : DatabaseInterface
 
 	bool prepare() override
 	{
+		if (!impl->imported_metadata.empty() && mode != DatabaseMode::ReadOnly)
+			return false;
+		if (impl->imported_metadata.size() > 1)
+			return false;
+
 		switch (mode)
 		{
 		case DatabaseMode::ReadOnly:
@@ -739,7 +1048,12 @@ struct StreamArchive : DatabaseInterface
 		if (!file)
 			return false;
 
-		if (mode != DatabaseMode::OverWrite && mode != DatabaseMode::ExclusiveOverWrite)
+		if (!impl->imported_metadata.empty())
+		{
+			// Do nothing here. TODO: Set fadvise to RANDOM here.
+			imported_metadata = impl->imported_metadata[0];
+		}
+		else if (mode != DatabaseMode::OverWrite && mode != DatabaseMode::ExclusiveOverWrite)
 		{
 #if _WIN32
 			if (mode == DatabaseMode::ReadOnly)
@@ -846,21 +1160,65 @@ struct StreamArchive : DatabaseInterface
 		return true;
 	}
 
+	static bool find_entry_from_metadata(const ExportedMetadataHeader *header, ResourceTag tag, Hash hash, Entry *entry)
+	{
+		size_t count = header->lists[tag].count;
+		if (!count)
+			return false;
+
+		// Binary search in-place.
+		auto *blocks = reinterpret_cast<const ExportedMetadataBlock *>(
+				reinterpret_cast<const uint8_t *>(header) + header->lists[tag].offset);
+
+		auto itr = std::lower_bound(blocks, blocks + count, hash, [](const ExportedMetadataBlock &a, Hash hash_) {
+			return a.hash < hash_;
+		});
+
+		if (itr != blocks + count && itr->hash == hash)
+		{
+			if (entry)
+			{
+				entry->offset = itr->file_offset;
+				entry->header = itr->payload;
+			}
+			return true;
+		}
+		else
+			return false;
+	}
+
+	bool find_entry(ResourceTag tag, Hash hash, Entry &entry) const
+	{
+		if (imported_metadata)
+		{
+			return find_entry_from_metadata(imported_metadata, tag, hash, &entry);
+		}
+		else
+		{
+			auto itr = seen_blobs[tag].find(hash);
+			if (itr == end(seen_blobs[tag]))
+				return false;
+
+			entry = itr->second;
+			return true;
+		}
+	}
+
 	bool read_entry(ResourceTag tag, Hash hash, size_t *blob_size, void *blob, PayloadReadFlags flags) override
 	{
 		if (!alive || mode != DatabaseMode::ReadOnly)
 			return false;
 
-		auto itr = seen_blobs[tag].find(hash);
-		if (itr == end(seen_blobs[tag]))
+		Entry entry;
+		if (!find_entry(tag, hash, entry))
 			return false;
 
 		if (!blob_size)
 			return false;
 
 		uint32_t out_size = (flags & PAYLOAD_READ_RAW_FOSSILIZE_DB_BIT) != 0 ?
-		                    (itr->second.header.payload_size + sizeof(PayloadHeaderRaw)) :
-		                    itr->second.header.uncompressed_size;
+		                    (entry.header.payload_size + sizeof(PayloadHeaderRaw)) :
+		                    entry.header.uncompressed_size;
 
 		if (blob)
 		{
@@ -876,16 +1234,16 @@ struct StreamArchive : DatabaseInterface
 			{
 				// Include the header.
 				ConditionalLockGuard holder(read_lock, (flags & PAYLOAD_READ_CONCURRENT_BIT) != 0);
-				if (fseek(file, itr->second.offset - sizeof(PayloadHeaderRaw), SEEK_SET) < 0)
+				if (fseek(file, entry.offset - sizeof(PayloadHeaderRaw), SEEK_SET) < 0)
 					return false;
 
-				size_t read_size = itr->second.header.payload_size + sizeof(PayloadHeaderRaw);
+				size_t read_size = entry.header.payload_size + sizeof(PayloadHeaderRaw);
 				if (fread(blob, 1, read_size, file) != read_size)
 					return false;
 			}
 			else
 			{
-				if (!decode_payload(blob, out_size, itr->second, (flags & PAYLOAD_READ_CONCURRENT_BIT) != 0))
+				if (!decode_payload(blob, out_size, entry, (flags & PAYLOAD_READ_CONCURRENT_BIT) != 0))
 					return false;
 			}
 		}
@@ -1031,37 +1389,58 @@ struct StreamArchive : DatabaseInterface
 	{
 		if (!test_resource_filter(tag, hash))
 			return false;
-		return seen_blobs[tag].count(hash) != 0;
+
+		if (imported_metadata)
+			return find_entry_from_metadata(imported_metadata, tag, hash, nullptr);
+		else
+			return seen_blobs[tag].count(hash) != 0;
 	}
 
 	bool get_hash_list_for_resource_tag(ResourceTag tag, size_t *hash_count, Hash *hashes) override
 	{
-		size_t size = seen_blobs[tag].size();
-		if (hashes)
+		if (imported_metadata)
 		{
-			if (size != *hash_count)
-				return false;
+			size_t size = imported_metadata->lists[tag].count;
+			if (hashes)
+			{
+				if (size != *hash_count)
+					return false;
+			}
+			else
+				*hash_count = size;
+
+			if (hashes)
+			{
+				const auto *blocks = reinterpret_cast<const ExportedMetadataBlock *>(
+						reinterpret_cast<const uint8_t *>(imported_metadata) + imported_metadata->lists[tag].offset);
+				for (size_t i = 0; i < size; i++)
+					hashes[i] = blocks[i].hash;
+			}
 		}
 		else
-			*hash_count = size;
-
-		if (hashes)
 		{
-			Hash *iter = hashes;
-			for (auto &blob : seen_blobs[tag])
-				*iter++ = blob.first;
+			size_t size = seen_blobs[tag].size();
+			if (hashes)
+			{
+				if (size != *hash_count)
+					return false;
+			}
+			else
+				*hash_count = size;
 
-			// Make replay more deterministic.
-			sort(hashes, hashes + size);
+			if (hashes)
+			{
+				Hash *iter = hashes;
+				for (auto &blob : seen_blobs[tag])
+					*iter++ = blob.first;
+
+				// Make replay more deterministic.
+				sort(hashes, hashes + size);
+			}
 		}
+
 		return true;
 	}
-
-	struct Entry
-	{
-		uint64_t offset;
-		PayloadHeader header;
-	};
 
 	bool decode_payload_uncompressed(void *blob, size_t blob_size, const Entry &entry, bool concurrent)
 	{
@@ -1172,6 +1551,63 @@ struct StreamArchive : DatabaseInterface
 		return path.c_str();
 	}
 
+	size_t compute_exported_metadata_size() const override
+	{
+		size_t size = sizeof(ExportedMetadataHeader);
+		for (auto &blobs : seen_blobs)
+			size += blobs.size() * sizeof(ExportedMetadataBlock);
+		return size;
+	}
+
+	bool write_exported_metadata(void *data_, size_t size) const override
+	{
+		auto *data = static_cast<uint8_t *>(data_);
+		auto *header = static_cast<ExportedMetadataHeader *>(data_);
+		if (size < sizeof(*header))
+			return false;
+
+		header->magic = ExportedMetadataMagic;
+		header->size = size;
+
+		size_t offset = sizeof(*header);
+		for (unsigned i = 0; i < RESOURCE_COUNT; i++)
+		{
+			header->lists[i].offset = offset;
+			header->lists[i].count = seen_blobs[i].size();
+			offset += header->lists[i].count * sizeof(ExportedMetadataBlock);
+		}
+
+		if (offset != size)
+			return false;
+
+		for (unsigned i = 0; i < RESOURCE_COUNT; i++)
+		{
+			auto *blocks = reinterpret_cast<ExportedMetadataBlock *>(data + header->lists[i].offset);
+			auto *pblocks = blocks;
+
+			for (auto &blob : seen_blobs[i])
+			{
+				auto &block = *pblocks;
+				block.hash = blob.first;
+				block.file_offset = blob.second.offset;
+				block.payload = blob.second.header;
+				pblocks++;
+			}
+
+			// Sorting here is somewhat important, since we will be using binary search when looking up exported metadata.
+			// Conserving memory is also somewhat important, so we should only have one copy of the data structures we need
+			// in immutable shared memory.
+			// For hashmaps we would either need to make a completely custom SHM compatible hashmap implementation, which
+			// would likely consume more memory either way.
+			std::sort(blocks, blocks + seen_blobs[i].size(), [](const ExportedMetadataBlock &a, const ExportedMetadataBlock &b) {
+				return a.hash < b.hash;
+			});
+		}
+
+		return true;
+	}
+
+	const ExportedMetadataHeader *imported_metadata = nullptr;
 	FILE *file = nullptr;
 	string path;
 	unordered_map<Hash, Entry> seen_blobs[RESOURCE_COUNT];
@@ -1247,6 +1683,20 @@ struct ConcurrentDatabase : DatabaseInterface
 		if (mode != DatabaseMode::ReadOnly && !impl->sub_databases_in_whitelist.empty())
 			return false;
 
+		// Set inherited metadata in sub-databases before we prepare them.
+		if (!impl->imported_metadata.empty())
+		{
+			if (readonly_interface)
+				readonly_interface->add_imported_metadata(impl->imported_metadata.front());
+
+			for (size_t i = 1; i < impl->imported_metadata.size(); i++)
+			{
+				size_t extra_index = i - 1;
+				if (extra_index < extra_readonly.size() && extra_readonly[extra_index])
+					extra_readonly[extra_index]->add_imported_metadata(impl->imported_metadata[i]);
+			}
+		}
+
 		if (!has_prepared_readonly)
 		{
 			// Prepare everything.
@@ -1273,13 +1723,16 @@ struct ConcurrentDatabase : DatabaseInterface
 					return false;
 			}
 
-			// Prime the hashmaps.
-			if (readonly_interface)
-				prime_read_only_hashes(*readonly_interface);
+			// Prime the hashmaps, however, we'll rely on concurrent metadata if we have it to avoid memory bloat.
+			if (!impl->imported_concurrent_metadata)
+			{
+				if (readonly_interface)
+					prime_read_only_hashes(*readonly_interface);
 
-			for (auto &extra : extra_readonly)
-				if (extra)
-					prime_read_only_hashes(*extra);
+				for (auto &extra : extra_readonly)
+					if (extra)
+						prime_read_only_hashes(*extra);
+			}
 
 			// We only need the database for priming purposes.
 			if (mode != DatabaseMode::ReadOnly)
@@ -1347,11 +1800,22 @@ struct ConcurrentDatabase : DatabaseInterface
 			return false;
 	}
 
+	static bool find_entry_in_concurrent_metadata(const ExportedMetadataHeader *header, ResourceTag tag, Hash hash)
+	{
+		auto *begin_range = reinterpret_cast<const uint8_t *>(header) + header->lists[tag].offset;
+		auto *end_range = begin_range + header->lists[tag].count;
+		return std::binary_search(begin_range, end_range, hash);
+	}
+
 	// Checks if entry already exists in database, i.e. no need to serialize.
 	bool has_entry(ResourceTag tag, Hash hash) override
 	{
+		if (impl->imported_concurrent_metadata)
+			return find_entry_in_concurrent_metadata(impl->imported_concurrent_metadata, tag, hash);
+
 		if (!test_resource_filter(tag, hash))
 			return false;
+
 		if (primed_hashes[tag].count(hash))
 			return true;
 
@@ -1365,6 +1829,28 @@ struct ConcurrentDatabase : DatabaseInterface
 
 	bool get_hash_list_for_resource_tag(ResourceTag tag, size_t *num_hashes, Hash *hashes) override
 	{
+		if (impl->imported_concurrent_metadata)
+		{
+			size_t total_size = impl->imported_concurrent_metadata->lists[tag].count;
+
+			if (hashes)
+			{
+				if (total_size != *num_hashes)
+					return false;
+			}
+			else
+				*num_hashes = total_size;
+
+			if (hashes)
+			{
+				memcpy(hashes,
+				       reinterpret_cast<const uint8_t *>(impl->imported_concurrent_metadata) +
+				       impl->imported_concurrent_metadata->lists[tag].offset,
+				       total_size * sizeof(*hashes));
+			}
+			return true;
+		}
+
 		size_t readonly_size = primed_hashes[tag].size();
 
 		size_t writeonly_size = 0;
@@ -1426,6 +1912,170 @@ struct ConcurrentDatabase : DatabaseInterface
 
 	bool has_sub_databases() override
 	{
+		return true;
+	}
+
+	size_t get_total_num_hashes_for_tag(ResourceTag tag) const
+	{
+		size_t count = 0;
+
+		// This is an upper bound, we might prune it later, although in general we don't expect duplicates.
+		size_t hash_count = 0;
+		if (readonly_interface &&
+		    !readonly_interface->get_hash_list_for_resource_tag(tag, &hash_count, nullptr))
+			return 0;
+		count += hash_count;
+
+		for (auto &e : extra_readonly)
+		{
+			hash_count = 0;
+			if (e && !e->get_hash_list_for_resource_tag(tag, &hash_count, nullptr))
+				return 0;
+			count += hash_count;
+		}
+
+		return count;
+	}
+
+	size_t get_total_num_hashes() const
+	{
+		size_t count = 0;
+		for (unsigned i = 0; i < RESOURCE_COUNT; i++)
+		{
+			auto tag = ResourceTag(i);
+			count += get_total_num_hashes_for_tag(tag);
+		}
+		return count;
+	}
+
+	size_t compute_exported_metadata_size() const override
+	{
+		if (mode != DatabaseMode::ReadOnly)
+			return 0;
+
+		size_t size = 0;
+
+		size += sizeof(ExportedMetadataHeader) + get_total_num_hashes() * sizeof(ExportedMetadataConcurrentPrimedBlock);
+
+		if (readonly_interface)
+			size += readonly_interface->compute_exported_metadata_size();
+		else
+			size += sizeof(ExportedMetadataHeader);
+
+		for (auto &e : extra_readonly)
+		{
+			if (e)
+				size += e->compute_exported_metadata_size();
+			else
+				size += sizeof(ExportedMetadataHeader);
+		}
+
+		return size;
+	}
+
+	bool write_exported_metadata(void *data_, size_t size) const override
+	{
+		auto *data = static_cast<uint8_t *>(data_);
+
+		if (!write_exported_concurrent_metadata(data, size))
+			return false;
+
+		if (!write_exported_metadata_for_db(readonly_interface.get(), data, size))
+			return false;
+
+		for (auto &e : extra_readonly)
+			if (!write_exported_metadata_for_db(e.get(), data, size))
+				return false;
+
+		return size == 0;
+	}
+
+	bool write_exported_concurrent_hashes(ResourceTag tag, ExportedMetadataConcurrentPrimedBlock *primed, uint64_t &total_count) const
+	{
+		auto *primed_begin = primed;
+		size_t hash_count = 0;
+
+		// This is an upper bound, we might prune it later, although in general we don't expect duplicates.
+		if (readonly_interface &&
+		    !readonly_interface->get_hash_list_for_resource_tag(tag, &hash_count, nullptr))
+			return false;
+		if (readonly_interface &&
+		    !readonly_interface->get_hash_list_for_resource_tag(tag, &hash_count, primed))
+			return false;
+		primed += hash_count;
+
+		for (auto &e : extra_readonly)
+		{
+			hash_count = 0;
+			if (e && !e->get_hash_list_for_resource_tag(tag, &hash_count, nullptr))
+				return false;
+			if (e && !e->get_hash_list_for_resource_tag(tag, &hash_count, primed))
+				return false;
+			primed += hash_count;
+		}
+
+		std::sort(primed_begin, primed);
+		primed = std::unique(primed_begin, primed);
+		total_count = size_t(primed - primed_begin);
+		return true;
+	}
+
+	bool write_exported_concurrent_metadata(uint8_t *&data, size_t &size) const
+	{
+		size_t total_hashes = get_total_num_hashes();
+		size_t required = sizeof(ExportedMetadataHeader) + total_hashes * sizeof(ExportedMetadataConcurrentPrimedBlock);
+		if (size < required)
+			return false;
+
+		auto *header = reinterpret_cast<ExportedMetadataHeader *>(data);
+		header->magic = ExportedMetadataMagicConcurrent;
+		header->size = required;
+
+		size_t offset = sizeof(*header);
+		for (unsigned i = 0; i < RESOURCE_COUNT; i++)
+		{
+			auto tag = ResourceTag(i);
+			header->lists[i].offset = offset;
+			if (!write_exported_concurrent_hashes(tag, reinterpret_cast<ExportedMetadataConcurrentPrimedBlock *>(data + offset),
+			                                      header->lists[i].count))
+			{
+				return false;
+			}
+			offset += header->lists[i].count * sizeof(ExportedMetadataConcurrentPrimedBlock);
+		}
+
+		data += required;
+		size -= required;
+		return true;
+	}
+
+	static bool write_exported_metadata_for_db(const DatabaseInterface *iface, uint8_t *&data, size_t &size)
+	{
+		if (iface)
+		{
+			size_t required = iface->compute_exported_metadata_size();
+			if (required > size)
+				return false;
+
+			if (!iface->write_exported_metadata(data, required))
+				return false;
+
+			data += required;
+			size -= required;
+		}
+		else
+		{
+			if (size < sizeof(ExportedMetadataHeader))
+				return false;
+
+			auto *header = reinterpret_cast<ExportedMetadataHeader *>(data);
+			header->magic = ExportedMetadataMagic;
+			header->size = sizeof(*header);
+			memset(header->lists, 0, sizeof(header->lists));
+			data += sizeof(ExportedMetadataHeader);
+			size -= sizeof(ExportedMetadataHeader);
+		}
+
 		return true;
 	}
 

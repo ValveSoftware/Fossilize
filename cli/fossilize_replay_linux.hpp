@@ -72,6 +72,7 @@ static VulkanDevice::Options device_options;
 static bool quiet_slave;
 
 static SharedControlBlock *control_block;
+static int metadata_fd = -1;
 }
 
 struct ProcessProgress
@@ -457,6 +458,16 @@ static int run_master_process(const VulkanDevice::Options &opts,
 		{
 			for (auto &path : databases)
 				LOGE("Failed to parse database %s.\n", path);
+			return EXIT_FAILURE;
+		}
+
+		// Export metadata so that we don't have to re-parse the archive over and over.
+		char export_name[DatabaseInterface::OSHandleNameSize];
+		DatabaseInterface::get_unique_os_export_name(export_name, sizeof(export_name));
+		Global::metadata_fd = db->export_metadata_to_os_handle(export_name);
+		if (Global::metadata_fd < 0)
+		{
+			LOGE("Failed to export metadata to FD handle.\n");
 			return EXIT_FAILURE;
 		}
 
@@ -912,7 +923,7 @@ static int run_slave_process(const VulkanDevice::Options &opts,
 	if (pthread_sigmask(SIG_BLOCK, &mask, &old_mask) < 0)
 		return EXIT_FAILURE;
 
-	int ret = run_normal_process(replayer, databases);
+	int ret = run_normal_process(replayer, databases, Global::metadata_fd);
 	global_replayer = nullptr;
 
 	// Cannot reliably handle these signals if they occur during teardown of the process.

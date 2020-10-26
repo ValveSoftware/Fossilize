@@ -79,6 +79,8 @@ enum class DatabaseMode
 	ExclusiveOverWrite
 };
 
+struct ExportedMetadataHeader;
+
 // This is an interface to interact with an external database for blob modules.
 // It is is a simple database with key + blob.
 // NOTE: The database is NOT thread-safe.
@@ -144,9 +146,42 @@ public:
 	virtual DatabaseInterface *get_sub_database(unsigned index);
 	virtual bool has_sub_databases();
 
+	// This is a special purpose feature which allows us to parse a StreamArchive once,
+	// build optimized metadata structures for it, which can then be shared with other processes.
+	// Used primarily by the multi-process replayer.
+	// This is an int FD on Unix-likes and a FileMapping HANDLE on Win32.
+	// Can only be used on ReadOnly StreamArchive databases (or concurrent variant).
+	// Caller is responsible for closing these handles.
+	// The handle is already created with sharing enabled.
+	// The format of the encoded data is application specific and is only expected to be
+	// compatible with the exact same commit of Fossilize.
+	// Name is an os-dependent name. You can obtain a unique name from get_unique_os_export_name().
+	// On Unix-likes, the SHM name is unlinked immediately, FD should be inherited through a fork().
+	// On Windows, the FileMapping handle must be opened explicitly in child processes.
+	intptr_t export_metadata_to_os_handle(const char *name);
+	enum { OSHandleNameSize = 64 };
+	// Gets a name for passing into export_metadata_to_os_handle. size should be equal to OSHandleNameSize.
+	static void get_unique_os_export_name(char *buffer, size_t size);
+	static bool metadata_handle_is_valid(intptr_t handle);
+	static intptr_t invalid_metadata_handle();
+
+	// Takes ownership of the handle if call succeeds. Call before prepare().
+	// This way, parsing can be skipped and metadata can be read from a shared memory block instead.
+	// Will only work if the database setup is exactly the same as the setup that was used for
+	// export_metadata_to_os_handle().
+	// Importing metadata cannot be used together with white- or blacklists.
+	// If needed, those must be used before exporting metadata.
+	bool import_metadata_from_os_handle(intptr_t handle);
+
+	// Internal details.
+	virtual size_t compute_exported_metadata_size() const;
+	virtual bool write_exported_metadata(void *data, size_t size) const;
+	void add_imported_metadata(const ExportedMetadataHeader *header);
+
 protected:
 	bool test_resource_filter(ResourceTag tag, Hash hash) const;
 	bool add_to_implicit_whitelist(DatabaseInterface &iface);
+
 	struct Impl;
 	Impl *impl;
 };
