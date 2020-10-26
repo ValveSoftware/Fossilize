@@ -1011,7 +1011,9 @@ struct StreamArchive : DatabaseInterface
 #if _WIN32
 			{
 				file = nullptr;
-				int fd = _open(path.c_str(), _O_BINARY | _O_RDONLY | _O_SEQUENTIAL, _S_IREAD);
+				int fd = _open(path.c_str(), _O_BINARY | _O_RDONLY |
+				               (impl->imported_metadata.empty() ? _O_SEQUENTIAL : _O_RANDOM),
+				               _S_IREAD);
 				if (fd >= 0)
 					file = _fdopen(fd, "rb");
 			}
@@ -1052,6 +1054,13 @@ struct StreamArchive : DatabaseInterface
 		{
 			// Do nothing here. TODO: Set fadvise to RANDOM here.
 			imported_metadata = impl->imported_metadata[0];
+#ifdef __linux__
+			// We're going to be doing scattered reads, which hopefully have been cached earlier.
+			// However, if the archive has been paged out, RANDOM is the correct approach,
+			// since prefetching data is only detrimental.
+			if (posix_fadvise(fileno(file), 0, 0, POSIX_FADV_RANDOM) != 0)
+				LOGE("Failed to advise of file usage. This is not fatal, but might compromise disk performance.\n");
+#endif
 		}
 		else if (mode != DatabaseMode::OverWrite && mode != DatabaseMode::ExclusiveOverWrite)
 		{
@@ -1062,6 +1071,13 @@ struct StreamArchive : DatabaseInterface
 				setvbuf(file, nullptr, _IOFBF, FOSSILIZE_BLOB_HASH_LENGTH + sizeof(PayloadHeaderRaw));
 			}
 #endif
+
+#ifdef __linux__
+			// We're going to scan through the archive sequentially to discover metadata, so some prefetching is welcome.
+			if (posix_fadvise(fileno(file), 0, 0, POSIX_FADV_SEQUENTIAL) != 0)
+				LOGE("Failed to advise of file usage. This is not fatal, but might compromise disk performance.\n");
+#endif
+
 			// Scan through the archive and get the list of files.
 			fseek(file, 0, SEEK_END);
 			size_t len = ftell(file);
