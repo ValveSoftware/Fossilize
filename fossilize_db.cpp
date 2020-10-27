@@ -379,11 +379,29 @@ void DatabaseInterface::add_imported_metadata(const ExportedMetadataHeader *head
 	impl->imported_metadata.push_back(header);
 }
 
+static size_t deduce_imported_size(const void *mapped, size_t maximum_size)
+{
+	size_t total_size = 0;
+	while (total_size + sizeof(ExportedMetadataHeader) <= maximum_size)
+	{
+		auto *header = reinterpret_cast<const ExportedMetadataHeader *>(static_cast<const uint8_t *>(mapped) + total_size);
+		if (header->size + total_size > maximum_size)
+			break;
+		if (header->magic != ExportedMetadataMagic && header->magic != ExportedMetadataMagicConcurrent)
+			break;
+		total_size += header->size;
+	}
+
+	return total_size;
+}
+
 bool DatabaseInterface::Impl::parse_imported_metadata(const void *data_, size_t size_)
 {
 	std::vector<const ExportedMetadataHeader *> headers;
 	auto *data = static_cast<const uint8_t *>(data_);
-	size_t size = size_;
+
+	// Imported size might be rounded up to page size, so find exact bound first.
+	size_t size = deduce_imported_size(data_, size_);
 
 	if (size < sizeof(ExportedMetadataHeader))
 		return false;
@@ -454,18 +472,7 @@ bool DatabaseInterface::import_metadata_from_os_handle(intptr_t handle)
 		return false;
 	}
 
-	size_t total_size = 0;
-	while (total_size + sizeof(ExportedMetadataHeader) <= info.RegionSize)
-	{
-		auto *header = reinterpret_cast<const ExportedMetadataHeader *>(static_cast<const uint8_t *>(mapped) + total_size);
-		if (header->size + total_size > info.RegionSize)
-			break;
-		if (header->magic != ExportedMetadataMagic && header->magic != ExportedMetadataMagicConcurrent)
-			break;
-		total_size += header->size;
-	}
-
-	bool ret = impl->parse_imported_metadata(mapped, total_size);
+	bool ret = impl->parse_imported_metadata(mapped, info.RegionSize);
 	if (ret)
 		CloseHandle(mapping_handle);
 	else
