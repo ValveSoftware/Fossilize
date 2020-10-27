@@ -2436,7 +2436,8 @@ static void print_help()
 	"\t[--timeout <seconds>]\n" \
 	"\t[--progress]\n" \
 	"\t[--quiet-slave]\n" \
-	"\t[--shm-name <name>]\n\t[--shm-mutex-name <name>]\n"
+	"\t[--shm-name <name>]\n\t[--shm-mutex-name <name>]\n" \
+	"\t[--metadata-name <name>]\n"
 #else
 #define EXTRA_OPTIONS \
 	"\t[--slave-process]\n" \
@@ -2872,11 +2873,20 @@ static void populate_blob_hash_set(std::unordered_set<Hash> &hashes, ResourceTag
 		hashes.insert(h);
 }
 
-static int run_normal_process(ThreadedReplayer &replayer, const vector<const char *> &databases)
+static int run_normal_process(ThreadedReplayer &replayer, const vector<const char *> &databases, intptr_t metadata_handle)
 {
 	auto start_time = chrono::steady_clock::now();
 	auto start_create_archive = chrono::steady_clock::now();
 	auto resolver = create_database(databases);
+
+	if (DatabaseInterface::metadata_handle_is_valid(metadata_handle))
+	{
+		if (!resolver->import_metadata_from_os_handle(metadata_handle))
+		{
+			LOGE("Failed to import metadata.\n");
+			return EXIT_FAILURE;
+		}
+	}
 
 	auto end_create_archive = chrono::steady_clock::now();
 
@@ -3217,6 +3227,7 @@ int main(int argc, char *argv[])
 #ifdef _WIN32
 	const char *shm_name = nullptr;
 	const char *shm_mutex_name = nullptr;
+	const char *metadata_name = nullptr;
 #else
 	int shmem_fd = -1;
 #endif
@@ -3273,6 +3284,7 @@ int main(int argc, char *argv[])
 #ifdef _WIN32
 	cbs.add("--shm-name", [&](CLIParser &parser) { shm_name = parser.next_string(); });
 	cbs.add("--shm-mutex-name", [&](CLIParser &parser) { shm_mutex_name = parser.next_string(); });
+	cbs.add("--metadata-name", [&](CLIParser &parser) { metadata_name = parser.next_string(); });
 #else
 	cbs.add("--shmem-fd", [&](CLIParser &parser) { shmem_fd = parser.next_uint(); });
 #endif
@@ -3362,7 +3374,7 @@ int main(int argc, char *argv[])
 	else if (slave_process)
 	{
 #ifdef _WIN32
-		ret = run_slave_process(opts, replayer_opts, databases, shm_name, shm_mutex_name);
+		ret = run_slave_process(opts, replayer_opts, databases, shm_name, shm_mutex_name, metadata_name);
 #else
 		ret = run_slave_process(opts, replayer_opts, databases);
 #endif
@@ -3374,7 +3386,7 @@ int main(int argc, char *argv[])
 #ifndef NO_ROBUST_REPLAYER
 		install_trivial_crash_handlers(replayer);
 #endif
-		ret = run_normal_process(replayer, databases);
+		ret = run_normal_process(replayer, databases, DatabaseInterface::invalid_metadata_handle());
 #ifndef NO_ROBUST_REPLAYER
 		if (log_memory)
 			log_process_memory();

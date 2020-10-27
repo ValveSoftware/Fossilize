@@ -1217,6 +1217,319 @@ static bool test_filter()
 	return true;
 }
 
+static bool test_export_single_archive()
+{
+	static const uint16_t one = 1;
+	static const uint32_t two = 2;
+	static const uint64_t three = 3;
+	char export_path[DatabaseInterface::OSHandleNameSize];
+	DatabaseInterface::get_unique_os_export_name(export_path, sizeof(export_path));
+
+	{
+		auto db = std::unique_ptr<DatabaseInterface>(create_stream_archive_database(".__test_archive.foz",
+		                                                                            DatabaseMode::OverWrite));
+		if (!db || !db->prepare())
+			return false;
+
+		if (!db->write_entry(RESOURCE_SHADER_MODULE, 1, &one, sizeof(one), 0))
+			return false;
+		if (!db->write_entry(RESOURCE_SHADER_MODULE, 2, &two, sizeof(two), 0))
+			return false;
+		if (!db->write_entry(RESOURCE_SHADER_MODULE, 3, &three, sizeof(three), 0))
+			return false;
+
+		if (!db->write_entry(RESOURCE_GRAPHICS_PIPELINE, 300, &one, sizeof(one), 0))
+			return false;
+		if (!db->write_entry(RESOURCE_GRAPHICS_PIPELINE, 200, &two, sizeof(two), 0))
+			return false;
+		if (!db->write_entry(RESOURCE_GRAPHICS_PIPELINE, 100, &three, sizeof(three), 0))
+			return false;
+	}
+
+	intptr_t handle;
+	{
+		auto db = std::unique_ptr<DatabaseInterface>(create_stream_archive_database(".__test_archive.foz", DatabaseMode::ReadOnly));
+		if (!db || !db->prepare())
+			return false;
+		handle = db->export_metadata_to_os_handle(export_path);
+#ifdef __WIN32
+		if (handle == 0)
+			return false;
+#else
+		if (handle < 0)
+			return false;
+#endif
+	}
+
+	auto db = std::unique_ptr<DatabaseInterface>(create_stream_archive_database(".__test_archive.foz", DatabaseMode::ReadOnly));
+	if (!db || !db->import_metadata_from_os_handle(handle) || !db->prepare())
+		return false;
+
+	size_t count;
+
+	for (unsigned i = 0; i < RESOURCE_COUNT; i++)
+	{
+		if (!db->get_hash_list_for_resource_tag(ResourceTag(i), &count, nullptr))
+			return false;
+
+		switch (ResourceTag(i))
+		{
+		case RESOURCE_GRAPHICS_PIPELINE:
+		case RESOURCE_SHADER_MODULE:
+			if (count != 3)
+				return false;
+			break;
+
+		default:
+			if (count != 0)
+				return false;
+			break;
+		}
+	}
+
+	Hash hashes[3];
+	count = 3;
+	if (!db->get_hash_list_for_resource_tag(RESOURCE_SHADER_MODULE, &count, hashes))
+		return false;
+	static const Hash reference_hashes_module[3] = { 1, 2, 3 };
+	static const Hash reference_hashes_pipeline[3] = { 100, 200, 300 };
+	if (memcmp(reference_hashes_module, hashes, sizeof(hashes)) != 0)
+		return false;
+
+	if (!db->get_hash_list_for_resource_tag(RESOURCE_GRAPHICS_PIPELINE, &count, hashes))
+		return false;
+	if (memcmp(reference_hashes_pipeline, hashes, sizeof(hashes)) != 0)
+		return false;
+
+	union
+	{
+		uint16_t u16;
+		uint32_t u32;
+		uint64_t u64;
+	} u;
+
+	size_t blob_size;
+
+	blob_size = sizeof(u.u16);
+	if (!db->read_entry(RESOURCE_SHADER_MODULE, 1, &blob_size, &u.u16, 0) || u.u16 != one)
+		return false;
+
+	blob_size = sizeof(u.u32);
+	if (!db->read_entry(RESOURCE_SHADER_MODULE, 2, &blob_size, &u.u32, 0) || u.u32 != two)
+		return false;
+
+	blob_size = sizeof(u.u64);
+	if (!db->read_entry(RESOURCE_SHADER_MODULE, 3, &blob_size, &u.u64, 0) || u.u64 != three)
+		return false;
+
+	if (db->has_entry(RESOURCE_SHADER_MODULE, 0) || db->has_entry(RESOURCE_SHADER_MODULE, 4))
+		return false;
+
+	blob_size = sizeof(u.u16);
+	if (!db->read_entry(RESOURCE_GRAPHICS_PIPELINE, 300, &blob_size, &u.u16, 0) || u.u16 != one)
+		return false;
+
+	blob_size = sizeof(u.u32);
+	if (!db->read_entry(RESOURCE_GRAPHICS_PIPELINE, 200, &blob_size, &u.u32, 0) || u.u32 != two)
+		return false;
+
+	blob_size = sizeof(u.u64);
+	if (!db->read_entry(RESOURCE_GRAPHICS_PIPELINE, 100, &blob_size, &u.u64, 0) || u.u64 != three)
+		return false;
+
+	if (db->has_entry(RESOURCE_GRAPHICS_PIPELINE, 150) ||
+	    db->has_entry(RESOURCE_GRAPHICS_PIPELINE, 99) ||
+	    db->has_entry(RESOURCE_GRAPHICS_PIPELINE, 400))
+		return false;
+
+	db.reset();
+	remove(".__test_archive.foz");
+	return true;
+}
+
+static bool test_export_concurrent_archive(bool with_read_only)
+{
+	remove(".__test_archive.foz");
+	static const uint16_t one = 1;
+	static const uint32_t two = 2;
+	static const uint64_t three = 3;
+	static const uint8_t four = 4;
+
+	char export_path[DatabaseInterface::OSHandleNameSize];
+	DatabaseInterface::get_unique_os_export_name(export_path, sizeof(export_path));
+
+	if (with_read_only)
+	{
+		auto db = std::unique_ptr<DatabaseInterface>(create_stream_archive_database(".__test_archive.foz",
+		                                                                            DatabaseMode::OverWrite));
+		if (!db || !db->prepare())
+			return false;
+
+		if (!db->write_entry(RESOURCE_SHADER_MODULE, 1000, &four, sizeof(four), 0))
+			return false;
+		if (!db->write_entry(RESOURCE_GRAPHICS_PIPELINE, 1300, &four, sizeof(four), 0))
+			return false;
+	}
+
+	{
+		auto db = std::unique_ptr<DatabaseInterface>(create_stream_archive_database(".__test_archive1.foz",
+		                                                                            DatabaseMode::OverWrite));
+		if (!db || !db->prepare())
+			return false;
+
+		if (!db->write_entry(RESOURCE_SHADER_MODULE, 1, &one, sizeof(one), 0))
+			return false;
+		if (!db->write_entry(RESOURCE_GRAPHICS_PIPELINE, 300, &one, sizeof(one), 0))
+			return false;
+
+		// Duplicate.
+		if (!db->write_entry(RESOURCE_SHADER_MODULE, 2, &two, sizeof(two), 0))
+			return false;
+	}
+
+	{
+		auto db = std::unique_ptr<DatabaseInterface>(create_stream_archive_database(".__test_archive2.foz",
+		                                                                            DatabaseMode::OverWrite));
+		if (!db || !db->prepare())
+			return false;
+
+		if (!db->write_entry(RESOURCE_SHADER_MODULE, 2, &two, sizeof(two), 0))
+			return false;
+		if (!db->write_entry(RESOURCE_GRAPHICS_PIPELINE, 200, &two, sizeof(two), 0))
+			return false;
+	}
+
+	{
+		auto db = std::unique_ptr<DatabaseInterface>(create_stream_archive_database(".__test_archive3.foz",
+		                                                                            DatabaseMode::OverWrite));
+		if (!db || !db->prepare())
+			return false;
+
+		if (!db->write_entry(RESOURCE_SHADER_MODULE, 3, &three, sizeof(three), 0))
+			return false;
+		if (!db->write_entry(RESOURCE_GRAPHICS_PIPELINE, 100, &three, sizeof(three), 0))
+			return false;
+	}
+
+	static const char *extra_paths[] = { ".__test_archive1.foz", ".__test_archive_bogus.foz", ".__test_archive2.foz", ".__test_archive3.foz" };
+	intptr_t handle;
+	{
+		auto db = std::unique_ptr<DatabaseInterface>(create_concurrent_database(".__test_archive", DatabaseMode::ReadOnly, extra_paths, 4));
+		if (!db || !db->prepare())
+			return false;
+		handle = db->export_metadata_to_os_handle(export_path);
+#ifdef __WIN32
+		if (handle == 0)
+			return false;
+#else
+		if (handle < 0)
+			return false;
+#endif
+	}
+
+	auto db = std::unique_ptr<DatabaseInterface>(create_concurrent_database(".__test_archive", DatabaseMode::ReadOnly, extra_paths, 4));
+	if (!db || !db->import_metadata_from_os_handle(handle) || !db->prepare())
+		return false;
+
+	size_t expected_count = with_read_only ? 4 : 3;
+	size_t count;
+
+	for (unsigned i = 0; i < RESOURCE_COUNT; i++)
+	{
+		if (!db->get_hash_list_for_resource_tag(ResourceTag(i), &count, nullptr))
+			return false;
+
+		switch (ResourceTag(i))
+		{
+		case RESOURCE_GRAPHICS_PIPELINE:
+		case RESOURCE_SHADER_MODULE:
+			if (count != expected_count)
+				return false;
+			break;
+
+		default:
+			if (count != 0)
+				return false;
+			break;
+		}
+	}
+
+	Hash hashes[4];
+	count = expected_count;
+	if (!db->get_hash_list_for_resource_tag(RESOURCE_SHADER_MODULE, &count, hashes))
+		return false;
+	static const Hash reference_hashes_module[4] = { 1, 2, 3, 1000 };
+	static const Hash reference_hashes_pipeline[4] = { 100, 200, 300, 1300 };
+	if (memcmp(reference_hashes_module, hashes, sizeof(*hashes) * expected_count) != 0)
+		return false;
+
+	count = expected_count;
+	if (!db->get_hash_list_for_resource_tag(RESOURCE_GRAPHICS_PIPELINE, &count, hashes))
+		return false;
+	if (memcmp(reference_hashes_pipeline, hashes, sizeof(*hashes) * expected_count) != 0)
+		return false;
+
+	union
+	{
+		uint8_t u8;
+		uint16_t u16;
+		uint32_t u32;
+		uint64_t u64;
+	} u;
+
+	size_t blob_size;
+
+	blob_size = sizeof(u.u16);
+	if (!db->read_entry(RESOURCE_SHADER_MODULE, 1, &blob_size, &u.u16, 0) || u.u16 != one)
+		return false;
+
+	blob_size = sizeof(u.u32);
+	if (!db->read_entry(RESOURCE_SHADER_MODULE, 2, &blob_size, &u.u32, 0) || u.u32 != two)
+		return false;
+
+	blob_size = sizeof(u.u64);
+	if (!db->read_entry(RESOURCE_SHADER_MODULE, 3, &blob_size, &u.u64, 0) || u.u64 != three)
+		return false;
+
+	if (with_read_only)
+	{
+		blob_size = sizeof(u.u8);
+		if (!db->read_entry(RESOURCE_SHADER_MODULE, 1000, &blob_size, &u.u8, 0) || u.u8 != four)
+			return false;
+
+		blob_size = sizeof(u.u8);
+		if (!db->read_entry(RESOURCE_GRAPHICS_PIPELINE, 1300, &blob_size, &u.u8, 0) || u.u8 != four)
+			return false;
+	}
+
+	if (db->has_entry(RESOURCE_SHADER_MODULE, 0) || db->has_entry(RESOURCE_SHADER_MODULE, 4))
+		return false;
+
+	blob_size = sizeof(u.u16);
+	if (!db->read_entry(RESOURCE_GRAPHICS_PIPELINE, 300, &blob_size, &u.u16, 0) || u.u16 != one)
+		return false;
+
+	blob_size = sizeof(u.u32);
+	if (!db->read_entry(RESOURCE_GRAPHICS_PIPELINE, 200, &blob_size, &u.u32, 0) || u.u32 != two)
+		return false;
+
+	blob_size = sizeof(u.u64);
+	if (!db->read_entry(RESOURCE_GRAPHICS_PIPELINE, 100, &blob_size, &u.u64, 0) || u.u64 != three)
+		return false;
+
+	if (db->has_entry(RESOURCE_GRAPHICS_PIPELINE, 150) ||
+	    db->has_entry(RESOURCE_GRAPHICS_PIPELINE, 99) ||
+	    db->has_entry(RESOURCE_GRAPHICS_PIPELINE, 400))
+		return false;
+
+	db.reset();
+	remove(".__test_archive.foz");
+	remove(".__test_archive1.foz");
+	remove(".__test_archive2.foz");
+	remove(".__test_archive3.foz");
+	return true;
+}
+
 int main()
 {
 	if (!test_concurrent_database_extra_paths())
@@ -1228,6 +1541,12 @@ int main()
 	if (!test_database())
 		return EXIT_FAILURE;
 	if (!test_filter())
+		return EXIT_FAILURE;
+	if (!test_export_single_archive())
+		return EXIT_FAILURE;
+	if (!test_export_concurrent_archive(false))
+		return EXIT_FAILURE;
+	if (!test_export_concurrent_archive(true))
 		return EXIT_FAILURE;
 
 	std::vector<uint8_t> res;

@@ -63,6 +63,8 @@ static const char *shm_name;
 static const char *shm_mutex_name;
 static HANDLE shared_mutex;
 static HANDLE job_handle;
+static char metadata_export_name[DatabaseInterface::OSHandleNameSize];
+static HANDLE metadata_handle;
 }
 
 struct ProcessProgress
@@ -405,6 +407,12 @@ bool ProcessProgress::start_child_process()
 		cmdline += Global::shm_mutex_name;
 	}
 
+	if (*Global::metadata_export_name != '\0')
+	{
+		cmdline += " --metadata-name ";
+		cmdline += Global::metadata_export_name;
+	}
+
 	if (Global::base_replayer_options.spirv_validate)
 		cmdline += " --spirv-val";
 	if (Global::device_options.null_device)
@@ -626,9 +634,19 @@ static void log_and_die()
 	ExitProcess(1);
 }
 
+static bool open_metadata_shm(const char *metadata_path)
+{
+	HANDLE mapping = OpenFileMappingA(FILE_MAP_READ, FALSE, metadata_path);
+	if (!mapping)
+		return false;
+
+	Global::metadata_handle = mapping;
+	return true;
+}
+
 static bool open_shm(const char *shm_path, const char *shm_mutex_path)
 {
-	HANDLE mapping = OpenFileMapping(FILE_MAP_READ | FILE_MAP_WRITE, FALSE, shm_path);
+	HANDLE mapping = OpenFileMappingA(FILE_MAP_READ | FILE_MAP_WRITE, FALSE, shm_path);
 	if (!mapping)
 	{
 		LOGE("Failed to open file mapping in replayer.\n");
@@ -729,6 +747,15 @@ static int run_master_process(const VulkanDevice::Options &opts,
 		{
 			for (auto &path : databases)
 				LOGE("Failed to parse database %s.\n", path);
+			return EXIT_FAILURE;
+		}
+
+		DatabaseInterface::get_unique_os_export_name(Global::metadata_export_name, sizeof(Global::metadata_export_name));
+		intptr_t mapping = db->export_metadata_to_os_handle(Global::metadata_export_name);
+		// Keep the handle alive by "leaking" it. It will be cleaned up on process exit.
+		if (!DatabaseInterface::metadata_handle_is_valid(mapping))
+		{
+			LOGE("Failed to export metadata.\n");
 			return EXIT_FAILURE;
 		}
 
@@ -1050,11 +1077,18 @@ static void abort_handler(int)
 
 static int run_slave_process(const VulkanDevice::Options &opts,
                              const ThreadedReplayer::Options &replayer_opts,
-                             const vector<const char *> &databases, const char *shm_name, const char *shm_mutex_name)
+                             const vector<const char *> &databases,
+                             const char *shm_name, const char *shm_mutex_name, const char *metadata_name)
 {
 	if (shm_name && shm_mutex_name && !open_shm(shm_name, shm_mutex_name))
 	{
 		LOGE("Failed to map external memory resources.\n");
+		return EXIT_FAILURE;
+	}
+
+	if (metadata_name && !open_metadata_shm(metadata_name))
+	{
+		LOGE("Failed to map external metadata.\n");
 		return EXIT_FAILURE;
 	}
 
@@ -1103,7 +1137,7 @@ static int run_slave_process(const VulkanDevice::Options &opts,
 	signal(SIGABRT, abort_handler);
 
 	global_replayer = &replayer;
-	int code = run_normal_process(replayer, databases);
+	int code = run_normal_process(replayer, databases, reinterpret_cast<intptr_t>(Global::metadata_handle));
 	global_replayer = nullptr;
 
 	// Do not try to catch errors in teardown. Crashes here should never happen, and if they do,
