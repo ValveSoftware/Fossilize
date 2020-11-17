@@ -67,6 +67,7 @@ static ThreadedReplayer::Options base_replayer_options;
 static vector<const char *> databases;
 static sigset_t old_mask;
 static int signal_fd;
+static int timer_fd;
 static int epoll_fd;
 static VulkanDevice::Options device_options;
 static bool quiet_slave;
@@ -290,6 +291,82 @@ static void send_faulty_modules_and_close(int fd)
 	close(fd);
 }
 
+static bool poll_process_memory_usage(pid_t pid, ExternalReplayer::ProcessStats &stats)
+{
+	long long values[3];
+	char path[1024];
+	snprintf(path, sizeof(path), "/proc/%d/statm", pid);
+	FILE *file = fopen(path, "r");
+	if (!file)
+		return false;
+
+	if (fscanf(file, "%lld %lld %lld",
+	           &values[0], &values[1], &values[2]) != 3)
+	{
+		fclose(file);
+		return false;
+	}
+	fclose(file);
+
+	int64_t resident = (values[1] * getpagesize()) / (1024 * 1024);
+	int64_t shared = (values[2] * getpagesize()) / (1024 * 1024);
+	if (resident > UINT32_MAX)
+		resident = UINT32_MAX;
+	if (shared > UINT32_MAX)
+		shared = UINT32_MAX;
+
+	stats.resident_mib = resident;
+	stats.shared_mib = shared;
+	return true;
+}
+
+static void poll_self_child_memory_usage(const std::vector<ProcessProgress> &processes)
+{
+	uint64_t v;
+	if (read(Global::timer_fd, &v, sizeof(v)) < 0)
+		return;
+
+	uint32_t num_processes = processes.size() + 1;
+	if (num_processes > MaxProcessStats)
+		num_processes = MaxProcessStats;
+
+	ExternalReplayer::ProcessStats stats = {};
+	if (!poll_process_memory_usage(getpid(), stats))
+		stats = {};
+
+	if (Global::control_block)
+	{
+		Global::control_block->process_reserved_memory_mib[0].store(stats.resident_mib, std::memory_order_relaxed);
+		Global::control_block->process_shared_memory_mib[0].store(stats.shared_mib, std::memory_order_relaxed);
+	}
+	else
+	{
+		LOGI("Master process: %5u MiB resident, %5u MiB shared.\n", stats.resident_mib, stats.shared_mib);
+	}
+
+	for (uint32_t i = 1; i < num_processes; i++)
+	{
+		if (processes[i - 1].pid < 0)
+			continue;
+		if (!poll_process_memory_usage(processes[i - 1].pid, stats))
+			stats = {};
+
+		if (Global::control_block)
+		{
+			Global::control_block->process_reserved_memory_mib[i].store(stats.resident_mib, std::memory_order_relaxed);
+			Global::control_block->process_shared_memory_mib[i].store(stats.shared_mib, std::memory_order_relaxed);
+		}
+		else
+		{
+			LOGI("Child process #%u: %15u MiB resident, %15u MiB shared.\n",
+			     i - 1, stats.resident_mib, stats.shared_mib);
+		}
+	}
+
+	if (Global::control_block)
+		Global::control_block->num_processes_memory_stats.store(num_processes, std::memory_order_release);
+}
+
 bool ProcessProgress::start_child_process()
 {
 	graphics_progress = -1;
@@ -344,6 +421,7 @@ bool ProcessProgress::start_child_process()
 		// Close various FDs we won't use.
 		close(Global::signal_fd);
 		close(Global::epoll_fd);
+		close(Global::timer_fd);
 		close(crash_fds[0]);
 		close(input_fds[1]);
 
@@ -471,6 +549,13 @@ static int run_master_process(const VulkanDevice::Options &opts,
 			return EXIT_FAILURE;
 		}
 
+		if (Global::control_block)
+		{
+			struct stat s;
+			if (fstat(Global::metadata_fd, &s) == 0)
+				Global::control_block->metadata_shared_size_mib.store(uint32_t(s.st_size / (1024 * 1024)), std::memory_order_relaxed);
+		}
+
 		if (!db->get_hash_list_for_resource_tag(RESOURCE_GRAPHICS_PIPELINE, &num_graphics_pipelines, nullptr))
 		{
 			for (auto &path : databases)
@@ -536,20 +621,53 @@ static int run_master_process(const VulkanDevice::Options &opts,
 
 	// Create an epoll instance and add the signal fd to it.
 	// The signalfd will signal when SIGCHLD is pending.
-	Global::epoll_fd = epoll_create(2 * int(processes) + 2);
+	Global::epoll_fd = epoll_create(2 * int(processes) + 3);
 	if (Global::epoll_fd < 0)
 	{
 		LOGE("Failed to create epollfd. Too old Linux kernel?\n");
 		return EXIT_FAILURE;
 	}
 
+	static constexpr uint32_t POLL_VALUE_SIGNAL_FD = UINT32_MAX;
+	static constexpr uint32_t POLL_VALUE_SENTINEL_FD = UINT32_MAX - 1u;
+	static constexpr uint32_t POLL_VALUE_TIMER_FD = UINT32_MAX - 2u;
+	static constexpr uint32_t POLL_VALUE_MAX_CHILD = UINT32_MAX - 3u;
+
 	{
 		epoll_event event = {};
 		event.events = EPOLLIN;
-		event.data.u32 = UINT32_MAX;
+		event.data.u32 = POLL_VALUE_SIGNAL_FD;
 		if (epoll_ctl(Global::epoll_fd, EPOLL_CTL_ADD, Global::signal_fd, &event) < 0)
 		{
 			LOGE("Failed to add signalfd to epoll.\n");
+			return EXIT_FAILURE;
+		}
+	}
+
+	Global::timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC);
+	if (Global::timer_fd < 0)
+	{
+		LOGE("Failed to create timerfd. Too old Linux kernel?\n");
+		return EXIT_FAILURE;
+	}
+
+	{
+		epoll_event event = {};
+		event.events = EPOLLIN;
+		event.data.u32 = POLL_VALUE_TIMER_FD;
+		if (epoll_ctl(Global::epoll_fd, EPOLL_CTL_ADD, Global::timer_fd, &event) < 0)
+		{
+			LOGE("Failed to add timerfd to epoll.\n");
+			return EXIT_FAILURE;
+		}
+
+		// Poll child memory usage every second.
+		struct itimerspec spec = {};
+		spec.it_interval.tv_sec = 1;
+		spec.it_value.tv_sec = 1;
+		if (timerfd_settime(Global::timer_fd, 0, &spec, nullptr) < 0)
+		{
+			LOGE("Failed to set time with timerfd_settime.\n");
 			return EXIT_FAILURE;
 		}
 	}
@@ -563,7 +681,7 @@ static int run_master_process(const VulkanDevice::Options &opts,
 
 		epoll_event event = {};
 		event.events = 0;
-		event.data.u32 = UINT32_MAX - 1;
+		event.data.u32 = POLL_VALUE_SENTINEL_FD;
 		if (epoll_ctl(Global::epoll_fd, EPOLL_CTL_ADD, STDIN_FILENO, &event) < 0)
 		{
 			LOGE("Failed to add STDIN_FILENO to epoll.\n");
@@ -611,7 +729,7 @@ static int run_master_process(const VulkanDevice::Options &opts,
 			auto &e = events[i];
 			if (e.events & (EPOLLIN | EPOLLHUP | EPOLLRDHUP))
 			{
-				if (e.data.u32 < UINT32_MAX - 1)
+				if (e.data.u32 <= POLL_VALUE_MAX_CHILD)
 				{
 					auto &proc = child_processes[e.data.u32 & 0x7fffffffu];
 
@@ -636,7 +754,7 @@ static int run_master_process(const VulkanDevice::Options &opts,
 						}
 					}
 				}
-				else if (e.data.u32 == UINT32_MAX)
+				else if (e.data.u32 == POLL_VALUE_SIGNAL_FD)
 				{
 					// Read from signalfd to clear the pending flag.
 					signalfd_siginfo info = {};
@@ -675,7 +793,7 @@ static int run_master_process(const VulkanDevice::Options &opts,
 						}
 					}
 				}
-				else if (e.data.u32 == UINT32_MAX - 1)
+				else if (e.data.u32 == POLL_VALUE_SENTINEL_FD)
 				{
 					LOGI("Parent process died, terminating early ...\n");
 					// STDIN in parent process was hung, kill every child process and ourselves and then exit.
@@ -684,6 +802,10 @@ static int run_master_process(const VulkanDevice::Options &opts,
 						LOGE("Failed to kill process group ... This should not happen.\n");
 						abort();
 					}
+				}
+				else if (e.data.u32 == POLL_VALUE_TIMER_FD)
+				{
+					poll_self_child_memory_usage(child_processes);
 				}
 			}
 			else if (e.events & EPOLLERR)

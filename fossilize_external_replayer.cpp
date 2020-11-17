@@ -124,4 +124,9 @@ bool ExternalReplayer::get_compute_failed_validation(size_t *num_hashes, Hash *h
 {
 	return impl->get_compute_failed_validation(num_hashes, hashes);
 }
+
+bool ExternalReplayer::poll_memory_usage(uint32_t *num_processes, ProcessStats *stats) const
+{
+	return impl->poll_memory_usage(num_processes, stats);
+}
 }

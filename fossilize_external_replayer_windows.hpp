@@ -71,6 +71,7 @@ struct ExternalReplayer::Impl
 	bool get_failed(const std::unordered_set<Hash> &failed, size_t *count, Hash *hashes) const;
 	bool get_failed(const std::vector<std::pair<unsigned, Hash>> &failed, size_t *count,
 	                unsigned *indices, Hash *hashes) const;
+	bool poll_memory_usage(uint32_t *num_processes, ProcessStats *stats) const;
 };
 
 ExternalReplayer::Impl::~Impl()
@@ -85,6 +86,11 @@ ExternalReplayer::Impl::~Impl()
 		CloseHandle(process);
 	if (job_handle)
 		CloseHandle(job_handle);
+}
+
+bool ExternalReplayer::Impl::poll_memory_usage(uint32_t *, ProcessStats *) const
+{
+	return false;
 }
 
 uintptr_t ExternalReplayer::Impl::get_process_handle() const
