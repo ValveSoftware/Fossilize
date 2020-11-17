@@ -208,6 +208,32 @@ public:
 	PollResult poll_progress(Progress &progress);
 	static void compute_condensed_progress(const Progress &progress, unsigned &completed, unsigned &total);
 
+	struct ProcessStats
+	{
+		// Maps to RSS in Linux (element 1 in statm). Measured in MiB.
+		uint32_t resident_mib;
+		// Maps to Resident shared (element 2 in statm) in Linux. Measured in MiB.
+		uint32_t shared_mib;
+
+		// Set to how much shared metadata this process maps.
+		// This can be subtracted from shared_mib to figure out
+		// how much unrelated shared memory is used.
+		uint32_t shared_metadata_mib;
+
+		// resident - shared is the amount of resident memory which is unique to the process,
+	};
+
+	// num_processes must not be nullptr.
+	// If stats is non-nullptr, num_processes will receive the actual number of values that were reported in stats.
+	// Since number of child processes is technically volatile, the number of child processes can change
+	// between a call to poll_memory_usage(&count, nullptr) and poll_memory_usage(&count, stats).
+	// *num_processes is the upper bound when called with stats.
+	// This returns false if platform does not yet support memory query.
+	// If memory query is not available yet, 0 process stats will be returned.
+	// The internal data is updated at some regular interval.
+	// The first process is the primary replaying process.
+	bool poll_memory_usage(uint32_t *num_processes, ProcessStats *stats) const;
+
 private:
 	struct Impl;
 	Impl *impl;

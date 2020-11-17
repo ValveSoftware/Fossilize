@@ -2500,6 +2500,19 @@ static void log_progress(const ExternalReplayer::Progress &progress)
 	LOGI("=================\n");
 }
 
+static void log_memory_usage(const std::vector<ExternalReplayer::ProcessStats> &usage)
+{
+	LOGI("=================\n");
+	LOGI(" Memory usage:\n");
+	unsigned index = 0;
+	for (auto &use : usage)
+	{
+		LOGI("   #%u: %5u MiB resident %5u MiB shared (%u MiB shared metadata).\n", index++,
+		     use.resident_mib, use.shared_mib, use.shared_metadata_mib);
+	}
+	LOGI("=================\n");
+}
+
 static void log_faulty_modules(ExternalReplayer &replayer)
 {
 	size_t count;
@@ -2585,7 +2598,8 @@ static void log_faulty_compute(ExternalReplayer &replayer)
 
 static int run_progress_process(const VulkanDevice::Options &device_opts,
                                 const ThreadedReplayer::Options &replayer_opts,
-                                const vector<const char *> &databases, int timeout)
+                                const vector<const char *> &databases,
+                                int timeout, bool log_memory)
 {
 	ExternalReplayer::Options opts = {};
 	opts.on_disk_pipeline_cache = replayer_opts.on_disk_pipeline_cache_path.empty() ?
@@ -2674,7 +2688,23 @@ static int run_progress_process(const VulkanDevice::Options &device_opts,
 
 		case ExternalReplayer::PollResult::Complete:
 		case ExternalReplayer::PollResult::Running:
+		{
 			log_progress(progress);
+
+			if (log_memory)
+			{
+				uint32_t num_processes;
+				if (replayer.poll_memory_usage(&num_processes, nullptr))
+				{
+					std::vector<ExternalReplayer::ProcessStats> usage(num_processes);
+					if (replayer.poll_memory_usage(&num_processes, usage.data()))
+					{
+						usage.resize(num_processes);
+						log_memory_usage(usage);
+					}
+				}
+			}
+
 			if (result == ExternalReplayer::PollResult::Complete)
 			{
 				log_faulty_modules(replayer);
@@ -2683,6 +2713,7 @@ static int run_progress_process(const VulkanDevice::Options &device_opts,
 				return replayer.wait();
 			}
 			break;
+		}
 		}
 	}
 }
@@ -3361,7 +3392,7 @@ int main(int argc, char *argv[])
 #ifndef NO_ROBUST_REPLAYER
 	if (progress)
 	{
-		ret = run_progress_process(opts, replayer_opts, databases, timeout);
+		ret = run_progress_process(opts, replayer_opts, databases, timeout, log_memory);
 	}
 	else if (master_process)
 	{

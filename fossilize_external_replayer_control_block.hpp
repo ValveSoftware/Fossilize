@@ -32,7 +32,8 @@ static_assert(sizeof(std::atomic<uint32_t>) == sizeof(uint32_t), "Atomic size mi
 namespace Fossilize
 {
 enum { ControlBlockMessageSize = 64 };
-enum { ControlBlockMagic = 0x19bcde18 };
+enum { ControlBlockMagic = 0x19bcde19 };
+enum { MaxProcessStats = 256 };
 
 struct SharedControlBlock
 {
@@ -66,6 +67,13 @@ struct SharedControlBlock
 
 	std::atomic<uint32_t> static_total_count_graphics;
 	std::atomic<uint32_t> static_total_count_compute;
+
+	std::atomic<uint32_t> num_processes_memory_stats;
+	std::atomic<uint32_t> metadata_shared_size_mib;
+	// Could be 64-bit, but we can express up to ~4 * 10^15 bytes this way.
+	// 64-bit would need some form of locking on 32-bit arch.
+	std::atomic<uint32_t> process_reserved_memory_mib[MaxProcessStats];
+	std::atomic<uint32_t> process_shared_memory_mib[MaxProcessStats];
 
 	// Ring buffer. Needs lock.
 	uint32_t write_count;

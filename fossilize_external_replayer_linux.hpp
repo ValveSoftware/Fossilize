@@ -134,6 +134,7 @@ struct ExternalReplayer::Impl
 	bool get_failed(const std::vector<std::pair<unsigned, Hash>> &failed, size_t *count,
 	                unsigned *indices, Hash *hashes) const;
 	void reset_pid();
+	bool poll_memory_usage(uint32_t *num_processes, ProcessStats *stats) const;
 };
 
 ExternalReplayer::Impl::~Impl()
@@ -163,6 +164,34 @@ void ExternalReplayer::Impl::reset_pid()
 	if (close_fd >= 0)
 		close(close_fd);
 	close_fd = -1;
+}
+
+bool ExternalReplayer::Impl::poll_memory_usage(uint32_t *num_processes, ProcessStats *stats) const
+{
+	uint32_t active_children = shm_block->num_processes_memory_stats.load(std::memory_order_acquire);
+
+	if (stats)
+	{
+		if (active_children > *num_processes)
+			active_children = *num_processes;
+		else if (active_children < *num_processes)
+			*num_processes = active_children;
+
+		for (uint32_t i = 0; i < active_children; i++)
+		{
+			stats[i].resident_mib = shm_block->process_reserved_memory_mib[i].load(std::memory_order_relaxed);
+			stats[i].shared_mib = shm_block->process_shared_memory_mib[i].load(std::memory_order_relaxed);
+
+			if (i != 0)
+				stats[i].shared_metadata_mib = shm_block->metadata_shared_size_mib.load(std::memory_order_relaxed);
+			else
+				stats[i].shared_metadata_mib = 0;
+		}
+	}
+	else
+		*num_processes = active_children;
+
+	return true;
 }
 
 ExternalReplayer::PollResult ExternalReplayer::Impl::poll_progress(ExternalReplayer::Progress &progress)
