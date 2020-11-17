@@ -595,7 +595,9 @@ static int run_master_process(const VulkanDevice::Options &opts,
 		int ret = epoll_wait(Global::epoll_fd, events, 64, -1);
 		if (ret < 0)
 		{
-			LOGE("epoll_wait() failed.\n");
+			if (errno == EINTR)
+				continue;
+			LOGE("epoll_wait() failed (errno = %d).\n", errno);
 			return EXIT_FAILURE;
 		}
 
