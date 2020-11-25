@@ -81,10 +81,23 @@ Each SPIR-V word takes from 1 to 5 bytes with this scheme.
 // Note that fossilize.hpp will include Vulkan headers, so make sure you include vulkan.h before
 // this one if you care about which Vulkan headers you use.
 #include "fossilize.hpp"
+#include "fossilize_db.hpp"
 
 void create_state()
 {
+    auto db = std::unique_ptr<Fossilize::DatabaseInterface>(
+            Fossilize::create_database("/tmp/test.foz", Fossilize::DatabaseMode::OverWrite));
+    if (!db)
+        return;
+
     Fossilize::StateRecorder recorder;
+
+    // If using a database, you cannot serialize later with recorder.serialize().
+    // This is optional.
+    // The database method is useful if you intend to replay the archive in fossilize-replay or similar.
+    // The recorder interface calls db->prepare(), so it is not necessary to do so here.
+    recorder.init_recording_thread(db.get());
+
     // TODO here: Add way to capture which extensions/physical device features were used to deal with exotic things
     // which require extensions when making repro cases.
 
@@ -100,8 +113,8 @@ void create_state()
 
     // Do the same for render passes, pipelines, shader modules, samplers (if using immutable samplers) as necessary.
 
-    // This method gives you a standalone JSON file which contains everything.
-    // The alternative is using init_recording_thread() to set up a database backend.
+    // If you don't use the database recording thread, you can create a single monolithic JSON,
+    // otherwise, just make sure the state recorder is destroyed before the database interface.
     uint8_t *serialized;
     size_t size;
     recorder.serialize(&serialized, &size);
@@ -155,6 +168,9 @@ void replay_state(Device &device)
     Fossilize::Replayer replayer;
     bool success = replayer.parse(device, nullptr, serialized_state, serialized_state_size);
     // Now internal hashmaps are warmed up, and all pipelines have been created.
+
+    // It is possible to keep parsing state blobs.
+    // This is useful if the state blobs come from Fossilize stream archives.
 }
 ```
 
