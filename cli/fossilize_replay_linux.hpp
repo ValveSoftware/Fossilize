@@ -479,6 +479,7 @@ bool ProcessProgress::start_child_process()
 static int run_master_process(const VulkanDevice::Options &opts,
                               const ThreadedReplayer::Options &replayer_opts,
                               const vector<const char *> &databases,
+                              const char *whitelist, uint32_t whitelist_mask,
                               bool quiet_slave, int shmem_fd)
 {
 	Global::quiet_slave = quiet_slave;
@@ -532,6 +533,17 @@ static int run_master_process(const VulkanDevice::Options &opts,
 
 	{
 		auto db = create_database(databases);
+
+		if (whitelist)
+		{
+			db->set_whitelist_tag_mask(whitelist_mask);
+			if (!db->load_whitelist_database(whitelist))
+			{
+				LOGE("Failed to load whitelist database: %s.\n", whitelist);
+				exit(EXIT_FAILURE);
+			}
+		}
+
 		if (!db->prepare())
 		{
 			for (auto &path : databases)
@@ -1047,7 +1059,7 @@ static int run_slave_process(const VulkanDevice::Options &opts,
 	if (pthread_sigmask(SIG_BLOCK, &mask, &old_mask) < 0)
 		return EXIT_FAILURE;
 
-	int ret = run_normal_process(replayer, databases, Global::metadata_fd);
+	int ret = run_normal_process(replayer, databases, nullptr, 0, Global::metadata_fd);
 	global_replayer = nullptr;
 
 	// Cannot reliably handle these signals if they occur during teardown of the process.

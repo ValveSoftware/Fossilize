@@ -685,6 +685,7 @@ static bool open_shm(const char *shm_path, const char *shm_mutex_path)
 static int run_master_process(const VulkanDevice::Options &opts,
                               const ThreadedReplayer::Options &replayer_opts,
                               const vector<const char *> &databases,
+                              const char *whitelist_path, uint32_t whitelist_mask,
                               bool quiet_slave, const char *shm_name, const char *shm_mutex_name)
 {
 	Global::quiet_slave = quiet_slave;
@@ -743,6 +744,17 @@ static int run_master_process(const VulkanDevice::Options &opts,
 
 	{
 		auto db = create_database(databases);
+
+		if (whitelist_path)
+		{
+			db->set_whitelist_tag_mask(whitelist_mask);
+			if (!db->load_whitelist_database(whitelist_path))
+			{
+				LOGE("Failed to load whitelist database: %s.\n", whitelist_path);
+				return EXIT_FAILURE;
+			}
+		}
+
 		if (!db->prepare())
 		{
 			for (auto &path : databases)
@@ -1137,7 +1149,7 @@ static int run_slave_process(const VulkanDevice::Options &opts,
 	signal(SIGABRT, abort_handler);
 
 	global_replayer = &replayer;
-	int code = run_normal_process(replayer, databases, reinterpret_cast<intptr_t>(Global::metadata_handle));
+	int code = run_normal_process(replayer, databases, nullptr, 0, reinterpret_cast<intptr_t>(Global::metadata_handle));
 	global_replayer = nullptr;
 
 	// Do not try to catch errors in teardown. Crashes here should never happen, and if they do,

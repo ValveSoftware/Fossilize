@@ -500,6 +500,19 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 		cmdline += "\"";
 	}
 
+	if (options.on_disk_replay_whitelist)
+	{
+		cmdline += " --on-disk-replay-whitelist ";
+		cmdline += "\"";
+		cmdline += options.on_disk_replay_whitelist;
+		cmdline += "\"";
+
+		cmdline += " --on-disk-replay-whitelist-mask ";
+		char whitelist_hex[9];
+		sprintf(whitelist_hex, "%x", options.on_disk_replay_whitelist_mask);
+		cmdline += whitelist_hex;
+	}
+
 	if (options.replayer_cache_path)
 	{
 		cmdline += " --replayer-cache ";

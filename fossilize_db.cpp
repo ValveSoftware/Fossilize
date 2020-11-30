@@ -125,6 +125,9 @@ struct DatabaseInterface::Impl
 	std::vector<unsigned> sub_databases_in_whitelist;
 	std::unordered_set<Hash> implicit_whitelisted[RESOURCE_COUNT];
 	DatabaseMode mode;
+	uint32_t whitelist_tag_mask = (1u << RESOURCE_SHADER_MODULE) |
+	                              (1u << RESOURCE_GRAPHICS_PIPELINE) |
+	                              (1u << RESOURCE_COMPUTE_PIPELINE);
 
 	const ExportedMetadataHeader *imported_concurrent_metadata = nullptr;
 
@@ -149,6 +152,11 @@ bool DatabaseInterface::has_sub_databases()
 DatabaseInterface *DatabaseInterface::get_sub_database(unsigned)
 {
 	return nullptr;
+}
+
+void DatabaseInterface::set_whitelist_tag_mask(uint32_t mask)
+{
+	impl->whitelist_tag_mask = mask;
 }
 
 bool DatabaseInterface::load_whitelist_database(const char *path)
@@ -249,11 +257,13 @@ DatabaseInterface::~DatabaseInterface()
 
 bool DatabaseInterface::test_resource_filter(ResourceTag tag, Hash hash) const
 {
-	if (tag != RESOURCE_SHADER_MODULE && tag != RESOURCE_COMPUTE_PIPELINE && tag != RESOURCE_GRAPHICS_PIPELINE)
-		return true;
-
-	if (impl->whitelist && impl->implicit_whitelisted[tag].count(hash) == 0 && !impl->whitelist->has_entry(tag, hash))
+	if ((impl->whitelist_tag_mask & (1u << tag)) != 0 &&
+	    impl->whitelist &&
+	    impl->implicit_whitelisted[tag].count(hash) == 0 &&
+	    !impl->whitelist->has_entry(tag, hash))
+	{
 		return false;
+	}
 
 	if (impl->blacklist && impl->blacklist->has_entry(tag, hash))
 		return false;

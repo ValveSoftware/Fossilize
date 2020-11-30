@@ -539,6 +539,17 @@ void ExternalReplayer::Impl::start_replayer_process(const ExternalReplayer::Opti
 		argv.push_back(options.on_disk_validation_blacklist);
 	}
 
+	char whitelist_hex[9];
+	if (options.on_disk_replay_whitelist)
+	{
+		argv.push_back("--on-disk-replay-whitelist");
+		argv.push_back(options.on_disk_replay_whitelist);
+
+		sprintf(whitelist_hex, "%x", options.on_disk_replay_whitelist_mask);
+		argv.push_back("--on-disk-replay-whitelist-mask");
+		argv.push_back(whitelist_hex);
+	}
+
 	if (options.replayer_cache_path)
 	{
 		argv.push_back("--replayer-cache");
