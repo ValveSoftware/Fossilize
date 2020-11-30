@@ -99,6 +99,12 @@ public:
 	bool load_whitelist_database(const char *path);
 	bool load_blacklist_database(const char *path);
 
+	// When using a whitelist in load_whitelist_database,
+	// only consider checking whitelist for a tag
+	// where the tag'th bit is set in mask.
+	// By default this mask is set for shader modules and graphics pipelines.
+	void set_whitelist_tag_mask(uint32_t mask);
+
 	// Useful if also replaying a database which is known to contain valid data.
 	//
 	// Currently only supported for the concurrent database.

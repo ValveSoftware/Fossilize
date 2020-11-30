@@ -222,7 +222,7 @@ struct ThreadedReplayer : StateCreatorInterface
 		string on_disk_validation_blacklist_path;
 		string pipeline_stats_path;
 		string replayer_cache_path;
-		std::vector<unsigned> implicit_whitelist_database_indices;
+		vector<unsigned> implicit_whitelist_database_indices;
 
 		// VALVE: Add multi-threaded pipeline creation
 		unsigned num_threads = thread::hardware_concurrency();
@@ -2462,6 +2462,8 @@ static void print_help()
 	     "\t[--on-disk-validation-cache <path>]\n"
 	     "\t[--on-disk-validation-whitelist <path>]\n"
 	     "\t[--on-disk-validation-blacklist <path>]\n"
+	     "\t[--on-disk-replay-whitelist <path>]\n"
+	     "\t[--on-disk-replay-whitelist-mask <module/pipeline/hex>]\n"
 	     "\t[--pipeline-hash <hash>]\n"
 	     "\t[--graphics-pipeline-range <start> <end>]\n"
 	     "\t[--compute-pipeline-range <start> <end>]\n"
@@ -2599,6 +2601,7 @@ static void log_faulty_compute(ExternalReplayer &replayer)
 static int run_progress_process(const VulkanDevice::Options &device_opts,
                                 const ThreadedReplayer::Options &replayer_opts,
                                 const vector<const char *> &databases,
+                                const char *whitelist, uint32_t whitelist_mask,
                                 int timeout, bool log_memory)
 {
 	ExternalReplayer::Options opts = {};
@@ -2637,6 +2640,8 @@ static int run_progress_process(const VulkanDevice::Options &device_opts,
 	opts.num_implicit_whitelist_indices = replayer_opts.implicit_whitelist_database_indices.size();
 	opts.replayer_cache_path = replayer_opts.replayer_cache_path.empty() ?
 			nullptr : replayer_opts.replayer_cache_path.c_str();
+	opts.on_disk_replay_whitelist = whitelist;
+	opts.on_disk_replay_whitelist_mask = whitelist_mask;
 
 	ExternalReplayer replayer;
 	if (!replayer.start(opts))
@@ -2904,11 +2909,23 @@ static void populate_blob_hash_set(std::unordered_set<Hash> &hashes, ResourceTag
 		hashes.insert(h);
 }
 
-static int run_normal_process(ThreadedReplayer &replayer, const vector<const char *> &databases, intptr_t metadata_handle)
+static int run_normal_process(ThreadedReplayer &replayer, const vector<const char *> &databases,
+                              const char *whitelist, uint32_t whitelist_mask,
+                              intptr_t metadata_handle)
 {
 	auto start_time = chrono::steady_clock::now();
 	auto start_create_archive = chrono::steady_clock::now();
 	auto resolver = create_database(databases);
+
+	if (whitelist)
+	{
+		resolver->set_whitelist_tag_mask(whitelist_mask);
+		if (!resolver->load_whitelist_database(whitelist))
+		{
+			LOGE("Failed to load whitelist database: %s.\n", whitelist);
+			return EXIT_FAILURE;
+		}
+	}
 
 	if (DatabaseInterface::metadata_handle_is_valid(metadata_handle))
 	{
@@ -3245,6 +3262,9 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 int main(int argc, char *argv[])
 {
 	vector<const char *> databases;
+	const char *whitelist_path = nullptr;
+	uint32_t whitelist_mask = ExternalReplayer::WHITELIST_MASK_ALL_BIT;
+
 	VulkanDevice::Options opts;
 	ThreadedReplayer::Options replayer_opts;
 
@@ -3282,6 +3302,26 @@ int main(int argc, char *argv[])
 	});
 	cbs.add("--on-disk-validation-whitelist", [&](CLIParser &parser) {
 		replayer_opts.on_disk_validation_whitelist_path = parser.next_string();
+	});
+	cbs.add("--on-disk-replay-whitelist", [&](CLIParser &parser) {
+		whitelist_path = parser.next_string();
+	});
+	cbs.add("--on-disk-replay-whitelist-mask", [&](CLIParser &parser) {
+		const char *tag = parser.next_string();
+		if (strcmp(tag, "module") == 0)
+			whitelist_mask = 1u << RESOURCE_SHADER_MODULE;
+		else if (strcmp(tag, "pipeline") == 0)
+			whitelist_mask = (1u << RESOURCE_GRAPHICS_PIPELINE) | (1u << RESOURCE_COMPUTE_PIPELINE);
+		else
+		{
+			whitelist_mask = strtoull(tag, nullptr, 16);
+			if (whitelist_mask == 0)
+			{
+				LOGE("Invalid --on-disk-replay-whitelist-mask: %s\n", tag);
+				print_help();
+				exit(EXIT_FAILURE);
+			}
+		}
 	});
 	cbs.add("--num-threads", [&](CLIParser &parser) { replayer_opts.num_threads = parser.next_uint(); });
 	cbs.add("--loop", [&](CLIParser &parser) { replayer_opts.loop_count = parser.next_uint(); });
@@ -3392,14 +3432,18 @@ int main(int argc, char *argv[])
 #ifndef NO_ROBUST_REPLAYER
 	if (progress)
 	{
-		ret = run_progress_process(opts, replayer_opts, databases, timeout, log_memory);
+		ret = run_progress_process(opts, replayer_opts, databases, whitelist_path, whitelist_mask, timeout, log_memory);
 	}
 	else if (master_process)
 	{
 #ifdef _WIN32
-		ret = run_master_process(opts, replayer_opts, databases, quiet_slave, shm_name, shm_mutex_name);
+		ret = run_master_process(opts, replayer_opts,
+		                         databases, whitelist_path, whitelist_mask,
+		                         quiet_slave, shm_name, shm_mutex_name);
 #else
-		ret = run_master_process(opts, replayer_opts, databases, quiet_slave, shmem_fd);
+		ret = run_master_process(opts, replayer_opts,
+		                         databases, whitelist_path, whitelist_mask,
+		                         quiet_slave, shmem_fd);
 #endif
 	}
 	else if (slave_process)
@@ -3417,7 +3461,9 @@ int main(int argc, char *argv[])
 #ifndef NO_ROBUST_REPLAYER
 		install_trivial_crash_handlers(replayer);
 #endif
-		ret = run_normal_process(replayer, databases, DatabaseInterface::invalid_metadata_handle());
+		ret = run_normal_process(replayer, databases,
+		                         whitelist_path, whitelist_mask,
+		                         DatabaseInterface::invalid_metadata_handle());
 #ifndef NO_ROBUST_REPLAYER
 		if (log_memory)
 			log_process_memory();

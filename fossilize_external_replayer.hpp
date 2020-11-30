@@ -36,6 +36,17 @@ public:
 		const char *value;
 	};
 
+	enum WhiteListMaskBits
+	{
+		WHITELIST_MASK_MODULE_BIT = 1u << RESOURCE_SHADER_MODULE,
+		WHITELIST_MASK_GRAPHICS_PIPELINE_BIT = 1u << RESOURCE_GRAPHICS_PIPELINE,
+		WHITELIST_MASK_COMPUTE_PIPELINE_BIT = 1u << RESOURCE_COMPUTE_PIPELINE,
+		WHITELIST_MASK_PIPELINE_BIT = WHITELIST_MASK_COMPUTE_PIPELINE_BIT | WHITELIST_MASK_GRAPHICS_PIPELINE_BIT,
+		WHITELIST_MASK_ALL_BIT = WHITELIST_MASK_MODULE_BIT | WHITELIST_MASK_PIPELINE_BIT,
+		WHITELIST_MASK_INT_MAX = 0x7fffffff
+	};
+	using WhiteListMaskFlags = unsigned;
+
 	struct Options
 	{
 		// Path to the fossilize-replay executable.
@@ -122,6 +133,16 @@ public:
 		// If non-zero, enables a timeout for pipeline compilation to have forward progress on drivers
 		// which enter infinite loops during compilation.
 		unsigned timeout_seconds;
+
+		// If used, will only replay a blob if it exists in the whitelist.
+		// The intented use of this is to use validation whitelists and then only replay
+		// blobs which are known to have passed validation.
+		const char *on_disk_replay_whitelist;
+		// The whitelist mask controls which resource types are considered for replay.
+		// If a resource tag is not set, it is assumed at all resources of that type is whitelisted.
+		// This is useful if we only want to use the whitelist for e.g. shader modules.
+		// Must be non-zero if on_disk_replay_whitelist is set.
+		WhiteListMaskFlags on_disk_replay_whitelist_mask;
 	};
 
 	ExternalReplayer();
