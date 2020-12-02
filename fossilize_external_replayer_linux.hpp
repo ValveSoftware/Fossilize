@@ -627,8 +627,7 @@ void ExternalReplayer::Impl::start_replayer_process(const ExternalReplayer::Opti
 	// Replayer should have idle priority.
 	// nice() can return -1 in valid scenarios, need to check errno.
 	errno = 0;
-	nice(19);
-	if (errno != 0)
+	if (nice(19) == -1 && errno != 0)
 		LOGE("Failed to set nice value for external replayer!\n");
 
 #ifdef __linux__
