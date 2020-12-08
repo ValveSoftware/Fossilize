@@ -366,18 +366,6 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 			for (uint32_t i = 0; i < flags->bindingCount; i++)
 				flag_union |= flags->pBindingFlags[i];
 
-			// Should map to descriptor type here, but shouldn't cause any pipeline compilation if we do a basic sanity check.
-			if ((flag_union & VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT) != 0 &&
-			    features.descriptor_indexing.descriptorBindingSampledImageUpdateAfterBind == VK_FALSE &&
-			    features.descriptor_indexing.descriptorBindingStorageBufferUpdateAfterBind == VK_FALSE &&
-			    features.descriptor_indexing.descriptorBindingStorageImageUpdateAfterBind == VK_FALSE &&
-			    features.descriptor_indexing.descriptorBindingUniformTexelBufferUpdateAfterBind == VK_FALSE &&
-			    features.descriptor_indexing.descriptorBindingStorageTexelBufferUpdateAfterBind == VK_FALSE &&
-			    features.descriptor_indexing.descriptorBindingUniformBufferUpdateAfterBind == VK_FALSE)
-			{
-				return false;
-			}
-
 			if ((flag_union & VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT) != 0 &&
 			    features.descriptor_indexing.descriptorBindingUpdateUnusedWhilePending == VK_FALSE)
 			{
@@ -513,6 +501,19 @@ bool FeatureFilter::Impl::sampler_is_supported(const VkSamplerCreateInfo *info) 
 	return pnext_chain_is_supported(info->pNext);
 }
 
+template <typename T>
+static const T *find_pnext(const void *pNext, VkStructureType sType)
+{
+	while (pNext)
+	{
+		auto *base_in = static_cast<const VkBaseInStructure *>(pNext);
+		if (base_in->sType == sType)
+			return static_cast<const T *>(pNext);
+		pNext = base_in->pNext;
+	}
+	return nullptr;
+}
+
 bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorSetLayoutCreateInfo *info) const
 {
 	// This should not get recorded, but if it does ...
@@ -522,16 +523,218 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 	if (null_device)
 		return true;
 
+	struct DescriptorCounts
+	{
+		uint32_t sampled_image;
+		uint32_t storage_image;
+		uint32_t ssbo;
+		uint32_t ubo;
+		uint32_t input_attachment;
+		uint32_t sampler;
+		uint32_t ubo_dynamic;
+		uint32_t ssbo_dynamic;
+	};
+	DescriptorCounts counts = {};
+
+	auto *flags = find_pnext<VkDescriptorSetLayoutBindingFlagsCreateInfo>(
+			info->pNext,
+			VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO);
+
+	auto *mutable_info = find_pnext<VkMutableDescriptorTypeCreateInfoVALVE>(
+			info->pNext,
+			VK_STRUCTURE_TYPE_MUTABLE_DESCRIPTOR_TYPE_CREATE_INFO_VALVE);
+
+	bool pool_is_update_after_bind = (info->flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT) != 0;
+
 	for (unsigned i = 0; i < info->bindingCount; i++)
 	{
-		if (info->pBindings[i].descriptorType == VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK_EXT)
+		bool binding_is_update_after_bind =
+				flags && i < flags->bindingCount &&
+				(flags->pBindingFlags[i] & VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT) != 0;
+
+		uint32_t *count = nullptr;
+
+		switch (info->pBindings[i].descriptorType)
 		{
+		case VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK_EXT:
 			if (features.inline_uniform_block.inlineUniformBlock == VK_FALSE)
 				return false;
 			if (info->pBindings[i].descriptorCount > props.inline_uniform_block.maxInlineUniformBlockSize)
 				return false;
+			if (binding_is_update_after_bind && features.inline_uniform_block.descriptorBindingInlineUniformBlockUpdateAfterBind == VK_FALSE)
+				return false;
+			break;
+
+		case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+			if (binding_is_update_after_bind && features.descriptor_indexing.descriptorBindingStorageBufferUpdateAfterBind == VK_FALSE)
+				return false;
+			count = &counts.ssbo;
+			break;
+
+		case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+			if (binding_is_update_after_bind && features.descriptor_indexing.descriptorBindingUniformBufferUpdateAfterBind == VK_FALSE)
+				return false;
+			count = &counts.ubo;
+			break;
+
+		case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
+		case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
+			if (binding_is_update_after_bind && features.descriptor_indexing.descriptorBindingSampledImageUpdateAfterBind == VK_FALSE)
+				return false;
+			count = &counts.sampled_image;
+			break;
+
+		case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
+			if (binding_is_update_after_bind && features.descriptor_indexing.descriptorBindingUniformTexelBufferUpdateAfterBind == VK_FALSE)
+				return false;
+			count = &counts.sampled_image;
+			break;
+
+		case VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:
+			if (binding_is_update_after_bind && features.descriptor_indexing.descriptorBindingStorageTexelBufferUpdateAfterBind == VK_FALSE)
+				return false;
+			count = &counts.storage_image;
+			break;
+
+		case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+			if (binding_is_update_after_bind && features.descriptor_indexing.descriptorBindingStorageImageUpdateAfterBind == VK_FALSE)
+				return false;
+			count = &counts.storage_image;
+			break;
+
+		case VK_DESCRIPTOR_TYPE_SAMPLER:
+			if (binding_is_update_after_bind && features.descriptor_indexing.descriptorBindingSampledImageUpdateAfterBind == VK_FALSE)
+				return false;
+			count = &counts.sampler;
+			break;
+
+		case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
+			if (binding_is_update_after_bind)
+				return false;
+			count = &counts.input_attachment;
+			break;
+
+		case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
+			if (binding_is_update_after_bind)
+				return false;
+			count = &counts.ubo_dynamic;
+			break;
+
+		case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC:
+			if (binding_is_update_after_bind)
+				return false;
+			count = &counts.ssbo_dynamic;
+			break;
+
+		case VK_DESCRIPTOR_TYPE_MUTABLE_VALVE:
+		{
+			DescriptorCounts mutable_counts = {};
+			if (features.mutable_descriptor_type_valve.mutableDescriptorType == VK_FALSE)
+				return false;
+			if (!mutable_info || i >= mutable_info->mutableDescriptorTypeListCount)
+				return false;
+
+			auto &list = mutable_info->pMutableDescriptorTypeLists[i];
+
+			for (uint32_t j = 0; j < list.descriptorTypeCount; j++)
+			{
+				switch (list.pDescriptorTypes[j])
+				{
+				case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+					if (binding_is_update_after_bind && features.descriptor_indexing.descriptorBindingStorageBufferUpdateAfterBind == VK_FALSE)
+						return false;
+					mutable_counts.ssbo = 1;
+					break;
+
+				case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+					if (binding_is_update_after_bind && features.descriptor_indexing.descriptorBindingUniformBufferUpdateAfterBind == VK_FALSE)
+						return false;
+					mutable_counts.ubo = 1;
+					break;
+
+				case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
+					if (binding_is_update_after_bind && features.descriptor_indexing.descriptorBindingSampledImageUpdateAfterBind == VK_FALSE)
+						return false;
+					mutable_counts.sampled_image = 1;
+					break;
+
+				case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
+					if (binding_is_update_after_bind && features.descriptor_indexing.descriptorBindingUniformTexelBufferUpdateAfterBind == VK_FALSE)
+						return false;
+					mutable_counts.sampled_image = 1;
+					break;
+
+				case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+					if (binding_is_update_after_bind && features.descriptor_indexing.descriptorBindingStorageImageUpdateAfterBind == VK_FALSE)
+						return false;
+					mutable_counts.storage_image = 1;
+					break;
+
+				case VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:
+					if (binding_is_update_after_bind && features.descriptor_indexing.descriptorBindingStorageTexelBufferUpdateAfterBind == VK_FALSE)
+						return false;
+					mutable_counts.storage_image = 1;
+					break;
+
+				default:
+					return false;
+				}
+			}
+
+			counts.sampled_image += info->pBindings[i].descriptorCount * mutable_counts.sampled_image;
+			counts.storage_image += info->pBindings[i].descriptorCount * mutable_counts.storage_image;
+			counts.ubo += info->pBindings[i].descriptorCount * mutable_counts.ubo;
+			counts.ssbo += info->pBindings[i].descriptorCount * mutable_counts.ssbo;
+			break;
 		}
+
+		default:
+			return false;
+		}
+
+		if (count)
+			*count += info->pBindings[i].descriptorCount;
 	}
+
+	if (pool_is_update_after_bind)
+	{
+		if (counts.ubo_dynamic > props.descriptor_indexing.maxDescriptorSetUpdateAfterBindUniformBuffersDynamic)
+			return false;
+		if (counts.ssbo_dynamic > props.descriptor_indexing.maxDescriptorSetUpdateAfterBindStorageBuffersDynamic)
+			return false;
+		if (counts.ubo > props.descriptor_indexing.maxDescriptorSetUpdateAfterBindUniformBuffers)
+			return false;
+		if (counts.ssbo > props.descriptor_indexing.maxDescriptorSetUpdateAfterBindStorageBuffers)
+			return false;
+		if (counts.sampled_image > props.descriptor_indexing.maxDescriptorSetUpdateAfterBindSampledImages)
+			return false;
+		if (counts.storage_image > props.descriptor_indexing.maxDescriptorSetUpdateAfterBindStorageBuffers)
+			return false;
+		if (counts.sampler > props.descriptor_indexing.maxDescriptorSetUpdateAfterBindSamplers)
+			return false;
+		if (counts.input_attachment > props.descriptor_indexing.maxDescriptorSetUpdateAfterBindInputAttachments)
+			return false;
+	}
+	else
+	{
+		if (counts.ubo_dynamic > props2.properties.limits.maxDescriptorSetUniformBuffersDynamic)
+			return false;
+		if (counts.ssbo_dynamic > props2.properties.limits.maxDescriptorSetStorageBuffersDynamic)
+			return false;
+		if (counts.ubo > props2.properties.limits.maxDescriptorSetUniformBuffers)
+			return false;
+		if (counts.ssbo > props2.properties.limits.maxDescriptorSetStorageBuffers)
+			return false;
+		if (counts.sampled_image > props2.properties.limits.maxDescriptorSetSampledImages)
+			return false;
+		if (counts.storage_image > props2.properties.limits.maxDescriptorSetStorageImages)
+			return false;
+		if (counts.sampler > props2.properties.limits.maxDescriptorSetSamplers)
+			return false;
+		if (counts.input_attachment > props2.properties.limits.maxDescriptorSetInputAttachments)
+			return false;
+	}
+
 	return pnext_chain_is_supported(info->pNext);
 }
 
