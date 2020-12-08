@@ -396,7 +396,7 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 				return false;
 			}
 
-			return true;
+			break;
 		}
 
 		case VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_ADVANCED_STATE_CREATE_INFO_EXT:
@@ -451,7 +451,7 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 				}
 			}
 
-			return true;
+			break;
 		}
 
 		case VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT:
