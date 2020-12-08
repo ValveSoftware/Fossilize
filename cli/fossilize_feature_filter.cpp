@@ -82,6 +82,7 @@ void *build_pnext_chain(VulkanFeatures &features)
 	FE(COOPERATIVE_MATRIX, cooperative_matrix_nv, NV);
 	FE(SHADER_SM_BUILTINS, sm_builtins_nv, NV);
 	FE(SHADER_INTEGER_FUNCTIONS_2, integer_functions2_intel, INTEL);
+	FE(MUTABLE_DESCRIPTOR_TYPE, mutable_descriptor_type_valve, VALVE);
 
 #undef CHAIN
 #undef F
@@ -214,6 +215,7 @@ void FeatureFilter::Impl::init_features(const void *pNext)
 		FE(COOPERATIVE_MATRIX, cooperative_matrix_nv, NV);
 		FE(SHADER_SM_BUILTINS, sm_builtins_nv, NV);
 		FE(SHADER_INTEGER_FUNCTIONS_2, integer_functions2_intel, INTEL);
+		FE(MUTABLE_DESCRIPTOR_TYPE, mutable_descriptor_type_valve, VALVE);
 		default:
 			break;
 		}
@@ -461,6 +463,37 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 			break;
 		}
 
+		case VK_STRUCTURE_TYPE_MUTABLE_DESCRIPTOR_TYPE_CREATE_INFO_VALVE:
+		{
+			if (features.mutable_descriptor_type_valve.mutableDescriptorType == VK_FALSE)
+				return false;
+
+			auto *lists = static_cast<const VkMutableDescriptorTypeCreateInfoVALVE *>(pNext);
+			for (uint32_t i = 0; i < lists->mutableDescriptorTypeListCount; i++)
+			{
+				for (uint32_t j = 0; j < lists->pMutableDescriptorTypeLists[i].descriptorTypeCount; j++)
+				{
+					switch (lists->pMutableDescriptorTypeLists[i].pDescriptorTypes[j])
+					{
+					case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
+					case VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:
+					case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+					case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+					case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
+					case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+						break;
+
+					default:
+						// Implementation can theoretically support beyond this (and we'd have to query support),
+						// but validate against what is required.
+						return false;
+					}
+				}
+			}
+
+			break;
+		}
+
 		default:
 			LOGE("Unrecognized pNext sType: %u. Treating as unsupported.\n", unsigned(base->sType));
 			return false;
@@ -482,8 +515,13 @@ bool FeatureFilter::Impl::sampler_is_supported(const VkSamplerCreateInfo *info) 
 
 bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorSetLayoutCreateInfo *info) const
 {
+	// This should not get recorded, but if it does ...
+	if ((info->flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_HOST_ONLY_POOL_BIT_VALVE) != 0)
+		return false;
+
 	if (null_device)
 		return true;
+
 	for (unsigned i = 0; i < info->bindingCount; i++)
 	{
 		if (info->pBindings[i].descriptorType == VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK_EXT)
