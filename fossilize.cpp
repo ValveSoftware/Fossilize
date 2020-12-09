@@ -209,6 +209,7 @@ struct StateReplayer::Impl
 	bool parse_rasterization_conservative_state(const Value &state, VkPipelineRasterizationConservativeStateCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_rasterization_line_state(const Value &state, VkPipelineRasterizationLineStateCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_shader_stage_required_subgroup_size(const Value &state, VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_mutable_descriptor_type(const Value &state, VkMutableDescriptorTypeCreateInfoVALVE **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_uints(const Value &attachments, const uint32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	bool parse_sints(const Value &attachments, const int32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	const char *duplicate_string(const char *str, size_t len);
@@ -294,6 +295,8 @@ struct StateRecorder::Impl
 	void *copy_pnext_struct(const VkPipelineRasterizationLineStateCreateInfoEXT *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT *create_info,
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkMutableDescriptorTypeCreateInfoVALVE *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 
 	bool remap_sampler_handle(VkSampler sampler, VkSampler *out_sampler) const FOSSILIZE_WARN_UNUSED;
@@ -630,6 +633,20 @@ static void hash_pnext_struct(const StateRecorder *,
 	h.u32(create_info.requiredSubgroupSize);
 }
 
+static void hash_pnext_struct(const StateRecorder *,
+                              Hasher &h,
+                              const VkMutableDescriptorTypeCreateInfoVALVE &mutable_info)
+{
+	h.u32(mutable_info.mutableDescriptorTypeListCount);
+	for (uint32_t i = 0; i < mutable_info.mutableDescriptorTypeListCount; i++)
+	{
+		auto &l = mutable_info.pMutableDescriptorTypeLists[i];
+		h.u32(l.descriptorTypeCount);
+		for (uint32_t j = 0; j < l.descriptorTypeCount; j++)
+			h.s32(l.pDescriptorTypes[j]);
+	}
+}
+
 static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const void *pNext)
 {
 	while (pNext != nullptr)
@@ -677,6 +694,10 @@ static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const voi
 
 		case VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT:
 			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_MUTABLE_DESCRIPTOR_TYPE_CREATE_INFO_VALVE:
+			hash_pnext_struct(recorder, h, *static_cast<const VkMutableDescriptorTypeCreateInfoVALVE *>(pNext));
 			break;
 
 		default:
@@ -2623,6 +2644,43 @@ bool StateReplayer::Impl::parse_shader_stage_required_subgroup_size(const Value 
 	return true;
 }
 
+bool StateReplayer::Impl::parse_mutable_descriptor_type(const Value &state,
+                                                        VkMutableDescriptorTypeCreateInfoVALVE **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkMutableDescriptorTypeCreateInfoVALVE>();
+	*out_info = info;
+
+	if (!state.HasMember("mutableDescriptorTypeLists"))
+		return true;
+
+	auto &lists = state["mutableDescriptorTypeLists"];
+	if (lists.Empty())
+		return true;
+
+	auto out_count = lists.Size();
+	auto *out_lists = allocator.allocate_n_cleared<VkMutableDescriptorTypeListVALVE>(out_count);
+
+	info->mutableDescriptorTypeListCount = out_count;
+	info->pMutableDescriptorTypeLists = out_lists;
+
+	for (uint32_t i = 0; i < out_count; i++)
+	{
+		auto &list = lists[i];
+		auto list_count = list.Size();
+		out_lists[i].descriptorTypeCount = list_count;
+
+		if (!list.Empty())
+		{
+			auto *desc_types = allocator.allocate_n<VkDescriptorType>(list_count);
+			out_lists[i].pDescriptorTypes = desc_types;
+			for (auto itr = list.Begin(); itr != list.End(); ++itr)
+				*desc_types++ = static_cast<VkDescriptorType>(itr->GetUint());
+		}
+	}
+
+	return true;
+}
+
 bool StateReplayer::Impl::parse_multiview_state(const Value &state, VkRenderPassMultiviewCreateInfo **out_info)
 {
 	auto *info = allocator.allocate_cleared<VkRenderPassMultiviewCreateInfo>();
@@ -2750,6 +2808,15 @@ bool StateReplayer::Impl::parse_pnext_chain(const Value &pnext, const void **out
 		{
 			VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT *info = nullptr;
 			if (!parse_shader_stage_required_subgroup_size(next, &info))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_MUTABLE_DESCRIPTOR_TYPE_CREATE_INFO_VALVE:
+		{
+			VkMutableDescriptorTypeCreateInfoVALVE *info = nullptr;
+			if (!parse_mutable_descriptor_type(next, &info))
 				return false;
 			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
 			break;
@@ -2998,6 +3065,23 @@ void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineShaderStageRequired
 	return copy(create_info, 1, alloc);
 }
 
+void *StateRecorder::Impl::copy_pnext_struct(const VkMutableDescriptorTypeCreateInfoVALVE *create_info,
+                                             ScratchAllocator &alloc)
+{
+	auto *info = copy(create_info, 1, alloc);
+	if (info->pMutableDescriptorTypeLists)
+		info->pMutableDescriptorTypeLists = copy(create_info->pMutableDescriptorTypeLists, create_info->mutableDescriptorTypeListCount, alloc);
+
+	for (uint32_t i = 0; i < info->mutableDescriptorTypeListCount; i++)
+	{
+		auto &l = const_cast<VkMutableDescriptorTypeListVALVE &>(info->pMutableDescriptorTypeLists[i]);
+		if (l.pDescriptorTypes)
+			l.pDescriptorTypes = copy(l.pDescriptorTypes, l.descriptorTypeCount, alloc);
+	}
+
+	return info;
+}
+
 void *StateRecorder::Impl::copy_pnext_struct(
 		const VkPipelineRasterizationDepthClipStateCreateInfoEXT *create_info,
 		ScratchAllocator &alloc)
@@ -3089,6 +3173,13 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 		case VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT:
 		{
 			auto *ci = static_cast<const VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_MUTABLE_DESCRIPTOR_TYPE_CREATE_INFO_VALVE:
+		{
+			auto *ci = static_cast<const VkMutableDescriptorTypeCreateInfoVALVE *>(pNext);
 			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
 			break;
 		}
@@ -4772,6 +4863,27 @@ static bool json_value(const VkPipelineShaderStageRequiredSubgroupSizeCreateInfo
 }
 
 template <typename Allocator>
+static bool json_value(const VkMutableDescriptorTypeCreateInfoVALVE &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+
+	Value lists(kArrayType);
+	for (uint32_t i = 0; i < create_info.mutableDescriptorTypeListCount; i++)
+	{
+		Value list(kArrayType);
+		auto &l = create_info.pMutableDescriptorTypeLists[i];
+		for (uint32_t j = 0; j < l.descriptorTypeCount; j++)
+			list.PushBack(l.pDescriptorTypes[j], alloc);
+		lists.PushBack(list, alloc);
+	}
+	value.AddMember("mutableDescriptorTypeLists", lists, alloc);
+
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
 static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *out_value)
 {
 	Value nexts(kArrayType);
@@ -4829,6 +4941,11 @@ static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *o
 
 		case VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT:
 			if (!json_value(*static_cast<const VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_MUTABLE_DESCRIPTOR_TYPE_CREATE_INFO_VALVE:
+			if (!json_value(*static_cast<const VkMutableDescriptorTypeCreateInfoVALVE *>(pNext), alloc, &next))
 				return false;
 			break;
 

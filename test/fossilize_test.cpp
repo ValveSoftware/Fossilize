@@ -194,6 +194,19 @@ static void record_set_layouts(StateRecorder &recorder)
 		fake_handle<VkSampler>(100),
 	};
 
+	VkMutableDescriptorTypeListVALVE mutable_lists[3] = {};
+
+	static const VkDescriptorType mutable_lists0[] = { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE };
+	static const VkDescriptorType mutable_lists1[] = { VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER };
+
+	VkMutableDescriptorTypeCreateInfoVALVE mutable_info = { VK_STRUCTURE_TYPE_MUTABLE_DESCRIPTOR_TYPE_CREATE_INFO_VALVE };
+	mutable_info.mutableDescriptorTypeListCount = 3;
+	mutable_info.pMutableDescriptorTypeLists = mutable_lists;
+	mutable_lists[0].descriptorTypeCount = sizeof(mutable_lists0) / sizeof(*mutable_lists0);
+	mutable_lists[0].pDescriptorTypes = mutable_lists0;
+	mutable_lists[1].descriptorTypeCount = sizeof(mutable_lists1) / sizeof(*mutable_lists1);
+	mutable_lists[1].pDescriptorTypes = mutable_lists1;
+
 	VkDescriptorSetLayoutCreateInfo layout = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
 	layout.bindingCount = 3;
 	layout.pBindings = bindings;
@@ -222,6 +235,8 @@ static void record_set_layouts(StateRecorder &recorder)
 	flags.pBindingFlags = binding_flags;
 	flags.bindingCount = 3;
 	layout.pNext = &flags;
+
+	flags.pNext = &mutable_info;
 
 	if (!recorder.record_descriptor_set_layout(fake_handle<VkDescriptorSetLayout>(1000), layout))
 		abort();
