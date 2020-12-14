@@ -126,18 +126,19 @@ static thread_local StateRecorder *tls_recorder = nullptr;
 
 static bool emergencyRecord()
 {
+	bool ret = false;
 	if (tls_recorder)
 	{
 		if (tls_graphics_create_info)
-			return tls_recorder->record_graphics_pipeline(VK_NULL_HANDLE, *tls_graphics_create_info, nullptr, 0);
+			ret = tls_recorder->record_graphics_pipeline(VK_NULL_HANDLE, *tls_graphics_create_info, nullptr, 0);
 		if (tls_compute_create_info)
-			return tls_recorder->record_compute_pipeline(VK_NULL_HANDLE, *tls_compute_create_info, nullptr, 0);
+			ret = tls_recorder->record_compute_pipeline(VK_NULL_HANDLE, *tls_compute_create_info, nullptr, 0);
 
 		// Flush out the recording thread.
 		tls_recorder->tear_down_recording_thread();
 	}
 
-	return false;
+	return ret;
 }
 
 #ifdef _WIN32
