@@ -922,6 +922,8 @@ struct ThreadedReplayer : StateCreatorInterface
 						else
 							pipeline_cache_misses.fetch_add(1, std::memory_order_relaxed);
 					}
+					//FIXME We should move this call to the cache miss branch once we figured out why the NVIDIA driver
+					//      triggers huge amounts of writes even in the cache hit branch
 					maybe_throttle();
 				}
 				else
@@ -1063,6 +1065,8 @@ struct ThreadedReplayer : StateCreatorInterface
 						else
 							pipeline_cache_misses.fetch_add(1, std::memory_order_relaxed);
 					}
+					//FIXME We should move this call to the cache miss branch once we figured out why the NVIDIA driver
+					//      triggers huge amounts of writes even in the cache hit branch
 					maybe_throttle();
 				}
 				else
@@ -2355,6 +2359,8 @@ struct ThreadedReplayer : StateCreatorInterface
 	double m_prev_loadavg;
 	inline void maybe_throttle()
 	{
+		//TODO We should probably skip this if fossilize runs in foreground mode from the Steam client
+		//     Q: Is there a way to detect that situation?
 #ifdef __linux__
 		double loadavg[1];
 		// TODO Maybe use PSI on modern systems to measure the current IO latency?
