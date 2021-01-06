@@ -210,6 +210,7 @@ ExternalReplayer::PollResult ExternalReplayer::Impl::poll_progress(ExternalRepla
 		if ((ret = waitpid(pid, &wstatus, WNOHANG)) > 0)
 		{
 			// Child process can receive SIGCONT/SIGSTOP which is benign.
+			// This should normally only happen when the process is being debugged.
 			if (WIFEXITED(wstatus) || WIFSIGNALED(wstatus))
 				reset_pid();
 		}

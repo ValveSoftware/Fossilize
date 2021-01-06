@@ -792,6 +792,11 @@ static int run_master_process(const VulkanDevice::Options &opts,
 								                   return progress.pid == pid;
 							                   });
 
+							// Child process can receive SIGCONT/SIGSTOP which is benign.
+							// This should normally only happen when the process is being debugged.
+							if (!WIFEXITED(wstatus) && !WIFSIGNALED(wstatus))
+								continue;
+
 							if (itr != end(child_processes))
 							{
 								if (itr->process_shutdown(wstatus) && !itr->start_child_process())
