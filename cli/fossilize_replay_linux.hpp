@@ -28,6 +28,7 @@
 #include <sys/wait.h>
 #include <sys/epoll.h>
 #include <sys/signalfd.h>
+#include <sys/socket.h>
 #include <sys/timerfd.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
@@ -63,6 +64,13 @@ namespace Global
 {
 static unordered_set<Hash> faulty_spirv_modules;
 static unsigned active_processes;
+static unsigned running_processes;
+static unsigned target_running_processes;
+
+static int target_running_processes_static = -1;
+static bool target_running_processes_io_stall = true;
+static bool target_running_processes_dirty_pages = true;
+
 static ThreadedReplayer::Options base_replayer_options;
 static vector<const char *> databases;
 static sigset_t old_mask;
@@ -71,6 +79,8 @@ static int timer_fd;
 static int epoll_fd;
 static VulkanDevice::Options device_options;
 static bool quiet_slave;
+static bool control_fd_is_sentinel;
+static int control_fd = -1;
 
 static SharedControlBlock *control_block;
 static int metadata_fd = -1;
@@ -95,6 +105,7 @@ struct ProcessProgress
 	void parse(const char *cmd);
 
 	uint32_t index = 0;
+	bool stopped = false;
 };
 
 void ProcessProgress::parse(const char *cmd)
@@ -322,10 +333,6 @@ static bool poll_process_memory_usage(pid_t pid, ExternalReplayer::ProcessStats 
 
 static void poll_self_child_memory_usage(const std::vector<ProcessProgress> &processes)
 {
-	uint64_t v;
-	if (read(Global::timer_fd, &v, sizeof(v)) < 0)
-		return;
-
 	uint32_t num_processes = processes.size() + 1;
 	if (num_processes > MaxProcessStats)
 		num_processes = MaxProcessStats;
@@ -347,8 +354,8 @@ static void poll_self_child_memory_usage(const std::vector<ProcessProgress> &pro
 	for (uint32_t i = 1; i < num_processes; i++)
 	{
 		if (processes[i - 1].pid < 0)
-			continue;
-		if (!poll_process_memory_usage(processes[i - 1].pid, stats))
+			stats = {};
+		else if (!poll_process_memory_usage(processes[i - 1].pid, stats))
 			stats = {};
 
 		if (Global::control_block)
@@ -364,13 +371,17 @@ static void poll_self_child_memory_usage(const std::vector<ProcessProgress> &pro
 	}
 
 	if (Global::control_block)
+	{
+		Global::control_block->num_running_processes.store(Global::running_processes, std::memory_order_relaxed);
 		Global::control_block->num_processes_memory_stats.store(num_processes, std::memory_order_release);
+	}
 }
 
 bool ProcessProgress::start_child_process()
 {
 	graphics_progress = -1;
 	compute_progress = -1;
+	stopped = false;
 
 	if (start_graphics_index >= end_graphics_index &&
 	    start_compute_index >= end_compute_index)
@@ -476,11 +487,276 @@ bool ProcessProgress::start_child_process()
 		return false;
 }
 
+struct StallState
+{
+	int32_t dirty_pages_mib = 0;
+	int64_t io_stalled_us = 0;
+	int64_t timestamp_ns = 0;
+};
+
+static bool get_dirty_page_info(StallState &state)
+{
+	FILE *file = fopen("/proc/meminfo", "r");
+	if (!file)
+	{
+		if (Global::control_block)
+			Global::control_block->dirty_pages_mib.store(-1, std::memory_order_relaxed);
+		return false;
+	}
+
+	bool got_dirty = false;
+
+	char buffer[1024];
+	while (fgets(buffer, sizeof(buffer), file))
+	{
+		if (strncmp(buffer, "Dirty:", 6) == 0)
+		{
+			errno = 0;
+			auto dirty_pages_kb = strtoll(buffer + 6, nullptr, 10);
+			if (errno == 0)
+			{
+				state.dirty_pages_mib = dirty_pages_kb / 1024;
+				if (Global::control_block)
+					Global::control_block->dirty_pages_mib.store(state.dirty_pages_mib, std::memory_order_relaxed);
+				got_dirty = true;
+			}
+		}
+	}
+
+	if (!got_dirty && Global::control_block)
+		Global::control_block->dirty_pages_mib.store(-1, std::memory_order_relaxed);
+
+	fclose(file);
+	return got_dirty;
+}
+
+static bool get_stall_info(const char *path, int64_t &total_us)
+{
+	FILE *file = fopen(path, "r");
+	if (!file)
+		return false;
+
+	bool ret = false;
+	char buffer[1024];
+	if (fgets(buffer, sizeof(buffer), file))
+	{
+		if (strncmp(buffer, "some ", 5) == 0)
+		{
+			const char *total = strstr(buffer, "total=");
+			if (total)
+			{
+				errno = 0;
+				total_us = strtoull(total + 6, nullptr, 10);
+				ret = errno == 0;
+			}
+		}
+	}
+
+	fclose(file);
+	return ret;
+}
+
+static bool poll_stall_information(StallState &state)
+{
+	if (!get_dirty_page_info(state))
+		state.dirty_pages_mib = -1;
+	if (!get_stall_info("/proc/pressure/io", state.io_stalled_us))
+		state.io_stalled_us = -1;
+
+	timespec ts = {};
+	if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
+		return false;
+	state.timestamp_ns = ts.tv_sec * 1000000000ll + ts.tv_nsec;
+	return true;
+}
+
+static void manage_thrashing_behavior(std::vector<ProcessProgress> &child_processes,
+                                      StallState &old_state, const StallState &new_state)
+{
+	// It is quite easy to overload the system with IO if we're not careful, so check for this.
+
+	float delta_us = 1e-3f * float(new_state.timestamp_ns - old_state.timestamp_ns);
+	float io_stall_us = float(new_state.io_stalled_us - old_state.io_stalled_us);
+
+	int32_t delta_dirty_pages_mib = 0;
+	if (new_state.dirty_pages_mib >= 0 && old_state.dirty_pages_mib >= 0)
+		delta_dirty_pages_mib = new_state.dirty_pages_mib - old_state.dirty_pages_mib;
+
+	float io_stall_ratio = -1.0f;
+	if (new_state.io_stalled_us >= 0 && old_state.io_stalled_us >= 0)
+		io_stall_ratio = io_stall_us / delta_us;
+	io_stall_ratio = std::min(1.0f, io_stall_ratio);
+
+	unsigned target_running_processes = Global::running_processes;
+
+	// Some heuristics here.
+	bool go_down = false;
+	bool go_up = false;
+
+	if (Global::target_running_processes_dirty_pages)
+	{
+		if (delta_dirty_pages_mib > 50)
+		{
+			// If we (or someone else) created more than 50 MiB of dirty data in this tick,
+			// we should lower number of processes.
+			go_down = true;
+		}
+		else if (delta_dirty_pages_mib < -10)
+		{
+			// Dirty pages is going down, can increase CPU load now.
+			go_up = true;
+		}
+	}
+
+	// IO stalls usually means someone is hammering IO.
+	// We don't want to contribute to that.
+	if (Global::target_running_processes_io_stall && io_stall_ratio >= 0.0f)
+	{
+		if (io_stall_ratio > 0.3f)
+			go_down = true;
+		else if (io_stall_ratio < 0.1f)
+			go_up = true;
+	}
+
+	// Ensure forward progress. Make at least one process active
+	// if we have had a period of complete sleep.
+	if (target_running_processes == 0)
+		go_up = true;
+
+	if (go_down && target_running_processes)
+		target_running_processes--;
+	else if (go_up)
+		target_running_processes++;
+
+	if (Global::control_block)
+	{
+		Global::control_block->io_stall_percentage.store(
+				io_stall_ratio < 0.0f ? -1 : int32_t(io_stall_ratio * 100.0f),
+				std::memory_order_relaxed);
+	}
+
+	old_state = new_state;
+
+	target_running_processes = std::min<unsigned>(target_running_processes, child_processes.size());
+	Global::target_running_processes = target_running_processes;
+}
+
+static void update_target_running_processes(std::vector<ProcessProgress> &child_processes)
+{
+	if (Global::target_running_processes_static >= 0)
+	{
+		Global::target_running_processes = Global::target_running_processes_static;
+		Global::target_running_processes = std::min<unsigned>(Global::target_running_processes, child_processes.size());
+	}
+
+	Global::running_processes = 0;
+	for (auto &process : child_processes)
+		if (process.pid > 0 && !process.stopped)
+			Global::running_processes++;
+
+	if (Global::running_processes > Global::target_running_processes)
+	{
+		// Put processes to sleep.
+		unsigned to_stop = Global::running_processes - Global::target_running_processes;
+		size_t num_processes = child_processes.size();
+		for (size_t i = 0; i < num_processes && to_stop; i++)
+		{
+			if (child_processes[i].pid >= 0 && !child_processes[i].stopped)
+			{
+				if (::kill(child_processes[i].pid, SIGSTOP) == 0)
+				{
+					to_stop--;
+					child_processes[i].stopped = true;
+					Global::running_processes--;
+				}
+			}
+		}
+	}
+	else if (Global::running_processes < Global::target_running_processes)
+	{
+		// Wake up sleeping processes.
+		unsigned to_wake_up = Global::target_running_processes - Global::running_processes;
+		size_t num_processes = child_processes.size();
+		for (size_t i = 0; i < num_processes && to_wake_up; i++)
+		{
+			if (child_processes[i].pid > 0 && child_processes[i].stopped)
+			{
+				if (::kill(child_processes[i].pid, SIGCONT) == 0)
+				{
+					to_wake_up--;
+					child_processes[i].stopped = false;
+					Global::running_processes++;
+				}
+			}
+		}
+	}
+}
+
+static void handle_control_command(const char *command)
+{
+	if (strncmp(command, "RUNNING_TARGET", 14) == 0)
+	{
+		errno = 0;
+		Global::target_running_processes_static = strtol(command + 14, nullptr, 10);
+		if (errno)
+			Global::target_running_processes_static = -1;
+	}
+	else if (strcmp(command, "IO_STALL_AUTO_ADJUST ON") == 0)
+		Global::target_running_processes_io_stall = true;
+	else if (strcmp(command, "IO_STALL_AUTO_ADJUST OFF") == 0)
+		Global::target_running_processes_io_stall = false;
+	else if (strcmp(command, "DIRTY_PAGE_BLOAT_AUTO_ADJUST ON") == 0)
+		Global::target_running_processes_dirty_pages = true;
+	else if (strcmp(command, "DIRTY_PAGE_BLOAT_AUTO_ADJUST OFF") == 0)
+		Global::target_running_processes_dirty_pages = false;
+	else if (strcmp(command, "DETACH") == 0)
+		Global::control_fd_is_sentinel = false;
+	else
+		LOGE("Unrecognized control command: %s.\n", command);
+}
+
+static void handle_control_commands()
+{
+	char buffer[4096];
+	ssize_t ret;
+
+	while ((ret = ::recv(Global::control_fd, buffer, sizeof(buffer) - 1, 0)) > 0)
+	{
+		buffer[ret] = '\0';
+		handle_control_command(buffer);
+	}
+
+	bool close_fd = false;
+	if (ret == 0)
+	{
+		if (Global::control_fd_is_sentinel)
+		{
+			LOGI("Parent process closed control FD with no notification, terminating early ...\n");
+			// control FD in parent process was hung, kill every child process and ourselves and then exit.
+			if (killpg(getpid(), SIGKILL) < 0)
+			{
+				LOGE("Failed to kill process group ... This should not happen.\n");
+				abort();
+			}
+		}
+		close_fd = true;
+	}
+	else if (errno != EAGAIN)
+		close_fd = true;
+
+	if (close_fd)
+	{
+		epoll_ctl(Global::epoll_fd, EPOLL_CTL_DEL, Global::control_fd, nullptr);
+		close(Global::control_fd);
+		Global::control_fd = -1;
+	}
+}
+
 static int run_master_process(const VulkanDevice::Options &opts,
                               const ThreadedReplayer::Options &replayer_opts,
                               const vector<const char *> &databases,
                               const char *whitelist, uint32_t whitelist_mask,
-                              bool quiet_slave, int shmem_fd)
+                              bool quiet_slave, int shmem_fd, int control_fd)
 {
 	Global::quiet_slave = quiet_slave;
 	Global::device_options = opts;
@@ -605,6 +881,8 @@ static int run_master_process(const VulkanDevice::Options &opts,
 		Global::control_block->progress_started.store(1, std::memory_order_release);
 
 	Global::active_processes = 0;
+	StallState stall_state;
+	bool use_stall_state = poll_stall_information(stall_state);
 
 	// We will wait for child processes explicitly with signalfd.
 	// Block delivery of signals in the normal way.
@@ -630,6 +908,8 @@ static int run_master_process(const VulkanDevice::Options &opts,
 	}
 
 	vector<ProcessProgress> child_processes(processes);
+	Global::target_running_processes = processes;
+	Global::running_processes = processes;
 
 	// Create an epoll instance and add the signal fd to it.
 	// The signalfd will signal when SIGCHLD is pending.
@@ -641,7 +921,7 @@ static int run_master_process(const VulkanDevice::Options &opts,
 	}
 
 	static constexpr uint32_t POLL_VALUE_SIGNAL_FD = UINT32_MAX;
-	static constexpr uint32_t POLL_VALUE_SENTINEL_FD = UINT32_MAX - 1u;
+	static constexpr uint32_t POLL_VALUE_CONTROL_FD = UINT32_MAX - 1u;
 	static constexpr uint32_t POLL_VALUE_TIMER_FD = UINT32_MAX - 2u;
 	static constexpr uint32_t POLL_VALUE_MAX_CHILD = UINT32_MAX - 3u;
 
@@ -684,24 +964,30 @@ static int run_master_process(const VulkanDevice::Options &opts,
 		}
 	}
 
-	// If the master process is the process group master, then STDIN is used as a sentinel.
-	// If it closes, treat this as the parent process having terminated without
-	// cleanly shutting down the Fossilize process and we should take down this process group.
-	if (getpgrp() == getpid())
+	// We can receive commands which can be used to dynamically adjust for various parameters.
+	if (control_fd >= 0)
 	{
-		LOGI("Using STDIN as sentinel FD.\n");
+		Global::control_fd_is_sentinel = true;
+		Global::control_fd = control_fd;
+		LOGI("Using control FD as sentinel.\n");
 
 		epoll_event event = {};
-		event.events = 0;
-		event.data.u32 = POLL_VALUE_SENTINEL_FD;
-		if (epoll_ctl(Global::epoll_fd, EPOLL_CTL_ADD, STDIN_FILENO, &event) < 0)
+		event.events = EPOLLIN;
+		event.data.u32 = POLL_VALUE_CONTROL_FD;
+		if (epoll_ctl(Global::epoll_fd, EPOLL_CTL_ADD, control_fd, &event) < 0)
 		{
-			LOGE("Failed to add STDIN_FILENO to epoll.\n");
+			LOGE("Failed to add control_fd to epoll.\n");
+			return EXIT_FAILURE;
+		}
+
+		if (fcntl(control_fd, F_SETFL, fcntl(control_fd, F_GETFL) | O_NONBLOCK) < 0)
+		{
+			LOGE("Failed to set O_NONBLOCK.\n");
 			return EXIT_FAILURE;
 		}
 	}
 	else
-		LOGI("Not using STDIN as sentinel FD.\n");
+		LOGI("Not using control_fd.\n");
 
 	// fork() and pipe() strategy.
 	for (unsigned i = 0; i < processes; i++)
@@ -804,25 +1090,32 @@ static int run_master_process(const VulkanDevice::Options &opts,
 									LOGE("Failed to start child process.\n");
 									return EXIT_FAILURE;
 								}
+								update_target_running_processes(child_processes);
 							}
 							else
 								LOGE("Got SIGCHLD from unknown process PID %d.\n", pid);
 						}
 					}
 				}
-				else if (e.data.u32 == POLL_VALUE_SENTINEL_FD)
+				else if (e.data.u32 == POLL_VALUE_CONTROL_FD)
 				{
-					LOGI("Parent process died, terminating early ...\n");
-					// STDIN in parent process was hung, kill every child process and ourselves and then exit.
-					if (killpg(getpid(), SIGKILL) < 0)
-					{
-						LOGE("Failed to kill process group ... This should not happen.\n");
-						abort();
-					}
+					handle_control_commands();
+					// After a control command treat it as having received a timer event
+					// so we react quickly to requested changes.
+					update_target_running_processes(child_processes);
+					poll_self_child_memory_usage(child_processes);
 				}
 				else if (e.data.u32 == POLL_VALUE_TIMER_FD)
 				{
-					poll_self_child_memory_usage(child_processes);
+					uint64_t v;
+					if (read(Global::timer_fd, &v, sizeof(v)) >= 0)
+					{
+						StallState new_stall_state;
+						if (use_stall_state && poll_stall_information(new_stall_state))
+							manage_thrashing_behavior(child_processes, stall_state, new_stall_state);
+						update_target_running_processes(child_processes);
+						poll_self_child_memory_usage(child_processes);
+					}
 				}
 			}
 			else if (e.events & EPOLLERR)

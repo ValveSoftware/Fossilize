@@ -72,6 +72,8 @@ struct ExternalReplayer::Impl
 	bool get_failed(const std::vector<std::pair<unsigned, Hash>> &failed, size_t *count,
 	                unsigned *indices, Hash *hashes) const;
 	bool poll_memory_usage(uint32_t *num_processes, ProcessStats *stats) const;
+	bool poll_global_resource_usage(GlobalResourceUsage &usage) const;
+	bool send_message(const char *msg);
 };
 
 ExternalReplayer::Impl::~Impl()
@@ -89,6 +91,11 @@ ExternalReplayer::Impl::~Impl()
 }
 
 bool ExternalReplayer::Impl::poll_memory_usage(uint32_t *, ProcessStats *) const
+{
+	return false;
+}
+
+bool ExternalReplayer::Impl::poll_global_resource_usage(GlobalResourceUsage &) const
 {
 	return false;
 }
@@ -663,6 +670,11 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 	CloseHandle(pi.hThread);
 	process = pi.hProcess;
 	return true;
+}
+
+bool ExternalReplayer::Impl::send_message(const char *)
+{
+	return false;
 }
 }
 

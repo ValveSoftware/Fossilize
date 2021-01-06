@@ -129,4 +129,14 @@ bool ExternalReplayer::poll_memory_usage(uint32_t *num_processes, ProcessStats *
 {
 	return impl->poll_memory_usage(num_processes, stats);
 }
+
+bool ExternalReplayer::poll_global_resource_usage(GlobalResourceUsage &stats) const
+{
+	return impl->poll_global_resource_usage(stats);
+}
+
+bool ExternalReplayer::send_message(const char *msg)
+{
+	return impl->send_message(msg);
+}
 }
