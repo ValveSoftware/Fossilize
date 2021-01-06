@@ -613,7 +613,7 @@ static int run_master_process(const VulkanDevice::Options &opts,
 	sigset_t mask;
 	sigemptyset(&mask);
 	sigaddset(&mask, SIGCHLD);
-	if (pthread_sigmask(SIG_BLOCK, &mask, &Global::old_mask) < 0)
+	if (pthread_sigmask(SIG_BLOCK, &mask, &Global::old_mask) != 0)
 	{
 		LOGE("Failed to block signal mask.\n");
 		return EXIT_FAILURE;
