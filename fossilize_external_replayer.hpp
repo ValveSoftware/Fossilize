@@ -229,6 +229,22 @@ public:
 	PollResult poll_progress(Progress &progress);
 	static void compute_condensed_progress(const Progress &progress, unsigned &completed, unsigned &total);
 
+	struct GlobalResourceUsage
+	{
+		// Number of outstanding dirty pages on the system.
+		// Can be used to keep track if driver cache threads are being swarmed.
+		// If negative, the query failed.
+		int32_t dirty_pages_mib;
+
+		// Stats from PSI on Linux, represents IO stall time from 0 to 100.
+		// If negative, the query failed.
+		int32_t io_stall_percentage;
+
+		// Number of active child processes.
+		// This can change dynamically based on stall factors.
+		uint32_t num_running_processes;
+	};
+
 	struct ProcessStats
 	{
 		// Maps to RSS in Linux (element 1 in statm). Measured in MiB.
@@ -254,6 +270,22 @@ public:
 	// The internal data is updated at some regular interval.
 	// The first process is the primary replaying process.
 	bool poll_memory_usage(uint32_t *num_processes, ProcessStats *stats) const;
+
+	// Only supported on Linux so far.
+	bool poll_global_resource_usage(GlobalResourceUsage &stats) const;
+
+	// **EXPERIMENTAL**
+	// Sends a message to replayer process. The interface is somewhat ad-hoc for now.
+	// Only supported on Linux so far.
+	// This can be used to control dynamic behavior related to scheduling.
+	// - "RUNNING_TARGET %n" (if >= 0, locks replayer to use n active processes for replay)
+	// - "RUNNING_TARGET -1" (Default: use automatic scheduling, IO pressure will fiddle with process count)
+	// - "IO_STALL_AUTO_ADJUST ON" (Allows IO pressure to adjust automatic scheduler)
+	// - "IO_STALL_AUTO_ADJUST OFF" (Disables IO pressure from adjusting automatic scheduler)
+	// - "DIRTY_PAGE_AUTO_ADJUST ON" (Allows dirty page pressure to adjust automatic scheduler)
+	// - "DIRTY_PAGE_AUTO_ADJUST OFF" (Disables dirty page pressure from adjusting automatic scheduler).
+	// - "DETACH" (Detach child processes from this process).
+	bool send_message(const char *msg);
 
 private:
 	struct Impl;

@@ -43,7 +43,8 @@ static void print_help()
 	     "\t[--frag shader.spv]\n"
 	     "\t[--comp shader.spv]\n"
 	     "\t[--output out.foz]\n"
-	     "\t[--spec <ID> <f32/u32/i32> <value>\n");
+	     "\t[--spec <ID> <f32/u32/i32> <value>\n"
+	     "\t[--multi-spec <index> <count>\n");
 }
 
 enum ShaderStage
@@ -61,6 +62,12 @@ struct SpecConstant
 {
 	std::vector<uint32_t> data;
 	std::vector<VkSpecializationMapEntry> map_entries;
+
+	struct
+	{
+		uint32_t index;
+		uint32_t count;
+	} iteration = {};
 };
 
 static bool load_shader_modules(const std::string *stages, std::vector<uint8_t> *modules)
@@ -559,7 +566,7 @@ static VkRenderPass synthesize_render_pass(StateRecorder &recorder, spvc_compile
 
 static VkPipeline synthesize_compute_pipeline(StateRecorder &recorder,
                                               const std::vector<uint8_t> *modules, VkPipelineLayout layout,
-                                              const SpecConstant &specs)
+                                              SpecConstant &specs)
 {
 	VkShaderModuleCreateInfo module_info = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
 	module_info.codeSize = modules[STAGE_COMP].size();
@@ -583,8 +590,18 @@ static VkPipeline synthesize_compute_pipeline(StateRecorder &recorder,
 		info.stage.pSpecializationInfo = &spec_info;
 	info.layout = layout;
 
-	if (!recorder.record_compute_pipeline((VkPipeline)uint64_t(1), info, nullptr, 0))
+	if (!recorder.record_compute_pipeline((VkPipeline) uint64_t(1), info, nullptr, 0))
 		return VK_NULL_HANDLE;
+
+	if (specs.iteration.count && specs.iteration.index < specs.data.size())
+	{
+		for (uint32_t i = 0; i < specs.iteration.count; i++)
+		{
+			specs.data[specs.iteration.index] = i;
+			if (!recorder.record_compute_pipeline((VkPipeline) uint64_t(2 + i), info, nullptr, 0))
+				return VK_NULL_HANDLE;
+		}
+	}
 
 	return (VkPipeline)uint64_t(1);
 }
@@ -654,7 +671,7 @@ static VkPipeline synthesize_graphics_pipeline(StateRecorder &recorder,
                                                VkPipelineLayout layout,
                                                VkRenderPass render_pass,
                                                uint8_t active_rt_mask,
-                                               const SpecConstant &specs)
+                                               SpecConstant &specs)
 {
 	std::vector<VkPipelineShaderStageCreateInfo> stages;
 	stages.reserve(STAGE_COUNT - 1);
@@ -768,6 +785,17 @@ static VkPipeline synthesize_graphics_pipeline(StateRecorder &recorder,
 
 	if (!recorder.record_graphics_pipeline((VkPipeline)uint64_t(1), info, nullptr, 0))
 		return VK_NULL_HANDLE;
+
+	if (specs.iteration.count && specs.iteration.index < specs.data.size())
+	{
+		for (uint32_t i = 0; i < specs.iteration.count; i++)
+		{
+			specs.data[specs.iteration.index] = i;
+			if (!recorder.record_graphics_pipeline((VkPipeline) uint64_t(2 + i), info, nullptr, 0))
+				return VK_NULL_HANDLE;
+		}
+	}
+
 	return (VkPipeline)uint64_t(1);
 }
 
@@ -813,6 +841,11 @@ int main(int argc, char *argv[])
 		}
 
 		spec_constants.data.push_back(raw_data);
+	});
+	cbs.add("--multi-spec", [&](CLIParser &parser) {
+		uint32_t index = parser.next_uint();
+		uint32_t count = parser.next_uint();
+		spec_constants.iteration = { index, count };
 	});
 
 	CLIParser parser(std::move(cbs), argc - 1, argv + 1);

@@ -2445,7 +2445,8 @@ static void print_help()
 	"\t[--timeout <seconds>]\n" \
 	"\t[--progress]\n" \
 	"\t[--quiet-slave]\n" \
-	"\t[--shm-fd <fd>]\n"
+	"\t[--shmem-fd <fd>]\n" \
+	"\t[--control-fd <fd>]\n"
 #endif
 #else
 #define EXTRA_OPTIONS ""
@@ -2502,7 +2503,8 @@ static void log_progress(const ExternalReplayer::Progress &progress)
 	LOGI("=================\n");
 }
 
-static void log_memory_usage(const std::vector<ExternalReplayer::ProcessStats> &usage)
+static void log_memory_usage(const std::vector<ExternalReplayer::ProcessStats> &usage,
+                             const ExternalReplayer::GlobalResourceUsage *global_stats)
 {
 	LOGI("=================\n");
 	LOGI(" Memory usage:\n");
@@ -2511,6 +2513,21 @@ static void log_memory_usage(const std::vector<ExternalReplayer::ProcessStats> &
 	{
 		LOGI("   #%u: %5u MiB resident %5u MiB shared (%u MiB shared metadata).\n", index++,
 		     use.resident_mib, use.shared_mib, use.shared_metadata_mib);
+	}
+
+	if (global_stats)
+	{
+		if (global_stats->dirty_pages_mib >= 0)
+			LOGI(" Dirty filesystem writes: %u MiB.\n", global_stats->dirty_pages_mib);
+		else
+			LOGI(" Dirty filesystem writes: N/A.\n");
+
+		if (global_stats->io_stall_percentage >= 0)
+			LOGI(" IO stall: %u%%.\n", global_stats->io_stall_percentage);
+		else
+			LOGI(" IO stall: N/A.\n");
+
+		LOGI(" Num running child processes: %u.\n", global_stats->num_running_processes);
 	}
 	LOGI("=================\n");
 }
@@ -2699,13 +2716,16 @@ static int run_progress_process(const VulkanDevice::Options &device_opts,
 			if (log_memory)
 			{
 				uint32_t num_processes;
+
 				if (replayer.poll_memory_usage(&num_processes, nullptr))
 				{
 					std::vector<ExternalReplayer::ProcessStats> usage(num_processes);
 					if (replayer.poll_memory_usage(&num_processes, usage.data()))
 					{
 						usage.resize(num_processes);
-						log_memory_usage(usage);
+						ExternalReplayer::GlobalResourceUsage global_stats = {};
+						bool got_global_stats = replayer.poll_global_resource_usage(global_stats);
+						log_memory_usage(usage, got_global_stats ? &global_stats : nullptr);
 					}
 				}
 			}
@@ -3281,6 +3301,7 @@ int main(int argc, char *argv[])
 	const char *metadata_name = nullptr;
 #else
 	int shmem_fd = -1;
+	int control_fd = -1;
 #endif
 #endif
 
@@ -3358,6 +3379,7 @@ int main(int argc, char *argv[])
 	cbs.add("--metadata-name", [&](CLIParser &parser) { metadata_name = parser.next_string(); });
 #else
 	cbs.add("--shmem-fd", [&](CLIParser &parser) { shmem_fd = parser.next_uint(); });
+	cbs.add("--control-fd", [&](CLIParser &parser) { control_fd = parser.next_uint(); });
 #endif
 #endif
 
@@ -3443,7 +3465,7 @@ int main(int argc, char *argv[])
 #else
 		ret = run_master_process(opts, replayer_opts,
 		                         databases, whitelist_path, whitelist_mask,
-		                         quiet_slave, shmem_fd);
+		                         quiet_slave, shmem_fd, control_fd);
 #endif
 	}
 	else if (slave_process)

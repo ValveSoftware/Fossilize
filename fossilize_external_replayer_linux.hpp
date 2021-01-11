@@ -24,6 +24,7 @@
 #include <sys/types.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/socket.h>
 #include <sys/wait.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -105,7 +106,7 @@ struct ExternalReplayer::Impl
 	pid_t pid = -1;
 	int fd = -1;
 	int kill_fd = -1;
-	int close_fd = -1;
+	int control_fd = -1;
 	SharedControlBlock *shm_block = nullptr;
 	size_t shm_block_size = 0;
 	int wstatus = 0;
@@ -117,7 +118,7 @@ struct ExternalReplayer::Impl
 	std::unordered_set<Hash> compute_failed_validation;
 
 	bool start(const ExternalReplayer::Options &options);
-	void start_replayer_process(const ExternalReplayer::Options &options);
+	void start_replayer_process(const ExternalReplayer::Options &options, int ctl_fd);
 	ExternalReplayer::PollResult poll_progress(Progress &progress);
 	uintptr_t get_process_handle() const;
 	int wait();
@@ -135,6 +136,8 @@ struct ExternalReplayer::Impl
 	                unsigned *indices, Hash *hashes) const;
 	void reset_pid();
 	bool poll_memory_usage(uint32_t *num_processes, ProcessStats *stats) const;
+	bool poll_global_resource_usage(GlobalResourceUsage &stats) const;
+	bool send_message(const char *msg);
 };
 
 ExternalReplayer::Impl::~Impl()
@@ -143,8 +146,8 @@ ExternalReplayer::Impl::~Impl()
 		close(fd);
 	if (kill_fd >= 0)
 		close(kill_fd);
-	if (close_fd >= 0)
-		close(close_fd);
+	if (control_fd >= 0)
+		close(control_fd);
 
 	if (shm_block)
 		munmap(shm_block, shm_block_size);
@@ -161,9 +164,23 @@ void ExternalReplayer::Impl::reset_pid()
 	if (kill_fd >= 0)
 		close(kill_fd);
 	kill_fd = -1;
-	if (close_fd >= 0)
-		close(close_fd);
-	close_fd = -1;
+	if (control_fd >= 0)
+		close(control_fd);
+	control_fd = -1;
+}
+
+bool ExternalReplayer::Impl::poll_global_resource_usage(GlobalResourceUsage &stats) const
+{
+	uint32_t active_children = shm_block->num_processes_memory_stats.load(std::memory_order_acquire);
+	if (active_children)
+	{
+		stats.dirty_pages_mib = shm_block->dirty_pages_mib.load(std::memory_order_relaxed);
+		stats.io_stall_percentage = shm_block->io_stall_percentage.load(std::memory_order_relaxed);
+		stats.num_running_processes = shm_block->num_running_processes.load(std::memory_order_relaxed);
+		return true;
+	}
+	else
+		return false;
 }
 
 bool ExternalReplayer::Impl::poll_memory_usage(uint32_t *num_processes, ProcessStats *stats) const
@@ -210,6 +227,7 @@ ExternalReplayer::PollResult ExternalReplayer::Impl::poll_progress(ExternalRepla
 		if ((ret = waitpid(pid, &wstatus, WNOHANG)) > 0)
 		{
 			// Child process can receive SIGCONT/SIGSTOP which is benign.
+			// This should normally only happen when the process is being debugged.
 			if (WIFEXITED(wstatus) || WIFSIGNALED(wstatus))
 				reset_pid();
 		}
@@ -471,9 +489,9 @@ bool ExternalReplayer::Impl::get_compute_failed_validation(size_t *count, Hash *
 	return get_failed(compute_failed_validation, count, hashes);
 }
 
-void ExternalReplayer::Impl::start_replayer_process(const ExternalReplayer::Options &options)
+void ExternalReplayer::Impl::start_replayer_process(const ExternalReplayer::Options &options, int ctl_fd)
 {
-	char fd_name[16];
+	char fd_name[16], control_fd_name[16];
 	sprintf(fd_name, "%d", fd);
 	char num_thread_holder[16];
 
@@ -504,6 +522,13 @@ void ExternalReplayer::Impl::start_replayer_process(const ExternalReplayer::Opti
 		argv.push_back("--quiet-slave");
 	argv.push_back("--shmem-fd");
 	argv.push_back(fd_name);
+
+	if (ctl_fd >= 0)
+	{
+		argv.push_back("--control-fd");
+		sprintf(control_fd_name, "%d", ctl_fd);
+		argv.push_back(control_fd_name);
+	}
 
 	if (options.spirv_validate)
 		argv.push_back("--spirv-val");
@@ -790,8 +815,8 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 	if (pipe(fds) < 0)
 		return false;
 
-	int close_fds[2] = { -1, -1 };
-	if (!options.inherit_process_group && pipe(close_fds) < 0)
+	int control_fds[2] = { -1, -1 };
+	if (socketpair(AF_UNIX, SOCK_DGRAM, 0, control_fds) < 0)
 		return false;
 
 	pid_t new_pid = fork();
@@ -803,38 +828,30 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 		pid = new_pid;
 		kill_fd = fds[0];
 
-		if (!options.inherit_process_group)
-		{
-			close(close_fds[0]);
-			close_fd = close_fds[1];
-		}
+		close(control_fds[0]);
+		control_fd = control_fds[1];
+		shutdown(control_fd, SHUT_RD);
 	}
 	else if (new_pid == 0)
 	{
 		close(fds[0]);
+		close(control_fds[1]);
+		shutdown(control_fds[0], SHUT_WR);
+
 		if (!options.inherit_process_group)
 		{
-			close(close_fds[1]);
-
 			if (!create_low_priority_autogroup())
 			{
 				LOGE("Failed to create session.\n");
 				exit(1);
 			}
-
-			if (dup2(close_fds[0], STDIN_FILENO) < 0)
-			{
-				LOGE("Failed to dup FD to stdin in child process.\n");
-				exit(1);
-			}
-
-			close(close_fds[0]);
 		}
 
-		// Notify parent process that it can return.
+		// Notify parent process that it can safely call killpg()
+		// since we've set up the process group.
 		close(fds[1]);
 
-		start_replayer_process(options);
+		start_replayer_process(options, control_fds[0]);
 	}
 	else
 	{
@@ -843,6 +860,19 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 	}
 
 	return true;
+}
+
+bool ExternalReplayer::Impl::send_message(const char *msg)
+{
+	if (control_fd < 0)
+		return false;
+#ifdef __linux__
+	auto ret = send(control_fd, msg, strlen(msg), MSG_NOSIGNAL);
+#else
+	// Apparently MSG_NOSIGNAL is POSIX, but does not exist on macOS?
+	auto ret = send(control_fd, msg, strlen(msg), 0);
+#endif
+	return ret >= 0;
 }
 }
 
