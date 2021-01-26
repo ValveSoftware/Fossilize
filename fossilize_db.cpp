@@ -45,6 +45,7 @@
 #include <dirent.h>
 
 #include "fossilize_inttypes.h"
+#include "fossilize_errors.hpp"
 
 using namespace std;
 
@@ -166,7 +167,7 @@ bool DatabaseInterface::load_whitelist_database(const char *path)
 
 	if (!impl->imported_metadata.empty())
 	{
-		LOGE("Cannot use imported metadata together with whitelists.\n");
+		LOGE_LEVEL("Cannot use imported metadata together with whitelists.\n");
 		return false;
 	}
 
@@ -191,7 +192,7 @@ bool DatabaseInterface::load_blacklist_database(const char *path)
 
 	if (!impl->imported_metadata.empty())
 	{
-		LOGE("Cannot use imported metadata together with blacklists.\n");
+		LOGE_LEVEL("Cannot use imported metadata together with blacklists.\n");
 		return false;
 	}
 
@@ -323,7 +324,7 @@ intptr_t DatabaseInterface::export_metadata_to_os_handle(const char *name)
 
 	if (!write_exported_metadata(mapped, size))
 	{
-		LOGE("Failed to write metadata block.\n");
+		LOGE_LEVEL("Failed to write metadata block.\n");
 		UnmapViewOfFile(mapped);
 		CloseHandle(mapping_handle);
 		return invalid_metadata_handle();
@@ -335,20 +336,20 @@ intptr_t DatabaseInterface::export_metadata_to_os_handle(const char *name)
 	int fd = shm_open(name, O_RDWR | O_CREAT | O_EXCL, 0600);
 	if (fd < 0)
 	{
-		LOGE("Failed to create shared memory.\n");
+		LOGE_LEVEL("Failed to create shared memory.\n");
 		return invalid_metadata_handle();
 	}
 
 	if (shm_unlink(name) < 0)
 	{
-		LOGE("Failed to unlink SHM block.\n");
+		LOGE_LEVEL("Failed to unlink SHM block.\n");
 		close(fd);
 		return invalid_metadata_handle();
 	}
 
 	if (ftruncate(fd, size) < 0)
 	{
-		LOGE("Failed to allocate space for metadata block.\n");
+		LOGE_LEVEL("Failed to allocate space for metadata block.\n");
 		close(fd);
 		return invalid_metadata_handle();
 	}
@@ -356,14 +357,14 @@ intptr_t DatabaseInterface::export_metadata_to_os_handle(const char *name)
 	void *mapped = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
 	if (mapped == MAP_FAILED)
 	{
-		LOGE("Failed to map metadata block.\n");
+		LOGE_LEVEL("Failed to map metadata block.\n");
 		close(fd);
 		return invalid_metadata_handle();
 	}
 
 	if (!write_exported_metadata(mapped, size))
 	{
-		LOGE("Failed to write metadata block.\n");
+		LOGE_LEVEL("Failed to write metadata block.\n");
 		munmap(mapped, size);
 		close(fd);
 		return invalid_metadata_handle();
@@ -463,7 +464,7 @@ bool DatabaseInterface::import_metadata_from_os_handle(intptr_t handle)
 {
 	if (impl->whitelist || impl->blacklist)
 	{
-		LOGE("Cannot use imported metadata along with white- or blacklists.\n");
+		LOGE_LEVEL("Cannot use imported metadata along with white- or blacklists.\n");
 		return false;
 	}
 
@@ -582,14 +583,14 @@ struct DumbDirectoryDatabase : DatabaseInterface
 		FILE *file = fopen(path.c_str(), "rb");
 		if (!file)
 		{
-			LOGE("Failed to open file: %s\n", path.c_str());
+			LOGE_LEVEL("Failed to open file: %s\n", path.c_str());
 			return false;
 		}
 
 		if (fseek(file, 0, SEEK_END) < 0)
 		{
 			fclose(file);
-			LOGE("Failed to seek in file: %s\n", path.c_str());
+			LOGE_LEVEL("Failed to seek in file: %s\n", path.c_str());
 			return false;
 		}
 
@@ -638,13 +639,13 @@ struct DumbDirectoryDatabase : DatabaseInterface
 		FILE *file = fopen(path.c_str(), "wb");
 		if (!file)
 		{
-			LOGE("Failed to write serialized state to disk (%s).\n", path.c_str());
+			LOGE_LEVEL("Failed to write serialized state to disk (%s).\n", path.c_str());
 			return false;
 		}
 
 		if (fwrite(blob, 1, size, file) != size)
 		{
-			LOGE("Failed to write serialized state to disk.\n");
+			LOGE_LEVEL("Failed to write serialized state to disk.\n");
 			fclose(file);
 			return false;
 		}
@@ -712,11 +713,11 @@ struct ZipDatabase : DatabaseInterface
 			if (mode != DatabaseMode::ReadOnly)
 			{
 				if (!mz_zip_writer_finalize_archive(&mz))
-					LOGE("Failed to finalize archive.\n");
+					LOGE_LEVEL("Failed to finalize archive.\n");
 			}
 
 			if (!mz_zip_end(&mz))
-				LOGE("mz_zip_end failed!\n");
+				LOGE_LEVEL("mz_zip_end failed!\n");
 		}
 	}
 
@@ -777,7 +778,7 @@ struct ZipDatabase : DatabaseInterface
 			// In-place update the archive. Should we consider emitting a new archive instead?
 			if (!mz_zip_writer_init_from_reader(&mz, path.c_str()))
 			{
-				LOGE("Failed to initialize ZIP writer from reader.\n");
+				LOGE_LEVEL("Failed to initialize ZIP writer from reader.\n");
 				mz_zip_end(&mz);
 				return false;
 			}
@@ -788,7 +789,7 @@ struct ZipDatabase : DatabaseInterface
 		{
 			if (!mz_zip_writer_init_file(&mz, path.c_str(), 0))
 			{
-				LOGE("Failed to open ZIP archive for writing. Cannot serialize anything to disk.\n");
+				LOGE_LEVEL("Failed to open ZIP archive for writing. Cannot serialize anything to disk.\n");
 				return false;
 			}
 
@@ -828,7 +829,7 @@ struct ZipDatabase : DatabaseInterface
 		{
 			if (!mz_zip_reader_extract_to_mem(&mz, itr->second.index, blob, itr->second.size, 0))
 			{
-				LOGE("Failed to extract blob.\n");
+				LOGE_LEVEL("Failed to extract blob.\n");
 				return false;
 			}
 		}
@@ -865,7 +866,7 @@ struct ZipDatabase : DatabaseInterface
 
 		if (!mz_zip_writer_add_mem(&mz, str, blob, size, mz_flags))
 		{
-			LOGE("Failed to add blob to cache.\n");
+			LOGE_LEVEL("Failed to add blob to cache.\n");
 			return false;
 		}
 
@@ -1076,7 +1077,7 @@ struct StreamArchive : DatabaseInterface
 			// However, if the archive has been paged out, RANDOM is the correct approach,
 			// since prefetching data is only detrimental.
 			if (posix_fadvise(fileno(file), 0, 0, POSIX_FADV_RANDOM) != 0)
-				LOGE("Failed to advise of file usage. This is not fatal, but might compromise disk performance.\n");
+				LOGE_LEVEL("Failed to advise of file usage. This is not fatal, but might compromise disk performance.\n");
 #endif
 		}
 		else if (mode != DatabaseMode::OverWrite && mode != DatabaseMode::ExclusiveOverWrite)
@@ -1092,7 +1093,7 @@ struct StreamArchive : DatabaseInterface
 #ifdef __linux__
 			// We're going to scan through the archive sequentially to discover metadata, so some prefetching is welcome.
 			if (posix_fadvise(fileno(file), 0, 0, POSIX_FADV_SEQUENTIAL) != 0)
-				LOGE("Failed to advise of file usage. This is not fatal, but might compromise disk performance.\n");
+				LOGE_LEVEL("Failed to advise of file usage. This is not fatal, but might compromise disk performance.\n");
 #endif
 
 			// Scan through the archive and get the list of files.
@@ -1126,7 +1127,7 @@ struct StreamArchive : DatabaseInterface
 					// Corrupt entry. Our process might have been killed before we could write all data.
 					if (offset + sizeof(bytes_to_read) > len)
 					{
-						LOGE("Detected sliced file. Dropping entries from here.\n");
+						LOGE_LEVEL("Detected sliced file. Dropping entries from here.\n");
 						break;
 					}
 
@@ -1140,7 +1141,7 @@ struct StreamArchive : DatabaseInterface
 					// Corrupt entry. Our process might have been killed before we could write all data.
 					if (offset + header.payload_size > len)
 					{
-						LOGE("Detected sliced file. Dropping entries from here.\n");
+						LOGE_LEVEL("Detected sliced file. Dropping entries from here.\n");
 						break;
 					}
 
@@ -1495,7 +1496,7 @@ struct StreamArchive : DatabaseInterface
 			auto disk_crc = uint32_t(mz_crc32(MZ_CRC32_INIT, static_cast<unsigned char *>(blob), blob_size));
 			if (disk_crc != entry.header.crc)
 			{
-				LOGE("CRC mismatch!\n");
+				LOGE_LEVEL("CRC mismatch!\n");
 				return false;
 			}
 		}
@@ -1552,7 +1553,7 @@ struct StreamArchive : DatabaseInterface
 			auto disk_crc = uint32_t(mz_crc32(MZ_CRC32_INIT, dst_zlib_buffer, entry.header.payload_size));
 			if (disk_crc != entry.header.crc)
 			{
-				LOGE("CRC mismatch!\n");
+				LOGE_LEVEL("CRC mismatch!\n");
 				return false;
 			}
 		}
