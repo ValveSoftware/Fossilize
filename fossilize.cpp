@@ -3963,7 +3963,8 @@ bool StateRecorder::Impl::remap_sampler_handle(VkSampler sampler, VkSampler *out
 	auto itr = sampler_to_hash.find(sampler);
 	if (itr == end(sampler_to_hash))
 	{
-		LOGE_LEVEL("Cannot find sampler in hashmap.\n");
+		LOGW_LEVEL("Cannot find sampler in hashmap.\n"
+		           "Object has either not been recorded, or it was not supported by Fossilize.\n");
 		return false;
 	}
 	else
@@ -3979,7 +3980,8 @@ bool StateRecorder::Impl::remap_descriptor_set_layout_handle(VkDescriptorSetLayo
 	auto itr = descriptor_set_layout_to_hash.find(layout);
 	if (itr == end(descriptor_set_layout_to_hash))
 	{
-		LOGE_LEVEL("Cannot find descriptor set layout in hashmap.\n");
+		LOGW_LEVEL("Cannot find descriptor set layout in hashmap.\n"
+		           "Object has either not been recorded, or it was not supported by Fossilize.\n");
 		return false;
 	}
 	else
@@ -3994,7 +3996,8 @@ bool StateRecorder::Impl::remap_pipeline_layout_handle(VkPipelineLayout layout, 
 	auto itr = pipeline_layout_to_hash.find(layout);
 	if (itr == end(pipeline_layout_to_hash))
 	{
-		LOGE_LEVEL("Cannot find pipeline layout in hashmap.\n");
+		LOGW_LEVEL("Cannot find pipeline layout in hashmap.\n"
+		           "Object has either not been recorded, or it was not supported by Fossilize.\n");
 		return false;
 	}
 	else
@@ -4009,7 +4012,8 @@ bool StateRecorder::Impl::remap_shader_module_handle(VkShaderModule module, VkSh
 	auto itr = shader_module_to_hash.find(module);
 	if (itr == end(shader_module_to_hash))
 	{
-		LOGE_LEVEL("Cannot find shader module in hashmap.\n");
+		LOGW_LEVEL("Cannot find shader module in hashmap.\n"
+		           "Object has either not been recorded, or it was not supported by Fossilize.\n");
 		return false;
 	}
 	else
@@ -4024,7 +4028,8 @@ bool StateRecorder::Impl::remap_render_pass_handle(VkRenderPass render_pass, VkR
 	auto itr = render_pass_to_hash.find(render_pass);
 	if (itr == end(render_pass_to_hash))
 	{
-		LOGE_LEVEL("Cannot find render pass in hashmap.\n");
+		LOGW_LEVEL("Cannot find render pass in hashmap.\n"
+		           "Object has either not been recorded, or it was not supported by Fossilize.\n");
 		return false;
 	}
 	else
@@ -4039,7 +4044,8 @@ bool StateRecorder::Impl::remap_graphics_pipeline_handle(VkPipeline pipeline, Vk
 	auto itr = graphics_pipeline_to_hash.find(pipeline);
 	if (itr == end(graphics_pipeline_to_hash))
 	{
-		LOGE_LEVEL("Cannot find graphics pipeline in hashmap.\n");
+		LOGW_LEVEL("Cannot find graphics pipeline in hashmap.\n"
+		           "Object has either not been recorded, or it was not supported by Fossilize.\n");
 		return false;
 	}
 	else
@@ -4054,7 +4060,8 @@ bool StateRecorder::Impl::remap_compute_pipeline_handle(VkPipeline pipeline, VkP
 	auto itr = compute_pipeline_to_hash.find(pipeline);
 	if (itr == end(compute_pipeline_to_hash))
 	{
-		LOGE_LEVEL("Cannot find compute pipeline in hashmap.\n");
+		LOGW_LEVEL("Cannot find compute pipeline in hashmap.\n"
+		           "Object has either not been recorded, or it was not supported by Fossilize.\n");
 		return false;
 	}
 	else
