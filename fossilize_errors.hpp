@@ -70,7 +70,10 @@ static inline void log_missing_resource(const char *type, Hash hash)
 
 static inline void log_invalid_resource(const char *type, Hash hash)
 {
-	LOGE_LEVEL("Referenced %s %016" PRIx64 ", but it is VK_NULL_HANDLE.\n", type, hash);
+	LOGW_LEVEL("Referenced %s %016" PRIx64
+			           ", but it is VK_NULL_HANDLE.\n"
+			           "The create info was likely not supported by device.\n",
+	           type, hash);
 }
 
 template <typename T>

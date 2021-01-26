@@ -1428,10 +1428,7 @@ bool StateReplayer::Impl::parse_shader_modules(StateCreatorInterface &iface, con
 			info.pCode = reinterpret_cast<uint32_t *>(decode_base64(allocator, obj["code"].GetString(), info.codeSize));
 
 		if (!iface.enqueue_create_shader_module(hash, &info, &replayed_shader_modules[hash]))
-		{
-			LOGE_LEVEL("Failed to create shader module.\n");
 			return false;
-		}
 	}
 
 	iface.notify_replayed_resources_for_type();
@@ -1469,10 +1466,7 @@ bool StateReplayer::Impl::parse_pipeline_layouts(StateCreatorInterface &iface, c
 		}
 
 		if (!iface.enqueue_create_pipeline_layout(hash, &info, &replayed_pipeline_layouts[hash]))
-		{
-			LOGE_LEVEL("Failed to create pipeline layout.\n");
 			return false;
-		}
 	}
 
 	iface.notify_replayed_resources_for_type();
@@ -1507,10 +1501,7 @@ bool StateReplayer::Impl::parse_descriptor_set_layouts(StateCreatorInterface &if
 				return false;
 
 		if (!iface.enqueue_create_descriptor_set_layout(hash, &info, &replayed_descriptor_set_layouts[hash]))
-		{
-			LOGE_LEVEL("Failed to create descriptor set layout.\n");
 			return false;
-		}
 	}
 
 	iface.notify_replayed_resources_for_type();
@@ -1605,10 +1596,7 @@ bool StateReplayer::Impl::parse_samplers(StateCreatorInterface &iface, const Val
 		info.unnormalizedCoordinates = obj["unnormalizedCoordinates"].GetUint();
 
 		if (!iface.enqueue_create_sampler(hash, &info, &replayed_samplers[hash]))
-		{
-			LOGE_LEVEL("Failed to create sampler.\n");
 			return false;
-		}
 	}
 
 	iface.notify_replayed_resources_for_type();
@@ -1794,10 +1782,7 @@ bool StateReplayer::Impl::parse_render_passes(StateCreatorInterface &iface, cons
 				return false;
 
 		if (!iface.enqueue_create_render_pass(hash, &info, &replayed_render_passes[hash]))
-		{
-			LOGE_LEVEL("Failed to create render pass.\n");
 			return false;
-		}
 	}
 
 	iface.notify_replayed_resources_for_type();
@@ -1976,10 +1961,7 @@ bool StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, D
 			return false;
 
 	if (!iface.enqueue_create_compute_pipeline(hash, &info, &replayed_compute_pipelines[hash]))
-	{
-		LOGE_LEVEL("Failed to create compute pipeline.\n");
 		return false;
-	}
 
 	return true;
 }
@@ -2508,10 +2490,7 @@ bool StateReplayer::Impl::parse_graphics_pipeline(StateCreatorInterface &iface, 
 			return false;
 
 	if (!iface.enqueue_create_graphics_pipeline(hash, &info, &replayed_graphics_pipelines[hash]))
-	{
-		LOGE_LEVEL("Failed to create graphics pipeline.");
 		return false;
-	}
 
 	return true;
 }

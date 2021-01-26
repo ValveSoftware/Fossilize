@@ -28,6 +28,10 @@
 	__android_log_print(ANDROID_LOG_INFO, "Fossilize", __VA_ARGS__); \
 	fprintf(stderr, "Fossilize INFO: " __VA_ARGS__); \
 } while(0)
+#define LOGW(...) do { \
+	__android_log_print(ANDROID_LOG_WARN, "Fossilize", __VA_ARGS__); \
+	fprintf(stderr, "Fossilize WARN: " __VA_ARGS__); \
+} while(0)
 #define LOGE(...) do { \
 	__android_log_print(ANDROID_LOG_ERROR, "Fossilize", __VA_ARGS__); \
 	fprintf(stderr, "Fossilize ERROR: " __VA_ARGS__); \
@@ -35,5 +39,6 @@
 #else
 #include <stdio.h>
 #define LOGI(...) do { fprintf(stderr, "Fossilize INFO: " __VA_ARGS__); fflush(stderr); } while(0)
+#define LOGW(...) do { fprintf(stderr, "Fossilize WARN: " __VA_ARGS__); fflush(stderr); } while(0)
 #define LOGE(...) do { fprintf(stderr, "Fossilize ERROR: " __VA_ARGS__); fflush(stderr); } while(0)
 #endif

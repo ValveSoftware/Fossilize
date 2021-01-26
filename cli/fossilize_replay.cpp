@@ -564,7 +564,8 @@ struct ThreadedReplayer : StateCreatorInterface
 		size_t json_size = 0;
 		if (!global_database->read_entry(work_item.tag, work_item.hash, &json_size, nullptr, PAYLOAD_READ_CONCURRENT_BIT))
 		{
-			LOGE("Failed to read entry (%u: %016" PRIx64 ")\n", unsigned(work_item.tag), work_item.hash);
+			LOGW("Entry (%u: %016" PRIx64 ") does not exist, this might be benign depending on where the archive comes from.\n",
+			     unsigned(work_item.tag), work_item.hash);
 			if (work_item.tag == RESOURCE_SHADER_MODULE && opts.control_block)
 				opts.control_block->parsed_module_failures.fetch_add(1, std::memory_order_relaxed);
 			return false;
@@ -574,7 +575,8 @@ struct ThreadedReplayer : StateCreatorInterface
 
 		if (!global_database->read_entry(work_item.tag, work_item.hash, &json_size, buffer.data(), PAYLOAD_READ_CONCURRENT_BIT))
 		{
-			LOGE("Failed to read entry (%u: %016" PRIx64 ")\n", unsigned(work_item.tag), work_item.hash);
+			LOGW("Entry (%u: %016" PRIx64 ") does not exist, this might be benign depending on where the archive comes from.\n",
+			     unsigned(work_item.tag), work_item.hash);
 			return false;
 		}
 
@@ -585,7 +587,8 @@ struct ThreadedReplayer : StateCreatorInterface
 
 		if (!replayer.parse(*this, global_database, buffer.data(), buffer.size()))
 		{
-			LOGE("Failed to parse blob (tag: %d, hash: 0x%016" PRIx64 ").\n", work_item.tag, work_item.hash);
+			LOGW("Did not replay blob (tag: %d, hash: 0x%016" PRIx64 "). See previous logs for context.\n",
+			     work_item.tag, work_item.hash);
 
 			if (work_item.tag == RESOURCE_GRAPHICS_PIPELINE && opts.control_block)
 			{
@@ -827,7 +830,7 @@ struct ThreadedReplayer : StateCreatorInterface
 			if (resource_is_blacklisted(work_item.tag, work_item.hash))
 			{
 				*work_item.output.pipeline = VK_NULL_HANDLE;
-				LOGE("Resource is blacklisted, ignoring.\n");
+				LOGW("Resource is blacklisted, ignoring.\n");
 				if (opts.control_block)
 					opts.control_block->skipped_graphics.fetch_add(1, std::memory_order_relaxed);
 				break;
@@ -836,7 +839,7 @@ struct ThreadedReplayer : StateCreatorInterface
 			if (!device->get_feature_filter().graphics_pipeline_is_supported(work_item.create_info.graphics_create_info))
 			{
 				*work_item.output.pipeline = VK_NULL_HANDLE;
-				LOGE("Graphics pipeline %016" PRIx64 " is not supported by current device, skipping.\n", work_item.hash);
+				LOGW("Graphics pipeline %016" PRIx64 " is not supported by current device, skipping.\n", work_item.hash);
 				if (opts.control_block)
 					opts.control_block->skipped_graphics.fetch_add(1, std::memory_order_relaxed);
 				break;
@@ -973,7 +976,7 @@ struct ThreadedReplayer : StateCreatorInterface
 			if (resource_is_blacklisted(work_item.tag, work_item.hash))
 			{
 				*work_item.output.pipeline = VK_NULL_HANDLE;
-				LOGE("Resource is blacklisted, ignoring.\n");
+				LOGW("Resource is blacklisted, ignoring.\n");
 				if (opts.control_block)
 					opts.control_block->skipped_compute.fetch_add(1, std::memory_order_relaxed);
 				break;
@@ -982,7 +985,7 @@ struct ThreadedReplayer : StateCreatorInterface
 			if (!device->get_feature_filter().compute_pipeline_is_supported(work_item.create_info.compute_create_info))
 			{
 				*work_item.output.pipeline = VK_NULL_HANDLE;
-				LOGE("Compute pipeline %016" PRIx64 " is not supported by current device, skipping.\n", work_item.hash);
+				LOGW("Compute pipeline %016" PRIx64 " is not supported by current device, skipping.\n", work_item.hash);
 				if (opts.control_block)
 					opts.control_block->skipped_compute.fetch_add(1, std::memory_order_relaxed);
 				break;
@@ -1371,7 +1374,7 @@ struct ThreadedReplayer : StateCreatorInterface
 				pipeline_stats_db.reset(create_stream_archive_database(foz_path.c_str(), DatabaseMode::Append));
 				if (!pipeline_stats_db->prepare())
 				{
-					LOGE("Failed to prepare stats database. Disabling pipeline stats.\n");
+					LOGW("Failed to prepare stats database. Disabling pipeline stats.\n");
 					pipeline_stats_db.reset();
 					opts.pipeline_stats = false;
 				}
@@ -1408,7 +1411,7 @@ struct ThreadedReplayer : StateCreatorInterface
 
 				if (vkCreatePipelineCache(device->get_device(), &info, nullptr, &disk_pipeline_cache) != VK_SUCCESS)
 				{
-					LOGE("Failed to create pipeline cache, trying to create a blank one.\n");
+					LOGW("Failed to create pipeline cache, trying to create a blank one.\n");
 					info.initialDataSize = 0;
 					info.pInitialData = nullptr;
 					if (vkCreatePipelineCache(device->get_device(), &info, nullptr, &disk_pipeline_cache) != VK_SUCCESS)
@@ -1451,7 +1454,7 @@ struct ThreadedReplayer : StateCreatorInterface
 
 					if (vkCreateValidationCacheEXT(device->get_device(), &info, nullptr, &validation_cache) != VK_SUCCESS)
 					{
-						LOGE("Failed to create validation cache, trying to create a blank one.\n");
+						LOGW("Failed to create validation cache, trying to create a blank one.\n");
 						info.initialDataSize = 0;
 						info.pInitialData = nullptr;
 						if (vkCreateValidationCacheEXT(device->get_device(), &info, nullptr, &validation_cache) != VK_SUCCESS)
@@ -1469,7 +1472,7 @@ struct ThreadedReplayer : StateCreatorInterface
 
 			if (!opts.replayer_cache_path.empty())
 				if (!init_replayer_cache())
-					LOGE("Failed to initialize replayer cache. Ignoring!\n");
+					LOGW("Failed to initialize replayer cache. Ignoring!\n");
 
 			auto end_device = chrono::steady_clock::now();
 			long time_ms = chrono::duration_cast<chrono::milliseconds>(end_device - start_device).count();
@@ -1496,7 +1499,7 @@ struct ThreadedReplayer : StateCreatorInterface
 	{
 		if (!device->get_feature_filter().sampler_is_supported(create_info))
 		{
-			LOGE("Sampler %016" PRIx64 " is not supported. Skipping.\n", index);
+			LOGW("Sampler %016" PRIx64 " is not supported. Skipping.\n", index);
 			return false;
 		}
 
@@ -1514,7 +1517,7 @@ struct ThreadedReplayer : StateCreatorInterface
 	{
 		if (!device->get_feature_filter().descriptor_set_layout_is_supported(create_info))
 		{
-			LOGE("Descriptor set layout %016" PRIx64 " is not supported. Skipping.\n", index);
+			LOGW("Descriptor set layout %016" PRIx64 " is not supported. Skipping.\n", index);
 			return false;
 		}
 
@@ -1532,7 +1535,7 @@ struct ThreadedReplayer : StateCreatorInterface
 	{
 		if (!device->get_feature_filter().pipeline_layout_is_supported(create_info))
 		{
-			LOGE("Pipeline layout %016" PRIx64 " is not supported. Skipping.\n", index);
+			LOGW("Pipeline layout %016" PRIx64 " is not supported. Skipping.\n", index);
 			return false;
 		}
 
@@ -1550,7 +1553,7 @@ struct ThreadedReplayer : StateCreatorInterface
 	{
 		if (!device->get_feature_filter().render_pass_is_supported(create_info))
 		{
-			LOGE("Render pass %016" PRIx64 " is not supported. Skipping.\n", index);
+			LOGW("Render pass %016" PRIx64 " is not supported. Skipping.\n", index);
 			return false;
 		}
 
@@ -1604,7 +1607,7 @@ struct ThreadedReplayer : StateCreatorInterface
 
 			if (!ret)
 			{
-				LOGE("Failed to validate SPIR-V module: %0" PRIX64 "\n", hash);
+				LOGW("Failed to validate SPIR-V module: %0" PRIX64 ", skipping!\n", hash);
 				*module = VK_NULL_HANDLE;
 				lock_guard<mutex> lock(internal_enqueue_mutex);
 				//LOGI("Inserting shader module %016llx.\n", static_cast<unsigned long long>(hash));
@@ -1622,7 +1625,7 @@ struct ThreadedReplayer : StateCreatorInterface
 
 		if (!device->get_feature_filter().shader_module_is_supported(create_info))
 		{
-			LOGE("Shader module %0" PRIx64 " is not supported on this device.\n", hash);
+			LOGW("Shader module %0" PRIx64 " is not supported on this device.\n", hash);
 			*module = VK_NULL_HANDLE;
 
 			lock_guard<mutex> lock(internal_enqueue_mutex);
@@ -1771,7 +1774,7 @@ struct ThreadedReplayer : StateCreatorInterface
 		// - Some drivers care about this information w.r.t. caching.
 		if (parent && derived)
 		{
-			LOGE("A parent pipeline is also a derived pipeline. Avoid potential deep dependency chains in replay by forcing the pipeline to be non-derived.\n");
+			LOGW("A parent pipeline is also a derived pipeline. Avoid potential deep dependency chains in replay by forcing the pipeline to be non-derived.\n");
 			auto *info = const_cast<VkGraphicsPipelineCreateInfo *>(create_info);
 			info->flags &= ~VK_PIPELINE_CREATE_DERIVATIVE_BIT;
 			info->basePipelineHandle = VK_NULL_HANDLE;
@@ -1917,10 +1920,6 @@ struct ThreadedReplayer : StateCreatorInterface
 		for (uint32_t i = 0; i < info->stageCount; i++)
 		{
 			auto result = shader_modules.find_object((Hash) info->pStages[i].module);
-			if (!result.second)
-			{
-				LOGE("Could not find shader module %016" PRIx64 " in cache.\n", (Hash) info->pStages[i].module);
-			}
 			const_cast<VkPipelineShaderStageCreateInfo *>(info->pStages)[i].module = result.first;
 		}
 	}
@@ -1928,10 +1927,6 @@ struct ThreadedReplayer : StateCreatorInterface
 	void resolve_shader_modules(VkComputePipelineCreateInfo *info)
 	{
 		auto result = shader_modules.find_object((Hash) info->stage.module);
-		if (!result.second)
-		{
-			LOGE("Could not find shader module %016" PRIx64 " in cache.\n", (Hash) info->stage.module);
-		}
 		const_cast<VkComputePipelineCreateInfo*>(info)->stage.module = result.first;
 	}
 
@@ -2271,7 +2266,7 @@ struct ThreadedReplayer : StateCreatorInterface
 				                 if (itr != begin(*derived))
 				                 {
 					                 auto skipped_count = unsigned(itr - begin(*derived));
-					                 LOGE("%u pipelines were not compiled because parent pipelines do not exist.\n", skipped_count);
+					                 LOGW("%u pipelines were not compiled because parent pipelines do not exist.\n", skipped_count);
 
 					                 if (opts.control_block)
 					                 {
@@ -3052,7 +3047,7 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 			}
 
 			if (!state_replayer.parse(replayer, resolver.get(), state_json.data(), state_json.size()))
-				LOGE("Failed to replay blob (tag: %s, hash: %016" PRIx64 ").\n", tag_names[tag], hash);
+				LOGW("Did not replay blob (tag: %s, hash: %016" PRIx64 "). See previous logs for context.\n", tag_names[tag], hash);
 		}
 
 		if (tag == RESOURCE_APPLICATION_INFO)
@@ -3095,7 +3090,7 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 
 		if (graphics_hashes.empty() && compute_hashes.empty())
 		{
-			LOGE("Specified pipeline hash %016" PRIx64 " not found on database.\n",
+			LOGE("Specified pipeline hash %016" PRIx64 " not found in database.\n",
 			     replayer.opts.pipeline_hash);
 			return EXIT_FAILURE;
 		}
