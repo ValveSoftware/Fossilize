@@ -1412,13 +1412,13 @@ bool StateReplayer::Impl::parse_shader_modules(StateCreatorInterface &iface, con
 			auto size = obj["varintSize"].GetUint64();
 			if (offset + size > varint_size)
 			{
-				LOGE("Binary varint buffer overflows payload.\n");
+				LOGE_LEVEL("Binary varint buffer overflows payload.\n");
 				return false;
 			}
 
 			if (!decode_varint(decoded, info.codeSize / 4, varint + offset, size))
 			{
-				LOGE("Invalid varint format.\n");
+				LOGE_LEVEL("Invalid varint format.\n");
 				return false;
 			}
 
@@ -1428,10 +1428,7 @@ bool StateReplayer::Impl::parse_shader_modules(StateCreatorInterface &iface, con
 			info.pCode = reinterpret_cast<uint32_t *>(decode_base64(allocator, obj["code"].GetString(), info.codeSize));
 
 		if (!iface.enqueue_create_shader_module(hash, &info, &replayed_shader_modules[hash]))
-		{
-			LOGE("Failed to create shader module.\n");
 			return false;
-		}
 	}
 
 	iface.notify_replayed_resources_for_type();
@@ -1469,10 +1466,7 @@ bool StateReplayer::Impl::parse_pipeline_layouts(StateCreatorInterface &iface, c
 		}
 
 		if (!iface.enqueue_create_pipeline_layout(hash, &info, &replayed_pipeline_layouts[hash]))
-		{
-			LOGE("Failed to create pipeline layout.\n");
 			return false;
-		}
 	}
 
 	iface.notify_replayed_resources_for_type();
@@ -1507,10 +1501,7 @@ bool StateReplayer::Impl::parse_descriptor_set_layouts(StateCreatorInterface &if
 				return false;
 
 		if (!iface.enqueue_create_descriptor_set_layout(hash, &info, &replayed_descriptor_set_layouts[hash]))
-		{
-			LOGE("Failed to create descriptor set layout.\n");
 			return false;
-		}
 	}
 
 	iface.notify_replayed_resources_for_type();
@@ -1605,10 +1596,7 @@ bool StateReplayer::Impl::parse_samplers(StateCreatorInterface &iface, const Val
 		info.unnormalizedCoordinates = obj["unnormalizedCoordinates"].GetUint();
 
 		if (!iface.enqueue_create_sampler(hash, &info, &replayed_samplers[hash]))
-		{
-			LOGE("Failed to create sampler.\n");
 			return false;
-		}
 	}
 
 	iface.notify_replayed_resources_for_type();
@@ -1794,10 +1782,7 @@ bool StateReplayer::Impl::parse_render_passes(StateCreatorInterface &iface, cons
 				return false;
 
 		if (!iface.enqueue_create_render_pass(hash, &info, &replayed_render_passes[hash]))
-		{
-			LOGE("Failed to create render pass.\n");
 			return false;
-		}
 	}
 
 	iface.notify_replayed_resources_for_type();
@@ -1976,10 +1961,7 @@ bool StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, D
 			return false;
 
 	if (!iface.enqueue_create_compute_pipeline(hash, &info, &replayed_compute_pipelines[hash]))
-	{
-		LOGE("Failed to create compute pipeline.\n");
 		return false;
-	}
 
 	return true;
 }
@@ -2508,10 +2490,7 @@ bool StateReplayer::Impl::parse_graphics_pipeline(StateCreatorInterface &iface, 
 			return false;
 
 	if (!iface.enqueue_create_graphics_pipeline(hash, &info, &replayed_graphics_pipelines[hash]))
-	{
-		LOGE("Failed to create graphics pipeline.");
 		return false;
-	}
 
 	return true;
 }
@@ -2823,7 +2802,7 @@ bool StateReplayer::Impl::parse_pnext_chain(const Value &pnext, const void **out
 		}
 
 		default:
-			LOGE("Failed to parse pNext chain for sType: %d\n", int(sType));
+			LOGE_LEVEL("Failed to parse pNext chain for sType: %d\n", int(sType));
 			return false;
 		}
 
@@ -2930,14 +2909,14 @@ bool StateReplayer::Impl::parse(StateCreatorInterface &iface, DatabaseInterface 
 	if (doc.HasParseError())
 	{
 		auto error = doc.GetParseError();
-		LOGE("Got parse error: %d\n", int(error));
+		LOGE_LEVEL("Got parse error: %d\n", int(error));
 		return false;
 	}
 
 	int version = doc["version"].GetInt();
 	if (version > FOSSILIZE_FORMAT_VERSION || version < FOSSILIZE_FORMAT_MIN_COMPAT_VERSION)
 	{
-		LOGE("JSON version mismatches.");
+		LOGE_LEVEL("JSON version mismatches.");
 		return false;
 	}
 
@@ -3185,7 +3164,7 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 		}
 
 		default:
-			LOGE("Cannot copy unknown pNext sType: %d.\n", int(pin->sType));
+			LOGE_LEVEL("Cannot copy unknown pNext sType: %d.\n", int(pin->sType));
 			return false;
 		}
 
@@ -3748,7 +3727,7 @@ bool StateRecorder::Impl::copy_compute_pipeline(const VkComputePipelineCreateInf
 		{
 			if (uint32_t(info->basePipelineIndex) >= base_pipeline_count)
 			{
-				LOGE("Base pipeline index is out of range.\n");
+				LOGE_LEVEL("Base pipeline index is out of range.\n");
 				return false;
 			}
 
@@ -3786,7 +3765,7 @@ bool StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateI
 		{
 			if (uint32_t(info->basePipelineIndex) >= base_pipeline_count)
 			{
-				LOGE("Base pipeline index is out of range.\n");
+				LOGE_LEVEL("Base pipeline index is out of range.\n");
 				return false;
 			}
 
@@ -3984,7 +3963,8 @@ bool StateRecorder::Impl::remap_sampler_handle(VkSampler sampler, VkSampler *out
 	auto itr = sampler_to_hash.find(sampler);
 	if (itr == end(sampler_to_hash))
 	{
-		LOGE("Cannot find sampler in hashmap.\n");
+		LOGW_LEVEL("Cannot find sampler in hashmap.\n"
+		           "Object has either not been recorded, or it was not supported by Fossilize.\n");
 		return false;
 	}
 	else
@@ -4000,7 +3980,8 @@ bool StateRecorder::Impl::remap_descriptor_set_layout_handle(VkDescriptorSetLayo
 	auto itr = descriptor_set_layout_to_hash.find(layout);
 	if (itr == end(descriptor_set_layout_to_hash))
 	{
-		LOGE("Cannot find descriptor set layout in hashmap.\n");
+		LOGW_LEVEL("Cannot find descriptor set layout in hashmap.\n"
+		           "Object has either not been recorded, or it was not supported by Fossilize.\n");
 		return false;
 	}
 	else
@@ -4015,7 +3996,8 @@ bool StateRecorder::Impl::remap_pipeline_layout_handle(VkPipelineLayout layout, 
 	auto itr = pipeline_layout_to_hash.find(layout);
 	if (itr == end(pipeline_layout_to_hash))
 	{
-		LOGE("Cannot find pipeline layout in hashmap.\n");
+		LOGW_LEVEL("Cannot find pipeline layout in hashmap.\n"
+		           "Object has either not been recorded, or it was not supported by Fossilize.\n");
 		return false;
 	}
 	else
@@ -4030,7 +4012,8 @@ bool StateRecorder::Impl::remap_shader_module_handle(VkShaderModule module, VkSh
 	auto itr = shader_module_to_hash.find(module);
 	if (itr == end(shader_module_to_hash))
 	{
-		LOGE("Cannot find shader module in hashmap.\n");
+		LOGW_LEVEL("Cannot find shader module in hashmap.\n"
+		           "Object has either not been recorded, or it was not supported by Fossilize.\n");
 		return false;
 	}
 	else
@@ -4045,7 +4028,8 @@ bool StateRecorder::Impl::remap_render_pass_handle(VkRenderPass render_pass, VkR
 	auto itr = render_pass_to_hash.find(render_pass);
 	if (itr == end(render_pass_to_hash))
 	{
-		LOGE("Cannot find render pass in hashmap.\n");
+		LOGW_LEVEL("Cannot find render pass in hashmap.\n"
+		           "Object has either not been recorded, or it was not supported by Fossilize.\n");
 		return false;
 	}
 	else
@@ -4060,7 +4044,8 @@ bool StateRecorder::Impl::remap_graphics_pipeline_handle(VkPipeline pipeline, Vk
 	auto itr = graphics_pipeline_to_hash.find(pipeline);
 	if (itr == end(graphics_pipeline_to_hash))
 	{
-		LOGE("Cannot find graphics pipeline in hashmap.\n");
+		LOGW_LEVEL("Cannot find graphics pipeline in hashmap.\n"
+		           "Object has either not been recorded, or it was not supported by Fossilize.\n");
 		return false;
 	}
 	else
@@ -4075,7 +4060,8 @@ bool StateRecorder::Impl::remap_compute_pipeline_handle(VkPipeline pipeline, VkP
 	auto itr = compute_pipeline_to_hash.find(pipeline);
 	if (itr == end(compute_pipeline_to_hash))
 	{
-		LOGE("Cannot find compute pipeline in hashmap.\n");
+		LOGW_LEVEL("Cannot find compute pipeline in hashmap.\n"
+		           "Object has either not been recorded, or it was not supported by Fossilize.\n");
 		return false;
 	}
 	else
@@ -4183,7 +4169,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 		assert(looping);
 		if (!database_iface->prepare())
 		{
-			LOGE("Failed to prepare database, will not dump data to database.\n");
+			LOGE_LEVEL("Failed to prepare database, will not dump data to database.\n");
 			database_iface = nullptr;
 		}
 
@@ -4204,7 +4190,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 		if (serialize_application_info(blob))
 			database_iface->write_entry(RESOURCE_APPLICATION_INFO, h.get(), blob.data(), blob.size(), payload_flags);
 		else
-			LOGE("Failed to serialize application info.\n");
+			LOGE_LEVEL("Failed to serialize application info.\n");
 	}
 
 	bool need_flush = false;
@@ -5866,7 +5852,12 @@ void StateRecorder::free_serialized(uint8_t *serialized)
 void StateRecorder::init_recording_thread(DatabaseInterface *iface)
 {
 	impl->database_iface = iface;
-	impl->worker_thread = std::thread(&StateRecorder::Impl::record_task, impl, this, true);
+
+	auto level = get_thread_log_level();
+	impl->worker_thread = std::thread([=]() {
+		set_thread_log_level(level);
+		impl->record_task(this, true);
+	});
 }
 
 void StateRecorder::tear_down_recording_thread()
@@ -5884,4 +5875,18 @@ StateRecorder::~StateRecorder()
 	delete impl;
 }
 
+#ifndef FOSSILIZE_API_DEFAULT_LOG_LEVEL
+#define FOSSILIZE_API_DEFAULT_LOG_LEVEL LOG_DEFAULT
+#endif
+
+static thread_local LogLevel thread_log_level = FOSSILIZE_API_DEFAULT_LOG_LEVEL;
+void set_thread_log_level(LogLevel level)
+{
+	thread_log_level = level;
+}
+
+LogLevel get_thread_log_level()
+{
+	return thread_log_level;
+}
 }

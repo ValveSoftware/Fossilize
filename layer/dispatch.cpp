@@ -24,6 +24,7 @@
 #include "utils.hpp"
 #include "device.hpp"
 #include "instance.hpp"
+#include "fossilize_errors.hpp"
 #include <mutex>
 
 // VALVE: do exports without .def file, see vk_layer.h for definition on non-Windows platforms
@@ -159,7 +160,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelinesNormal(Device *laye
 	for (uint32_t i = 0; i < createInfoCount; i++)
 	{
 		if (!layer->getRecorder().record_graphics_pipeline(pPipelines[i], pCreateInfos[i], pPipelines, createInfoCount))
-			LOGE("Recording graphics pipeline failed.\n");
+			LOGW_LEVEL("Recording graphics pipeline failed, usually caused by unsupported pNext.\n");
 	}
 
 	return VK_SUCCESS;
@@ -194,7 +195,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelinesParanoid(Device *la
 
 		// Record failing pipelines for repro.
 		if (!layer->getRecorder().record_graphics_pipeline(res == VK_SUCCESS ? pPipelines[i] : VK_NULL_HANDLE, info, nullptr, 0))
-			LOGE("Failed to record graphics pipeline.\n");
+			LOGW_LEVEL("Failed to record graphics pipeline, usually caused by unsupported pNext.\n");
 
 		if (res != VK_SUCCESS)
 		{
@@ -243,7 +244,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelinesNormal(Device *layer
 	for (uint32_t i = 0; i < createInfoCount; i++)
 	{
 		if (!layer->getRecorder().record_compute_pipeline(pPipelines[i], pCreateInfos[i], pPipelines, createInfoCount))
-			LOGE("Failed to record compute pipeline.\n");
+			LOGW_LEVEL("Failed to record compute pipeline, usually caused by unsupported pNext.\n");
 	}
 
 	return VK_SUCCESS;
@@ -278,7 +279,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelinesParanoid(Device *lay
 
 		// Record failing pipelines for repro.
 		if (!layer->getRecorder().record_compute_pipeline(res == VK_SUCCESS ? pPipelines[i] : VK_NULL_HANDLE, info, nullptr, 0))
-			LOGE("Failed to record compute pipeline.\n");
+			LOGW_LEVEL("Failed to record compute pipeline, usually caused by unsupported pNext.\n");
 
 		if (res != VK_SUCCESS)
 		{
@@ -324,7 +325,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(VkDevice device,
 	if (result == VK_SUCCESS)
 	{
 		if (!layer->getRecorder().record_pipeline_layout(*pLayout, *pCreateInfo))
-			LOGE("Failed to record pipeline layout.\n");
+			LOGW_LEVEL("Failed to record pipeline layout, usually caused by unsupported pNext.\n");
 	}
 	return result;
 }
@@ -342,7 +343,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(VkDevice device,
 	if (result == VK_SUCCESS && (pCreateInfo->flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_HOST_ONLY_POOL_BIT_VALVE) == 0)
 	{
 		if (!layer->getRecorder().record_descriptor_set_layout(*pSetLayout, *pCreateInfo))
-			LOGE("Failed to record descriptor set layout.\n");
+			LOGW_LEVEL("Failed to record descriptor set layout, usually caused by unsupported pNext.\n");
 	}
 	return result;
 }
@@ -386,7 +387,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateSampler(VkDevice device, const VkSam
 	if (res == VK_SUCCESS)
 	{
 		if (!layer->getRecorder().record_sampler(*pSampler, *pCreateInfo))
-			LOGE("Failed to record sampler.\n");
+			LOGW_LEVEL("Failed to record sampler, usually caused by unsupported pNext.\n");
 	}
 
 	return res;
@@ -405,7 +406,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateShaderModule(VkDevice device, const 
 	if (res == VK_SUCCESS)
 	{
 		if (!layer->getRecorder().record_shader_module(*pShaderModule, *pCreateInfo))
-			LOGE("Failed to record shader module.\n");
+			LOGW_LEVEL("Failed to record shader module, usually caused by unsupported pNext.\n");
 	}
 
 	return res;
@@ -421,7 +422,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass(VkDevice device, const Vk
 	if (res == VK_SUCCESS)
 	{
 		if (!layer->getRecorder().record_render_pass(*pRenderPass, *pCreateInfo))
-			LOGE("Failed to record render pass.\n");
+			LOGW_LEVEL("Failed to record render pass, usually caused by unsupported pNext.\n");
 	}
 	return res;
 }
