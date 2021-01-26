@@ -28,6 +28,7 @@
 #include <vector>
 #include <string>
 #include "layer/utils.hpp"
+#include "fossilize_errors.hpp"
 
 using namespace Fossilize;
 
@@ -1545,6 +1546,55 @@ static bool test_export_concurrent_archive(bool with_read_only)
 	return true;
 }
 
+static bool test_logging()
+{
+	VkSamplerCreateInfo create_info = { VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+	VkSamplerYcbcrConversionCreateInfo conv_info = { VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_CREATE_INFO };
+	create_info.pNext = &conv_info;
+
+	const auto immutable = fake_handle<VkSampler>(100);
+
+	VkDescriptorSetLayoutCreateInfo set_layout = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+	VkDescriptorSetLayoutBinding binding = {};
+	binding.pImmutableSamplers = &immutable;
+	binding.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+	binding.stageFlags = VK_SHADER_STAGE_ALL;
+	binding.descriptorCount = 1;
+	set_layout.pBindings = &binding;
+	set_layout.bindingCount = 1;
+
+	for (unsigned i = 0; i < 3; i++)
+	{
+		std::unique_ptr<DatabaseInterface> db(create_stream_archive_database(
+				".__test_archive.foz", DatabaseMode::OverWrite));
+		StateRecorder recorder;
+		if (!db || !db->prepare())
+			return false;
+
+		if (i == 0)
+			LOGI("Expecting log to trigger.\n");
+		else
+			LOGI("Expecting log to NOT trigger.\n");
+		LOGI("=======================\n");
+
+		set_thread_log_level(LogLevel(i));
+		recorder.init_recording_thread(db.get());
+
+		// Expect failure
+		if (recorder.record_sampler(immutable, create_info, 100))
+			return false;
+
+		// Should succeed, but will fail later when trying to resolve sampler.
+		if (!recorder.record_descriptor_set_layout(fake_handle<VkDescriptorSetLayout>(10), set_layout, 200))
+			return false;
+
+		recorder.tear_down_recording_thread();
+		LOGI("=======================\n");
+	}
+	remove(".__test_archive.foz");
+	return true;
+}
+
 int main()
 {
 	if (!test_concurrent_database_extra_paths())
@@ -1562,6 +1612,8 @@ int main()
 	if (!test_export_concurrent_archive(false))
 		return EXIT_FAILURE;
 	if (!test_export_concurrent_archive(true))
+		return EXIT_FAILURE;
+	if (!test_logging())
 		return EXIT_FAILURE;
 
 	std::vector<uint8_t> res;

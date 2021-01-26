@@ -36,10 +36,19 @@
 namespace Fossilize
 {
 // Sets the global logging level for the current thread.
+// Used by the Fossilize API.
 // Any internal threads created by Fossilize will inherit the log level from creating thread.
 // FOSSILIZE_API_DEFAULT_LOG_LEVEL define can be used to set initial value.
 void set_thread_log_level(LogLevel level);
 LogLevel get_thread_log_level();
+#ifndef LOGE
+#error "LOGE must be defined before including fossilize_errors.hpp."
+#endif
+
+#ifndef LOGW
+#error "LOGW must be defined before including fossilize_errors.hpp."
+#endif
+
 #define LOGE_LEVEL(...) do { if (get_thread_log_level() <= LOG_ERROR) { LOGE(__VA_ARGS__); } } while(0)
 #define LOGW_LEVEL(...) do { if (get_thread_log_level() < LOG_ERROR) { LOGW(__VA_ARGS__); } } while(0)
 
