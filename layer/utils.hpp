@@ -29,9 +29,11 @@
 #ifdef ANDROID
 #include <android/log.h>
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "Fossilize", __VA_ARGS__)
+#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, "Fossilize", __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "Fossilize", __VA_ARGS__)
 #else
 #include <stdio.h>
 #define LOGI(...) fprintf(stderr, "Fossilize INFO: " __VA_ARGS__)
+#define LOGW(...) fprintf(stderr, "Fossilize WARN: " __VA_ARGS__)
 #define LOGE(...) fprintf(stderr, "Fossilize ERROR: " __VA_ARGS__)
 #endif

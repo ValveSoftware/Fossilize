@@ -46,5 +46,16 @@ enum
 	FOSSILIZE_FORMAT_MIN_COMPAT_VERSION = 5
 };
 
+enum LogLevel
+{
+	// Log everything
+	LOG_ALL = 0,
+	LOG_DEFAULT = LOG_ALL,
+	// Only report errors and up, warnings are ignored
+	LOG_ERROR = 1,
+	// No logging at all
+	LOG_NONE = 2
+};
+
 using Hash = uint64_t;
 }

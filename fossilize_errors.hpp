@@ -35,6 +35,14 @@
 
 namespace Fossilize
 {
+// Sets the global logging level for the current thread.
+// Any internal threads created by Fossilize will inherit the log level from creating thread.
+// FOSSILIZE_API_DEFAULT_LOG_LEVEL define can be used to set initial value.
+void set_thread_log_level(LogLevel level);
+LogLevel get_thread_log_level();
+#define LOGE_LEVEL(...) do { if (get_thread_log_level() <= LOG_ERROR) { LOGE(__VA_ARGS__); } } while(0)
+#define LOGW_LEVEL(...) do { if (get_thread_log_level() < LOG_ERROR) { LOGW(__VA_ARGS__); } } while(0)
+
 static inline void log_error_pnext_chain(std::string what, const void *pNext)
 {
 	what += " (pNext->sType chain: [";
@@ -47,24 +55,32 @@ static inline void log_error_pnext_chain(std::string what, const void *pNext)
 			what += ", ";
 	}
 	what += "])";
-	LOGE("Error: %s\n", what.c_str());
+	LOGW_LEVEL("%s\n", what.c_str());
 }
 
 static inline void log_missing_resource(const char *type, Hash hash)
 {
-	LOGE("Referenced %s %016" PRIx64 ", but it does not exist.\n", type, hash);
+	LOGW_LEVEL("Referenced %s %016" PRIx64
+			           ", but it does not exist.\n"
+			           "This can be expected when replaying an archive from Steam.\n"
+			           "If replaying just the application cache, "
+			           "make sure to replay together with the common cache.\n",
+	           type, hash);
 }
 
 static inline void log_invalid_resource(const char *type, Hash hash)
 {
-	LOGE("Referenced %s %016" PRIx64 ", but it is VK_NULL_HANDLE.\n", type, hash);
+	LOGE_LEVEL("Referenced %s %016" PRIx64 ", but it is VK_NULL_HANDLE.\n", type, hash);
 }
 
 template <typename T>
 static inline void log_failed_hash(const char *type, T object)
 {
-	LOGE("%s handle 0x%016" PRIx64 " is not registered. It has either not been recorded, or it failed to be recorded earlier.\n",
-	     type, (uint64_t)object);
+	LOGW_LEVEL("%s handle 0x%016" PRIx64
+			           " is not registered.\n"
+			           "It has either not been recorded, or it failed to be recorded earlier "
+			           "(which is expected if application uses an extension that is not recognized by Fossilize).\n",
+	           type, (uint64_t)object);
 }
 }
 

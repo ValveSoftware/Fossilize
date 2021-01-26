@@ -35,6 +35,7 @@
 #endif
 #include <signal.h>
 #include "fossilize_inttypes.h"
+#include "fossilize_errors.hpp"
 
 namespace Fossilize
 {
@@ -144,9 +145,9 @@ static bool emergencyRecord()
 #ifdef _WIN32
 static LONG WINAPI crashHandler(_EXCEPTION_POINTERS *)
 {
-	LOGE("Caught segmentation fault! Emergency serialization of state to disk ...\n");
+	LOGE_LEVEL("Caught segmentation fault! Emergency serialization of state to disk ...\n");
 	emergencyRecord();
-	LOGE("Done with emergency serialization, hopefully this worked :D\n");
+	LOGE_LEVEL("Done with emergency serialization, hopefully this worked :D\n");
 
 	MessageBoxA(nullptr, "Pipeline creation triggered an access violation, the offending state was serialized. The application will now terminate.",
 	            "Pipeline creation access violation", 0);
@@ -167,9 +168,9 @@ static void installSegfaultHandler()
 #else
 static void segfaultHandler(int sig)
 {
-	LOGE("Caught segmentation fault! Emergency serialization of state to disk ...\n");
+	LOGE_LEVEL("Caught segmentation fault! Emergency serialization of state to disk ...\n");
 	emergencyRecord();
-	LOGE("Done with emergency serialization, hopefully this worked :D\n");
+	LOGE_LEVEL("Done with emergency serialization, hopefully this worked :D\n");
 
 	// Now we can die properly.
 	raise(sig);
@@ -183,11 +184,11 @@ static void installSegfaultHandler()
 	sa.sa_handler = segfaultHandler;
 
 	if (sigaction(SIGSEGV, &sa, nullptr) < 0)
-		LOGE("Failed to install SIGSEGV handler!\n");
+		LOGE_LEVEL("Failed to install SIGSEGV handler!\n");
 	if (sigaction(SIGFPE, &sa, nullptr) < 0)
-		LOGE("Failed to install SIGFPE handler!\n");
+		LOGE_LEVEL("Failed to install SIGFPE handler!\n");
 	if (sigaction(SIGABRT, &sa, nullptr) < 0)
-		LOGE("Failed to install SIGABRT handler!\n");
+		LOGE_LEVEL("Failed to install SIGABRT handler!\n");
 }
 #endif
 
@@ -293,10 +294,10 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkApplicationInfo *appI
 	recorder->set_application_info_filter(entry.filter.get());
 	if (appInfo)
 		if (!recorder->record_application_info(*appInfo))
-			LOGE("Failed to record application info.\n");
+			LOGE_LEVEL("Failed to record application info.\n");
 	if (features)
 		if (!recorder->record_physical_device_features(*features))
-			LOGE("Failed to record physical device features.\n");
+			LOGE_LEVEL("Failed to record physical device features.\n");
 	recorder->init_recording_thread(entry.interface.get());
 
 	return recorder;
