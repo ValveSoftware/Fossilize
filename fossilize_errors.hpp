@@ -73,7 +73,8 @@ static inline void log_missing_resource(const char *type, Hash hash)
 			           ", but it does not exist.\n"
 			           "This can be expected when replaying an archive from Steam.\n"
 			           "If replaying just the application cache, "
-			           "make sure to replay together with the common cache.\n",
+			           "make sure to replay together with the common cache, "
+			           "as application cache can depend on common cache.\n",
 	           type, hash);
 }
 
