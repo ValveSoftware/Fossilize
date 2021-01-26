@@ -5845,7 +5845,12 @@ void StateRecorder::free_serialized(uint8_t *serialized)
 void StateRecorder::init_recording_thread(DatabaseInterface *iface)
 {
 	impl->database_iface = iface;
-	impl->worker_thread = std::thread(&StateRecorder::Impl::record_task, impl, this, true);
+
+	auto level = get_thread_log_level();
+	impl->worker_thread = std::thread([=]() {
+		set_thread_log_level(level);
+		impl->record_task(this, true);
+	});
 }
 
 void StateRecorder::tear_down_recording_thread()
