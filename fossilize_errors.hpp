@@ -37,10 +37,23 @@ namespace Fossilize
 {
 // Sets the global logging level for the current thread.
 // Used by the Fossilize API.
-// Any internal threads created by Fossilize will inherit the log level from creating thread.
+// Any internal threads created by Fossilize will inherit the log level and callbacks from creating thread.
 // FOSSILIZE_API_DEFAULT_LOG_LEVEL define can be used to set initial value.
 void set_thread_log_level(LogLevel level);
 LogLevel get_thread_log_level();
+
+// Custom callback. Log level filter is somewhat moot, but at least avoids some redundant
+// work from happening to build a message that is ignored.
+using LogCallback = void (*)(LogLevel level, const char *message, void *userdata);
+void set_thread_log_callback(LogCallback cb, void *userdata);
+
+namespace Internal
+{
+bool log_thread_callback(LogLevel level, const char *fmt, ...);
+LogCallback get_thread_log_callback();
+void *get_thread_log_userdata();
+}
+
 #ifndef LOGE
 #error "LOGE must be defined before including fossilize_errors.hpp."
 #endif
@@ -49,8 +62,21 @@ LogLevel get_thread_log_level();
 #error "LOGW must be defined before including fossilize_errors.hpp."
 #endif
 
-#define LOGE_LEVEL(...) do { if (get_thread_log_level() <= LOG_ERROR) { LOGE(__VA_ARGS__); } } while(0)
-#define LOGW_LEVEL(...) do { if (get_thread_log_level() < LOG_ERROR) { LOGW(__VA_ARGS__); } } while(0)
+#define LOGE_LEVEL(...) do { \
+	if (get_thread_log_level() <= LOG_ERROR) { \
+		if (!Internal::log_thread_callback(LOG_ERROR, __VA_ARGS__)) { \
+			LOGE(__VA_ARGS__); \
+		} \
+	} \
+} while(0)
+
+#define LOGW_LEVEL(...) do { \
+	if (get_thread_log_level() <= LOG_WARNING) { \
+		if (!Internal::log_thread_callback(LOG_WARNING, __VA_ARGS__)) { \
+			LOGW(__VA_ARGS__); \
+		} \
+	} \
+} while(0)
 
 static inline void log_error_pnext_chain(std::string what, const void *pNext)
 {

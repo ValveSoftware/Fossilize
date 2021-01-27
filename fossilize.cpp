@@ -31,6 +31,7 @@
 #include <unordered_map>
 #include <queue>
 #include <string.h>
+#include <stdarg.h>
 #include "varint.hpp"
 #include "path.hpp"
 #include "fossilize_db.hpp"
@@ -5854,8 +5855,11 @@ void StateRecorder::init_recording_thread(DatabaseInterface *iface)
 	impl->database_iface = iface;
 
 	auto level = get_thread_log_level();
+	auto cb = Internal::get_thread_log_callback();
+	auto userdata = Internal::get_thread_log_userdata();
 	impl->worker_thread = std::thread([=]() {
 		set_thread_log_level(level);
+		set_thread_log_callback(cb, userdata);
 		impl->record_task(this, true);
 	});
 }
@@ -5880,9 +5884,46 @@ StateRecorder::~StateRecorder()
 #endif
 
 static thread_local LogLevel thread_log_level = FOSSILIZE_API_DEFAULT_LOG_LEVEL;
+static thread_local LogCallback thread_log_callback;
+static thread_local void *thread_log_userdata;
 void set_thread_log_level(LogLevel level)
 {
 	thread_log_level = level;
+}
+
+void set_thread_log_callback(LogCallback cb, void *userdata)
+{
+	thread_log_callback = cb;
+	thread_log_userdata = userdata;
+}
+
+namespace Internal
+{
+bool log_thread_callback(LogLevel level, const char *fmt, ...)
+{
+	if (!thread_log_callback)
+		return false;
+
+	va_list va;
+	va_start(va, fmt);
+	char buffer[8 * 1024];
+	vsnprintf(buffer, sizeof(buffer), fmt, va);
+	// Guard against ancient MSVC bugs.
+	buffer[sizeof(buffer) - 1] = '\0';
+	va_end(va);
+	thread_log_callback(level, buffer, thread_log_userdata);
+	return true;
+}
+
+LogCallback get_thread_log_callback()
+{
+	return thread_log_callback;
+}
+
+void *get_thread_log_userdata()
+{
+	return thread_log_userdata;
+}
 }
 
 LogLevel get_thread_log_level()
