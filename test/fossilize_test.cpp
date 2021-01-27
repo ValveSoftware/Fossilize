@@ -1563,15 +1563,36 @@ static bool test_logging()
 	set_layout.pBindings = &binding;
 	set_layout.bindingCount = 1;
 
+	struct UserData
+	{
+		unsigned err_count;
+		unsigned warn_count;
+		unsigned info_count;
+	};
+
+	UserData userdata = {};
+	set_thread_log_callback([](LogLevel level, const char *message, void *u) {
+		auto *user = static_cast<UserData *>(u);
+		if (level == LOG_WARNING)
+			user->warn_count++;
+		else if (level == LOG_ERROR)
+			user->err_count++;
+		else if (level == LOG_INFO)
+			user->info_count++;
+		fprintf(stderr, "Callback: %s", message);
+	}, &userdata);
+
 	for (unsigned i = 0; i < 3; i++)
 	{
+		userdata = {};
+
 		std::unique_ptr<DatabaseInterface> db(create_stream_archive_database(
 				".__test_archive.foz", DatabaseMode::OverWrite));
 		StateRecorder recorder;
 		if (!db || !db->prepare())
 			return false;
 
-		if (i == 0)
+		if (i < 2)
 			LOGI("Expecting log to trigger.\n");
 		else
 			LOGI("Expecting log to NOT trigger.\n");
@@ -1584,14 +1605,23 @@ static bool test_logging()
 		if (recorder.record_sampler(immutable, create_info, 100))
 			return false;
 
+		unsigned expected_warn = i < 2 ? 1 : 0;
+		if (userdata.warn_count != expected_warn || userdata.err_count != 0 || userdata.info_count != 0)
+			return false;
+
 		// Should succeed, but will fail later when trying to resolve sampler.
 		if (!recorder.record_descriptor_set_layout(fake_handle<VkDescriptorSetLayout>(10), set_layout, 200))
 			return false;
 
 		recorder.tear_down_recording_thread();
 		LOGI("=======================\n");
+
+		expected_warn = i < 2 ? 2 : 0;
+		if (userdata.warn_count != expected_warn || userdata.err_count != 0 || userdata.info_count != 0)
+			return false;
 	}
 	remove(".__test_archive.foz");
+	set_thread_log_callback(nullptr, nullptr);
 	return true;
 }
 

@@ -49,12 +49,15 @@ enum
 enum LogLevel
 {
 	// Log everything
-	LOG_ALL = 0,
-	LOG_DEFAULT = LOG_ALL,
+	LOG_INFO = 0,
+	LOG_ALL = LOG_INFO,
+	// Only report warnings and up, info messages are ignored
+	LOG_WARNING = 1,
+	LOG_DEFAULT = LOG_WARNING,
 	// Only report errors and up, warnings are ignored
-	LOG_ERROR = 1,
-	// No logging at all
-	LOG_NONE = 2
+	LOG_ERROR = 2,
+	// No logging at all, only used as a log level
+	LOG_NONE = 3
 };
 
 using Hash = uint64_t;
