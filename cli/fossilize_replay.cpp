@@ -421,14 +421,13 @@ struct ThreadedReplayer : StateCreatorInterface
 			else if (index == 0)
 				db = global_database;
 
-			if (!db)
+			if (db)
 			{
-				LOGE("Could not open sub database %u.\n", index);
-				return false;
+				if (!init_implicit_whitelist(*db))
+					return false;
 			}
-
-			if (!init_implicit_whitelist(*db))
-				return false;
+			else
+				LOGW("Could not open sub database %u, skipping it for purposes of whitelisting.\n", index);
 		}
 
 		return true;
@@ -2940,6 +2939,10 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 			LOGE("Failed to load whitelist database: %s.\n", whitelist);
 			return EXIT_FAILURE;
 		}
+
+		if (resolver->has_sub_databases())
+			for (unsigned index : replayer.opts.implicit_whitelist_database_indices)
+				resolver->promote_sub_database_to_whitelist(index);
 	}
 
 	if (DatabaseInterface::metadata_handle_is_valid(metadata_handle))
