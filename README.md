@@ -30,7 +30,7 @@ Ideally, this serialized cache could be shipped, and applications can assume all
 
 If rapidjson is not already bundled in your project, you need to check out the submodules.
 
-```
+```shell
 git submodule update --init
 ```
 
@@ -39,7 +39,7 @@ It is also possible to use `FOSSILIZE_VULKAN_INCLUDE_PATH` to override Vulkan he
 
 Normally, the CLI tools will be built. These require SPIRV-Tools and SPIRV-Cross submodules to be initialized, however, if you're only building Fossilize as a library/layer, you can use CMake options `-DFOSSILIZE_CLI=OFF` and `-DFOSSILIZE_TESTS=OFF` to disable all those requirements for submodules (assuming you have custom include path for rapidjson).
 Standalone build:
-```
+```shell
 mkdir build
 cd build
 cmake ..
@@ -47,7 +47,7 @@ cmake --build .
 ```
 
 Link as part of other project:
-```
+```cmake
 add_subdirectory(fossilize EXCLUDE_FROM_ALL)
 target_link_library(your-target fossilize)
 ```
@@ -77,7 +77,7 @@ Each SPIR-V word takes from 1 to 5 bytes with this scheme.
 ## Sample API usage
 
 ### Recording state
-```
+```cpp
 // Note that fossilize.hpp will include Vulkan headers, so make sure you include vulkan.h before
 // this one if you care about which Vulkan headers you use.
 #include "fossilize.hpp"
@@ -124,7 +124,7 @@ void create_state()
 ```
 
 ### Replaying state
-```
+```cpp
 // Note that fossilize.hpp will include Vulkan headers, so make sure you include vulkan.h before
 // this one if you care about which Vulkan headers you use.
 #include "fossilize.hpp"
