@@ -1009,6 +1009,8 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 		       features.shading_rate_nv.shadingRateImage == VK_TRUE;
 	case spv::CapabilityDemoteToHelperInvocationEXT:
 		return features.demote_to_helper.shaderDemoteToHelperInvocation == VK_TRUE;
+	case spv::CapabilityFragmentShadingRateKHR:
+		return features.fragment_shading_rate.primitiveFragmentShadingRate == VK_TRUE;
 
 	default:
 		LOGE("Unrecognized SPIR-V capability %u, treating as unsupported.\n", unsigned(cap));
