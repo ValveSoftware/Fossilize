@@ -45,6 +45,7 @@ struct VulkanFeatures
 	VkPhysicalDeviceSeparateDepthStencilLayoutsFeatures separate_ds_layout;
 	VkPhysicalDeviceBufferDeviceAddressFeatures buffer_device_address;
 	VkPhysicalDeviceShaderClockFeaturesKHR shader_clock;
+	VkPhysicalDeviceFragmentShadingRateFeaturesKHR fragment_shading_rate;
 	VkPhysicalDeviceTransformFeedbackFeaturesEXT transform_feedback;
 	VkPhysicalDeviceDepthClipEnableFeaturesEXT depth_clip;
 	VkPhysicalDeviceInlineUniformBlockFeaturesEXT inline_uniform_block;
@@ -77,6 +78,7 @@ struct VulkanProperties
 	VkPhysicalDeviceSubgroupSizeControlPropertiesEXT subgroup_size_control;
 	VkPhysicalDeviceInlineUniformBlockPropertiesEXT inline_uniform_block;
 	VkPhysicalDeviceVertexAttributeDivisorPropertiesEXT attribute_divisor;
+	VkPhysicalDeviceFragmentShadingRatePropertiesKHR fragment_shading_rate;
 };
 
 void *build_pnext_chain(VulkanProperties &properties);

@@ -63,6 +63,7 @@ void *build_pnext_chain(VulkanFeatures &features)
 	F(SEPARATE_DEPTH_STENCIL_LAYOUTS, separate_ds_layout);
 	F(BUFFER_DEVICE_ADDRESS, buffer_device_address);
 	FE(SHADER_CLOCK, shader_clock, KHR);
+	FE(FRAGMENT_SHADING_RATE, fragment_shading_rate, KHR);
 	FE(TRANSFORM_FEEDBACK, transform_feedback, EXT);
 	FE(DEPTH_CLIP_ENABLE, depth_clip, EXT);
 	FE(INLINE_UNIFORM_BLOCK, inline_uniform_block, EXT);
@@ -111,6 +112,7 @@ void *build_pnext_chain(VulkanProperties &props)
 	P(DESCRIPTOR_INDEXING, descriptor_indexing);
 	P(SUBGROUP, subgroup);
 	P(FLOAT_CONTROLS, float_control);
+	PE(FRAGMENT_SHADING_RATE, fragment_shading_rate, KHR);
 	PE(SUBGROUP_SIZE_CONTROL, subgroup_size_control, EXT);
 	PE(INLINE_UNIFORM_BLOCK, inline_uniform_block, EXT);
 	PE(VERTEX_ATTRIBUTE_DIVISOR, attribute_divisor, EXT);
@@ -196,6 +198,7 @@ void FeatureFilter::Impl::init_features(const void *pNext)
 		F(SEPARATE_DEPTH_STENCIL_LAYOUTS, separate_ds_layout);
 		F(BUFFER_DEVICE_ADDRESS, buffer_device_address);
 		FE(SHADER_CLOCK, shader_clock, KHR);
+		FE(FRAGMENT_SHADING_RATE, fragment_shading_rate, KHR);
 		FE(TRANSFORM_FEEDBACK, transform_feedback, EXT);
 		FE(DEPTH_CLIP_ENABLE, depth_clip, EXT);
 		FE(INLINE_UNIFORM_BLOCK, inline_uniform_block, EXT);
@@ -248,6 +251,7 @@ void FeatureFilter::Impl::init_properties(const void *pNext)
 		P(DESCRIPTOR_INDEXING, descriptor_indexing);
 		P(SUBGROUP, subgroup);
 		P(FLOAT_CONTROLS, float_control);
+		PE(FRAGMENT_SHADING_RATE, fragment_shading_rate, KHR);
 		PE(SUBGROUP_SIZE_CONTROL, subgroup_size_control, EXT);
 		PE(INLINE_UNIFORM_BLOCK, inline_uniform_block, EXT);
 		PE(VERTEX_ATTRIBUTE_DIVISOR, attribute_divisor, EXT);
@@ -1005,6 +1009,8 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 		       features.shading_rate_nv.shadingRateImage == VK_TRUE;
 	case spv::CapabilityDemoteToHelperInvocationEXT:
 		return features.demote_to_helper.shaderDemoteToHelperInvocation == VK_TRUE;
+	case spv::CapabilityFragmentShadingRateKHR:
+		return features.fragment_shading_rate.primitiveFragmentShadingRate == VK_TRUE;
 
 	default:
 		LOGE("Unrecognized SPIR-V capability %u, treating as unsupported.\n", unsigned(cap));
@@ -1169,6 +1175,14 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 				if (!enabled_extensions.count(VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME))
 					return false;
 				if (!features.extended_dynamic_state.extendedDynamicState)
+					return false;
+				break;
+
+			case VK_DYNAMIC_STATE_FRAGMENT_SHADING_RATE_KHR:
+				// Only support dynamic fragment shading rate for now.
+				// pNext variant needs to validate against vkGetPhysicalDeviceFragmentShadingRatesKHR on top.
+				if (!enabled_extensions.count(VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME) ||
+				    features.fragment_shading_rate.pipelineFragmentShadingRate == VK_FALSE)
 					return false;
 				break;
 
