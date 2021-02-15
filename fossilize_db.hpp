@@ -116,7 +116,13 @@ public:
 	// and index 1 and up refer to extra readonly databases which are passed in.
 	//
 	// Can be called multiple times to whitelist multiple databases.
-	// Using this is meaningless unless load_whitelist_database is also used.
+	// If a subdata index does not prepare() successfully, the database entries for that index
+	// will not be promoted to the whitelist.
+	//
+	// The database is considered sensitive to whitelist checking
+	// if either load_whitelist_database is successfully called,
+	// or at least one call to promote_sub_database_to_whitelist() is used
+	// (even if that sub database fails to prepare()).
 	void promote_sub_database_to_whitelist(unsigned index);
 
 	// Prepares the database. It can load in the off-line archive from disk.

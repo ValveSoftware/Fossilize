@@ -258,12 +258,16 @@ DatabaseInterface::~DatabaseInterface()
 
 bool DatabaseInterface::test_resource_filter(ResourceTag tag, Hash hash) const
 {
-	if ((impl->whitelist_tag_mask & (1u << tag)) != 0 &&
-	    impl->whitelist &&
-	    impl->implicit_whitelisted[tag].count(hash) == 0 &&
-	    !impl->whitelist->has_entry(tag, hash))
+	if ((impl->whitelist_tag_mask & (1u << tag)) != 0)
 	{
-		return false;
+		bool whitelist_sensitive = impl->whitelist || !impl->sub_databases_in_whitelist.empty();
+		if (whitelist_sensitive)
+		{
+			bool whitelisted = (impl->whitelist && impl->whitelist->has_entry(tag, hash)) ||
+			                   (impl->implicit_whitelisted[tag].count(hash) != 0);
+			if (!whitelisted)
+				return false;
+		}
 	}
 
 	if (impl->blacklist && impl->blacklist->has_entry(tag, hash))
@@ -1751,9 +1755,8 @@ struct ConcurrentDatabase : DatabaseInterface
 				else if (index <= extra_readonly.size())
 					iface = extra_readonly[index - 1].get();
 
-				if (!iface)
-					return false;
-				if (!add_to_implicit_whitelist(*iface))
+				// It's okay if the archive does not exist, we just ignore it.
+				if (iface && !add_to_implicit_whitelist(*iface))
 					return false;
 			}
 
