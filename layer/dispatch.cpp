@@ -29,6 +29,11 @@
 
 // VALVE: do exports without .def file, see vk_layer.h for definition on non-Windows platforms
 #ifdef _MSC_VER
+#if defined(_WIN32) && !defined(_WIN64)
+// Josh: We need to match the export names up to the functions to avoid stdcall aliasing
+#pragma comment(linker, "/EXPORT:VK_LAYER_fossilize_GetInstanceProcAddr=_VK_LAYER_fossilize_GetInstanceProcAddr@8")
+#pragma comment(linker, "/EXPORT:VK_LAYER_fossilize_GetDeviceProcAddr=_VK_LAYER_fossilize_GetDeviceProcAddr@8")
+#endif
 #undef VK_LAYER_EXPORT
 #define VK_LAYER_EXPORT extern "C" __declspec(dllexport)
 #endif
