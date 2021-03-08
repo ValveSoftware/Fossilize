@@ -34,7 +34,8 @@ static void print_help()
 {
 	LOGI("Usage: fossilize-list\n"
 	     "\t<database path>\n"
-	     "\t[--tag index]\n");
+	     "\t[--tag index]\n"
+	     "\t[--size]\n");
 }
 
 int main(int argc, char **argv)
@@ -42,9 +43,11 @@ int main(int argc, char **argv)
 	CLICallbacks cbs;
 	string db_path;
 	unsigned tag_uint = 0;
+	bool log_size = false;
 	cbs.default_handler = [&](const char *path) { db_path = path; };
 	cbs.add("--help", [&](CLIParser &parser) { print_help(); parser.end(); });
 	cbs.add("--tag", [&](CLIParser &parser) { tag_uint = parser.next_uint(); });
+	cbs.add("--size", [&](CLIParser &) { log_size = true; });
 	cbs.error_handler = [] { print_help(); };
 	CLIParser parser(move(cbs), argc - 1, argv + 1);
 
@@ -88,8 +91,32 @@ int main(int argc, char **argv)
 		return EXIT_FAILURE;
 	}
 
+	uint64_t compressed_total_size = 0;
+	uint64_t uncompressed_total_size = 0;
 	for (auto hash : hashes)
 	{
-		printf("%016" PRIx64 "\n", hash);
+		if (log_size)
+		{
+			size_t compressed_blob_size = 0;
+			size_t uncompressed_blob_size = 0;
+			if (!input_db->read_entry(tag, hash, &compressed_blob_size, nullptr, PAYLOAD_READ_RAW_FOSSILIZE_DB_BIT) ||
+			    !input_db->read_entry(tag, hash, &uncompressed_blob_size, nullptr, 0))
+			{
+				LOGE("Failed to query blob size.\n");
+				return EXIT_FAILURE;
+			}
+			compressed_total_size += compressed_blob_size;
+			uncompressed_total_size += uncompressed_blob_size;
+			printf("%016" PRIx64 " %u compressed bytes, %u uncompressed bytes\n", hash,
+			       unsigned(compressed_blob_size), unsigned(uncompressed_blob_size));
+		}
+		else
+			printf("%016" PRIx64 "\n", hash);
+	}
+
+	if (log_size)
+	{
+		printf("Total size (compressed): %" PRIu64 " bytes.\n", compressed_total_size);
+		printf("Total size (uncompressed): %" PRIu64 " bytes.\n", uncompressed_total_size);
 	}
 }
