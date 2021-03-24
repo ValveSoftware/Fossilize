@@ -2427,7 +2427,6 @@ static void print_help()
 #define EXTRA_OPTIONS \
 	"\t[--slave-process]\n" \
 	"\t[--master-process]\n" \
-	"\t[--timeout <seconds>]\n" \
 	"\t[--progress]\n" \
 	"\t[--quiet-slave]\n" \
 	"\t[--shm-name <name>]\n\t[--shm-mutex-name <name>]\n" \
@@ -2436,7 +2435,6 @@ static void print_help()
 #define EXTRA_OPTIONS \
 	"\t[--slave-process]\n" \
 	"\t[--master-process]\n" \
-	"\t[--timeout <seconds>]\n" \
 	"\t[--progress]\n" \
 	"\t[--quiet-slave]\n" \
 	"\t[--shmem-fd <fd>]\n" \
@@ -2613,7 +2611,7 @@ static int run_progress_process(const VulkanDevice::Options &device_opts,
                                 const ThreadedReplayer::Options &replayer_opts,
                                 const vector<const char *> &databases,
                                 const char *whitelist, uint32_t whitelist_mask,
-                                int timeout, bool log_memory)
+                                bool log_memory)
 {
 	ExternalReplayer::Options opts = {};
 	opts.on_disk_pipeline_cache = replayer_opts.on_disk_pipeline_cache_path.empty() ?
@@ -2661,23 +2659,8 @@ static int run_progress_process(const VulkanDevice::Options &device_opts,
 		return EXIT_FAILURE;
 	}
 
-	bool has_killed = false;
-	auto start_time = std::chrono::steady_clock::now();
-
 	for (;;)
 	{
-		if (!has_killed && timeout > 0)
-		{
-			auto current_time = std::chrono::steady_clock::now();
-			auto delta = current_time - start_time;
-			if (std::chrono::duration_cast<std::chrono::seconds>(delta).count() >= timeout)
-			{
-				LOGE("Killing process due to timeout.\n");
-				replayer.kill();
-				has_killed = true;
-			}
-		}
-
 		std::this_thread::sleep_for(std::chrono::milliseconds(100));
 		ExternalReplayer::Progress progress = {};
 
@@ -3291,7 +3274,6 @@ int main(int argc, char *argv[])
 	bool slave_process = false;
 	bool quiet_slave = false;
 	bool progress = false;
-	int timeout = -1;
 
 #ifdef _WIN32
 	const char *shm_name = nullptr;
@@ -3368,7 +3350,6 @@ int main(int argc, char *argv[])
 	cbs.add("--quiet-slave", [&](CLIParser &) { quiet_slave = true; });
 	cbs.add("--master-process", [&](CLIParser &) { master_process = true; });
 	cbs.add("--slave-process", [&](CLIParser &) { slave_process = true; });
-	cbs.add("--timeout", [&](CLIParser &parser) { timeout = parser.next_uint(); });
 	cbs.add("--progress", [&](CLIParser &) { progress = true; });
 
 #ifdef _WIN32
@@ -3452,7 +3433,7 @@ int main(int argc, char *argv[])
 #ifndef NO_ROBUST_REPLAYER
 	if (progress)
 	{
-		ret = run_progress_process(opts, replayer_opts, databases, whitelist_path, whitelist_mask, timeout, log_memory);
+		ret = run_progress_process(opts, replayer_opts, databases, whitelist_path, whitelist_mask, log_memory);
 	}
 	else if (master_process)
 	{
