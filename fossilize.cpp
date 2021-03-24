@@ -244,7 +244,7 @@ struct StateRecorder::Impl
 	std::unordered_map<Hash, VkShaderModuleCreateInfo *> shader_modules;
 	std::unordered_map<Hash, VkGraphicsPipelineCreateInfo *> graphics_pipelines;
 	std::unordered_map<Hash, VkComputePipelineCreateInfo *> compute_pipelines;
-	std::unordered_map<Hash, VkRenderPassCreateInfo *> render_passes;
+	std::unordered_map<Hash, void *> render_passes;
 	std::unordered_map<Hash, VkSamplerCreateInfo *> samplers;
 
 	std::unordered_map<VkDescriptorSetLayout, Hash> descriptor_set_layout_to_hash;
@@ -326,6 +326,7 @@ struct StateRecorder::Impl
 	bool serialize_descriptor_set_layout(Hash hash, const VkDescriptorSetLayoutCreateInfo &create_info, std::vector<uint8_t> &blob) const FOSSILIZE_WARN_UNUSED;
 	bool serialize_pipeline_layout(Hash hash, const VkPipelineLayoutCreateInfo &create_info, std::vector<uint8_t> &blob) const FOSSILIZE_WARN_UNUSED;
 	bool serialize_render_pass(Hash hash, const VkRenderPassCreateInfo &create_info, std::vector<uint8_t> &blob) const FOSSILIZE_WARN_UNUSED;
+	bool serialize_render_pass2(Hash hash, const VkRenderPassCreateInfo2 &create_info, std::vector<uint8_t> &blob) const FOSSILIZE_WARN_UNUSED;
 	bool serialize_shader_module(Hash hash, const VkShaderModuleCreateInfo &create_info, std::vector<uint8_t> &blob, ScratchAllocator &allocator) const FOSSILIZE_WARN_UNUSED;
 	bool serialize_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo &create_info, std::vector<uint8_t> &blob) const FOSSILIZE_WARN_UNUSED;
 	bool serialize_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo &create_info, std::vector<uint8_t> &blob) const FOSSILIZE_WARN_UNUSED;
@@ -4420,7 +4421,8 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 		if (!record_item.create_info)
 			break;
 
-		switch (reinterpret_cast<VkBaseInStructure *>(record_item.create_info)->sType)
+		VkStructureType record_type = reinterpret_cast<VkBaseInStructure *>(record_item.create_info)->sType;
+		switch (record_type)
 		{
 		case VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO:
 		{
@@ -4464,12 +4466,23 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 		}
 
 		case VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO:
+		case VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2:
 		{
-			auto *create_info = reinterpret_cast<VkRenderPassCreateInfo *>(record_item.create_info);
+			VkRenderPassCreateInfo *create_info = nullptr;
+			VkRenderPassCreateInfo2 *create_info2 = nullptr;
+			if (record_type == VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2)
+				create_info2 = reinterpret_cast<VkRenderPassCreateInfo2 *>(record_item.create_info);
+			else
+				create_info = reinterpret_cast<VkRenderPassCreateInfo *>(record_item.create_info);
+
 			auto hash = record_item.custom_hash;
 			if (hash == 0)
-				if (!Hashing::compute_hash_render_pass(*create_info, &hash))
+			{
+				if (create_info && !Hashing::compute_hash_render_pass(*create_info, &hash))
 					break;
+				if (create_info2 && !Hashing::compute_hash_render_pass2(*create_info2, &hash))
+					break;
+			}
 
 			render_pass_to_hash[api_object_cast<VkRenderPass>(record_item.handle)] = hash;
 
@@ -4482,7 +4495,8 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 
 					if (!database_iface->has_entry(RESOURCE_RENDER_PASS, hash))
 					{
-						if (serialize_render_pass(hash, *create_info, blob))
+						if ((create_info && serialize_render_pass(hash, *create_info, blob)) ||
+						    (create_info && serialize_render_pass2(hash, *create_info2, blob)))
 						{
 							database_iface->write_entry(RESOURCE_RENDER_PASS, hash, blob.data(), blob.size(),
 							                            payload_flags);
@@ -4496,9 +4510,18 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 				// Retain for combined serialize() later.
 				if (!render_passes.count(hash))
 				{
-					VkRenderPassCreateInfo *create_info_copy = nullptr;
-					if (copy_render_pass(create_info, allocator, &create_info_copy))
-						render_passes[hash] = create_info_copy;
+					if (create_info)
+					{
+						VkRenderPassCreateInfo *create_info_copy = nullptr;
+						if (copy_render_pass(create_info, allocator, &create_info_copy))
+							render_passes[hash] = create_info_copy;
+					}
+					else if (create_info2)
+					{
+						VkRenderPassCreateInfo2 *create_info_copy = nullptr;
+						if (copy_render_pass2(create_info2, allocator, &create_info_copy))
+							render_passes[hash] = create_info_copy;
+					}
 				}
 			}
 			break;
@@ -5338,6 +5361,151 @@ static bool json_value(const VkRenderPassCreateInfo& pass, Allocator& alloc, Val
 }
 
 template <typename Allocator>
+static bool json_value(const VkRenderPassCreateInfo2 &pass, Allocator &alloc, Value *out_value)
+{
+	Value json_object(kObjectType);
+	json_object.AddMember("flags", pass.flags, alloc);
+
+	Value deps(kArrayType);
+	Value subpasses(kArrayType);
+	Value attachments(kArrayType);
+
+	if (pass.pDependencies)
+	{
+		for (uint32_t i = 0; i < pass.dependencyCount; i++)
+		{
+			auto &d = pass.pDependencies[i];
+			Value dep(kObjectType);
+			dep.AddMember("dependencyFlags", d.dependencyFlags, alloc);
+			dep.AddMember("dstAccessMask", d.dstAccessMask, alloc);
+			dep.AddMember("srcAccessMask", d.srcAccessMask, alloc);
+			dep.AddMember("dstStageMask", d.dstStageMask, alloc);
+			dep.AddMember("srcStageMask", d.srcStageMask, alloc);
+			dep.AddMember("dstSubpass", d.dstSubpass, alloc);
+			dep.AddMember("srcSubpass", d.srcSubpass, alloc);
+			dep.AddMember("viewOffset", d.viewOffset, alloc);
+			if (!pnext_chain_add_json_value(dep, d, alloc))
+				return false;
+			deps.PushBack(dep, alloc);
+		}
+		json_object.AddMember("dependencies", deps, alloc);
+	}
+
+	if (pass.pAttachments)
+	{
+		for (uint32_t i = 0; i < pass.attachmentCount; i++)
+		{
+			auto &a = pass.pAttachments[i];
+			Value att(kObjectType);
+
+			att.AddMember("flags", a.flags, alloc);
+			att.AddMember("format", a.format, alloc);
+			att.AddMember("finalLayout", a.finalLayout, alloc);
+			att.AddMember("initialLayout", a.initialLayout, alloc);
+			att.AddMember("loadOp", a.loadOp, alloc);
+			att.AddMember("storeOp", a.storeOp, alloc);
+			att.AddMember("samples", a.samples, alloc);
+			att.AddMember("stencilLoadOp", a.stencilLoadOp, alloc);
+			att.AddMember("stencilStoreOp", a.stencilStoreOp, alloc);
+			if (!pnext_chain_add_json_value(att, a, alloc))
+				return false;
+			attachments.PushBack(att, alloc);
+		}
+		json_object.AddMember("attachments", attachments, alloc);
+	}
+
+	for (uint32_t i = 0; i < pass.subpassCount; i++)
+	{
+		auto &sub = pass.pSubpasses[i];
+		Value p(kObjectType);
+		p.AddMember("flags", sub.flags, alloc);
+		p.AddMember("pipelineBindPoint", sub.pipelineBindPoint, alloc);
+		p.AddMember("viewMask", sub.viewMask, alloc);
+
+		if (sub.pPreserveAttachments)
+		{
+			Value preserves(kArrayType);
+			for (uint32_t j = 0; j < sub.preserveAttachmentCount; j++)
+				preserves.PushBack(sub.pPreserveAttachments[j], alloc);
+			p.AddMember("preserveAttachments", preserves, alloc);
+		}
+
+		if (sub.pInputAttachments)
+		{
+			Value inputs(kArrayType);
+			for (uint32_t j = 0; j < sub.inputAttachmentCount; j++)
+			{
+				Value input(kObjectType);
+				auto &ia = sub.pInputAttachments[j];
+				input.AddMember("attachment", ia.attachment, alloc);
+				input.AddMember("layout", ia.layout, alloc);
+				input.AddMember("aspectMask", ia.aspectMask, alloc);
+				if (!pnext_chain_add_json_value(input, ia, alloc))
+					return false;
+				inputs.PushBack(input, alloc);
+			}
+			p.AddMember("inputAttachments", inputs, alloc);
+		}
+
+		if (sub.pColorAttachments)
+		{
+			Value colors(kArrayType);
+			for (uint32_t j = 0; j < sub.colorAttachmentCount; j++)
+			{
+				Value color(kObjectType);
+				auto &c = sub.pColorAttachments[j];
+				color.AddMember("attachment", c.attachment, alloc);
+				color.AddMember("layout", c.layout, alloc);
+				color.AddMember("aspectMask", c.aspectMask, alloc);
+				if (!pnext_chain_add_json_value(color, c, alloc))
+					return false;
+				colors.PushBack(color, alloc);
+			}
+			p.AddMember("colorAttachments", colors, alloc);
+		}
+
+		if (sub.pResolveAttachments)
+		{
+			Value resolves(kArrayType);
+			for (uint32_t j = 0; j < sub.colorAttachmentCount; j++)
+			{
+				Value resolve(kObjectType);
+				auto &r = sub.pResolveAttachments[j];
+				resolve.AddMember("attachment", r.attachment, alloc);
+				resolve.AddMember("layout", r.layout, alloc);
+				resolve.AddMember("aspectMask", r.aspectMask, alloc);
+				if (!pnext_chain_add_json_value(resolve, r, alloc))
+					return false;
+				resolves.PushBack(resolve, alloc);
+			}
+			p.AddMember("resolveAttachments", resolves, alloc);
+		}
+
+		if (sub.pDepthStencilAttachment)
+		{
+			Value depth_stencil(kObjectType);
+			depth_stencil.AddMember("attachment", sub.pDepthStencilAttachment->attachment, alloc);
+			depth_stencil.AddMember("layout", sub.pDepthStencilAttachment->layout, alloc);
+			depth_stencil.AddMember("aspectMask", sub.pDepthStencilAttachment->layout, alloc);
+			if (!pnext_chain_add_json_value(depth_stencil, *sub.pDepthStencilAttachment, alloc))
+				return false;
+			p.AddMember("depthStencilAttachment", depth_stencil, alloc);
+		}
+
+		if (!pnext_chain_add_json_value(p, sub, alloc))
+			return false;
+		subpasses.PushBack(p, alloc);
+	}
+	json_object.AddMember("subpasses", subpasses, alloc);
+
+	if (!pnext_chain_add_json_value(json_object, pass, alloc))
+		return false;
+
+	*out_value = json_object;
+	return true;
+}
+
+template <typename Allocator>
 static bool json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& alloc, Value *out_value)
 {
 	Value p(kObjectType);
@@ -5793,6 +5961,31 @@ bool StateRecorder::Impl::serialize_render_pass(Hash hash, const VkRenderPassCre
 	return true;
 }
 
+bool StateRecorder::Impl::serialize_render_pass2(Hash hash, const VkRenderPassCreateInfo2 &create_info, vector<uint8_t> &blob) const
+{
+	Document doc;
+	doc.SetObject();
+	auto &alloc = doc.GetAllocator();
+
+	Value value;
+	if (!json_value(create_info, alloc, &value))
+		return false;
+
+	Value serialized_render_passes(kObjectType);
+	serialized_render_passes.AddMember(uint64_string(hash, alloc), value, alloc);
+
+	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
+	doc.AddMember("renderPasses2", serialized_render_passes, alloc);
+
+	StringBuffer buffer;
+	CustomWriter writer(buffer);
+	doc.Accept(writer);
+
+	blob.resize(buffer.GetSize());
+	memcpy(blob.data(), buffer.GetString(), buffer.GetSize());
+	return true;
+}
+
 bool StateRecorder::Impl::serialize_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo &create_info, vector<uint8_t> &blob) const
 {
 	Document doc;
@@ -5941,13 +6134,29 @@ bool StateRecorder::serialize(uint8_t **serialized_data, size_t *serialized_size
 	doc.AddMember("shaderModules", shader_modules, alloc);
 
 	Value render_passes(kObjectType);
+	Value render_passes2(kObjectType);
 	for (auto &pass : impl->render_passes)
 	{
-		if (!json_value(*pass.second, alloc, &value))
+		switch (static_cast<VkBaseInStructure *>(pass.second)->sType)
+		{
+		case VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO:
+			if (!json_value(*static_cast<VkRenderPassCreateInfo *>(pass.second), alloc, &value))
+				return false;
+			render_passes.AddMember(uint64_string(pass.first, alloc), value, alloc);
+			break;
+
+		case VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2:
+			if (!json_value(*static_cast<VkRenderPassCreateInfo2 *>(pass.second), alloc, &value))
+				return false;
+			render_passes2.AddMember(uint64_string(pass.first, alloc), value, alloc);
+			break;
+
+		default:
 			return false;
-		render_passes.AddMember(uint64_string(pass.first, alloc), value, alloc);
+		}
 	}
 	doc.AddMember("renderPasses", render_passes, alloc);
+	doc.AddMember("renderPasses2", render_passes2, alloc);
 
 	Value compute_pipelines(kObjectType);
 	for (auto &pipe : impl->compute_pipelines)
