@@ -1099,7 +1099,8 @@ bool compute_hash_compute_pipeline(const StateRecorder &recorder, const VkComput
 	return true;
 }
 
-static void hash_attachment(Hasher &h, const VkAttachmentDescription &att)
+template <typename Att>
+static void hash_attachment_base(Hasher &h, const Att &att)
 {
 	h.u32(att.flags);
 	h.u32(att.initialLayout);
@@ -1112,7 +1113,19 @@ static void hash_attachment(Hasher &h, const VkAttachmentDescription &att)
 	h.u32(att.samples);
 }
 
-static void hash_dependency(Hasher &h, const VkSubpassDependency &dep)
+static void hash_attachment(Hasher &h, const VkAttachmentDescription &att)
+{
+	hash_attachment_base(h, att);
+}
+
+static bool hash_attachment2(Hasher &h, const VkAttachmentDescription2 &att)
+{
+	hash_attachment_base(h, att);
+	return hash_pnext_chain(nullptr, h, att.pNext);
+}
+
+template <typename Dep>
+static void hash_dependency_base(Hasher &h, const Dep &dep)
 {
 	h.u32(dep.dependencyFlags);
 	h.u32(dep.dstAccessMask);
@@ -1123,7 +1136,35 @@ static void hash_dependency(Hasher &h, const VkSubpassDependency &dep)
 	h.u32(dep.dstStageMask);
 }
 
-static void hash_subpass(Hasher &h, const VkSubpassDescription &subpass)
+static void hash_dependency(Hasher &h, const VkSubpassDependency &dep)
+{
+	hash_dependency_base(h, dep);
+}
+
+static bool hash_dependency2(Hasher &h, const VkSubpassDependency2 &dep)
+{
+	hash_dependency_base(h, dep);
+	h.s32(dep.viewOffset);
+	return hash_pnext_chain(nullptr, h, dep.pNext);
+}
+
+static bool hash_reference_base(Hasher &h, const VkAttachmentReference &ref)
+{
+	h.u32(ref.attachment);
+	h.u32(ref.layout);
+	return true;
+}
+
+static bool hash_reference_base(Hasher &h, const VkAttachmentReference2 &ref)
+{
+	h.u32(ref.attachment);
+	h.u32(ref.layout);
+	h.u32(ref.aspectMask);
+	return hash_pnext_chain(nullptr, h, ref.pNext);
+}
+
+template <typename Subpass>
+static bool hash_subpass_base(Hasher &h, const Subpass &subpass)
 {
 	h.u32(subpass.flags);
 	h.u32(subpass.colorAttachmentCount);
@@ -1135,38 +1176,48 @@ static void hash_subpass(Hasher &h, const VkSubpassDescription &subpass)
 		h.u32(subpass.pPreserveAttachments[i]);
 
 	for (uint32_t i = 0; i < subpass.colorAttachmentCount; i++)
-	{
-		h.u32(subpass.pColorAttachments[i].attachment);
-		h.u32(subpass.pColorAttachments[i].layout);
-	}
-
+		if (!hash_reference_base(h, subpass.pColorAttachments[i]))
+			return false;
 	for (uint32_t i = 0; i < subpass.inputAttachmentCount; i++)
-	{
-		h.u32(subpass.pInputAttachments[i].attachment);
-		h.u32(subpass.pInputAttachments[i].layout);
-	}
+		if (!hash_reference_base(h, subpass.pInputAttachments[i]))
+			return false;
 
 	if (subpass.pResolveAttachments)
-	{
 		for (uint32_t i = 0; i < subpass.colorAttachmentCount; i++)
-		{
-			h.u32(subpass.pResolveAttachments[i].attachment);
-			h.u32(subpass.pResolveAttachments[i].layout);
-		}
-	}
+			if (!hash_reference_base(h, subpass.pResolveAttachments[i]))
+				return false;
 
 	if (subpass.pDepthStencilAttachment)
 	{
-		h.u32(subpass.pDepthStencilAttachment->attachment);
-		h.u32(subpass.pDepthStencilAttachment->layout);
+		if (!hash_reference_base(h, *subpass.pDepthStencilAttachment))
+			return false;
 	}
 	else
 		h.u32(0);
+
+	return true;
+}
+
+static void hash_subpass(Hasher &h, const VkSubpassDescription &subpass)
+{
+	hash_subpass_base(h, subpass);
+}
+
+static bool hash_subpass2(Hasher &h, const VkSubpassDescription2 &subpass)
+{
+	if (!hash_subpass_base(h, subpass))
+		return false;
+	h.u32(subpass.viewMask);
+	return hash_pnext_chain(nullptr, h, subpass.pNext);
 }
 
 bool compute_hash_render_pass(const VkRenderPassCreateInfo &create_info, Hash *out_hash)
 {
 	Hasher h;
+
+	// Conditionally branch to remain hash compatible.
+	if (create_info.flags != 0)
+		h.u32(create_info.flags);
 
 	h.u32(create_info.attachmentCount);
 	h.u32(create_info.dependencyCount);
@@ -1189,6 +1240,48 @@ bool compute_hash_render_pass(const VkRenderPassCreateInfo &create_info, Hash *o
 		auto &subpass = create_info.pSubpasses[i];
 		hash_subpass(h, subpass);
 	}
+
+	if (!hash_pnext_chain(nullptr, h, create_info.pNext))
+		return false;
+
+	*out_hash = h.get();
+	return true;
+}
+
+bool compute_hash_render_pass2(const VkRenderPassCreateInfo2 &create_info, Hash *out_hash)
+{
+	Hasher h;
+
+	h.u32(create_info.flags);
+	h.u32(create_info.attachmentCount);
+	h.u32(create_info.dependencyCount);
+	h.u32(create_info.subpassCount);
+	h.u32(create_info.correlatedViewMaskCount);
+	h.u32(2);
+
+	for (uint32_t i = 0; i < create_info.attachmentCount; i++)
+	{
+		auto &att = create_info.pAttachments[i];
+		if (!hash_attachment2(h, att))
+			return false;
+	}
+
+	for (uint32_t i = 0; i < create_info.dependencyCount; i++)
+	{
+		auto &dep = create_info.pDependencies[i];
+		if (!hash_dependency2(h, dep))
+			return false;
+	}
+
+	for (uint32_t i = 0; i < create_info.subpassCount; i++)
+	{
+		auto &subpass = create_info.pSubpasses[i];
+		if (!hash_subpass2(h, subpass))
+			return false;
+	}
+
+	for (uint32_t i = 0; i < create_info.correlatedViewMaskCount; i++)
+		h.u32(create_info.pCorrelatedViewMasks[i]);
 
 	if (!hash_pnext_chain(nullptr, h, create_info.pNext))
 		return false;

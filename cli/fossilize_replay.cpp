@@ -1566,6 +1566,24 @@ struct ThreadedReplayer : StateCreatorInterface
 		return true;
 	}
 
+	bool enqueue_create_render_pass2(Hash index, const VkRenderPassCreateInfo2 *create_info, VkRenderPass *render_pass) override
+	{
+		if (!device->get_feature_filter().render_pass2_is_supported(create_info))
+		{
+			LOGW("Render pass %016" PRIx64 " is not supported. Skipping.\n", index);
+			return false;
+		}
+
+		// Playback in-order.
+		if (vkCreateRenderPass2KHR(device->get_device(), create_info, nullptr, render_pass) != VK_SUCCESS)
+		{
+			LOGE("Creating render pass %0" PRIX64 " Failed!\n", index);
+			return false;
+		}
+		render_passes[index] = *render_pass;
+		return true;
+	}
+
 	bool enqueue_create_shader_module(Hash hash, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module) override
 	{
 		*module = VK_NULL_HANDLE;

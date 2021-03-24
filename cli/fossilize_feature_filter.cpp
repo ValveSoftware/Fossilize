@@ -135,6 +135,7 @@ struct FeatureFilter::Impl
 	bool pipeline_layout_is_supported(const VkPipelineLayoutCreateInfo *info) const;
 	bool shader_module_is_supported(const VkShaderModuleCreateInfo *info) const;
 	bool render_pass_is_supported(const VkRenderPassCreateInfo *info) const;
+	bool render_pass2_is_supported(const VkRenderPassCreateInfo2 *info) const;
 	bool graphics_pipeline_is_supported(const VkGraphicsPipelineCreateInfo *info) const;
 	bool compute_pipeline_is_supported(const VkComputePipelineCreateInfo *info) const;
 
@@ -1130,6 +1131,12 @@ bool FeatureFilter::Impl::render_pass_is_supported(const VkRenderPassCreateInfo 
 	return pnext_chain_is_supported(info->pNext);
 }
 
+bool FeatureFilter::Impl::render_pass2_is_supported(const VkRenderPassCreateInfo2 *) const
+{
+	// TODO
+	return false;
+}
+
 bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelineCreateInfo *info) const
 {
 	if (null_device)
@@ -1304,6 +1311,11 @@ bool FeatureFilter::shader_module_is_supported(const VkShaderModuleCreateInfo *i
 bool FeatureFilter::render_pass_is_supported(const VkRenderPassCreateInfo *info) const
 {
 	return impl->render_pass_is_supported(info);
+}
+
+bool FeatureFilter::render_pass2_is_supported(const VkRenderPassCreateInfo2 *info) const
+{
+	return impl->render_pass2_is_supported(info);
 }
 
 bool FeatureFilter::graphics_pipeline_is_supported(const VkGraphicsPipelineCreateInfo *info) const

@@ -485,6 +485,14 @@ create_render_pass(VkDevice, const VkRenderPassCreateInfo *, const VkAllocationC
 	return VK_SUCCESS;
 }
 
+static VKAPI_ATTR VkResult VKAPI_CALL
+create_render_pass2(VkDevice, const VkRenderPassCreateInfo2 *, const VkAllocationCallbacks *,
+                    VkRenderPass *pass)
+{
+	*pass = allocate_dummy<VkRenderPass>(1024);
+	return VK_SUCCESS;
+}
+
 static VKAPI_ATTR void VKAPI_CALL
 destroy_render_pass(VkDevice, VkRenderPass pass, const VkAllocationCallbacks *)
 {
@@ -569,6 +577,8 @@ void VulkanDevice::init_null_device()
 	vkCreatePipelineLayout = create_pipeline_layout;
 	vkDestroyPipelineLayout = destroy_pipeline_layout;
 	vkCreateRenderPass = create_render_pass;
+	vkCreateRenderPass2 = create_render_pass2;
+	vkCreateRenderPass2KHR = create_render_pass2;
 	vkDestroyRenderPass = destroy_render_pass;
 	vkCreateShaderModule = create_shader_module;
 	vkDestroyShaderModule = destroy_shader_module;

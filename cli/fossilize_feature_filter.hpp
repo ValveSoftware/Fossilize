@@ -102,6 +102,7 @@ public:
 	bool pipeline_layout_is_supported(const VkPipelineLayoutCreateInfo *info) const;
 	bool shader_module_is_supported(const VkShaderModuleCreateInfo *info) const;
 	bool render_pass_is_supported(const VkRenderPassCreateInfo *info) const;
+	bool render_pass2_is_supported(const VkRenderPassCreateInfo2 *info) const;
 	bool graphics_pipeline_is_supported(const VkGraphicsPipelineCreateInfo *info) const;
 	bool compute_pipeline_is_supported(const VkComputePipelineCreateInfo *info) const;
 
