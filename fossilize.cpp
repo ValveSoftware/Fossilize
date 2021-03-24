@@ -5123,6 +5123,19 @@ static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *o
 	return true;
 }
 
+template <typename T, typename Allocator>
+static bool pnext_chain_add_json_value(Value &base, const T &t, Allocator &alloc)
+{
+	if (t.pNext)
+	{
+		Value nexts;
+		if (!pnext_chain_json_value(t.pNext, alloc, &nexts))
+			return false;
+		base.AddMember("pNext", nexts, alloc);
+	}
+	return true;
+}
+
 template <typename Allocator>
 static bool json_value(const VkComputePipelineCreateInfo& pipe, Allocator& alloc, Value *out_value)
 {
@@ -5157,14 +5170,8 @@ static bool json_value(const VkComputePipelineCreateInfo& pipe, Allocator& alloc
 		stage.AddMember("specializationInfo", spec, alloc);
 	}
 
-	if (pipe.stage.pNext)
-	{
-		Value nexts;
-		if (!pnext_chain_json_value(pipe.stage.pNext, alloc, &nexts))
-			return false;
-		stage.AddMember("pNext", nexts, alloc);
-	}
-
+	if (!pnext_chain_add_json_value(stage, pipe.stage, alloc))
+		return false;
 	p.AddMember("stage", stage, alloc);
 
 	*out_value = p;
@@ -5197,13 +5204,8 @@ static bool json_value(const VkDescriptorSetLayoutCreateInfo& layout, Allocator&
 	}
 	l.AddMember("bindings", bindings, alloc);
 
-	if (layout.pNext)
-	{
-		Value nexts;
-		if (!pnext_chain_json_value(layout.pNext, alloc, &nexts))
-			return false;
-		l.AddMember("pNext", nexts, alloc);
-	}
+	if (!pnext_chain_add_json_value(l, layout, alloc))
+		return false;
 
 	*out_value = l;
 	return true;
@@ -5328,13 +5330,8 @@ static bool json_value(const VkRenderPassCreateInfo& pass, Allocator& alloc, Val
 	}
 	json_object.AddMember("subpasses", subpasses, alloc);
 
-	if (pass.pNext)
-	{
-		Value nexts;
-		if (!pnext_chain_json_value(pass.pNext, alloc, &nexts))
-			return false;
-		json_object.AddMember("pNext", nexts, alloc);
-	}
+	if (!pnext_chain_add_json_value(json_object, pass, alloc))
+		return false;
 
 	*out_value = json_object;
 	return true;
@@ -5356,15 +5353,8 @@ static bool json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& allo
 		Value tess(kObjectType);
 		tess.AddMember("flags", pipe.pTessellationState->flags, alloc);
 		tess.AddMember("patchControlPoints", pipe.pTessellationState->patchControlPoints, alloc);
-
-		if (pipe.pTessellationState->pNext)
-		{
-			Value nexts;
-			if (!pnext_chain_json_value(pipe.pTessellationState->pNext, alloc, &nexts))
-				return false;
-			tess.AddMember("pNext", nexts, alloc);
-		}
-
+		if (!pnext_chain_add_json_value(tess, *pipe.pTessellationState, alloc))
+			return false;
 		p.AddMember("tessellationState", tess, alloc);
 	}
 
@@ -5431,15 +5421,8 @@ static bool json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& allo
 		}
 		vi.AddMember("attributes", attribs, alloc);
 		vi.AddMember("bindings", bindings, alloc);
-
-		if (pipe.pVertexInputState->pNext)
-		{
-			Value nexts;
-			if (!pnext_chain_json_value(pipe.pVertexInputState->pNext, alloc, &nexts))
-				return false;
-			vi.AddMember("pNext", nexts, alloc);
-		}
-
+		if (!pnext_chain_add_json_value(vi, *pipe.pVertexInputState, alloc))
+			return false;
 		p.AddMember("vertexInputState", vi, alloc);
 	}
 
@@ -5457,15 +5440,8 @@ static bool json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& allo
 		rs.AddMember("frontFace", pipe.pRasterizationState->frontFace, alloc);
 		rs.AddMember("lineWidth", pipe.pRasterizationState->lineWidth, alloc);
 		rs.AddMember("cullMode", pipe.pRasterizationState->cullMode, alloc);
-
-		if (pipe.pRasterizationState->pNext)
-		{
-			Value nexts;
-			if (!pnext_chain_json_value(pipe.pRasterizationState->pNext, alloc, &nexts))
-				return false;
-			rs.AddMember("pNext", nexts, alloc);
-		}
-
+		if (!pnext_chain_add_json_value(rs, *pipe.pRasterizationState, alloc))
+			return false;
 		p.AddMember("rasterizationState", rs, alloc);
 	}
 
@@ -5504,15 +5480,8 @@ static bool json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& allo
 			attachments.PushBack(att, alloc);
 		}
 		cb.AddMember("attachments", attachments, alloc);
-
-		if (pipe.pColorBlendState->pNext)
-		{
-			Value nexts;
-			if (!pnext_chain_json_value(pipe.pColorBlendState->pNext, alloc, &nexts))
-				return false;
-			cb.AddMember("pNext", nexts, alloc);
-		}
-
+		if (!pnext_chain_add_json_value(cb, *pipe.pColorBlendState, alloc))
+			return false;
 		p.AddMember("colorBlendState", cb, alloc);
 	}
 
@@ -5616,14 +5585,8 @@ static bool json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& allo
 			stage.AddMember("specializationInfo", spec, alloc);
 		}
 
-		if (s.pNext)
-		{
-			Value nexts;
-			if (!pnext_chain_json_value(s.pNext, alloc, &nexts))
-				return false;
-			stage.AddMember("pNext", nexts, alloc);
-		}
-
+		if (!pnext_chain_add_json_value(stage, s, alloc))
+			return false;
 		stages.PushBack(stage, alloc);
 	}
 	p.AddMember("stages", stages, alloc);
