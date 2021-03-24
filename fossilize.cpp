@@ -272,6 +272,8 @@ struct StateRecorder::Impl
 	                  VkSamplerCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
 	bool copy_render_pass(const VkRenderPassCreateInfo *create_info, ScratchAllocator &alloc,
 	                      VkRenderPassCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
+	bool copy_render_pass2(const VkRenderPassCreateInfo2 *create_info, ScratchAllocator &alloc,
+	                       VkRenderPassCreateInfo2 **out_info) FOSSILIZE_WARN_UNUSED;
 	bool copy_application_info(const VkApplicationInfo *app_info, ScratchAllocator &alloc, VkApplicationInfo **out_info) FOSSILIZE_WARN_UNUSED;
 	bool copy_physical_device_features(const VkPhysicalDeviceFeatures2 *pdf, ScratchAllocator &alloc, VkPhysicalDeviceFeatures2 **out_features) FOSSILIZE_WARN_UNUSED;
 
@@ -341,6 +343,8 @@ struct StateRecorder::Impl
 	template <typename T>
 	T *copy(const T *src, size_t count, ScratchAllocator &alloc);
 	bool copy_pnext_chain(const void *pNext, ScratchAllocator &alloc, const void **out_pnext) FOSSILIZE_WARN_UNUSED;
+	template <typename T>
+	bool copy_pnext_chains(const T *ts, uint32_t count, ScratchAllocator &alloc);
 };
 
 // reinterpret_cast does not work reliably on MSVC 2013 for Vulkan objects.
@@ -3169,6 +3173,15 @@ void *StateRecorder::Impl::copy_pnext_struct(
 	return copy(create_info, 1, alloc);
 }
 
+template <typename T>
+bool StateRecorder::Impl::copy_pnext_chains(const T *ts, uint32_t count, ScratchAllocator &alloc)
+{
+	for (uint32_t i = 0; i < count; i++)
+		if (!copy_pnext_chain(ts[i].pNext, alloc, &const_cast<T&>(ts[i]).pNext))
+			return false;
+	return true;
+}
+
 bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &alloc, const void **out_pnext)
 {
 	VkBaseInStructure new_pnext = {};
@@ -3555,6 +3568,27 @@ bool StateRecorder::record_render_pass(VkRenderPass render_pass, const VkRenderP
 
 		VkRenderPassCreateInfo *new_info = nullptr;
 		if (!impl->copy_render_pass(&create_info, impl->temp_allocator, &new_info))
+			return false;
+
+		impl->record_queue.push({api_object_cast<uint64_t>(render_pass), new_info, custom_hash});
+		impl->record_cv.notify_one();
+	}
+
+	// Thread is not running, drain the queue ourselves.
+	if (!impl->worker_thread.joinable())
+		impl->record_task(this, false);
+
+	return true;
+}
+
+bool StateRecorder::record_render_pass2(VkRenderPass render_pass, const VkRenderPassCreateInfo2 &create_info,
+                                        Hash custom_hash)
+{
+	{
+		std::lock_guard<std::mutex> lock(impl->record_lock);
+
+		VkRenderPassCreateInfo2 *new_info = nullptr;
+		if (!impl->copy_render_pass2(&create_info, impl->temp_allocator, &new_info))
 			return false;
 
 		impl->record_queue.push({api_object_cast<uint64_t>(render_pass), new_info, custom_hash});
@@ -4043,6 +4077,53 @@ bool StateRecorder::Impl::copy_render_pass(const VkRenderPassCreateInfo *create_
 			sub.pInputAttachments = copy(sub.pInputAttachments, sub.inputAttachmentCount, alloc);
 		if (sub.pPreserveAttachments)
 			sub.pPreserveAttachments = copy(sub.pPreserveAttachments, sub.preserveAttachmentCount, alloc);
+	}
+
+	if (!copy_pnext_chain(create_info->pNext, alloc, &info->pNext))
+		return false;
+
+	*out_create_info = info;
+	return true;
+}
+
+bool StateRecorder::Impl::copy_render_pass2(const VkRenderPassCreateInfo2 *create_info, ScratchAllocator &alloc,
+                                            VkRenderPassCreateInfo2 **out_create_info)
+{
+	auto *info = copy(create_info, 1, alloc);
+	info->pAttachments = copy(info->pAttachments, info->attachmentCount, alloc);
+	info->pSubpasses = copy(info->pSubpasses, info->subpassCount, alloc);
+	info->pDependencies = copy(info->pDependencies, info->dependencyCount, alloc);
+	info->pCorrelatedViewMasks = copy(info->pCorrelatedViewMasks, info->correlatedViewMaskCount, alloc);
+
+	if (info->pAttachments && !copy_pnext_chains(info->pAttachments, info->attachmentCount, alloc))
+		return false;
+	if (info->pSubpasses && !copy_pnext_chains(info->pSubpasses, info->subpassCount, alloc))
+		return false;
+	if (info->pDependencies && !copy_pnext_chains(info->pDependencies, info->dependencyCount, alloc))
+		return false;
+
+	for (uint32_t i = 0; i < info->subpassCount; i++)
+	{
+		auto &sub = const_cast<VkSubpassDescription2 &>(info->pSubpasses[i]);
+		if (sub.pDepthStencilAttachment)
+			sub.pDepthStencilAttachment = copy(sub.pDepthStencilAttachment, 1, alloc);
+		if (sub.pColorAttachments)
+			sub.pColorAttachments = copy(sub.pColorAttachments, sub.colorAttachmentCount, alloc);
+		if (sub.pResolveAttachments)
+			sub.pResolveAttachments = copy(sub.pResolveAttachments, sub.colorAttachmentCount, alloc);
+		if (sub.pInputAttachments)
+			sub.pInputAttachments = copy(sub.pInputAttachments, sub.inputAttachmentCount, alloc);
+		if (sub.pPreserveAttachments)
+			sub.pPreserveAttachments = copy(sub.pPreserveAttachments, sub.preserveAttachmentCount, alloc);
+
+		if (sub.pColorAttachments && !copy_pnext_chains(sub.pColorAttachments, sub.colorAttachmentCount, alloc))
+			return false;
+		if (sub.pInputAttachments && !copy_pnext_chains(sub.pInputAttachments, sub.inputAttachmentCount, alloc))
+			return false;
+		if (sub.pResolveAttachments && !copy_pnext_chains(sub.pResolveAttachments, sub.colorAttachmentCount, alloc))
+			return false;
+		if (sub.pDepthStencilAttachment && !copy_pnext_chains(sub.pDepthStencilAttachment, 1, alloc))
+			return false;
 	}
 
 	if (!copy_pnext_chain(create_info->pNext, alloc, &info->pNext))
