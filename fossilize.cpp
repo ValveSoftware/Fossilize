@@ -1708,24 +1708,27 @@ bool StateReplayer::Impl::parse_samplers(StateCreatorInterface &iface, const Val
 	return true;
 }
 
+template <typename Desc>
+static void parse_render_pass_attachments_base(Desc &desc, const Value &obj)
+{
+	desc.flags = obj["flags"].GetUint();
+	desc.finalLayout = static_cast<VkImageLayout>(obj["finalLayout"].GetUint());
+	desc.initialLayout = static_cast<VkImageLayout>(obj["initialLayout"].GetUint());
+	desc.format = static_cast<VkFormat>(obj["format"].GetUint());
+	desc.loadOp = static_cast<VkAttachmentLoadOp>(obj["loadOp"].GetUint());
+	desc.storeOp = static_cast<VkAttachmentStoreOp>(obj["storeOp"].GetUint());
+	desc.stencilLoadOp = static_cast<VkAttachmentLoadOp>(obj["stencilLoadOp"].GetUint());
+	desc.stencilStoreOp = static_cast<VkAttachmentStoreOp>(obj["stencilStoreOp"].GetUint());
+	desc.samples = static_cast<VkSampleCountFlagBits>(obj["samples"].GetUint());
+}
+
 bool StateReplayer::Impl::parse_render_pass_attachments(const Value &attachments, const VkAttachmentDescription **out_attachments)
 {
 	auto *infos = allocator.allocate_n_cleared<VkAttachmentDescription>(attachments.Size());
 	auto *ret = infos;
 
 	for (auto itr = attachments.Begin(); itr != attachments.End(); ++itr, infos++)
-	{
-		auto &obj = *itr;
-		infos->flags = obj["flags"].GetUint();
-		infos->finalLayout = static_cast<VkImageLayout>(obj["finalLayout"].GetUint());
-		infos->initialLayout = static_cast<VkImageLayout>(obj["initialLayout"].GetUint());
-		infos->format = static_cast<VkFormat>(obj["format"].GetUint());
-		infos->loadOp = static_cast<VkAttachmentLoadOp>(obj["loadOp"].GetUint());
-		infos->storeOp = static_cast<VkAttachmentStoreOp>(obj["storeOp"].GetUint());
-		infos->stencilLoadOp = static_cast<VkAttachmentLoadOp>(obj["stencilLoadOp"].GetUint());
-		infos->stencilStoreOp = static_cast<VkAttachmentStoreOp>(obj["stencilStoreOp"].GetUint());
-		infos->samples = static_cast<VkSampleCountFlagBits>(obj["samples"].GetUint());
-	}
+		parse_render_pass_attachments_base(*infos, *itr);
 
 	*out_attachments = ret;
 	return true;
@@ -1740,15 +1743,7 @@ bool StateReplayer::Impl::parse_render_pass_attachments2(const Value &attachment
 	{
 		auto &obj = *itr;
 		infos->sType = VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2;
-		infos->flags = obj["flags"].GetUint();
-		infos->finalLayout = static_cast<VkImageLayout>(obj["finalLayout"].GetUint());
-		infos->initialLayout = static_cast<VkImageLayout>(obj["initialLayout"].GetUint());
-		infos->format = static_cast<VkFormat>(obj["format"].GetUint());
-		infos->loadOp = static_cast<VkAttachmentLoadOp>(obj["loadOp"].GetUint());
-		infos->storeOp = static_cast<VkAttachmentStoreOp>(obj["storeOp"].GetUint());
-		infos->stencilLoadOp = static_cast<VkAttachmentLoadOp>(obj["stencilLoadOp"].GetUint());
-		infos->stencilStoreOp = static_cast<VkAttachmentStoreOp>(obj["stencilStoreOp"].GetUint());
-		infos->samples = static_cast<VkSampleCountFlagBits>(obj["samples"].GetUint());
+		parse_render_pass_attachments_base(*infos, *itr);
 		if (obj.HasMember("pNext"))
 			if (!parse_pnext_chain(obj["pNext"], &infos->pNext))
 				return false;
@@ -1756,6 +1751,18 @@ bool StateReplayer::Impl::parse_render_pass_attachments2(const Value &attachment
 
 	*out_attachments = ret;
 	return true;
+}
+
+template <typename Dep>
+static void parse_render_pass_dependencies_base(Dep &dep, const Value &obj)
+{
+	dep.dependencyFlags = obj["dependencyFlags"].GetUint();
+	dep.dstAccessMask = obj["dstAccessMask"].GetUint();
+	dep.srcAccessMask = obj["srcAccessMask"].GetUint();
+	dep.dstStageMask = obj["dstStageMask"].GetUint();
+	dep.srcStageMask = obj["srcStageMask"].GetUint();
+	dep.srcSubpass = obj["srcSubpass"].GetUint();
+	dep.dstSubpass = obj["dstSubpass"].GetUint();
 }
 
 bool StateReplayer::Impl::parse_render_pass_dependencies(const Value &dependencies, const VkSubpassDependency **out_deps)
@@ -1766,13 +1773,7 @@ bool StateReplayer::Impl::parse_render_pass_dependencies(const Value &dependenci
 	for (auto itr = dependencies.Begin(); itr != dependencies.End(); ++itr, infos++)
 	{
 		auto &obj = *itr;
-		infos->dependencyFlags = obj["dependencyFlags"].GetUint();
-		infos->dstAccessMask = obj["dstAccessMask"].GetUint();
-		infos->srcAccessMask = obj["srcAccessMask"].GetUint();
-		infos->dstStageMask = obj["dstStageMask"].GetUint();
-		infos->srcStageMask = obj["srcStageMask"].GetUint();
-		infos->srcSubpass = obj["srcSubpass"].GetUint();
-		infos->dstSubpass = obj["dstSubpass"].GetUint();
+		parse_render_pass_dependencies_base(*infos, obj);
 	}
 
 	*out_deps = ret;
@@ -1788,13 +1789,7 @@ bool StateReplayer::Impl::parse_render_pass_dependencies2(const Value &dependenc
 	{
 		auto &obj = *itr;
 		infos->sType = VK_STRUCTURE_TYPE_SUBPASS_DEPENDENCY_2;
-		infos->dependencyFlags = obj["dependencyFlags"].GetUint();
-		infos->dstAccessMask = obj["dstAccessMask"].GetUint();
-		infos->srcAccessMask = obj["srcAccessMask"].GetUint();
-		infos->dstStageMask = obj["dstStageMask"].GetUint();
-		infos->srcStageMask = obj["srcStageMask"].GetUint();
-		infos->srcSubpass = obj["srcSubpass"].GetUint();
-		infos->dstSubpass = obj["dstSubpass"].GetUint();
+		parse_render_pass_dependencies_base(*infos, obj);
 		infos->viewOffset = obj["viewOffset"].GetInt();
 		if (obj.HasMember("pNext"))
 			if (!parse_pnext_chain(obj["pNext"], &infos->pNext))
@@ -1805,12 +1800,17 @@ bool StateReplayer::Impl::parse_render_pass_dependencies2(const Value &dependenc
 	return true;
 }
 
+template <typename Ref>
+static void parse_attachment_base(Ref &ref, const Value &value)
+{
+	ref.attachment = value["attachment"].GetUint();
+	ref.layout = static_cast<VkImageLayout>(value["layout"].GetUint());
+}
+
 bool StateReplayer::Impl::parse_attachment(const Value &value, const VkAttachmentReference **out_reference)
 {
 	auto *ret = allocator.allocate_cleared<VkAttachmentReference>();
-	ret->attachment = value["attachment"].GetUint();
-	ret->layout = static_cast<VkImageLayout>(value["layout"].GetUint());
-
+	parse_attachment_base(*ret, value);
 	*out_reference = ret;
 	return true;
 }
@@ -1819,8 +1819,7 @@ bool StateReplayer::Impl::parse_attachment2(const Value &value, const VkAttachme
 {
 	auto *ret = allocator.allocate_cleared<VkAttachmentReference2>();
 	ret->sType = VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2;
-	ret->attachment = value["attachment"].GetUint();
-	ret->layout = static_cast<VkImageLayout>(value["layout"].GetUint());
+	parse_attachment_base(*ret, value);
 	ret->aspectMask = value["aspectMask"].GetUint();
 
 	if (value.HasMember("pNext"))
@@ -1839,8 +1838,7 @@ bool StateReplayer::Impl::parse_attachments(const Value &attachments, const VkAt
 	for (auto itr = attachments.Begin(); itr != attachments.End(); ++itr, refs++)
 	{
 		auto &value = *itr;
-		refs->attachment = value["attachment"].GetUint();
-		refs->layout = static_cast<VkImageLayout>(value["layout"].GetUint());
+		parse_attachment_base(*refs, value);
 	}
 
 	*out_references = ret;
@@ -1856,9 +1854,9 @@ bool StateReplayer::Impl::parse_attachments2(const Value &attachments, const VkA
 	{
 		auto &value = *itr;
 		refs->sType = VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2;
-		refs->attachment = value["attachment"].GetUint();
-		refs->layout = static_cast<VkImageLayout>(value["layout"].GetUint());
+		parse_attachment_base(*refs, value);
 		refs->aspectMask = value["aspectMask"].GetUint();
+
 		if (value.HasMember("pNext"))
 			if (!parse_pnext_chain(value["pNext"], &refs->pNext))
 				return false;
