@@ -121,6 +121,18 @@ struct ReplayInterface : StateCreatorInterface
 		return recorder.record_render_pass(*render_pass, *create_info);
 	}
 
+	bool enqueue_create_render_pass2(Hash hash, const VkRenderPassCreateInfo2 *create_info, VkRenderPass *render_pass) override
+	{
+		Hash recorded_hash;
+		if (!Hashing::compute_hash_render_pass2(*create_info, &recorded_hash))
+			return false;
+		if (recorded_hash != hash)
+			return false;
+
+		*render_pass = fake_handle<VkRenderPass>(hash);
+		return recorder.record_render_pass2(*render_pass, *create_info);
+	}
+
 	bool enqueue_create_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
 		Hash recorded_hash;
@@ -301,12 +313,103 @@ static void record_shader_modules(StateRecorder &recorder)
 		abort();
 }
 
+static void record_render_passes2(StateRecorder &recorder)
+{
+	VkRenderPassCreateInfo2 pass = { VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2 };
+
+	VkSubpassDependency2 deps[2] = {};
+	VkSubpassDescription2 subpasses[2] = {};
+	VkAttachmentDescription2 att[2] = {};
+
+	static const uint32_t correlated_view_masks[] = { 1, 4, 2 };
+	pass.correlatedViewMaskCount = 3;
+	pass.pCorrelatedViewMasks = correlated_view_masks;
+
+	pass.flags = 10;
+	pass.attachmentCount = 2;
+	pass.pAttachments = att;
+	pass.dependencyCount = 2;
+	pass.pDependencies = deps;
+	pass.subpassCount = 1;
+	pass.pSubpasses = subpasses;
+
+	deps[0].sType = VK_STRUCTURE_TYPE_SUBPASS_DEPENDENCY_2;
+	deps[0].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+	deps[0].dstAccessMask = 49;
+	deps[0].srcAccessMask = 34;
+	deps[0].dstStageMask = 199;
+	deps[0].srcStageMask = 10;
+	deps[0].srcSubpass = 9;
+	deps[0].dstSubpass = 19;
+	deps[0].viewOffset = -4;
+	deps[1].dependencyFlags = 19;
+	deps[1].dstAccessMask = 490;
+	deps[1].srcAccessMask = 340;
+	deps[1].dstStageMask = 1990;
+	deps[1].srcStageMask = 100;
+	deps[1].srcSubpass = 90;
+	deps[1].dstSubpass = 190;
+	deps[1].viewOffset = 6;
+
+	att[0].sType = VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2;
+	att[0].flags = 40;
+	att[0].format = VK_FORMAT_R16G16_SFLOAT;
+	att[0].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+	att[0].initialLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+	att[0].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+	att[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+	att[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+	att[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE;
+	att[0].samples = VK_SAMPLE_COUNT_16_BIT;
+
+	static const uint32_t preserves[4] = { 9, 4, 2, 3 };
+	static const VkAttachmentReference2 inputs[2] = {
+		{ VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2, nullptr, 3, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 5 },
+		{ VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2, nullptr, 9, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 6 }
+	};
+	static const VkAttachmentReference2 colors[2] = {
+		{ VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2, nullptr, 8, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 10 },
+		{ VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2, nullptr, 1, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 13 }
+	};
+	static const VkAttachmentReference2 resolves[2] = {
+		{ VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2, nullptr, 1, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 20 },
+		{ VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2, nullptr, 3, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 30 }
+	};
+	static const VkAttachmentReference2 ds = {
+		VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2, nullptr, 0, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, 40
+	};
+	subpasses[0].sType = VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_2;
+	subpasses[0].preserveAttachmentCount = 4;
+	subpasses[0].pPreserveAttachments = preserves;
+	subpasses[0].inputAttachmentCount = 2;
+	subpasses[0].pInputAttachments = inputs;
+	subpasses[0].colorAttachmentCount = 2;
+	subpasses[0].pColorAttachments = colors;
+	subpasses[0].pipelineBindPoint = VK_PIPELINE_BIND_POINT_COMPUTE;
+	subpasses[0].pDepthStencilAttachment = &ds;
+	subpasses[0].pResolveAttachments = resolves;
+	subpasses[0].viewMask = 0xf;
+
+	subpasses[1].sType = VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_2;
+	subpasses[1].inputAttachmentCount = 1;
+	subpasses[1].pInputAttachments = inputs;
+	subpasses[1].colorAttachmentCount = 2;
+	subpasses[1].pColorAttachments = colors;
+	subpasses[1].pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+	subpasses[1].viewMask = 0x7;
+
+	if (!recorder.record_render_pass2(fake_handle<VkRenderPass>(40000), pass))
+		abort();
+}
+
 static void record_render_passes(StateRecorder &recorder)
 {
 	VkRenderPassCreateInfo pass = { VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
 	VkSubpassDependency deps[2] = {};
 	VkSubpassDescription subpasses[2] = {};
 	VkAttachmentDescription att[2] = {};
+
+	pass.flags = 8;
 
 	deps[0].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
 	deps[0].dstAccessMask = 49;
@@ -323,6 +426,7 @@ static void record_render_passes(StateRecorder &recorder)
 	deps[1].srcSubpass = 90;
 	deps[1].dstSubpass = 190;
 
+	att[0].flags = 40;
 	att[0].format = VK_FORMAT_R16G16_SFLOAT;
 	att[0].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 	att[0].initialLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
@@ -1668,6 +1772,7 @@ int main()
 		record_pipeline_layouts(recorder);
 		record_shader_modules(recorder);
 		record_render_passes(recorder);
+		record_render_passes2(recorder);
 		record_compute_pipelines(recorder);
 		record_graphics_pipelines(recorder);
 
