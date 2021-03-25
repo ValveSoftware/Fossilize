@@ -461,6 +461,20 @@ bool compute_hash_sampler(const VkSamplerCreateInfo &sampler, Hash *out_hash)
 
 static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const void *pNext) FOSSILIZE_WARN_UNUSED;
 
+static bool validate_pnext_chain(const void *pNext, const VkStructureType *expected, uint32_t count)
+{
+	while (pNext != nullptr)
+	{
+		auto *pin = static_cast<const VkBaseInStructure *>(pNext);
+		auto sType = pin->sType;
+		if (std::find(expected, expected + count, sType) == expected + count)
+			return false;
+		pNext = pin->pNext;
+	}
+
+	return true;
+}
+
 bool compute_hash_descriptor_set_layout(const StateRecorder &recorder, const VkDescriptorSetLayoutCreateInfo &layout, Hash *out_hash)
 {
 	Hasher h;
@@ -659,6 +673,71 @@ static void hash_pnext_struct(const StateRecorder *,
 	}
 }
 
+static void hash_pnext_struct(const StateRecorder *,
+                              Hasher &h,
+                              const VkAttachmentDescriptionStencilLayoutKHR &info)
+{
+	h.u32(info.stencilInitialLayout);
+	h.u32(info.stencilFinalLayout);
+}
+
+static bool hash_pnext_struct(const StateRecorder *,
+                              Hasher &h,
+                              const VkFragmentShadingRateAttachmentInfoKHR &info)
+{
+	if (info.pFragmentShadingRateAttachment)
+	{
+		h.u32(info.pFragmentShadingRateAttachment->attachment);
+		h.u32(info.pFragmentShadingRateAttachment->layout);
+		h.u32(info.pFragmentShadingRateAttachment->aspectMask);
+		h.u32(info.shadingRateAttachmentTexelSize.width);
+		h.u32(info.shadingRateAttachmentTexelSize.height);
+
+		// Avoid potential stack overflow on intentionally broken input.
+		// It is also meaningless, since the only pNext we can consider here
+		// is stencil layout.
+		if (info.pFragmentShadingRateAttachment->pNext)
+			return false;
+	}
+	else
+		h.u32(0);
+
+	return true;
+}
+
+static bool hash_pnext_struct(const StateRecorder *recorder,
+                              Hasher &h,
+                              const VkSubpassDescriptionDepthStencilResolve &info)
+{
+	if (info.pDepthStencilResolveAttachment)
+	{
+		h.u32(info.depthResolveMode);
+		h.u32(info.stencilResolveMode);
+
+		h.u32(info.pDepthStencilResolveAttachment->attachment);
+		h.u32(info.pDepthStencilResolveAttachment->layout);
+		h.u32(info.pDepthStencilResolveAttachment->aspectMask);
+
+		// Ensures we cannot get a recursive cycle.
+		const VkStructureType expected = VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_STENCIL_LAYOUT;
+		if (!validate_pnext_chain(info.pDepthStencilResolveAttachment->pNext, &expected, 1))
+			return false;
+		if (!hash_pnext_chain(recorder, h, info.pDepthStencilResolveAttachment->pNext))
+			return false;
+	}
+	else
+		h.u32(0);
+
+	return true;
+}
+
+static void hash_pnext_struct(const StateRecorder *,
+                              Hasher &h,
+                              const VkAttachmentReferenceStencilLayoutKHR &info)
+{
+	h.u32(info.stencilLayout);
+}
+
 static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const void *pNext)
 {
 	while (pNext != nullptr)
@@ -710,6 +789,24 @@ static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const voi
 
 		case VK_STRUCTURE_TYPE_MUTABLE_DESCRIPTOR_TYPE_CREATE_INFO_VALVE:
 			hash_pnext_struct(recorder, h, *static_cast<const VkMutableDescriptorTypeCreateInfoVALVE *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_STENCIL_LAYOUT_KHR:
+			hash_pnext_struct(recorder, h, *static_cast<const VkAttachmentDescriptionStencilLayoutKHR *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_FRAGMENT_SHADING_RATE_ATTACHMENT_INFO_KHR:
+			if (!hash_pnext_struct(recorder, h, *static_cast<const VkFragmentShadingRateAttachmentInfoKHR *>(pNext)))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_DEPTH_STENCIL_RESOLVE:
+			if (!hash_pnext_struct(recorder, h, *static_cast<const VkSubpassDescriptionDepthStencilResolve *>(pNext)))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_STENCIL_LAYOUT_KHR:
+			hash_pnext_struct(recorder, h, *static_cast<const VkAttachmentReferenceStencilLayoutKHR *>(pNext));
 			break;
 
 		default:
