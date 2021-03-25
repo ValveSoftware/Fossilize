@@ -5370,6 +5370,14 @@ static bool json_value(const VkRenderPassCreateInfo2 &pass, Allocator &alloc, Va
 	Value subpasses(kArrayType);
 	Value attachments(kArrayType);
 
+	if (pass.pCorrelatedViewMasks)
+	{
+		Value view_masks(kArrayType);
+		for (uint32_t i = 0; i < pass.correlatedViewMaskCount; i++)
+			view_masks.PushBack(pass.pCorrelatedViewMasks[i], alloc);
+		json_object.AddMember("correlatedViewMasks", view_masks, alloc);
+	}
+
 	if (pass.pDependencies)
 	{
 		for (uint32_t i = 0; i < pass.dependencyCount; i++)
