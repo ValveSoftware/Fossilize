@@ -5701,7 +5701,7 @@ static bool json_value(const VkRenderPassCreateInfo2 &pass, Allocator &alloc, Va
 			Value depth_stencil(kObjectType);
 			depth_stencil.AddMember("attachment", sub.pDepthStencilAttachment->attachment, alloc);
 			depth_stencil.AddMember("layout", sub.pDepthStencilAttachment->layout, alloc);
-			depth_stencil.AddMember("aspectMask", sub.pDepthStencilAttachment->layout, alloc);
+			depth_stencil.AddMember("aspectMask", sub.pDepthStencilAttachment->aspectMask, alloc);
 			if (!pnext_chain_add_json_value(depth_stencil, *sub.pDepthStencilAttachment, alloc))
 				return false;
 			p.AddMember("depthStencilAttachment", depth_stencil, alloc);
