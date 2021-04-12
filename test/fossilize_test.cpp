@@ -321,6 +321,11 @@ static void record_render_passes2(StateRecorder &recorder)
 	VkSubpassDescription2 subpasses[2] = {};
 	VkAttachmentDescription2 att[2] = {};
 
+	const VkAttachmentReference2 attachment_ref_shading_rate = {
+		VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2, nullptr,
+		4, VK_IMAGE_LAYOUT_FRAGMENT_SHADING_RATE_ATTACHMENT_OPTIMAL_KHR, 0
+	};
+
 	VkAttachmentDescriptionStencilLayoutKHR attachment_desc_stencil_layout =
 			{ VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_STENCIL_LAYOUT };
 	attachment_desc_stencil_layout.stencilInitialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -330,7 +335,7 @@ static void record_render_passes2(StateRecorder &recorder)
 			{ VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_STENCIL_LAYOUT };
 	attachment_ref_stencil_layout.stencilLayout = VK_IMAGE_LAYOUT_STENCIL_ATTACHMENT_OPTIMAL;
 
-	VkAttachmentReference2 ds_resolve_ref = {
+	const VkAttachmentReference2 ds_resolve_ref = {
 		VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2, &attachment_ref_stencil_layout,
 		3, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, 0,
 	};
@@ -340,6 +345,13 @@ static void record_render_passes2(StateRecorder &recorder)
 	ds_resolve.depthResolveMode = VK_RESOLVE_MODE_MAX_BIT;
 	ds_resolve.stencilResolveMode = VK_RESOLVE_MODE_MIN_BIT;
 	ds_resolve.pDepthStencilResolveAttachment = &ds_resolve_ref;
+
+	VkFragmentShadingRateAttachmentInfoKHR shading_rate_info =
+			{ VK_STRUCTURE_TYPE_FRAGMENT_SHADING_RATE_ATTACHMENT_INFO_KHR };
+	shading_rate_info.pFragmentShadingRateAttachment = &attachment_ref_shading_rate;
+	shading_rate_info.shadingRateAttachmentTexelSize.width = 8;
+	shading_rate_info.shadingRateAttachmentTexelSize.height = 16;
+	ds_resolve.pNext = &shading_rate_info;
 
 	static const uint32_t correlated_view_masks[] = { 1, 4, 2 };
 	pass.correlatedViewMaskCount = 3;

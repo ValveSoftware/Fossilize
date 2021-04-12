@@ -220,6 +220,7 @@ struct StateReplayer::Impl
 	bool parse_attachment_description_stencil_layout(const Value &state, VkAttachmentDescriptionStencilLayout **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_attachment_reference_stencil_layout(const Value &state, VkAttachmentReferenceStencilLayout **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_subpass_description_depth_stencil_resolve(const Value &state, VkSubpassDescriptionDepthStencilResolve **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_fragment_shading_rate_attachment_info(const Value &state, VkFragmentShadingRateAttachmentInfoKHR **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_uints(const Value &attachments, const uint32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	bool parse_sints(const Value &attachments, const int32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	const char *duplicate_string(const char *str, size_t len);
@@ -315,6 +316,8 @@ struct StateRecorder::Impl
 	void *copy_pnext_struct(const VkAttachmentReferenceStencilLayout *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkSubpassDescriptionDepthStencilResolve *create_info,
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkFragmentShadingRateAttachmentInfoKHR *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 
 	bool remap_sampler_handle(VkSampler sampler, VkSampler *out_sampler) const FOSSILIZE_WARN_UNUSED;
@@ -3068,6 +3071,24 @@ bool StateReplayer::Impl::parse_subpass_description_depth_stencil_resolve(const 
 	return true;
 }
 
+bool StateReplayer::Impl::parse_fragment_shading_rate_attachment_info(const Value &state,
+                                                                      VkFragmentShadingRateAttachmentInfoKHR **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkFragmentShadingRateAttachmentInfoKHR>();
+	*out_info = info;
+
+	info->shadingRateAttachmentTexelSize.width = state["shadingRateAttachmentTexelSize"]["width"].GetUint();
+	info->shadingRateAttachmentTexelSize.height = state["shadingRateAttachmentTexelSize"]["height"].GetUint();
+
+	if (state.HasMember("fragmentShadingRateAttachment"))
+	{
+		if (!parse_attachment2(state["fragmentShadingRateAttachment"], &info->pFragmentShadingRateAttachment))
+			return false;
+	}
+
+	return true;
+}
+
 bool StateReplayer::Impl::parse_mutable_descriptor_type(const Value &state,
                                                         VkMutableDescriptorTypeCreateInfoVALVE **out_info)
 {
@@ -3270,6 +3291,15 @@ bool StateReplayer::Impl::parse_pnext_chain(const Value &pnext, const void **out
 			if (!parse_subpass_description_depth_stencil_resolve(next, &resolve))
 				return false;
 			new_struct = reinterpret_cast<VkBaseInStructure *>(resolve);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_FRAGMENT_SHADING_RATE_ATTACHMENT_INFO_KHR:
+		{
+			VkFragmentShadingRateAttachmentInfoKHR *rate = nullptr;
+			if (!parse_fragment_shading_rate_attachment_info(next, &rate))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(rate);
 			break;
 		}
 
@@ -3578,6 +3608,21 @@ void *StateRecorder::Impl::copy_pnext_struct(const VkSubpassDescriptionDepthSten
 	return resolve;
 }
 
+void *StateRecorder::Impl::copy_pnext_struct(const VkFragmentShadingRateAttachmentInfoKHR *create_info,
+                                             ScratchAllocator &alloc)
+{
+	auto *resolve = copy(create_info, 1, alloc);
+	if (resolve->pFragmentShadingRateAttachment)
+	{
+		auto *att = copy(resolve->pFragmentShadingRateAttachment, 1, alloc);
+		if (!copy_pnext_chain(att->pNext, alloc, &att->pNext))
+			return nullptr;
+		resolve->pFragmentShadingRateAttachment = att;
+	}
+
+	return resolve;
+}
+
 template <typename T>
 bool StateRecorder::Impl::copy_pnext_chains(const T *ts, uint32_t count, ScratchAllocator &alloc)
 {
@@ -3696,6 +3741,16 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 			if (!resolve)
 				return false;
 			*ppNext = resolve;
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_FRAGMENT_SHADING_RATE_ATTACHMENT_INFO_KHR:
+		{
+			auto *ci = static_cast<const VkFragmentShadingRateAttachmentInfoKHR *>(pNext);
+			auto *rate = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			if (!rate)
+				return false;
+			*ppNext = rate;
 			break;
 		}
 
@@ -5518,6 +5573,8 @@ static bool json_value(const VkAttachmentReferenceStencilLayout &create_info, Al
 
 template <typename Allocator>
 static bool json_value(const VkSubpassDescriptionDepthStencilResolve &create_info, Allocator &alloc, Value *out_value);
+template <typename Allocator>
+static bool json_value(const VkFragmentShadingRateAttachmentInfoKHR &create_info, Allocator &alloc, Value *out_value);
 
 template <typename Allocator>
 static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *out_value)
@@ -5600,6 +5657,11 @@ static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *o
 				return false;
 			break;
 
+		case VK_STRUCTURE_TYPE_FRAGMENT_SHADING_RATE_ATTACHMENT_INFO_KHR:
+			if (!json_value(*static_cast<const VkFragmentShadingRateAttachmentInfoKHR *>(pNext), alloc, &next))
+				return false;
+			break;
+
 		default:
 			log_error_pnext_chain("Unsupported pNext found, cannot hash sType.", pNext);
 			return false;
@@ -5653,6 +5715,27 @@ static bool json_value(const VkSubpassDescriptionDepthStencilResolve &create_inf
 		if (!json_value(*create_info.pDepthStencilResolveAttachment, alloc, &att))
 			return false;
 		value.AddMember("depthStencilResolveAttachment", att, alloc);
+	}
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
+static bool json_value(const VkFragmentShadingRateAttachmentInfoKHR &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+
+	Value extent(kObjectType);
+	extent.AddMember("width", create_info.shadingRateAttachmentTexelSize.width, alloc);
+	extent.AddMember("height", create_info.shadingRateAttachmentTexelSize.height, alloc);
+	value.AddMember("shadingRateAttachmentTexelSize", extent, alloc);
+	if (create_info.pFragmentShadingRateAttachment)
+	{
+		Value att;
+		if (!json_value(*create_info.pFragmentShadingRateAttachment, alloc, &att))
+			return false;
+		value.AddMember("fragmentShadingRateAttachment", att, alloc);
 	}
 	*out_value = value;
 	return true;
