@@ -5942,12 +5942,8 @@ static bool json_value(const VkRenderPassCreateInfo2 &pass, Allocator &alloc, Va
 			Value inputs(kArrayType);
 			for (uint32_t j = 0; j < sub.inputAttachmentCount; j++)
 			{
-				Value input(kObjectType);
-				auto &ia = sub.pInputAttachments[j];
-				input.AddMember("attachment", ia.attachment, alloc);
-				input.AddMember("layout", ia.layout, alloc);
-				input.AddMember("aspectMask", ia.aspectMask, alloc);
-				if (!pnext_chain_add_json_value(input, ia, alloc))
+				Value input;
+				if (!json_value(sub.pInputAttachments[j], alloc, &input))
 					return false;
 				inputs.PushBack(input, alloc);
 			}
@@ -5959,12 +5955,8 @@ static bool json_value(const VkRenderPassCreateInfo2 &pass, Allocator &alloc, Va
 			Value colors(kArrayType);
 			for (uint32_t j = 0; j < sub.colorAttachmentCount; j++)
 			{
-				Value color(kObjectType);
-				auto &c = sub.pColorAttachments[j];
-				color.AddMember("attachment", c.attachment, alloc);
-				color.AddMember("layout", c.layout, alloc);
-				color.AddMember("aspectMask", c.aspectMask, alloc);
-				if (!pnext_chain_add_json_value(color, c, alloc))
+				Value color;
+				if (!json_value(sub.pColorAttachments[j], alloc, &color))
 					return false;
 				colors.PushBack(color, alloc);
 			}
@@ -5976,12 +5968,8 @@ static bool json_value(const VkRenderPassCreateInfo2 &pass, Allocator &alloc, Va
 			Value resolves(kArrayType);
 			for (uint32_t j = 0; j < sub.colorAttachmentCount; j++)
 			{
-				Value resolve(kObjectType);
-				auto &r = sub.pResolveAttachments[j];
-				resolve.AddMember("attachment", r.attachment, alloc);
-				resolve.AddMember("layout", r.layout, alloc);
-				resolve.AddMember("aspectMask", r.aspectMask, alloc);
-				if (!pnext_chain_add_json_value(resolve, r, alloc))
+				Value resolve;
+				if (!json_value(sub.pResolveAttachments[j], alloc, &resolve))
 					return false;
 				resolves.PushBack(resolve, alloc);
 			}
@@ -5990,11 +5978,8 @@ static bool json_value(const VkRenderPassCreateInfo2 &pass, Allocator &alloc, Va
 
 		if (sub.pDepthStencilAttachment)
 		{
-			Value depth_stencil(kObjectType);
-			depth_stencil.AddMember("attachment", sub.pDepthStencilAttachment->attachment, alloc);
-			depth_stencil.AddMember("layout", sub.pDepthStencilAttachment->layout, alloc);
-			depth_stencil.AddMember("aspectMask", sub.pDepthStencilAttachment->aspectMask, alloc);
-			if (!pnext_chain_add_json_value(depth_stencil, *sub.pDepthStencilAttachment, alloc))
+			Value depth_stencil;
+			if (!json_value(*sub.pDepthStencilAttachment, alloc, &depth_stencil))
 				return false;
 			p.AddMember("depthStencilAttachment", depth_stencil, alloc);
 		}
