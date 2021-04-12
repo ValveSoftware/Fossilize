@@ -330,6 +330,17 @@ static void record_render_passes2(StateRecorder &recorder)
 			{ VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_STENCIL_LAYOUT };
 	attachment_ref_stencil_layout.stencilLayout = VK_IMAGE_LAYOUT_STENCIL_ATTACHMENT_OPTIMAL;
 
+	VkAttachmentReference2 ds_resolve_ref = {
+		VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2, &attachment_ref_stencil_layout,
+		3, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, 0,
+	};
+
+	VkSubpassDescriptionDepthStencilResolve ds_resolve =
+			{ VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_DEPTH_STENCIL_RESOLVE };
+	ds_resolve.depthResolveMode = VK_RESOLVE_MODE_MAX_BIT;
+	ds_resolve.stencilResolveMode = VK_RESOLVE_MODE_MIN_BIT;
+	ds_resolve.pDepthStencilResolveAttachment = &ds_resolve_ref;
+
 	static const uint32_t correlated_view_masks[] = { 1, 4, 2 };
 	pass.correlatedViewMaskCount = 3;
 	pass.pCorrelatedViewMasks = correlated_view_masks;
@@ -339,7 +350,7 @@ static void record_render_passes2(StateRecorder &recorder)
 	pass.pAttachments = att;
 	pass.dependencyCount = 2;
 	pass.pDependencies = deps;
-	pass.subpassCount = 1;
+	pass.subpassCount = 2;
 	pass.pSubpasses = subpasses;
 
 	deps[0].sType = VK_STRUCTURE_TYPE_SUBPASS_DEPENDENCY_2;
@@ -410,6 +421,7 @@ static void record_render_passes2(StateRecorder &recorder)
 	subpasses[1].pColorAttachments = colors;
 	subpasses[1].pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
 	subpasses[1].viewMask = 0x7;
+	subpasses[1].pNext = &ds_resolve;
 
 	if (!recorder.record_render_pass2(fake_handle<VkRenderPass>(40000), pass))
 		abort();

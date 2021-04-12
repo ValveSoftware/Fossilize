@@ -219,6 +219,7 @@ struct StateReplayer::Impl
 	bool parse_mutable_descriptor_type(const Value &state, VkMutableDescriptorTypeCreateInfoVALVE **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_attachment_description_stencil_layout(const Value &state, VkAttachmentDescriptionStencilLayout **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_attachment_reference_stencil_layout(const Value &state, VkAttachmentReferenceStencilLayout **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_subpass_description_depth_stencil_resolve(const Value &state, VkSubpassDescriptionDepthStencilResolve **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_uints(const Value &attachments, const uint32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	bool parse_sints(const Value &attachments, const int32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	const char *duplicate_string(const char *str, size_t len);
@@ -312,6 +313,8 @@ struct StateRecorder::Impl
 	void *copy_pnext_struct(const VkAttachmentDescriptionStencilLayout *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkAttachmentReferenceStencilLayout *create_info,
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkSubpassDescriptionDepthStencilResolve *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 
 	bool remap_sampler_handle(VkSampler sampler, VkSampler *out_sampler) const FOSSILIZE_WARN_UNUSED;
@@ -3047,6 +3050,24 @@ bool StateReplayer::Impl::parse_attachment_reference_stencil_layout(const Value 
 	return true;
 }
 
+bool StateReplayer::Impl::parse_subpass_description_depth_stencil_resolve(const Value &state,
+                                                                          VkSubpassDescriptionDepthStencilResolve **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkSubpassDescriptionDepthStencilResolve>();
+	*out_info = info;
+
+	info->depthResolveMode = static_cast<VkResolveModeFlagBits>(state["depthResolveMode"].GetUint());
+	info->stencilResolveMode = static_cast<VkResolveModeFlagBits>(state["stencilResolveMode"].GetUint());
+
+	if (state.HasMember("depthStencilResolveAttachment"))
+	{
+		if (!parse_attachment2(state["depthStencilResolveAttachment"], &info->pDepthStencilResolveAttachment))
+			return false;
+	}
+
+	return true;
+}
+
 bool StateReplayer::Impl::parse_mutable_descriptor_type(const Value &state,
                                                         VkMutableDescriptorTypeCreateInfoVALVE **out_info)
 {
@@ -3240,6 +3261,15 @@ bool StateReplayer::Impl::parse_pnext_chain(const Value &pnext, const void **out
 			if (!parse_attachment_reference_stencil_layout(next, &info))
 				return false;
 			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_DEPTH_STENCIL_RESOLVE:
+		{
+			VkSubpassDescriptionDepthStencilResolve *resolve = nullptr;
+			if (!parse_subpass_description_depth_stencil_resolve(next, &resolve))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(resolve);
 			break;
 		}
 
@@ -3533,6 +3563,21 @@ void *StateRecorder::Impl::copy_pnext_struct(const VkAttachmentReferenceStencilL
 	return copy(create_info, 1, alloc);
 }
 
+void *StateRecorder::Impl::copy_pnext_struct(const VkSubpassDescriptionDepthStencilResolve *create_info,
+                                             ScratchAllocator &alloc)
+{
+	auto *resolve = copy(create_info, 1, alloc);
+	if (resolve->pDepthStencilResolveAttachment)
+	{
+		auto *att = copy(resolve->pDepthStencilResolveAttachment, 1, alloc);
+		if (!copy_pnext_chain(att->pNext, alloc, &att->pNext))
+			return nullptr;
+		resolve->pDepthStencilResolveAttachment = att;
+	}
+
+	return resolve;
+}
+
 template <typename T>
 bool StateRecorder::Impl::copy_pnext_chains(const T *ts, uint32_t count, ScratchAllocator &alloc)
 {
@@ -3641,6 +3686,16 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 		{
 			auto *ci = static_cast<const VkAttachmentReferenceStencilLayout *>(pNext);
 			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_DEPTH_STENCIL_RESOLVE:
+		{
+			auto *ci = static_cast<const VkSubpassDescriptionDepthStencilResolve *>(pNext);
+			auto *resolve = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			if (!resolve)
+				return false;
+			*ppNext = resolve;
 			break;
 		}
 
@@ -5462,6 +5517,9 @@ static bool json_value(const VkAttachmentReferenceStencilLayout &create_info, Al
 }
 
 template <typename Allocator>
+static bool json_value(const VkSubpassDescriptionDepthStencilResolve &create_info, Allocator &alloc, Value *out_value);
+
+template <typename Allocator>
 static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *out_value)
 {
 	Value nexts(kArrayType);
@@ -5537,6 +5595,11 @@ static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *o
 				return false;
 			break;
 
+		case VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_DEPTH_STENCIL_RESOLVE:
+			if (!json_value(*static_cast<const VkSubpassDescriptionDepthStencilResolve *>(pNext), alloc, &next))
+				return false;
+			break;
+
 		default:
 			log_error_pnext_chain("Unsupported pNext found, cannot hash sType.", pNext);
 			return false;
@@ -5560,6 +5623,38 @@ static bool pnext_chain_add_json_value(Value &base, const T &t, Allocator &alloc
 			return false;
 		base.AddMember("pNext", nexts, alloc);
 	}
+	return true;
+}
+
+template <typename Allocator>
+static bool json_value(const VkAttachmentReference2 &att, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("attachment", att.attachment, alloc);
+	value.AddMember("layout", att.layout, alloc);
+	value.AddMember("aspectMask", att.aspectMask, alloc);
+	if (!pnext_chain_add_json_value(value, att, alloc))
+		return false;
+
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
+static bool json_value(const VkSubpassDescriptionDepthStencilResolve &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("depthResolveMode", create_info.depthResolveMode, alloc);
+	value.AddMember("stencilResolveMode", create_info.stencilResolveMode, alloc);
+	if (create_info.pDepthStencilResolveAttachment)
+	{
+		Value att;
+		if (!json_value(*create_info.pDepthStencilResolveAttachment, alloc, &att))
+			return false;
+		value.AddMember("depthStencilResolveAttachment", att, alloc);
+	}
+	*out_value = value;
 	return true;
 }
 
