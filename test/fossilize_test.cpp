@@ -321,6 +321,11 @@ static void record_render_passes2(StateRecorder &recorder)
 	VkSubpassDescription2 subpasses[2] = {};
 	VkAttachmentDescription2 att[2] = {};
 
+	VkAttachmentDescriptionStencilLayoutKHR attachment_desc_stencil_layout =
+			{ VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_STENCIL_LAYOUT };
+	attachment_desc_stencil_layout.stencilInitialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	attachment_desc_stencil_layout.stencilFinalLayout = VK_IMAGE_LAYOUT_STENCIL_ATTACHMENT_OPTIMAL;
+
 	static const uint32_t correlated_view_masks[] = { 1, 4, 2 };
 	pass.correlatedViewMaskCount = 3;
 	pass.pCorrelatedViewMasks = correlated_view_masks;
@@ -361,6 +366,10 @@ static void record_render_passes2(StateRecorder &recorder)
 	att[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
 	att[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE;
 	att[0].samples = VK_SAMPLE_COUNT_16_BIT;
+
+	att[1] = att[0];
+	att[1].format = VK_FORMAT_D32_SFLOAT_S8_UINT;
+	att[1].pNext = &attachment_desc_stencil_layout;
 
 	static const uint32_t preserves[4] = { 9, 4, 2, 3 };
 	static const VkAttachmentReference2 inputs[2] = {

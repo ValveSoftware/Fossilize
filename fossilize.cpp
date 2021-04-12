@@ -217,6 +217,7 @@ struct StateReplayer::Impl
 	bool parse_rasterization_line_state(const Value &state, VkPipelineRasterizationLineStateCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_shader_stage_required_subgroup_size(const Value &state, VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_mutable_descriptor_type(const Value &state, VkMutableDescriptorTypeCreateInfoVALVE **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_attachment_description_stencil_layout(const Value &state, VkAttachmentDescriptionStencilLayout **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_uints(const Value &attachments, const uint32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	bool parse_sints(const Value &attachments, const int32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	const char *duplicate_string(const char *str, size_t len);
@@ -306,6 +307,8 @@ struct StateRecorder::Impl
 	void *copy_pnext_struct(const VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkMutableDescriptorTypeCreateInfoVALVE *create_info,
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkAttachmentDescriptionStencilLayout *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 
 	bool remap_sampler_handle(VkSampler sampler, VkSampler *out_sampler) const FOSSILIZE_WARN_UNUSED;
@@ -3020,6 +3023,17 @@ bool StateReplayer::Impl::parse_shader_stage_required_subgroup_size(const Value 
 	return true;
 }
 
+bool StateReplayer::Impl::parse_attachment_description_stencil_layout(const Value &state,
+                                                                      VkAttachmentDescriptionStencilLayout **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkAttachmentDescriptionStencilLayout>();
+	*out_info = info;
+
+	info->stencilInitialLayout = static_cast<VkImageLayout>(state["stencilInitialLayout"].GetUint());
+	info->stencilFinalLayout = static_cast<VkImageLayout>(state["stencilFinalLayout"].GetUint());
+	return true;
+}
+
 bool StateReplayer::Impl::parse_mutable_descriptor_type(const Value &state,
                                                         VkMutableDescriptorTypeCreateInfoVALVE **out_info)
 {
@@ -3193,6 +3207,15 @@ bool StateReplayer::Impl::parse_pnext_chain(const Value &pnext, const void **out
 		{
 			VkMutableDescriptorTypeCreateInfoVALVE *info = nullptr;
 			if (!parse_mutable_descriptor_type(next, &info))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_STENCIL_LAYOUT:
+		{
+			VkAttachmentDescriptionStencilLayout *info = nullptr;
+			if (!parse_attachment_description_stencil_layout(next, &info))
 				return false;
 			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
 			break;
@@ -3476,6 +3499,12 @@ void *StateRecorder::Impl::copy_pnext_struct(
 	return copy(create_info, 1, alloc);
 }
 
+void *StateRecorder::Impl::copy_pnext_struct(const VkAttachmentDescriptionStencilLayout *create_info,
+                                             ScratchAllocator &alloc)
+{
+	return copy(create_info, 1, alloc);
+}
+
 template <typename T>
 bool StateRecorder::Impl::copy_pnext_chains(const T *ts, uint32_t count, ScratchAllocator &alloc)
 {
@@ -3569,6 +3598,13 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 		case VK_STRUCTURE_TYPE_MUTABLE_DESCRIPTOR_TYPE_CREATE_INFO_VALVE:
 		{
 			auto *ci = static_cast<const VkMutableDescriptorTypeCreateInfoVALVE *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_STENCIL_LAYOUT:
+		{
+			auto *ci = static_cast<const VkAttachmentDescriptionStencilLayout *>(pNext);
 			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
 			break;
 		}
@@ -5370,6 +5406,17 @@ static bool json_value(const VkMutableDescriptorTypeCreateInfoVALVE &create_info
 }
 
 template <typename Allocator>
+static bool json_value(const VkAttachmentDescriptionStencilLayout &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("stencilInitialLayout", create_info.stencilInitialLayout, alloc);
+	value.AddMember("stencilFinalLayout", create_info.stencilFinalLayout, alloc);
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
 static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *out_value)
 {
 	Value nexts(kArrayType);
@@ -5432,6 +5479,11 @@ static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *o
 
 		case VK_STRUCTURE_TYPE_MUTABLE_DESCRIPTOR_TYPE_CREATE_INFO_VALVE:
 			if (!json_value(*static_cast<const VkMutableDescriptorTypeCreateInfoVALVE *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_STENCIL_LAYOUT:
+			if (!json_value(*static_cast<const VkAttachmentDescriptionStencilLayout *>(pNext), alloc, &next))
 				return false;
 			break;
 
