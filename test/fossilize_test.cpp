@@ -326,6 +326,10 @@ static void record_render_passes2(StateRecorder &recorder)
 	attachment_desc_stencil_layout.stencilInitialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 	attachment_desc_stencil_layout.stencilFinalLayout = VK_IMAGE_LAYOUT_STENCIL_ATTACHMENT_OPTIMAL;
 
+	VkAttachmentReferenceStencilLayout attachment_ref_stencil_layout =
+			{ VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_STENCIL_LAYOUT };
+	attachment_ref_stencil_layout.stencilLayout = VK_IMAGE_LAYOUT_STENCIL_ATTACHMENT_OPTIMAL;
+
 	static const uint32_t correlated_view_masks[] = { 1, 4, 2 };
 	pass.correlatedViewMaskCount = 3;
 	pass.pCorrelatedViewMasks = correlated_view_masks;
@@ -385,7 +389,7 @@ static void record_render_passes2(StateRecorder &recorder)
 		{ VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2, nullptr, 3, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 30 }
 	};
 	static const VkAttachmentReference2 ds = {
-		VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2, nullptr, 0, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, 40
+		VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2, &attachment_ref_stencil_layout, 0, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, 40
 	};
 	subpasses[0].sType = VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_2;
 	subpasses[0].preserveAttachmentCount = 4;
