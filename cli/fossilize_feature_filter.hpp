@@ -80,6 +80,7 @@ struct VulkanProperties
 	VkPhysicalDeviceVertexAttributeDivisorPropertiesEXT attribute_divisor;
 	VkPhysicalDeviceFragmentShadingRatePropertiesKHR fragment_shading_rate;
 	VkPhysicalDeviceDepthStencilResolveProperties ds_resolve;
+	VkPhysicalDeviceMultiviewProperties multiview;
 };
 
 void *build_pnext_chain(VulkanProperties &properties);

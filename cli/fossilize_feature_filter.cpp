@@ -113,6 +113,7 @@ void *build_pnext_chain(VulkanProperties &props)
 	P(SUBGROUP, subgroup);
 	P(FLOAT_CONTROLS, float_control);
 	P(DEPTH_STENCIL_RESOLVE, ds_resolve);
+	P(MULTIVIEW, multiview);
 	PE(FRAGMENT_SHADING_RATE, fragment_shading_rate, KHR);
 	PE(SUBGROUP_SIZE_CONTROL, subgroup_size_control, EXT);
 	PE(INLINE_UNIFORM_BLOCK, inline_uniform_block, EXT);
@@ -144,6 +145,8 @@ struct FeatureFilter::Impl
 	bool attachment_description2_is_supported(const VkAttachmentDescription2 &desc) const;
 	bool subpass_description2_is_supported(const VkSubpassDescription2 &sub) const;
 	bool subpass_dependency2_is_supported(const VkSubpassDependency2 &dep) const;
+
+	bool multiview_mask_is_supported(uint32_t mask) const;
 
 	std::unordered_set<std::string> enabled_extensions;
 
@@ -259,6 +262,7 @@ void FeatureFilter::Impl::init_properties(const void *pNext)
 		P(SUBGROUP, subgroup);
 		P(FLOAT_CONTROLS, float_control);
 		P(DEPTH_STENCIL_RESOLVE, ds_resolve);
+		P(MULTIVIEW, multiview);
 		PE(FRAGMENT_SHADING_RATE, fragment_shading_rate, KHR);
 		PE(SUBGROUP_SIZE_CONTROL, subgroup_size_control, EXT);
 		PE(INLINE_UNIFORM_BLOCK, inline_uniform_block, EXT);
@@ -305,6 +309,14 @@ bool FeatureFilter::init_null_device()
 {
 	impl->null_device = true;
 	return true;
+}
+
+bool FeatureFilter::Impl::multiview_mask_is_supported(uint32_t mask) const
+{
+	const uint32_t allowed_mask =
+			(props.multiview.maxMultiviewViewCount >= 32 ? 0u : (1u << props.multiview.maxMultiviewViewCount)) - 1u;
+
+	return (mask & allowed_mask) == mask;
 }
 
 bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
@@ -367,9 +379,26 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 			break;
 
 		case VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO:
+		{
 			if (features.multiview.multiview == VK_FALSE)
 				return false;
+
+			auto *multiview = static_cast<const VkRenderPassMultiviewCreateInfo *>(pNext);
+
+			for (uint32_t i = 0; i < multiview->subpassCount; i++)
+			{
+				if (!multiview_mask_is_supported(multiview->pViewMasks[i]))
+					return false;
+			}
+
+			for (uint32_t i = 0; i < multiview->correlationMaskCount; i++)
+			{
+				if (!multiview_mask_is_supported(multiview->pCorrelationMasks[i]))
+					return false;
+			}
+
 			break;
+		}
 
 		case VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT:
 		{
@@ -1259,6 +1288,9 @@ bool FeatureFilter::Impl::subpass_description2_is_supported(const VkSubpassDescr
 	if (sub.pDepthStencilAttachment && !attachment_reference2_is_supported(*sub.pDepthStencilAttachment))
 		return false;
 
+	if (sub.viewMask && !multiview_mask_is_supported(sub.viewMask))
+		return false;
+
 	return true;
 }
 
@@ -1298,6 +1330,10 @@ bool FeatureFilter::Impl::render_pass2_is_supported(const VkRenderPassCreateInfo
 		if (!subpass_dependency2_is_supported(info->pDependencies[i]))
 			return false;
 	}
+
+	for (uint32_t i = 0; i < info->correlatedViewMaskCount; i++)
+		if (!multiview_mask_is_supported(info->pCorrelatedViewMasks[i]))
+			return false;
 
 	return true;
 }
