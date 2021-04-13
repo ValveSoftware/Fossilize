@@ -141,12 +141,17 @@ struct FeatureFilter::Impl
 	bool graphics_pipeline_is_supported(const VkGraphicsPipelineCreateInfo *info) const;
 	bool compute_pipeline_is_supported(const VkComputePipelineCreateInfo *info) const;
 
+	bool attachment_reference_is_supported(const VkAttachmentReference &ref) const;
 	bool attachment_reference2_is_supported(const VkAttachmentReference2 &ref) const;
+	bool attachment_description_is_supported(const VkAttachmentDescription &desc) const;
 	bool attachment_description2_is_supported(const VkAttachmentDescription2 &desc) const;
+	bool subpass_description_is_supported(const VkSubpassDescription &sub) const;
 	bool subpass_description2_is_supported(const VkSubpassDescription2 &sub) const;
+	bool subpass_dependency_is_supported(const VkSubpassDependency &dep) const;
 	bool subpass_dependency2_is_supported(const VkSubpassDependency2 &dep) const;
 
 	bool multiview_mask_is_supported(uint32_t mask) const;
+	bool image_layout_is_supported(VkImageLayout layout) const;
 
 	std::unordered_set<std::string> enabled_extensions;
 
@@ -524,6 +529,21 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 		}
 
 		case VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_STENCIL_LAYOUT:
+		{
+			if (!enabled_extensions.count(VK_KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS_EXTENSION_NAME) ||
+			    !features.separate_ds_layout.separateDepthStencilLayouts)
+			{
+				return false;
+			}
+
+			auto *layout = static_cast<const VkAttachmentDescriptionStencilLayout *>(pNext);
+			if (!image_layout_is_supported(layout->stencilInitialLayout))
+				return false;
+			if (!image_layout_is_supported(layout->stencilFinalLayout))
+				return false;
+			break;
+		}
+
 		case VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_STENCIL_LAYOUT:
 		{
 			if (!enabled_extensions.count(VK_KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS_EXTENSION_NAME) ||
@@ -532,6 +552,9 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 				return false;
 			}
 
+			auto *layout = static_cast<const VkAttachmentReferenceStencilLayout *>(pNext);
+			if (!image_layout_is_supported(layout->stencilLayout))
+				return false;
 			break;
 		}
 
@@ -1249,20 +1272,127 @@ bool FeatureFilter::Impl::render_pass_is_supported(const VkRenderPassCreateInfo 
 {
 	if (null_device)
 		return true;
-	return pnext_chain_is_supported(info->pNext);
+
+	if (!pnext_chain_is_supported(info->pNext))
+		return false;
+
+	for (uint32_t i = 0; i < info->attachmentCount; i++)
+	{
+		if (!attachment_description_is_supported(info->pAttachments[i]))
+			return false;
+	}
+
+	for (uint32_t i = 0; i < info->subpassCount; i++)
+	{
+		if (!subpass_description_is_supported(info->pSubpasses[i]))
+			return false;
+	}
+
+	for (uint32_t i = 0; i < info->dependencyCount; i++)
+	{
+		if (!subpass_dependency_is_supported(info->pDependencies[i]))
+			return false;
+	}
+
+	return true;
+}
+
+bool FeatureFilter::Impl::image_layout_is_supported(VkImageLayout layout) const
+{
+	switch (layout)
+	{
+	case VK_IMAGE_LAYOUT_UNDEFINED:
+	case VK_IMAGE_LAYOUT_GENERAL:
+	case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
+	case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
+	case VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL:
+	case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
+	case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
+	case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
+	case VK_IMAGE_LAYOUT_PREINITIALIZED:
+		return true;
+
+	case VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:
+		return enabled_extensions.count(VK_KHR_SWAPCHAIN_EXTENSION_NAME) != 0;
+
+	case VK_IMAGE_LAYOUT_SHARED_PRESENT_KHR:
+		return enabled_extensions.count(VK_KHR_SHARED_PRESENTABLE_IMAGE_EXTENSION_NAME) != 0;
+
+	case VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_STENCIL_READ_ONLY_OPTIMAL:
+	case VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_STENCIL_ATTACHMENT_OPTIMAL:
+		return enabled_extensions.count(VK_KHR_MAINTENANCE2_EXTENSION_NAME) != 0;
+
+	case VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL:
+	case VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL:
+	case VK_IMAGE_LAYOUT_STENCIL_ATTACHMENT_OPTIMAL:
+	case VK_IMAGE_LAYOUT_STENCIL_READ_ONLY_OPTIMAL:
+		return enabled_extensions.count(VK_KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS_EXTENSION_NAME) != 0 &&
+		       features.separate_ds_layout.separateDepthStencilLayouts == VK_TRUE;
+
+	case VK_IMAGE_LAYOUT_FRAGMENT_SHADING_RATE_ATTACHMENT_OPTIMAL_KHR:
+		return enabled_extensions.count(VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME) != 0 &&
+		       features.fragment_shading_rate.attachmentFragmentShadingRate == VK_TRUE;
+
+	default:
+		return false;
+	}
+}
+
+bool FeatureFilter::Impl::attachment_reference_is_supported(const VkAttachmentReference &ref) const
+{
+	if (!image_layout_is_supported(ref.layout))
+		return false;
+
+	return true;
 }
 
 bool FeatureFilter::Impl::attachment_reference2_is_supported(const VkAttachmentReference2 &ref) const
 {
 	if (!pnext_chain_is_supported(ref.pNext))
 		return false;
+	if (!image_layout_is_supported(ref.layout))
+		return false;
 
 	return true;
 }
 
-bool FeatureFilter::Impl::attachment_description2_is_supported(const VkAttachmentDescription2 &ref) const
+bool FeatureFilter::Impl::attachment_description_is_supported(const VkAttachmentDescription &desc) const
 {
-	if (!pnext_chain_is_supported(ref.pNext))
+	if (!image_layout_is_supported(desc.initialLayout))
+		return false;
+	if (!image_layout_is_supported(desc.finalLayout))
+		return false;
+
+	return true;
+}
+
+bool FeatureFilter::Impl::attachment_description2_is_supported(const VkAttachmentDescription2 &desc) const
+{
+	if (!pnext_chain_is_supported(desc.pNext))
+		return false;
+	if (!image_layout_is_supported(desc.initialLayout))
+		return false;
+	if (!image_layout_is_supported(desc.finalLayout))
+		return false;
+
+	return true;
+}
+
+bool FeatureFilter::Impl::subpass_description_is_supported(const VkSubpassDescription &sub) const
+{
+	for (uint32_t j = 0; j < sub.colorAttachmentCount; j++)
+	{
+		if (!attachment_reference_is_supported(sub.pColorAttachments[j]))
+			return false;
+		if (sub.pResolveAttachments && !attachment_reference_is_supported(sub.pResolveAttachments[j]))
+			return false;
+	}
+
+	for (uint32_t j = 0; j < sub.inputAttachmentCount; j++)
+		if (!attachment_reference_is_supported(sub.pInputAttachments[j]))
+			return false;
+
+	if (sub.pDepthStencilAttachment && !attachment_reference_is_supported(*sub.pDepthStencilAttachment))
 		return false;
 
 	return true;
@@ -1291,6 +1421,11 @@ bool FeatureFilter::Impl::subpass_description2_is_supported(const VkSubpassDescr
 	if (sub.viewMask && !multiview_mask_is_supported(sub.viewMask))
 		return false;
 
+	return true;
+}
+
+bool FeatureFilter::Impl::subpass_dependency_is_supported(const VkSubpassDependency &) const
+{
 	return true;
 }
 
