@@ -535,7 +535,7 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 
 		case VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_STENCIL_LAYOUT:
 		{
-			if (!enabled_extensions.count(VK_KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS_EXTENSION_NAME) ||
+			if ((api_version < VK_API_VERSION_1_2 && !enabled_extensions.count(VK_KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS_EXTENSION_NAME)) ||
 			    !features.separate_ds_layout.separateDepthStencilLayouts)
 			{
 				return false;
