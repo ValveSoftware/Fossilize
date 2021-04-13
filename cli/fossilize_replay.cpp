@@ -1570,7 +1570,7 @@ struct ThreadedReplayer : StateCreatorInterface
 	{
 		if (!device->get_feature_filter().render_pass2_is_supported(create_info))
 		{
-			LOGW("Render pass %016" PRIx64 " is not supported. Skipping.\n", index);
+			LOGW("Render pass (version 2) %016" PRIx64 " is not supported. Skipping.\n", index);
 			return false;
 		}
 

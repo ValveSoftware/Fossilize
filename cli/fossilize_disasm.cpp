@@ -190,6 +190,26 @@ struct DisasmReplayer : StateCreatorInterface
 		return true;
 	}
 
+	bool enqueue_create_render_pass2(Hash hash, const VkRenderPassCreateInfo2 *create_info, VkRenderPass *render_pass) override
+	{
+		if (device)
+		{
+			LOGI("Creating render pass (version 2) %0" PRIX64 "\n", hash);
+			if (vkCreateRenderPass2KHR(device->get_device(), create_info, nullptr, render_pass) != VK_SUCCESS)
+			{
+				LOGE(" ... Failed!\n");
+				return false;
+			}
+			LOGI(" ... Succeeded!\n");
+		}
+		else
+			*render_pass = fake_handle<VkRenderPass>(hash);
+
+		render_passes.push_back(*render_pass);
+		render_pass_infos.push_back(create_info);
+		return true;
+	}
+
 	bool enqueue_create_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
 		if (device)
@@ -246,7 +266,7 @@ struct DisasmReplayer : StateCreatorInterface
 	vector<const VkDescriptorSetLayoutCreateInfo *> set_layout_infos;
 	vector<const VkPipelineLayoutCreateInfo *> pipeline_layout_infos;
 	vector<const VkShaderModuleCreateInfo *> shader_module_infos;
-	vector<const VkRenderPassCreateInfo *> render_pass_infos;
+	vector<const void *> render_pass_infos;
 	vector<const VkGraphicsPipelineCreateInfo *> graphics_infos;
 	vector<const VkComputePipelineCreateInfo *> compute_infos;
 

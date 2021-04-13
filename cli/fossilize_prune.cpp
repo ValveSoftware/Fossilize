@@ -194,6 +194,12 @@ struct PruneReplayer : StateCreatorInterface
 		return true;
 	}
 
+	bool enqueue_create_render_pass2(Hash hash, const VkRenderPassCreateInfo2 *, VkRenderPass *render_pass) override
+	{
+		*render_pass = fake_handle<VkRenderPass>(hash);
+		return true;
+	}
+
 	bool filter_object(ResourceTag tag, Hash hash) const
 	{
 		bool hash_filtering = !(filter_compute.empty() && filter_graphics.empty());
