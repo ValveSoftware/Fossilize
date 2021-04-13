@@ -1308,8 +1308,6 @@ bool FeatureFilter::Impl::render_pass_is_supported(const VkRenderPassCreateInfo 
 			{
 				format_features |= VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT;
 			}
-
-			// Shading rate attachment is somewhat irrelevant to check for.
 		}
 
 		if (!attachment_description_is_supported(info->pAttachments[i], format_features))
@@ -1507,9 +1505,12 @@ bool FeatureFilter::Impl::render_pass2_is_supported(const VkRenderPassCreateInfo
 			{
 				if (info->pSubpasses[j].pColorAttachments[k].attachment == i)
 					format_features |= VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT;
+
 				if (info->pSubpasses[j].pResolveAttachments &&
 				    info->pSubpasses[j].pResolveAttachments[k].attachment == i)
+				{
 					format_features |= VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT;
+				}
 			}
 
 			for (uint32_t k = 0; k < info->pSubpasses[j].inputAttachmentCount; k++)
@@ -1518,9 +1519,27 @@ bool FeatureFilter::Impl::render_pass2_is_supported(const VkRenderPassCreateInfo
 
 			if (info->pSubpasses[j].pDepthStencilAttachment &&
 			    info->pSubpasses[j].pDepthStencilAttachment->attachment == i)
+			{
 				format_features |= VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT;
+			}
 
-			// Shading rate attachment is somewhat irrelevant to check for.
+			auto *ds_resolve = find_pnext<VkSubpassDescriptionDepthStencilResolve>(
+					info->pSubpasses[j].pNext, VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_DEPTH_STENCIL_RESOLVE);
+			if (ds_resolve &&
+			    ds_resolve->pDepthStencilResolveAttachment &&
+			    ds_resolve->pDepthStencilResolveAttachment->attachment == i)
+			{
+				format_features |= VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT;
+			}
+
+			auto *rate_attachment = find_pnext<VkFragmentShadingRateAttachmentInfoKHR>(
+					info->pSubpasses[j].pNext, VK_STRUCTURE_TYPE_FRAGMENT_SHADING_RATE_ATTACHMENT_INFO_KHR);
+			if (rate_attachment &&
+			    rate_attachment->pFragmentShadingRateAttachment &&
+			    rate_attachment->pFragmentShadingRateAttachment->attachment == i)
+			{
+				format_features |= VK_FORMAT_FEATURE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR;
+			}
 		}
 
 		if (!attachment_description2_is_supported(info->pAttachments[i], format_features))
