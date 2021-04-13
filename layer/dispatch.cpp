@@ -432,6 +432,38 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass(VkDevice device, const Vk
 	return res;
 }
 
+static VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass2(VkDevice device, const VkRenderPassCreateInfo2 *pCreateInfo,
+                                                        const VkAllocationCallbacks *pCallbacks, VkRenderPass *pRenderPass)
+{
+	auto *layer = get_device_layer(device);
+
+	// Split calls since 2 and KHR variants might not be present even if the other one is.
+	auto res = layer->getTable()->CreateRenderPass2(device, pCreateInfo, pCallbacks, pRenderPass);
+
+	if (res == VK_SUCCESS)
+	{
+		if (!layer->getRecorder().record_render_pass2(*pRenderPass, *pCreateInfo))
+			LOGW_LEVEL("Failed to record render pass, usually caused by unsupported pNext.\n");
+	}
+	return res;
+}
+
+static VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass2KHR(VkDevice device, const VkRenderPassCreateInfo2 *pCreateInfo,
+                                                           const VkAllocationCallbacks *pCallbacks, VkRenderPass *pRenderPass)
+{
+	auto *layer = get_device_layer(device);
+
+	// Split calls since 2 and KHR variants might not be present even if the other one is.
+	auto res = layer->getTable()->CreateRenderPass2KHR(device, pCreateInfo, pCallbacks, pRenderPass);
+
+	if (res == VK_SUCCESS)
+	{
+		if (!layer->getRecorder().record_render_pass2(*pRenderPass, *pCreateInfo))
+			LOGW_LEVEL("Failed to record render pass, usually caused by unsupported pNext.\n");
+	}
+	return res;
+}
+
 static PFN_vkVoidFunction interceptCoreDeviceCommand(const char *pName)
 {
 	static const struct
@@ -449,6 +481,8 @@ static PFN_vkVoidFunction interceptCoreDeviceCommand(const char *pName)
 		{ "vkCreateSampler", reinterpret_cast<PFN_vkVoidFunction>(CreateSampler) },
 		{ "vkCreateShaderModule", reinterpret_cast<PFN_vkVoidFunction>(CreateShaderModule) },
 		{ "vkCreateRenderPass", reinterpret_cast<PFN_vkVoidFunction>(CreateRenderPass) },
+		{ "vkCreateRenderPass2", reinterpret_cast<PFN_vkVoidFunction>(CreateRenderPass2) },
+		{ "vkCreateRenderPass2KHR", reinterpret_cast<PFN_vkVoidFunction>(CreateRenderPass2KHR) },
 	};
 
 	for (auto &cmd : coreDeviceCommands)
