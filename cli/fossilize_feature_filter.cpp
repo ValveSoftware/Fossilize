@@ -143,8 +143,10 @@ struct FeatureFilter::Impl
 
 	bool attachment_reference_is_supported(const VkAttachmentReference &ref) const;
 	bool attachment_reference2_is_supported(const VkAttachmentReference2 &ref) const;
-	bool attachment_description_is_supported(const VkAttachmentDescription &desc) const;
-	bool attachment_description2_is_supported(const VkAttachmentDescription2 &desc) const;
+	bool attachment_description_is_supported(const VkAttachmentDescription &desc,
+	                                         VkFormatFeatureFlags format_features) const;
+	bool attachment_description2_is_supported(const VkAttachmentDescription2 &desc,
+	                                          VkFormatFeatureFlags format_features) const;
 	bool subpass_description_is_supported(const VkSubpassDescription &sub) const;
 	bool subpass_description2_is_supported(const VkSubpassDescription2 &sub) const;
 	bool subpass_dependency_is_supported(const VkSubpassDependency &dep) const;
@@ -152,8 +154,11 @@ struct FeatureFilter::Impl
 
 	bool multiview_mask_is_supported(uint32_t mask) const;
 	bool image_layout_is_supported(VkImageLayout layout) const;
+	bool format_is_supported(VkFormat, VkFormatFeatureFlags format_features) const;
 
 	std::unordered_set<std::string> enabled_extensions;
+
+	DeviceQueryInterface *query = nullptr;
 
 	uint32_t api_version = 0;
 	VkPhysicalDeviceProperties2 props2 = {};
@@ -546,7 +551,7 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 
 		case VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_STENCIL_LAYOUT:
 		{
-			if (!enabled_extensions.count(VK_KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS_EXTENSION_NAME) ||
+			if ((api_version < VK_API_VERSION_1_2 && !enabled_extensions.count(VK_KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS_EXTENSION_NAME)) ||
 			    !features.separate_ds_layout.separateDepthStencilLayouts)
 			{
 				return false;
@@ -560,7 +565,7 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 
 		case VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_DEPTH_STENCIL_RESOLVE:
 		{
-			if (!enabled_extensions.count(VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME))
+			if (api_version < VK_API_VERSION_1_2 && !enabled_extensions.count(VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME))
 				return false;
 
 			auto *resolve = static_cast<const VkSubpassDescriptionDepthStencilResolve *>(pNext);
@@ -1278,7 +1283,31 @@ bool FeatureFilter::Impl::render_pass_is_supported(const VkRenderPassCreateInfo 
 
 	for (uint32_t i = 0; i < info->attachmentCount; i++)
 	{
-		if (!attachment_description_is_supported(info->pAttachments[i]))
+		VkFormatFeatureFlags format_features = 0;
+
+		for (uint32_t j = 0; j < info->subpassCount; j++)
+		{
+			for (uint32_t k = 0; k < info->pSubpasses[j].colorAttachmentCount; k++)
+			{
+				if (info->pSubpasses[j].pColorAttachments[k].attachment == i)
+					format_features |= VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT;
+				if (info->pSubpasses[j].pResolveAttachments &&
+				    info->pSubpasses[j].pResolveAttachments[k].attachment == i)
+					format_features |= VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT;
+			}
+
+			for (uint32_t k = 0; k < info->pSubpasses[j].inputAttachmentCount; k++)
+				if (info->pSubpasses[j].pInputAttachments[k].attachment == i)
+					format_features |= VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
+
+			if (info->pSubpasses[j].pDepthStencilAttachment &&
+			    info->pSubpasses[j].pDepthStencilAttachment->attachment == i)
+				format_features |= VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT;
+
+			// Shading rate attachment is somewhat irrelevant to check for.
+		}
+
+		if (!attachment_description_is_supported(info->pAttachments[i], format_features))
 			return false;
 	}
 
@@ -1295,6 +1324,14 @@ bool FeatureFilter::Impl::render_pass_is_supported(const VkRenderPassCreateInfo 
 	}
 
 	return true;
+}
+
+bool FeatureFilter::Impl::format_is_supported(VkFormat format, VkFormatFeatureFlags format_features) const
+{
+	if (!query)
+		return true;
+
+	return query->format_is_supported(format, format_features);
 }
 
 bool FeatureFilter::Impl::image_layout_is_supported(VkImageLayout layout) const
@@ -1320,13 +1357,14 @@ bool FeatureFilter::Impl::image_layout_is_supported(VkImageLayout layout) const
 
 	case VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_STENCIL_READ_ONLY_OPTIMAL:
 	case VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_STENCIL_ATTACHMENT_OPTIMAL:
-		return enabled_extensions.count(VK_KHR_MAINTENANCE2_EXTENSION_NAME) != 0;
+		return api_version >= VK_API_VERSION_1_1 || enabled_extensions.count(VK_KHR_MAINTENANCE2_EXTENSION_NAME) != 0;
 
 	case VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL:
 	case VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL:
 	case VK_IMAGE_LAYOUT_STENCIL_ATTACHMENT_OPTIMAL:
 	case VK_IMAGE_LAYOUT_STENCIL_READ_ONLY_OPTIMAL:
-		return enabled_extensions.count(VK_KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS_EXTENSION_NAME) != 0 &&
+		return (api_version >= VK_API_VERSION_1_2 ||
+		        enabled_extensions.count(VK_KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS_EXTENSION_NAME) != 0) &&
 		       features.separate_ds_layout.separateDepthStencilLayouts == VK_TRUE;
 
 	case VK_IMAGE_LAYOUT_FRAGMENT_SHADING_RATE_ATTACHMENT_OPTIMAL_KHR:
@@ -1356,23 +1394,29 @@ bool FeatureFilter::Impl::attachment_reference2_is_supported(const VkAttachmentR
 	return true;
 }
 
-bool FeatureFilter::Impl::attachment_description_is_supported(const VkAttachmentDescription &desc) const
+bool FeatureFilter::Impl::attachment_description_is_supported(const VkAttachmentDescription &desc,
+                                                              VkFormatFeatureFlags format_features) const
 {
 	if (!image_layout_is_supported(desc.initialLayout))
 		return false;
 	if (!image_layout_is_supported(desc.finalLayout))
 		return false;
+	if (format_features && !format_is_supported(desc.format, format_features))
+		return false;
 
 	return true;
 }
 
-bool FeatureFilter::Impl::attachment_description2_is_supported(const VkAttachmentDescription2 &desc) const
+bool FeatureFilter::Impl::attachment_description2_is_supported(const VkAttachmentDescription2 &desc,
+                                                               VkFormatFeatureFlags format_features) const
 {
 	if (!pnext_chain_is_supported(desc.pNext))
 		return false;
 	if (!image_layout_is_supported(desc.initialLayout))
 		return false;
 	if (!image_layout_is_supported(desc.finalLayout))
+		return false;
+	if (format_features && !format_is_supported(desc.format, format_features))
 		return false;
 
 	return true;
@@ -1450,7 +1494,31 @@ bool FeatureFilter::Impl::render_pass2_is_supported(const VkRenderPassCreateInfo
 
 	for (uint32_t i = 0; i < info->attachmentCount; i++)
 	{
-		if (!attachment_description2_is_supported(info->pAttachments[i]))
+		VkFormatFeatureFlags format_features = 0;
+
+		for (uint32_t j = 0; j < info->subpassCount; j++)
+		{
+			for (uint32_t k = 0; k < info->pSubpasses[j].colorAttachmentCount; k++)
+			{
+				if (info->pSubpasses[j].pColorAttachments[k].attachment == i)
+					format_features |= VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT;
+				if (info->pSubpasses[j].pResolveAttachments &&
+				    info->pSubpasses[j].pResolveAttachments[k].attachment == i)
+					format_features |= VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT;
+			}
+
+			for (uint32_t k = 0; k < info->pSubpasses[j].inputAttachmentCount; k++)
+				if (info->pSubpasses[j].pInputAttachments[k].attachment == i)
+					format_features |= VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
+
+			if (info->pSubpasses[j].pDepthStencilAttachment &&
+			    info->pSubpasses[j].pDepthStencilAttachment->attachment == i)
+				format_features |= VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT;
+
+			// Shading rate attachment is somewhat irrelevant to check for.
+		}
+
+		if (!attachment_description2_is_supported(info->pAttachments[i], format_features))
 			return false;
 	}
 
@@ -1495,6 +1563,16 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 		return false;
 	if (info->pRasterizationState && !pnext_chain_is_supported(info->pRasterizationState->pNext))
 		return false;
+
+	if (info->pVertexInputState)
+	{
+		for (uint32_t i = 0; i < info->pVertexInputState->vertexAttributeDescriptionCount; i++)
+		{
+			if (!format_is_supported(info->pVertexInputState->pVertexAttributeDescriptions[i].format,
+			                         VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT))
+				return false;
+		}
+	}
 
 	if (info->pDynamicState)
 	{
@@ -1667,5 +1745,10 @@ bool FeatureFilter::compute_pipeline_is_supported(const VkComputePipelineCreateI
 bool FeatureFilter::supports_scalar_block_layout() const
 {
 	return impl->null_device || impl->supports_scalar_block_layout;
+}
+
+void FeatureFilter::set_device_query_interface(DeviceQueryInterface *iface)
+{
+	impl->query = iface;
 }
 }

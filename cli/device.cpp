@@ -403,6 +403,8 @@ bool VulkanDevice::init_device(const Options &opts)
 		return false;
 	}
 
+	feature_filter.set_device_query_interface(this);
+
 	return true;
 }
 
@@ -426,6 +428,20 @@ void VulkanDevice::notify_validation_error()
 {
 	if (validation_callback)
 		validation_callback(validation_callback_userdata);
+}
+
+bool VulkanDevice::format_is_supported(VkFormat format, VkFormatFeatureFlags format_features)
+{
+	if (is_null_device)
+		return true;
+
+	VkFormatProperties format_props = {};
+	vkGetPhysicalDeviceFormatProperties(gpu, format, &format_props);
+	VkFormatFeatureFlags supported =
+			format_props.linearTilingFeatures |
+			format_props.optimalTilingFeatures |
+			format_props.bufferFeatures;
+	return (format_features & supported) == format_features;
 }
 
 template <typename T>
