@@ -112,6 +112,7 @@ void *build_pnext_chain(VulkanProperties &props)
 	P(DESCRIPTOR_INDEXING, descriptor_indexing);
 	P(SUBGROUP, subgroup);
 	P(FLOAT_CONTROLS, float_control);
+	P(DEPTH_STENCIL_RESOLVE, ds_resolve);
 	PE(FRAGMENT_SHADING_RATE, fragment_shading_rate, KHR);
 	PE(SUBGROUP_SIZE_CONTROL, subgroup_size_control, EXT);
 	PE(INLINE_UNIFORM_BLOCK, inline_uniform_block, EXT);
@@ -138,6 +139,11 @@ struct FeatureFilter::Impl
 	bool render_pass2_is_supported(const VkRenderPassCreateInfo2 *info) const;
 	bool graphics_pipeline_is_supported(const VkGraphicsPipelineCreateInfo *info) const;
 	bool compute_pipeline_is_supported(const VkComputePipelineCreateInfo *info) const;
+
+	bool attachment_reference2_is_supported(const VkAttachmentReference2 &ref) const;
+	bool attachment_description2_is_supported(const VkAttachmentDescription2 &desc) const;
+	bool subpass_description2_is_supported(const VkSubpassDescription2 &sub) const;
+	bool subpass_dependency2_is_supported(const VkSubpassDependency2 &dep) const;
 
 	std::unordered_set<std::string> enabled_extensions;
 
@@ -252,6 +258,7 @@ void FeatureFilter::Impl::init_properties(const void *pNext)
 		P(DESCRIPTOR_INDEXING, descriptor_indexing);
 		P(SUBGROUP, subgroup);
 		P(FLOAT_CONTROLS, float_control);
+		P(DEPTH_STENCIL_RESOLVE, ds_resolve);
 		PE(FRAGMENT_SHADING_RATE, fragment_shading_rate, KHR);
 		PE(SUBGROUP_SIZE_CONTROL, subgroup_size_control, EXT);
 		PE(INLINE_UNIFORM_BLOCK, inline_uniform_block, EXT);
@@ -483,6 +490,91 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 					}
 				}
 			}
+
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_STENCIL_LAYOUT:
+		case VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_STENCIL_LAYOUT:
+		{
+			if (!enabled_extensions.count(VK_KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS_EXTENSION_NAME) ||
+			    !features.separate_ds_layout.separateDepthStencilLayouts)
+			{
+				return false;
+			}
+
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_DEPTH_STENCIL_RESOLVE:
+		{
+			if (!enabled_extensions.count(VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME))
+				return false;
+
+			auto *resolve = static_cast<const VkSubpassDescriptionDepthStencilResolve *>(pNext);
+
+			if (!resolve->pDepthStencilResolveAttachment)
+				break;
+
+			if (!attachment_reference2_is_supported(*resolve->pDepthStencilResolveAttachment))
+				return false;
+
+			if ((props.ds_resolve.supportedDepthResolveModes & resolve->depthResolveMode) == 0)
+				return false;
+			if ((props.ds_resolve.supportedStencilResolveModes & resolve->stencilResolveMode) == 0)
+				return false;
+
+			if (resolve->depthResolveMode != resolve->stencilResolveMode)
+			{
+				bool use_zero = resolve->depthResolveMode == VK_RESOLVE_MODE_NONE ||
+				                resolve->stencilResolveMode == VK_RESOLVE_MODE_NONE;
+
+				auto cond = use_zero ?
+				            props.ds_resolve.independentResolveNone :
+				            props.ds_resolve.independentResolve;
+				if (!cond)
+					return false;
+			}
+
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_FRAGMENT_SHADING_RATE_ATTACHMENT_INFO_KHR:
+		{
+			if (!enabled_extensions.count(VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME) ||
+			    !features.fragment_shading_rate.attachmentFragmentShadingRate)
+			{
+				return false;
+			}
+
+			auto *attachment = static_cast<const VkFragmentShadingRateAttachmentInfoKHR *>(pNext);
+
+			if (!attachment->pFragmentShadingRateAttachment)
+				break;
+
+			if (!attachment_reference2_is_supported(*attachment->pFragmentShadingRateAttachment))
+				return false;
+
+			uint32_t width = attachment->shadingRateAttachmentTexelSize.width;
+			uint32_t height = attachment->shadingRateAttachmentTexelSize.height;
+
+			if (width == 0 || height == 0)
+				return false;
+
+			if (width < props.fragment_shading_rate.minFragmentShadingRateAttachmentTexelSize.width)
+				return false;
+			if (width > props.fragment_shading_rate.maxFragmentShadingRateAttachmentTexelSize.width)
+				return false;
+			if (height < props.fragment_shading_rate.minFragmentShadingRateAttachmentTexelSize.height)
+				return false;
+			if (height > props.fragment_shading_rate.maxFragmentShadingRateAttachmentTexelSize.height)
+				return false;
+
+			uint32_t higher = (std::max)(width, height);
+			uint32_t lower = (std::min)(width, height);
+			uint32_t aspect = higher / lower;
+			if (aspect > props.fragment_shading_rate.maxFragmentShadingRateAttachmentTexelSizeAspectRatio)
+				return false;
 
 			break;
 		}
@@ -1131,10 +1223,83 @@ bool FeatureFilter::Impl::render_pass_is_supported(const VkRenderPassCreateInfo 
 	return pnext_chain_is_supported(info->pNext);
 }
 
-bool FeatureFilter::Impl::render_pass2_is_supported(const VkRenderPassCreateInfo2 *) const
+bool FeatureFilter::Impl::attachment_reference2_is_supported(const VkAttachmentReference2 &ref) const
 {
-	// TODO
-	return false;
+	if (!pnext_chain_is_supported(ref.pNext))
+		return false;
+
+	return true;
+}
+
+bool FeatureFilter::Impl::attachment_description2_is_supported(const VkAttachmentDescription2 &ref) const
+{
+	if (!pnext_chain_is_supported(ref.pNext))
+		return false;
+
+	return true;
+}
+
+bool FeatureFilter::Impl::subpass_description2_is_supported(const VkSubpassDescription2 &sub) const
+{
+	if (!pnext_chain_is_supported(sub.pNext))
+		return false;
+
+	for (uint32_t j = 0; j < sub.colorAttachmentCount; j++)
+	{
+		if (!attachment_reference2_is_supported(sub.pColorAttachments[j]))
+			return false;
+		if (sub.pResolveAttachments && !attachment_reference2_is_supported(sub.pResolveAttachments[j]))
+			return false;
+	}
+
+	for (uint32_t j = 0; j < sub.inputAttachmentCount; j++)
+		if (!attachment_reference2_is_supported(sub.pInputAttachments[j]))
+			return false;
+
+	if (sub.pDepthStencilAttachment && !attachment_reference2_is_supported(*sub.pDepthStencilAttachment))
+		return false;
+
+	return true;
+}
+
+bool FeatureFilter::Impl::subpass_dependency2_is_supported(const VkSubpassDependency2 &dep) const
+{
+	if (!pnext_chain_is_supported(dep.pNext))
+		return false;
+
+	return true;
+}
+
+bool FeatureFilter::Impl::render_pass2_is_supported(const VkRenderPassCreateInfo2 *info) const
+{
+	if (null_device)
+		return true;
+
+	if (!enabled_extensions.count(VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME))
+		return false;
+
+	if (!pnext_chain_is_supported(info->pNext))
+		return false;
+
+	for (uint32_t i = 0; i < info->attachmentCount; i++)
+	{
+		if (!attachment_description2_is_supported(info->pAttachments[i]))
+			return false;
+	}
+
+	for (uint32_t i = 0; i < info->subpassCount; i++)
+	{
+		if (!subpass_description2_is_supported(info->pSubpasses[i]))
+			return false;
+	}
+
+	for (uint32_t i = 0; i < info->dependencyCount; i++)
+	{
+		if (!subpass_dependency2_is_supported(info->pDependencies[i]))
+			return false;
+	}
+
+	return true;
 }
 
 bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelineCreateInfo *info) const
