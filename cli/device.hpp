@@ -27,7 +27,7 @@
 
 namespace Fossilize
 {
-class VulkanDevice
+class VulkanDevice : public DeviceQueryInterface
 {
 public:
 	struct Options
@@ -116,5 +116,7 @@ private:
 	VulkanFeatures features = {};
 	VulkanProperties props = {};
 	FeatureFilter feature_filter;
+
+	bool format_is_supported(VkFormat format, VkFormatFeatureFlags features) override;
 };
 }

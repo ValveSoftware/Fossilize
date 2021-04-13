@@ -403,6 +403,8 @@ bool VulkanDevice::init_device(const Options &opts)
 		return false;
 	}
 
+	feature_filter.set_device_query_interface(this);
+
 	return true;
 }
 
@@ -426,6 +428,20 @@ void VulkanDevice::notify_validation_error()
 {
 	if (validation_callback)
 		validation_callback(validation_callback_userdata);
+}
+
+bool VulkanDevice::format_is_supported(VkFormat format, VkFormatFeatureFlags format_features)
+{
+	if (is_null_device)
+		return true;
+
+	VkFormatProperties format_props = {};
+	vkGetPhysicalDeviceFormatProperties(gpu, format, &format_props);
+	VkFormatFeatureFlags supported =
+			format_props.linearTilingFeatures |
+			format_props.optimalTilingFeatures |
+			format_props.bufferFeatures;
+	return (format_features & supported) == format_features;
 }
 
 template <typename T>
@@ -480,6 +496,14 @@ destroy_pipeline_layout(VkDevice, VkPipelineLayout layout, const VkAllocationCal
 static VKAPI_ATTR VkResult VKAPI_CALL
 create_render_pass(VkDevice, const VkRenderPassCreateInfo *, const VkAllocationCallbacks *,
                    VkRenderPass *pass)
+{
+	*pass = allocate_dummy<VkRenderPass>(1024);
+	return VK_SUCCESS;
+}
+
+static VKAPI_ATTR VkResult VKAPI_CALL
+create_render_pass2(VkDevice, const VkRenderPassCreateInfo2 *, const VkAllocationCallbacks *,
+                    VkRenderPass *pass)
 {
 	*pass = allocate_dummy<VkRenderPass>(1024);
 	return VK_SUCCESS;
@@ -569,6 +593,8 @@ void VulkanDevice::init_null_device()
 	vkCreatePipelineLayout = create_pipeline_layout;
 	vkDestroyPipelineLayout = destroy_pipeline_layout;
 	vkCreateRenderPass = create_render_pass;
+	vkCreateRenderPass2 = create_render_pass2;
+	vkCreateRenderPass2KHR = create_render_pass2;
 	vkDestroyRenderPass = destroy_render_pass;
 	vkCreateShaderModule = create_shader_module;
 	vkDestroyShaderModule = destroy_shader_module;

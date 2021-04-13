@@ -219,6 +219,11 @@ struct ReplayInterface : StateCreatorInterface
 		return true;
 	}
 
+	bool enqueue_create_render_pass2(Hash, const VkRenderPassCreateInfo2 *, VkRenderPass *) override
+	{
+		return true;
+	}
+
 	bool enqueue_create_compute_pipeline(Hash, const VkComputePipelineCreateInfo *, VkPipeline *) override
 	{
 		return true;

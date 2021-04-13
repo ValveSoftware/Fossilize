@@ -79,9 +79,18 @@ struct VulkanProperties
 	VkPhysicalDeviceInlineUniformBlockPropertiesEXT inline_uniform_block;
 	VkPhysicalDeviceVertexAttributeDivisorPropertiesEXT attribute_divisor;
 	VkPhysicalDeviceFragmentShadingRatePropertiesKHR fragment_shading_rate;
+	VkPhysicalDeviceDepthStencilResolveProperties ds_resolve;
+	VkPhysicalDeviceMultiviewProperties multiview;
 };
 
 void *build_pnext_chain(VulkanProperties &properties);
+
+class DeviceQueryInterface
+{
+public:
+	virtual ~DeviceQueryInterface() = default;
+	virtual bool format_is_supported(VkFormat format, VkFormatFeatureFlags features) = 0;
+};
 
 class FeatureFilter
 {
@@ -97,11 +106,18 @@ public:
 
 	bool init_null_device();
 
+	// Adds a query interface which lets the feature filter
+	// do more detailed checks.
+	// The pointer is not owned by FeatureFilter.
+	// If not present, all relevant features are assumed to return true.
+	void set_device_query_interface(DeviceQueryInterface *iface);
+
 	bool sampler_is_supported(const VkSamplerCreateInfo *info) const;
 	bool descriptor_set_layout_is_supported(const VkDescriptorSetLayoutCreateInfo *info) const;
 	bool pipeline_layout_is_supported(const VkPipelineLayoutCreateInfo *info) const;
 	bool shader_module_is_supported(const VkShaderModuleCreateInfo *info) const;
 	bool render_pass_is_supported(const VkRenderPassCreateInfo *info) const;
+	bool render_pass2_is_supported(const VkRenderPassCreateInfo2 *info) const;
 	bool graphics_pipeline_is_supported(const VkGraphicsPipelineCreateInfo *info) const;
 	bool compute_pipeline_is_supported(const VkComputePipelineCreateInfo *info) const;
 

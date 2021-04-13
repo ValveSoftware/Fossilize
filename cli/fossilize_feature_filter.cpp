@@ -112,6 +112,8 @@ void *build_pnext_chain(VulkanProperties &props)
 	P(DESCRIPTOR_INDEXING, descriptor_indexing);
 	P(SUBGROUP, subgroup);
 	P(FLOAT_CONTROLS, float_control);
+	P(DEPTH_STENCIL_RESOLVE, ds_resolve);
+	P(MULTIVIEW, multiview);
 	PE(FRAGMENT_SHADING_RATE, fragment_shading_rate, KHR);
 	PE(SUBGROUP_SIZE_CONTROL, subgroup_size_control, EXT);
 	PE(INLINE_UNIFORM_BLOCK, inline_uniform_block, EXT);
@@ -135,10 +137,28 @@ struct FeatureFilter::Impl
 	bool pipeline_layout_is_supported(const VkPipelineLayoutCreateInfo *info) const;
 	bool shader_module_is_supported(const VkShaderModuleCreateInfo *info) const;
 	bool render_pass_is_supported(const VkRenderPassCreateInfo *info) const;
+	bool render_pass2_is_supported(const VkRenderPassCreateInfo2 *info) const;
 	bool graphics_pipeline_is_supported(const VkGraphicsPipelineCreateInfo *info) const;
 	bool compute_pipeline_is_supported(const VkComputePipelineCreateInfo *info) const;
 
+	bool attachment_reference_is_supported(const VkAttachmentReference &ref) const;
+	bool attachment_reference2_is_supported(const VkAttachmentReference2 &ref) const;
+	bool attachment_description_is_supported(const VkAttachmentDescription &desc,
+	                                         VkFormatFeatureFlags format_features) const;
+	bool attachment_description2_is_supported(const VkAttachmentDescription2 &desc,
+	                                          VkFormatFeatureFlags format_features) const;
+	bool subpass_description_is_supported(const VkSubpassDescription &sub) const;
+	bool subpass_description2_is_supported(const VkSubpassDescription2 &sub) const;
+	bool subpass_dependency_is_supported(const VkSubpassDependency &dep) const;
+	bool subpass_dependency2_is_supported(const VkSubpassDependency2 &dep) const;
+
+	bool multiview_mask_is_supported(uint32_t mask) const;
+	bool image_layout_is_supported(VkImageLayout layout) const;
+	bool format_is_supported(VkFormat, VkFormatFeatureFlags format_features) const;
+
 	std::unordered_set<std::string> enabled_extensions;
+
+	DeviceQueryInterface *query = nullptr;
 
 	uint32_t api_version = 0;
 	VkPhysicalDeviceProperties2 props2 = {};
@@ -251,6 +271,8 @@ void FeatureFilter::Impl::init_properties(const void *pNext)
 		P(DESCRIPTOR_INDEXING, descriptor_indexing);
 		P(SUBGROUP, subgroup);
 		P(FLOAT_CONTROLS, float_control);
+		P(DEPTH_STENCIL_RESOLVE, ds_resolve);
+		P(MULTIVIEW, multiview);
 		PE(FRAGMENT_SHADING_RATE, fragment_shading_rate, KHR);
 		PE(SUBGROUP_SIZE_CONTROL, subgroup_size_control, EXT);
 		PE(INLINE_UNIFORM_BLOCK, inline_uniform_block, EXT);
@@ -297,6 +319,14 @@ bool FeatureFilter::init_null_device()
 {
 	impl->null_device = true;
 	return true;
+}
+
+bool FeatureFilter::Impl::multiview_mask_is_supported(uint32_t mask) const
+{
+	const uint32_t allowed_mask =
+			(props.multiview.maxMultiviewViewCount >= 32 ? 0u : (1u << props.multiview.maxMultiviewViewCount)) - 1u;
+
+	return (mask & allowed_mask) == mask;
 }
 
 bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
@@ -359,9 +389,26 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 			break;
 
 		case VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO:
+		{
 			if (features.multiview.multiview == VK_FALSE)
 				return false;
+
+			auto *multiview = static_cast<const VkRenderPassMultiviewCreateInfo *>(pNext);
+
+			for (uint32_t i = 0; i < multiview->subpassCount; i++)
+			{
+				if (!multiview_mask_is_supported(multiview->pViewMasks[i]))
+					return false;
+			}
+
+			for (uint32_t i = 0; i < multiview->correlationMaskCount; i++)
+			{
+				if (!multiview_mask_is_supported(multiview->pCorrelationMasks[i]))
+					return false;
+			}
+
 			break;
+		}
 
 		case VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT:
 		{
@@ -482,6 +529,109 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 					}
 				}
 			}
+
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_STENCIL_LAYOUT:
+		{
+			if ((api_version < VK_API_VERSION_1_2 && !enabled_extensions.count(VK_KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS_EXTENSION_NAME)) ||
+			    !features.separate_ds_layout.separateDepthStencilLayouts)
+			{
+				return false;
+			}
+
+			auto *layout = static_cast<const VkAttachmentDescriptionStencilLayout *>(pNext);
+			if (!image_layout_is_supported(layout->stencilInitialLayout))
+				return false;
+			if (!image_layout_is_supported(layout->stencilFinalLayout))
+				return false;
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_STENCIL_LAYOUT:
+		{
+			if ((api_version < VK_API_VERSION_1_2 && !enabled_extensions.count(VK_KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS_EXTENSION_NAME)) ||
+			    !features.separate_ds_layout.separateDepthStencilLayouts)
+			{
+				return false;
+			}
+
+			auto *layout = static_cast<const VkAttachmentReferenceStencilLayout *>(pNext);
+			if (!image_layout_is_supported(layout->stencilLayout))
+				return false;
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_DEPTH_STENCIL_RESOLVE:
+		{
+			if (api_version < VK_API_VERSION_1_2 && !enabled_extensions.count(VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME))
+				return false;
+
+			auto *resolve = static_cast<const VkSubpassDescriptionDepthStencilResolve *>(pNext);
+
+			if (!resolve->pDepthStencilResolveAttachment)
+				break;
+
+			if (!attachment_reference2_is_supported(*resolve->pDepthStencilResolveAttachment))
+				return false;
+
+			if ((props.ds_resolve.supportedDepthResolveModes & resolve->depthResolveMode) == 0)
+				return false;
+			if ((props.ds_resolve.supportedStencilResolveModes & resolve->stencilResolveMode) == 0)
+				return false;
+
+			if (resolve->depthResolveMode != resolve->stencilResolveMode)
+			{
+				bool use_zero = resolve->depthResolveMode == VK_RESOLVE_MODE_NONE ||
+				                resolve->stencilResolveMode == VK_RESOLVE_MODE_NONE;
+
+				auto cond = use_zero ?
+				            props.ds_resolve.independentResolveNone :
+				            props.ds_resolve.independentResolve;
+				if (!cond)
+					return false;
+			}
+
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_FRAGMENT_SHADING_RATE_ATTACHMENT_INFO_KHR:
+		{
+			if (!enabled_extensions.count(VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME) ||
+			    !features.fragment_shading_rate.attachmentFragmentShadingRate)
+			{
+				return false;
+			}
+
+			auto *attachment = static_cast<const VkFragmentShadingRateAttachmentInfoKHR *>(pNext);
+
+			if (!attachment->pFragmentShadingRateAttachment)
+				break;
+
+			if (!attachment_reference2_is_supported(*attachment->pFragmentShadingRateAttachment))
+				return false;
+
+			uint32_t width = attachment->shadingRateAttachmentTexelSize.width;
+			uint32_t height = attachment->shadingRateAttachmentTexelSize.height;
+
+			if (width == 0 || height == 0)
+				return false;
+
+			if (width < props.fragment_shading_rate.minFragmentShadingRateAttachmentTexelSize.width)
+				return false;
+			if (width > props.fragment_shading_rate.maxFragmentShadingRateAttachmentTexelSize.width)
+				return false;
+			if (height < props.fragment_shading_rate.minFragmentShadingRateAttachmentTexelSize.height)
+				return false;
+			if (height > props.fragment_shading_rate.maxFragmentShadingRateAttachmentTexelSize.height)
+				return false;
+
+			uint32_t higher = (std::max)(width, height);
+			uint32_t lower = (std::min)(width, height);
+			uint32_t aspect = higher / lower;
+			if (aspect > props.fragment_shading_rate.maxFragmentShadingRateAttachmentTexelSizeAspectRatio)
+				return false;
 
 			break;
 		}
@@ -1127,7 +1277,292 @@ bool FeatureFilter::Impl::render_pass_is_supported(const VkRenderPassCreateInfo 
 {
 	if (null_device)
 		return true;
-	return pnext_chain_is_supported(info->pNext);
+
+	if (!pnext_chain_is_supported(info->pNext))
+		return false;
+
+	for (uint32_t i = 0; i < info->attachmentCount; i++)
+	{
+		VkFormatFeatureFlags format_features = 0;
+
+		for (uint32_t j = 0; j < info->subpassCount; j++)
+		{
+			for (uint32_t k = 0; k < info->pSubpasses[j].colorAttachmentCount; k++)
+			{
+				if (info->pSubpasses[j].pColorAttachments[k].attachment == i)
+					format_features |= VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT;
+
+				if (info->pSubpasses[j].pResolveAttachments &&
+				    info->pSubpasses[j].pResolveAttachments[k].attachment == i)
+				{
+					format_features |= VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT;
+				}
+			}
+
+			for (uint32_t k = 0; k < info->pSubpasses[j].inputAttachmentCount; k++)
+				if (info->pSubpasses[j].pInputAttachments[k].attachment == i)
+					format_features |= VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
+
+			if (info->pSubpasses[j].pDepthStencilAttachment &&
+			    info->pSubpasses[j].pDepthStencilAttachment->attachment == i)
+			{
+				format_features |= VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT;
+			}
+		}
+
+		if (!attachment_description_is_supported(info->pAttachments[i], format_features))
+			return false;
+	}
+
+	for (uint32_t i = 0; i < info->subpassCount; i++)
+	{
+		if (!subpass_description_is_supported(info->pSubpasses[i]))
+			return false;
+	}
+
+	for (uint32_t i = 0; i < info->dependencyCount; i++)
+	{
+		if (!subpass_dependency_is_supported(info->pDependencies[i]))
+			return false;
+	}
+
+	return true;
+}
+
+bool FeatureFilter::Impl::format_is_supported(VkFormat format, VkFormatFeatureFlags format_features) const
+{
+	if (!query)
+		return true;
+
+	return query->format_is_supported(format, format_features);
+}
+
+bool FeatureFilter::Impl::image_layout_is_supported(VkImageLayout layout) const
+{
+	switch (layout)
+	{
+	case VK_IMAGE_LAYOUT_UNDEFINED:
+	case VK_IMAGE_LAYOUT_GENERAL:
+	case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
+	case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
+	case VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL:
+	case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
+	case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
+	case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
+	case VK_IMAGE_LAYOUT_PREINITIALIZED:
+		return true;
+
+	case VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:
+		return enabled_extensions.count(VK_KHR_SWAPCHAIN_EXTENSION_NAME) != 0;
+
+	case VK_IMAGE_LAYOUT_SHARED_PRESENT_KHR:
+		return enabled_extensions.count(VK_KHR_SHARED_PRESENTABLE_IMAGE_EXTENSION_NAME) != 0;
+
+	case VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_STENCIL_READ_ONLY_OPTIMAL:
+	case VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_STENCIL_ATTACHMENT_OPTIMAL:
+		return api_version >= VK_API_VERSION_1_1 || enabled_extensions.count(VK_KHR_MAINTENANCE2_EXTENSION_NAME) != 0;
+
+	case VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL:
+	case VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL:
+	case VK_IMAGE_LAYOUT_STENCIL_ATTACHMENT_OPTIMAL:
+	case VK_IMAGE_LAYOUT_STENCIL_READ_ONLY_OPTIMAL:
+		return (api_version >= VK_API_VERSION_1_2 ||
+		        enabled_extensions.count(VK_KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS_EXTENSION_NAME) != 0) &&
+		       features.separate_ds_layout.separateDepthStencilLayouts == VK_TRUE;
+
+	case VK_IMAGE_LAYOUT_FRAGMENT_SHADING_RATE_ATTACHMENT_OPTIMAL_KHR:
+		return enabled_extensions.count(VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME) != 0 &&
+		       features.fragment_shading_rate.attachmentFragmentShadingRate == VK_TRUE;
+
+	default:
+		return false;
+	}
+}
+
+bool FeatureFilter::Impl::attachment_reference_is_supported(const VkAttachmentReference &ref) const
+{
+	if (!image_layout_is_supported(ref.layout))
+		return false;
+
+	return true;
+}
+
+bool FeatureFilter::Impl::attachment_reference2_is_supported(const VkAttachmentReference2 &ref) const
+{
+	if (!pnext_chain_is_supported(ref.pNext))
+		return false;
+	if (!image_layout_is_supported(ref.layout))
+		return false;
+
+	return true;
+}
+
+bool FeatureFilter::Impl::attachment_description_is_supported(const VkAttachmentDescription &desc,
+                                                              VkFormatFeatureFlags format_features) const
+{
+	if (!image_layout_is_supported(desc.initialLayout))
+		return false;
+	if (!image_layout_is_supported(desc.finalLayout))
+		return false;
+	if (format_features && !format_is_supported(desc.format, format_features))
+		return false;
+
+	return true;
+}
+
+bool FeatureFilter::Impl::attachment_description2_is_supported(const VkAttachmentDescription2 &desc,
+                                                               VkFormatFeatureFlags format_features) const
+{
+	if (!pnext_chain_is_supported(desc.pNext))
+		return false;
+	if (!image_layout_is_supported(desc.initialLayout))
+		return false;
+	if (!image_layout_is_supported(desc.finalLayout))
+		return false;
+	if (format_features && !format_is_supported(desc.format, format_features))
+		return false;
+
+	return true;
+}
+
+bool FeatureFilter::Impl::subpass_description_is_supported(const VkSubpassDescription &sub) const
+{
+	for (uint32_t j = 0; j < sub.colorAttachmentCount; j++)
+	{
+		if (!attachment_reference_is_supported(sub.pColorAttachments[j]))
+			return false;
+		if (sub.pResolveAttachments && !attachment_reference_is_supported(sub.pResolveAttachments[j]))
+			return false;
+	}
+
+	for (uint32_t j = 0; j < sub.inputAttachmentCount; j++)
+		if (!attachment_reference_is_supported(sub.pInputAttachments[j]))
+			return false;
+
+	if (sub.pDepthStencilAttachment && !attachment_reference_is_supported(*sub.pDepthStencilAttachment))
+		return false;
+
+	return true;
+}
+
+bool FeatureFilter::Impl::subpass_description2_is_supported(const VkSubpassDescription2 &sub) const
+{
+	if (!pnext_chain_is_supported(sub.pNext))
+		return false;
+
+	for (uint32_t j = 0; j < sub.colorAttachmentCount; j++)
+	{
+		if (!attachment_reference2_is_supported(sub.pColorAttachments[j]))
+			return false;
+		if (sub.pResolveAttachments && !attachment_reference2_is_supported(sub.pResolveAttachments[j]))
+			return false;
+	}
+
+	for (uint32_t j = 0; j < sub.inputAttachmentCount; j++)
+		if (!attachment_reference2_is_supported(sub.pInputAttachments[j]))
+			return false;
+
+	if (sub.pDepthStencilAttachment && !attachment_reference2_is_supported(*sub.pDepthStencilAttachment))
+		return false;
+
+	if (sub.viewMask && !multiview_mask_is_supported(sub.viewMask))
+		return false;
+
+	return true;
+}
+
+bool FeatureFilter::Impl::subpass_dependency_is_supported(const VkSubpassDependency &) const
+{
+	return true;
+}
+
+bool FeatureFilter::Impl::subpass_dependency2_is_supported(const VkSubpassDependency2 &dep) const
+{
+	if (!pnext_chain_is_supported(dep.pNext))
+		return false;
+
+	return true;
+}
+
+bool FeatureFilter::Impl::render_pass2_is_supported(const VkRenderPassCreateInfo2 *info) const
+{
+	if (null_device)
+		return true;
+
+	if (!enabled_extensions.count(VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME))
+		return false;
+
+	if (!pnext_chain_is_supported(info->pNext))
+		return false;
+
+	for (uint32_t i = 0; i < info->attachmentCount; i++)
+	{
+		VkFormatFeatureFlags format_features = 0;
+
+		for (uint32_t j = 0; j < info->subpassCount; j++)
+		{
+			for (uint32_t k = 0; k < info->pSubpasses[j].colorAttachmentCount; k++)
+			{
+				if (info->pSubpasses[j].pColorAttachments[k].attachment == i)
+					format_features |= VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT;
+
+				if (info->pSubpasses[j].pResolveAttachments &&
+				    info->pSubpasses[j].pResolveAttachments[k].attachment == i)
+				{
+					format_features |= VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT;
+				}
+			}
+
+			for (uint32_t k = 0; k < info->pSubpasses[j].inputAttachmentCount; k++)
+				if (info->pSubpasses[j].pInputAttachments[k].attachment == i)
+					format_features |= VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
+
+			if (info->pSubpasses[j].pDepthStencilAttachment &&
+			    info->pSubpasses[j].pDepthStencilAttachment->attachment == i)
+			{
+				format_features |= VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT;
+			}
+
+			auto *ds_resolve = find_pnext<VkSubpassDescriptionDepthStencilResolve>(
+					info->pSubpasses[j].pNext, VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_DEPTH_STENCIL_RESOLVE);
+			if (ds_resolve &&
+			    ds_resolve->pDepthStencilResolveAttachment &&
+			    ds_resolve->pDepthStencilResolveAttachment->attachment == i)
+			{
+				format_features |= VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT;
+			}
+
+			auto *rate_attachment = find_pnext<VkFragmentShadingRateAttachmentInfoKHR>(
+					info->pSubpasses[j].pNext, VK_STRUCTURE_TYPE_FRAGMENT_SHADING_RATE_ATTACHMENT_INFO_KHR);
+			if (rate_attachment &&
+			    rate_attachment->pFragmentShadingRateAttachment &&
+			    rate_attachment->pFragmentShadingRateAttachment->attachment == i)
+			{
+				format_features |= VK_FORMAT_FEATURE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR;
+			}
+		}
+
+		if (!attachment_description2_is_supported(info->pAttachments[i], format_features))
+			return false;
+	}
+
+	for (uint32_t i = 0; i < info->subpassCount; i++)
+	{
+		if (!subpass_description2_is_supported(info->pSubpasses[i]))
+			return false;
+	}
+
+	for (uint32_t i = 0; i < info->dependencyCount; i++)
+	{
+		if (!subpass_dependency2_is_supported(info->pDependencies[i]))
+			return false;
+	}
+
+	for (uint32_t i = 0; i < info->correlatedViewMaskCount; i++)
+		if (!multiview_mask_is_supported(info->pCorrelatedViewMasks[i]))
+			return false;
+
+	return true;
 }
 
 bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelineCreateInfo *info) const
@@ -1152,6 +1587,16 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 		return false;
 	if (info->pRasterizationState && !pnext_chain_is_supported(info->pRasterizationState->pNext))
 		return false;
+
+	if (info->pVertexInputState)
+	{
+		for (uint32_t i = 0; i < info->pVertexInputState->vertexAttributeDescriptionCount; i++)
+		{
+			if (!format_is_supported(info->pVertexInputState->pVertexAttributeDescriptions[i].format,
+			                         VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT))
+				return false;
+		}
+	}
 
 	if (info->pDynamicState)
 	{
@@ -1306,6 +1751,11 @@ bool FeatureFilter::render_pass_is_supported(const VkRenderPassCreateInfo *info)
 	return impl->render_pass_is_supported(info);
 }
 
+bool FeatureFilter::render_pass2_is_supported(const VkRenderPassCreateInfo2 *info) const
+{
+	return impl->render_pass2_is_supported(info);
+}
+
 bool FeatureFilter::graphics_pipeline_is_supported(const VkGraphicsPipelineCreateInfo *info) const
 {
 	return impl->graphics_pipeline_is_supported(info);
@@ -1319,5 +1769,10 @@ bool FeatureFilter::compute_pipeline_is_supported(const VkComputePipelineCreateI
 bool FeatureFilter::supports_scalar_block_layout() const
 {
 	return impl->null_device || impl->supports_scalar_block_layout;
+}
+
+void FeatureFilter::set_device_query_interface(DeviceQueryInterface *iface)
+{
+	impl->query = iface;
 }
 }

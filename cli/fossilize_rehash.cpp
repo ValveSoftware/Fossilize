@@ -100,6 +100,12 @@ struct RehashReplayer : StateCreatorInterface
 		return recorder->record_render_pass(*render_pass, *create_info);
 	}
 
+	bool enqueue_create_render_pass2(Hash hash, const VkRenderPassCreateInfo2 *create_info, VkRenderPass *render_pass) override
+	{
+		*render_pass = fake_handle<VkRenderPass>(hash);
+		return recorder->record_render_pass2(*render_pass, *create_info);
+	}
+
 	bool enqueue_create_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
 		*pipeline = fake_handle<VkPipeline>(hash);

@@ -120,6 +120,7 @@ public:
 	virtual bool enqueue_create_pipeline_layout(Hash hash, const VkPipelineLayoutCreateInfo *create_info, VkPipelineLayout *layout) = 0;
 	virtual bool enqueue_create_shader_module(Hash hash, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module) = 0;
 	virtual bool enqueue_create_render_pass(Hash hash, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass) = 0;
+	virtual bool enqueue_create_render_pass2(Hash hash, const VkRenderPassCreateInfo2 *create_info, VkRenderPass *render_pass) = 0;
 	virtual bool enqueue_create_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) = 0;
 	virtual bool enqueue_create_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline) = 0;
 
@@ -213,6 +214,8 @@ public:
 	                             Hash custom_hash = 0) FOSSILIZE_WARN_UNUSED;
 	bool record_render_pass(VkRenderPass render_pass, const VkRenderPassCreateInfo &create_info,
 	                        Hash custom_hash = 0) FOSSILIZE_WARN_UNUSED;
+	bool record_render_pass2(VkRenderPass render_pass, const VkRenderPassCreateInfo2 &create_info,
+	                         Hash custom_hash = 0) FOSSILIZE_WARN_UNUSED;
 	bool record_sampler(VkSampler sampler, const VkSamplerCreateInfo &create_info,
 	                    Hash custom_hash = 0) FOSSILIZE_WARN_UNUSED;
 
@@ -270,6 +273,7 @@ Hash compute_combined_application_feature_hash(const StateRecorderApplicationFea
 bool compute_hash_shader_module(const VkShaderModuleCreateInfo &create_info, Hash *hash);
 bool compute_hash_sampler(const VkSamplerCreateInfo &create_info, Hash *hash);
 bool compute_hash_render_pass(const VkRenderPassCreateInfo &create_info, Hash *hash);
+bool compute_hash_render_pass2(const VkRenderPassCreateInfo2 &create_info, Hash *hash);
 
 // If you are recording in threaded mode, these must only be called from the recording thread,
 // as the dependent objects might not have been recorded yet, and thus the mapping of dependent objects is unknown.
