@@ -4979,7 +4979,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 					if (!database_iface->has_entry(RESOURCE_RENDER_PASS, hash))
 					{
 						if ((create_info && serialize_render_pass(hash, *create_info, blob)) ||
-						    (create_info && serialize_render_pass2(hash, *create_info2, blob)))
+						    (create_info2 && serialize_render_pass2(hash, *create_info2, blob)))
 						{
 							database_iface->write_entry(RESOURCE_RENDER_PASS, hash, blob.data(), blob.size(),
 							                            payload_flags);
