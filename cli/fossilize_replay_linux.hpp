@@ -435,6 +435,8 @@ bool ProcessProgress::start_child_process()
 		close(Global::timer_fd);
 		close(crash_fds[0]);
 		close(input_fds[1]);
+		if (Global::control_fd >= 0)
+			close(Global::control_fd);
 
 		// Override stdin/stdout.
 		if (dup2(crash_fds[1], STDOUT_FILENO) < 0)
