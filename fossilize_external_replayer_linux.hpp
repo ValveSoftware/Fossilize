@@ -418,7 +418,7 @@ bool ExternalReplayer::Impl::kill()
 		kill_fd = -1;
 	}
 
-	bool ret = killpg(pid, SIGTERM) == 0;
+	bool ret = killpg(pid, SIGKILL) == 0;
 	if (!ret)
 		LOGI("ExternalReplayer::Impl::kill(): Failed to kill: errno %d.\n", errno);
 	return ret;
@@ -816,7 +816,7 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 		return false;
 
 	int control_fds[2] = { -1, -1 };
-	if (socketpair(AF_UNIX, SOCK_DGRAM, 0, control_fds) < 0)
+	if (socketpair(AF_UNIX, SOCK_SEQPACKET, 0, control_fds) < 0)
 		return false;
 
 	pid_t new_pid = fork();
