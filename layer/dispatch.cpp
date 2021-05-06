@@ -498,36 +498,51 @@ extern "C"
 {
 VK_LAYER_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL VK_LAYER_fossilize_GetDeviceProcAddr(VkDevice device, const char *pName)
 {
-	auto proc = interceptCoreDeviceCommand(pName);
-	if (proc)
-		return proc;
-
-	Device *layer = nullptr;
+	Device *layer;
 	{
 		lock_guard<mutex> holder{globalLock};
 		layer = getLayerData(getDispatchKey(device), deviceData);
 	}
 
-	return layer->getTable()->GetDeviceProcAddr(device, pName);
+	auto proc = layer->getTable()->GetDeviceProcAddr(device, pName);
+
+	// If the underlying implementation returns nullptr, we also need to return nullptr.
+	// This means we never expose wrappers which will end up dispatching into nullptr.
+	if (proc)
+	{
+		auto wrapped_proc = interceptCoreDeviceCommand(pName);
+		if (wrapped_proc)
+			proc = wrapped_proc;
+	}
+
+	return proc;
 }
 
 VK_LAYER_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL VK_LAYER_fossilize_GetInstanceProcAddr(VkInstance instance, const char *pName)
 {
+	// We only wrap core Vulkan 1.0 instance commands, no need to check for availability of underlying implementation.
 	auto proc = interceptCoreInstanceCommand(pName);
 	if (proc)
 		return proc;
 
-	proc = interceptCoreDeviceCommand(pName);
-	if (proc)
-		return proc;
-
-	Instance *layer = nullptr;
+	Instance *layer;
 	{
 		lock_guard<mutex> holder{globalLock};
 		layer = getLayerData(getDispatchKey(instance), instanceData);
 	}
 
-	return layer->getProcAddr(pName);
+	proc = layer->getProcAddr(pName);
+
+	// If the underlying implementation returns nullptr, we also need to return nullptr.
+	// This means we never expose wrappers which will end up dispatching into nullptr.
+	if (proc)
+	{
+		auto wrapped_proc = interceptCoreDeviceCommand(pName);
+		if (wrapped_proc)
+			proc = wrapped_proc;
+	}
+
+	return proc;
 }
 
 #ifdef ANDROID
