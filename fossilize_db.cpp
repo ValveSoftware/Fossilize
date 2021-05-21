@@ -1081,7 +1081,7 @@ struct StreamArchive : DatabaseInterface
 			// However, if the archive has been paged out, RANDOM is the correct approach,
 			// since prefetching data is only detrimental.
 			if (posix_fadvise(fileno(file), 0, 0, POSIX_FADV_RANDOM) != 0)
-				LOGE_LEVEL("Failed to advise of file usage. This is not fatal, but might compromise disk performance.\n");
+				LOGW_LEVEL("Failed to advise of file usage. This is not fatal, but might compromise disk performance.\n");
 #endif
 		}
 		else if (mode != DatabaseMode::OverWrite && mode != DatabaseMode::ExclusiveOverWrite)
@@ -1097,7 +1097,7 @@ struct StreamArchive : DatabaseInterface
 #ifdef __linux__
 			// We're going to scan through the archive sequentially to discover metadata, so some prefetching is welcome.
 			if (posix_fadvise(fileno(file), 0, 0, POSIX_FADV_SEQUENTIAL) != 0)
-				LOGE_LEVEL("Failed to advise of file usage. This is not fatal, but might compromise disk performance.\n");
+				LOGW_LEVEL("Failed to advise of file usage. This is not fatal, but might compromise disk performance.\n");
 #endif
 
 			// Scan through the archive and get the list of files.
@@ -1131,7 +1131,7 @@ struct StreamArchive : DatabaseInterface
 					// Corrupt entry. Our process might have been killed before we could write all data.
 					if (offset + sizeof(bytes_to_read) > len)
 					{
-						LOGE_LEVEL("Detected sliced file. Dropping entries from here.\n");
+						LOGW_LEVEL("Detected sliced file. Dropping entries from here.\n");
 						break;
 					}
 
@@ -1145,7 +1145,7 @@ struct StreamArchive : DatabaseInterface
 					// Corrupt entry. Our process might have been killed before we could write all data.
 					if (offset + header.payload_size > len)
 					{
-						LOGE_LEVEL("Detected sliced file. Dropping entries from here.\n");
+						LOGW_LEVEL("Detected sliced file. Dropping entries from here.\n");
 						break;
 					}
 
