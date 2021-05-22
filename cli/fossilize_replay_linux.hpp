@@ -86,6 +86,18 @@ static SharedControlBlock *control_block;
 static int metadata_fd = -1;
 }
 
+static void remove_epoll_entry(int fd)
+{
+	if (epoll_ctl(Global::epoll_fd, EPOLL_CTL_DEL, fd, nullptr) < 0)
+		LOGE("epoll_ctl() DEL failed.\n");
+}
+
+static void close_and_remove_epoll_entry(int fd)
+{
+	remove_epoll_entry(fd);
+	close(fd);
+}
+
 struct ProcessProgress
 {
 	unsigned start_graphics_index = 0u;
@@ -114,7 +126,7 @@ void ProcessProgress::parse(const char *cmd)
 	{
 		// We crashed ... Set up a timeout in case the process hangs while trying to recover.
 		if (timer_fd >= 0)
-			close(timer_fd);
+			close_and_remove_epoll_entry(timer_fd);
 		timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC);
 
 		if (timer_fd >= 0)
@@ -222,13 +234,16 @@ bool ProcessProgress::process_shutdown(int wstatus)
 	// Flush out all messages we got.
 	while (process_once());
 	if (crash_file)
+	{
+		remove_epoll_entry(fileno(crash_file));
 		fclose(crash_file);
+	}
 	crash_file = nullptr;
 
 	// Close the timerfd.
 	if (timer_fd >= 0)
 	{
-		close(timer_fd);
+		close_and_remove_epoll_entry(timer_fd);
 		timer_fd = -1;
 	}
 
@@ -767,8 +782,7 @@ static void handle_control_commands()
 
 	if (close_fd)
 	{
-		epoll_ctl(Global::epoll_fd, EPOLL_CTL_DEL, Global::control_fd, nullptr);
-		close(Global::control_fd);
+		close_and_remove_epoll_entry(Global::control_fd);
 		Global::control_fd = -1;
 	}
 }
@@ -1060,7 +1074,7 @@ static int run_master_process(const VulkanDevice::Options &opts,
 						{
 							LOGE("Timeout triggered for child process #%u.\n", e.data.u32 & 0x7fffffffu);
 							kill(proc.pid, SIGKILL);
-							close(proc.timer_fd);
+							close_and_remove_epoll_entry(proc.timer_fd);
 							proc.timer_fd = -1;
 						}
 					}
@@ -1068,6 +1082,7 @@ static int run_master_process(const VulkanDevice::Options &opts,
 					{
 						if (!proc.process_once())
 						{
+							remove_epoll_entry(fileno(proc.crash_file));
 							fclose(proc.crash_file);
 							proc.crash_file = nullptr;
 						}
@@ -1146,6 +1161,7 @@ static int run_master_process(const VulkanDevice::Options &opts,
 					auto &proc = child_processes[e.data.u32 & 0x7fffffffu];
 					if (proc.crash_file)
 					{
+						remove_epoll_entry(fileno(proc.crash_file));
 						fclose(proc.crash_file);
 						proc.crash_file = nullptr;
 					}
