@@ -101,7 +101,7 @@ struct ProcessProgress
 
 	bool process_once();
 	bool process_shutdown(int wstatus);
-	bool start_child_process();
+	bool start_child_process(vector<ProcessProgress> &siblings);
 	void parse(const char *cmd);
 
 	uint32_t index = 0;
@@ -377,7 +377,7 @@ static void poll_self_child_memory_usage(const std::vector<ProcessProgress> &pro
 	}
 }
 
-bool ProcessProgress::start_child_process()
+bool ProcessProgress::start_child_process(vector<ProcessProgress> &siblings)
 {
 	graphics_progress = -1;
 	compute_progress = -1;
@@ -437,6 +437,18 @@ bool ProcessProgress::start_child_process()
 		close(input_fds[1]);
 		if (Global::control_fd >= 0)
 			close(Global::control_fd);
+		for (auto &sibling : siblings) {
+			if (&sibling == this)
+				continue;
+			if (sibling.crash_file) {
+				fclose(sibling.crash_file);
+				sibling.crash_file = NULL;
+			}
+			if (sibling.timer_fd >= 0) {
+				close(sibling.timer_fd);
+				sibling.timer_fd = -1;
+			}
+		}
 
 		// Override stdin/stdout.
 		if (dup2(crash_fds[1], STDOUT_FILENO) < 0)
@@ -1000,7 +1012,7 @@ static int run_master_process(const VulkanDevice::Options &opts,
 		progress.start_compute_index = compute_pipeline_offset + (i * unsigned(num_compute_pipelines)) / processes;
 		progress.end_compute_index = compute_pipeline_offset + ((i + 1) * unsigned(num_compute_pipelines)) / processes;
 		progress.index = i;
-		if (!progress.start_child_process())
+		if (!progress.start_child_process(child_processes))
 		{
 			LOGE("Failed to start child process.\n");
 			return EXIT_FAILURE;
@@ -1087,7 +1099,7 @@ static int run_master_process(const VulkanDevice::Options &opts,
 
 							if (itr != end(child_processes))
 							{
-								if (itr->process_shutdown(wstatus) && !itr->start_child_process())
+								if (itr->process_shutdown(wstatus) && !itr->start_child_process(child_processes))
 								{
 									LOGE("Failed to start child process.\n");
 									return EXIT_FAILURE;
