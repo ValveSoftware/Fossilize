@@ -437,14 +437,21 @@ bool ProcessProgress::start_child_process(vector<ProcessProgress> &siblings)
 		close(input_fds[1]);
 		if (Global::control_fd >= 0)
 			close(Global::control_fd);
-		for (auto &sibling : siblings) {
+
+		// Make sure we don't hold unrelated epoll sensitive FDs open.
+		for (auto &sibling : siblings)
+		{
 			if (&sibling == this)
 				continue;
-			if (sibling.crash_file) {
+
+			if (sibling.crash_file)
+			{
 				fclose(sibling.crash_file);
 				sibling.crash_file = NULL;
 			}
-			if (sibling.timer_fd >= 0) {
+
+			if (sibling.timer_fd >= 0)
+			{
 				close(sibling.timer_fd);
 				sibling.timer_fd = -1;
 			}
