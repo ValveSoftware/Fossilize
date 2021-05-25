@@ -905,6 +905,9 @@ static bool test_database()
 			return false;
 	}
 
+	remove(".__test_tmp.foz");
+	remove(".__test_tmp_copy.foz");
+
 	return true;
 }
 
@@ -1011,6 +1014,12 @@ static bool test_concurrent_database_extra_paths()
 	// .. but now it should exist.
 	if (!file_exists(".__test_concurrent.4.foz"))
 		return false;
+
+	remove(".__test_concurrent.foz");
+	remove(".__test_concurrent.1.foz");
+	remove(".__test_concurrent.2.foz");
+	remove(".__test_concurrent.3.foz");
+	remove(".__test_concurrent.4.foz");
 
 	return true;
 }
