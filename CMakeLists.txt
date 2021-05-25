@@ -55,7 +55,7 @@ add_library(fossilize STATIC
         fossilize.hpp fossilize.cpp
         fossilize_errors.hpp
         fossilize_application_filter.hpp fossilize_application_filter.cpp
-        fossilize_types.hpp
+        fossilize_types.hpp fossilize_hasher.hpp
         varint.cpp varint.hpp
         fossilize_db.cpp fossilize_db.hpp
         fossilize_inttypes.h
