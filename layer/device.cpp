@@ -39,6 +39,11 @@ void Device::init(VkPhysicalDevice gpu_, VkDevice device_, Instance *pInstance_,
 	pInstance = pInstance_;
 	pInstanceTable = pInstance->getTable();
 	pTable = pTable_;
-	recorder = pInstance->getStateRecorderForDevice(pInstance->getApplicationInfo(), &features);
+
+	// For now, we're only sensitive to vendorID.
+	VkPhysicalDeviceProperties2 props2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
+	pInstanceTable->GetPhysicalDeviceProperties(gpu, &props2.properties);
+
+	recorder = pInstance->getStateRecorderForDevice(&props2, pInstance->getApplicationInfo(), &features);
 }
 }

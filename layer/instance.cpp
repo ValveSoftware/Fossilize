@@ -266,7 +266,9 @@ Instance::Instance()
 #endif
 }
 
-StateRecorder *Instance::getStateRecorderForDevice(const VkApplicationInfo *appInfo, const VkPhysicalDeviceFeatures2 *features)
+StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDeviceProperties2 *props,
+                                                   const VkApplicationInfo *appInfo,
+                                                   const VkPhysicalDeviceFeatures2 *features)
 {
 	auto appInfoFeatureHash = Hashing::compute_application_feature_hash(appInfo, features);
 	auto hash = Hashing::compute_combined_application_feature_hash(appInfoFeatureHash);
@@ -299,17 +301,29 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkApplicationInfo *appI
 	extraPaths = getenv(FOSSILIZE_DUMP_PATH_READ_ONLY_ENV);
 #endif
 
+	bool needs_bucket = infoFilter->needs_buckets(appInfo);
 	char hashString[17];
+
 	sprintf(hashString, "%016" PRIx64, hash);
-	if (!serializationPath.empty())
+	if (!serializationPath.empty() && !needs_bucket)
+	{
 		serializationPath += ".";
-	serializationPath += hashString;
+		serializationPath += hashString;
+	}
 	entry.interface.reset(create_concurrent_database_with_encoded_extra_paths(serializationPath.c_str(),
 	                                                                          DatabaseMode::Append,
 	                                                                          extraPaths));
 
-	auto *recorder = new StateRecorder;
-	entry.recorder.reset(recorder);
+	if (needs_bucket)
+	{
+		char bucketPath[17];
+		Hash bucketHash = infoFilter->get_bucket_hash(props, appInfo, features);
+		sprintf(bucketPath, "%016" PRIx64, bucketHash);
+		entry.interface->set_bucket_path(bucketPath, hashString);
+	}
+
+	entry.recorder.reset(new StateRecorder);
+	auto *recorder = entry.recorder.get();
 	recorder->set_database_enable_compression(true);
 	recorder->set_database_enable_checksum(true);
 	recorder->set_application_info_filter(infoFilter);

@@ -55,7 +55,9 @@ public:
 		return pAppInfo;
 	}
 
-	StateRecorder *getStateRecorderForDevice(const VkApplicationInfo *appInfo, const VkPhysicalDeviceFeatures2 *features);
+	StateRecorder *getStateRecorderForDevice(const VkPhysicalDeviceProperties2 *props,
+	                                         const VkApplicationInfo *appInfo,
+	                                         const VkPhysicalDeviceFeatures2 *features);
 
 #ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
 	bool capturesCrashes() const
