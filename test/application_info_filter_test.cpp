@@ -25,6 +25,7 @@
 #include "vulkan.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 static bool write_string_to_file(const char *path, const char *str)
 {
@@ -49,12 +50,26 @@ R"delim(
 	"applicationFilters" : {
 		"test1" : { "minimumApplicationVersion" : 10 },
 		"test2" : { "minimumApplicationVersion" : 10, "minimumEngineVersion" : 1000 },
-		"test3" : { "minimumApiVersion" : 50 }
+		"test3" : { "minimumApiVersion" : 50 },
+		"test4" : {
+			"blacklistedEnvironments" : {
+				"TEST_ENV" : { "contains" : "foo", "equals" : "bar" },
+				"TEST_ENV" : { "equals" : "bar2", "contains": "" },
+				"TEST" : { "nonnull" : true }
+			}
+		}
 	},
 	"engineFilters" : {
 		"test1" : { "minimumEngineVersion" : 10 },
 		"test2" : { "minimumEngineVersion" : 10, "minimumApplicationVersion" : 1000 },
-		"test3" : { "minimumApiVersion" : 50 }
+		"test3" : { "minimumApiVersion" : 50 },
+		"test4" : {
+			"blacklistedEnvironments" : {
+				"TEST_ENV" : { "contains" : "foo", "equals" : "bar" },
+				"TEST_ENV" : { "equals" : "bar2", "contains": "" },
+				"TEST" : { "nonnull" : true }
+			}
+		}
 	}
 }
 )delim";
@@ -141,6 +156,90 @@ R"delim(
 	appinfo.apiVersion = 50;
 	if (!filter.test_application_info(&appinfo))
 		return EXIT_FAILURE;
+
+	appinfo.engineVersion = 0;
+	appinfo.applicationVersion = 0;
+
+	for (unsigned i = 0; i < 2; i++)
+	{
+		// Test env blacklisting (application)
+		if (i == 0)
+		{
+			appinfo.pApplicationName = "test4";
+			appinfo.pEngineName = nullptr;
+		}
+		else
+		{
+			appinfo.pEngineName = "test4";
+			appinfo.pApplicationName = nullptr;
+		}
+
+		struct UserData
+		{
+			const char *env = nullptr;
+			const char *data = nullptr;
+		} data = {};
+
+		const auto getenv_wrapper = +[](const char *env, void *userdata) -> const char *
+		{
+			auto *env_data = static_cast<const UserData *>(userdata);
+			if (env_data->env && strcmp(env_data->env, env) == 0)
+				return env_data->data;
+			else
+				return nullptr;
+		};
+
+		filter.set_environment_resolver(getenv_wrapper, &data);
+		if (!filter.test_application_info(&appinfo))
+			return EXIT_FAILURE;
+
+		data.env = "TEST_FOO";
+		data.data = "foo";
+
+		if (!filter.test_application_info(&appinfo))
+			return EXIT_FAILURE;
+
+		// Contains test, should fail
+		data.env = "TEST_ENV";
+
+		data.data = "foo";
+		if (filter.test_application_info(&appinfo))
+			return EXIT_FAILURE;
+
+		data.data = "Afoo";
+		if (filter.test_application_info(&appinfo))
+			return EXIT_FAILURE;
+
+		data.data = "fooA";
+		if (filter.test_application_info(&appinfo))
+			return EXIT_FAILURE;
+
+		// Equals bar, should fail
+		data.data = "bar";
+		if (filter.test_application_info(&appinfo))
+			return EXIT_FAILURE;
+
+		// Equals bar2, should fail
+		data.data = "bar2";
+		if (filter.test_application_info(&appinfo))
+			return EXIT_FAILURE;
+
+		// Should not fail
+		data.data = "bar3";
+		if (!filter.test_application_info(&appinfo))
+			return EXIT_FAILURE;
+
+		// Should not fail
+		data.env = "TEST";
+		data.data = nullptr;
+		if (!filter.test_application_info(&appinfo))
+			return EXIT_FAILURE;
+
+		// Should fail
+		data.data = "";
+		if (filter.test_application_info(&appinfo))
+			return EXIT_FAILURE;
+	}
 
 	remove(".__test_appinfo.json");
 }

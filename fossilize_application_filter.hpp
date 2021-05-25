@@ -35,6 +35,9 @@ public:
 	void operator=(const ApplicationInfoFilter &) = delete;
 	ApplicationInfoFilter(const ApplicationInfoFilter &) = delete;
 
+	// Wrapper for getenv() basically, useful for mocking in test suite.
+	void set_environment_resolver(const char *(*getenv_wrapper)(const char *, void *), void *userdata);
+
 	// Path to a JSON file. This is done async to avoid stalling main thread.
 	// Any further query will block.
 	// Called by layer when an instance is created.

@@ -41,11 +41,20 @@ namespace Fossilize
 {
 enum { FOSSILIZE_APPLICATION_INFO_FILTER_VERSION = 1 };
 
+struct EnvInfo
+{
+	std::string env;
+	std::string contains;
+	std::string equals;
+	bool nonnull = false;
+};
+
 struct AppInfo
 {
 	uint32_t minimum_api_version = VK_MAKE_VERSION(1, 0, 0);
 	uint32_t minimum_application_version = 0;
 	uint32_t minimum_engine_version = 0;
+	std::vector<EnvInfo> env_infos;
 };
 
 struct ApplicationInfoFilter::Impl
@@ -62,8 +71,12 @@ struct ApplicationInfoFilter::Impl
 
 	void parse_async(const char *path);
 	bool test_application_info(const VkApplicationInfo *info);
+	bool filter_env_info(const EnvInfo &info) const;
 	bool parse(const std::string &path);
 	bool check_success();
+
+	const char *(*getenv_wrapper)(const char *, void *) = nullptr;
+	void *getenv_userdata = nullptr;
 };
 
 bool ApplicationInfoFilter::Impl::check_success()
@@ -71,6 +84,25 @@ bool ApplicationInfoFilter::Impl::check_success()
 	if (task.valid())
 		task.wait();
 	return parsing_success;
+}
+
+bool ApplicationInfoFilter::Impl::filter_env_info(const EnvInfo &info) const
+{
+	if (!getenv_wrapper)
+		return false;
+
+	const char *env = getenv_wrapper(info.env.c_str(), getenv_userdata);
+	if (!env)
+		return false;
+
+	if (info.nonnull)
+		return true;
+	else if (!info.equals.empty() && info.equals == env)
+		return true;
+	else if (!info.contains.empty() && strstr(env, info.contains.c_str()))
+		return true;
+	else
+		return false;
 }
 
 bool ApplicationInfoFilter::Impl::test_application_info(const VkApplicationInfo *info)
@@ -120,6 +152,15 @@ bool ApplicationInfoFilter::Impl::test_application_info(const VkApplicationInfo 
 				     info->apiVersion, info->pApplicationName);
 				return false;
 			}
+
+			for (auto &env_info : itr->second.env_infos)
+			{
+				if (filter_env_info(env_info))
+				{
+					LOGI("Skipping recording due to environment rule for: %s.\n", env_info.env.c_str());
+					return false;
+				}
+			}
 		}
 	}
 
@@ -141,6 +182,15 @@ bool ApplicationInfoFilter::Impl::test_application_info(const VkApplicationInfo 
 				LOGI("apiVersion %u is too low for pEngineName %s. Skipping.\n",
 				     info->apiVersion, info->pEngineName);
 				return false;
+			}
+
+			for (auto &env_info : itr->second.env_infos)
+			{
+				if (filter_env_info(env_info))
+				{
+					LOGI("Skipping recording due to environment rule for: %s.\n", env_info.env.c_str());
+					return false;
+				}
 			}
 		}
 	}
@@ -261,6 +311,42 @@ static bool add_blacklists(std::unordered_set<std::string> &output, const Value 
 	return true;
 }
 
+static bool parse_blacklist_environments(const Value &value, std::vector<EnvInfo> &infos)
+{
+	auto &envs = value["blacklistedEnvironments"];
+	if (!envs.IsObject())
+	{
+		LOGE("blacklistedEnvironments must be an object.\n");
+		return false;
+	}
+
+	infos.clear();
+
+	for (auto itr = envs.MemberBegin(); itr != envs.MemberEnd(); ++itr)
+	{
+		auto &elem = itr->value;
+		if (!elem.IsObject())
+		{
+			LOGE("blacklistEnvironment element must be object.\n");
+			return false;
+		}
+
+		EnvInfo env_info;
+
+		env_info.env = itr->name.GetString();
+		if (elem.HasMember("contains") && elem["contains"].IsString())
+			env_info.contains = elem["contains"].GetString();
+		if (elem.HasMember("equals") && elem["equals"].IsString())
+			env_info.equals = elem["equals"].GetString();
+		if (elem.HasMember("nonnull") && elem["nonnull"].IsBool())
+			env_info.nonnull = elem["nonnull"].GetBool();
+
+		infos.push_back(std::move(env_info));
+	}
+
+	return true;
+}
+
 static bool add_application_filters(std::unordered_map<std::string, AppInfo> &output, const Value *filters)
 {
 	if (!filters->IsObject())
@@ -283,7 +369,10 @@ static bool add_application_filters(std::unordered_map<std::string, AppInfo> &ou
 		info.minimum_api_version = default_get_member_uint(value, "minimumApiVersion");
 		info.minimum_engine_version = default_get_member_uint(value, "minimumEngineVersion");
 		info.minimum_application_version = default_get_member_uint(value, "minimumApplicationVersion");
-		output[itr->name.GetString()] = info;
+		if (value.HasMember("blacklistedEnvironments"))
+			if (!parse_blacklist_environments(value, info.env_infos))
+				return false;
+		output[itr->name.GetString()] = std::move(info);
 	}
 
 	return true;
@@ -303,6 +392,7 @@ bool ApplicationInfoFilter::Impl::parse(const std::string &path)
 
 	if (!get_safe_member_string(doc, "asset", json_str) || json_str != "FossilizeApplicationInfoFilter")
 		return false;
+
 	if (!get_safe_member_int(doc, "version", json_int) || json_int != FOSSILIZE_APPLICATION_INFO_FILTER_VERSION)
 		return false;
 
@@ -361,6 +451,12 @@ bool ApplicationInfoFilter::test_application_info(const VkApplicationInfo *info)
 bool ApplicationInfoFilter::check_success()
 {
 	return impl->check_success();
+}
+
+void ApplicationInfoFilter::set_environment_resolver(const char *(*getenv_wrapper)(const char *, void *), void *userdata)
+{
+	impl->getenv_wrapper = getenv_wrapper;
+	impl->getenv_userdata = userdata;
 }
 
 ApplicationInfoFilter::~ApplicationInfoFilter()
