@@ -43,4 +43,10 @@ std::string get_executable_path();
 std::vector<std::string> split(const std::string &str, const char *delim);
 std::vector<std::string> split_no_empty(const std::string &str, const char *delim);
 std::string strip_whitespace(const std::string &str);
+
+bool mkdir(const std::string &path);
+bool touch(const std::string &path);
+bool is_file(const std::string &path);
+bool is_directory(const std::string &path);
+bool get_mtime_us(const std::string &path, uint64_t &mtime_us);
 }

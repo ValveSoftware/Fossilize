@@ -27,8 +27,11 @@
 #include <memory>
 #include <vector>
 #include <string>
+#include <chrono>
+#include <thread>
 #include "layer/utils.hpp"
 #include "fossilize_errors.hpp"
+#include "path.hpp"
 
 using namespace Fossilize;
 
@@ -1024,6 +1027,193 @@ static bool test_concurrent_database_extra_paths()
 	return true;
 }
 
+static bool test_concurrent_database_bucket_touch()
+{
+	{
+		auto db = std::unique_ptr<DatabaseInterface>(create_concurrent_database(".__test_concurrent",
+		                                                                         DatabaseMode::Append, nullptr, 0));
+		if (!db->set_bucket_path("buck", "base"))
+			return false;
+		if (!db->prepare())
+			return false;
+	}
+
+	if (!Path::is_directory(".__test_concurrent.buck"))
+		return false;
+	if (!Path::is_file(".__test_concurrent.buck/TOUCH"))
+		return false;
+
+	uint64_t current_mtime;
+	if (!Path::get_mtime_us(".__test_concurrent.buck/TOUCH", current_mtime))
+		return false;
+
+	std::this_thread::sleep_for(std::chrono::milliseconds(10));
+	{
+		auto db = std::unique_ptr<DatabaseInterface>(create_concurrent_database(".__test_concurrent",
+		                                                                         DatabaseMode::Append, nullptr, 0));
+		if (!db->set_bucket_path("buck", "base"))
+			return false;
+		if (!db->prepare())
+			return false;
+	}
+
+	uint64_t update_mtime;
+	if (!Path::get_mtime_us(".__test_concurrent.buck/TOUCH", update_mtime))
+		return false;
+
+	if (update_mtime == current_mtime)
+		return false;
+
+	remove(".__test_concurrent.buck/TOUCH");
+	remove(".__test_concurrent.buck");
+	return true;
+}
+
+static bool test_concurrent_database_bucket_write()
+{
+	{
+		auto db = std::unique_ptr<DatabaseInterface>(create_concurrent_database(".__test_concurrent",
+		                                                                         DatabaseMode::Append, nullptr, 0));
+		if (!db->set_bucket_path("buck", "base"))
+			return false;
+		if (!db->prepare())
+			return false;
+
+		const uint8_t blob[] = { 1, 2, 3 };
+		if (!db->write_entry(RESOURCE_SHADER_MODULE, 100, blob, sizeof(blob), 0))
+			return false;
+	}
+
+	{
+		auto db = std::unique_ptr<DatabaseInterface>(create_stream_archive_database(".__test_concurrent.buck/base.1.foz",
+		                                                                            DatabaseMode::ReadOnly));
+		if (!db->prepare())
+			return false;
+
+		if (!db->has_entry(RESOURCE_SHADER_MODULE, 100))
+			return false;
+
+		size_t size;
+		if (!db->read_entry(RESOURCE_SHADER_MODULE, 100, &size, nullptr, 0) || size != 3)
+			return false;
+	}
+
+	remove(".__test_concurrent.buck/TOUCH");
+	remove(".__test_concurrent.buck/base.1.foz");
+	remove(".__test_concurrent.buck");
+	return true;
+}
+
+static bool test_concurrent_database_bucket_append()
+{
+	for (unsigned i = 0; i < 3; i++)
+	{
+		auto db = std::unique_ptr<DatabaseInterface>(create_concurrent_database(".__test_concurrent",
+		                                                                        DatabaseMode::Append, nullptr, 0));
+		if (!db->set_bucket_path("buck", "base"))
+			return false;
+		if (!db->prepare())
+			return false;
+
+		const uint8_t blob[] = { 1, 2, 3 };
+		if (!db->write_entry(RESOURCE_SHADER_MODULE, 100 + i, blob, sizeof(blob), 0))
+			return false;
+	}
+
+	const char *source_paths[3] = {
+		".__test_concurrent.buck/base.1.foz",
+		".__test_concurrent.buck/base.2.foz",
+		".__test_concurrent.buck/base.3.foz",
+	};
+
+	// Verify that extra paths do not get redirected.
+	{
+		auto db = std::unique_ptr<DatabaseInterface>(create_concurrent_database(".__test_concurrent",
+		                                                                        DatabaseMode::Append,
+		                                                                        source_paths, 3));
+		if (!db->set_bucket_path("buck", "base"))
+			return false;
+		if (!db->prepare())
+			return false;
+
+		const uint8_t blob[] = { 1, 2, 3 };
+		for (unsigned i = 0; i < 4; i++)
+		{
+			if (i == 3)
+			{
+				if (Path::is_file(".__test_concurrent.buck/base.4.foz"))
+					return false;
+			}
+
+			if (!db->write_entry(RESOURCE_SHADER_MODULE, 100 + i, blob, sizeof(blob), 0))
+				return false;
+
+			if (i == 3)
+			{
+				// It should have been written now ...
+				if (!Path::is_file(".__test_concurrent.buck/base.4.foz"))
+					return false;
+			}
+		}
+	}
+
+	if (!merge_concurrent_databases(".__test_concurrent.buck/base.foz", source_paths, 3))
+		return false;
+
+	remove(".__test_concurrent.buck/base.1.foz");
+	remove(".__test_concurrent.buck/base.2.foz");
+	remove(".__test_concurrent.buck/base.3.foz");
+	remove(".__test_concurrent.buck/base.4.foz");
+
+	// Verify that read-only *is* redirected.
+	{
+		auto db = std::unique_ptr<DatabaseInterface>(create_concurrent_database(".__test_concurrent",
+		                                                                        DatabaseMode::Append, nullptr, 0));
+		if (!db->set_bucket_path("buck", "base"))
+			return false;
+		if (!db->prepare())
+			return false;
+
+		const uint8_t blob[] = { 1, 2, 3 };
+		for (unsigned i = 0; i < 4; i++)
+		{
+			if (i == 3)
+			{
+				if (Path::is_file(".__test_concurrent.buck/base.1.foz"))
+					return false;
+			}
+
+			if (!db->write_entry(RESOURCE_SHADER_MODULE, 100 + i, blob, sizeof(blob), 0))
+				return false;
+
+			if (i == 3)
+			{
+				// It should have been written now ...
+				if (!Path::is_file(".__test_concurrent.buck/base.1.foz"))
+					return false;
+			}
+		}
+	}
+
+	remove(".__test_concurrent.buck/TOUCH");
+	remove(".__test_concurrent.buck/base.1.foz");
+	remove(".__test_concurrent.buck/base.foz");
+	remove(".__test_concurrent.buck");
+	return true;
+}
+
+static bool test_concurrent_database_bucket()
+{
+	if (!test_concurrent_database_bucket_touch())
+		return false;
+	if (!test_concurrent_database_bucket_write())
+		return false;
+	if (!test_concurrent_database_bucket_append())
+		return false;
+
+	return true;
+}
+
 static bool test_concurrent_database()
 {
 	// Test a normal flow. First time we don't have the read-only database.
@@ -1780,6 +1970,8 @@ int main()
 	if (!test_concurrent_database_extra_paths())
 		return EXIT_FAILURE;
 	if (!test_concurrent_database())
+		return EXIT_FAILURE;
+	if (!test_concurrent_database_bucket())
 		return EXIT_FAILURE;
 	if (!test_implicit_whitelist())
 		return EXIT_FAILURE;

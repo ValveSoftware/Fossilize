@@ -190,6 +190,11 @@ public:
 	virtual bool write_exported_metadata(void *data, size_t size) const;
 	void add_imported_metadata(const ExportedMetadataHeader *header);
 
+	// For bucketization of archives.
+	// This only works with concurrent databases in Append mode.
+	// See further comments after create_concurrent_database().
+	virtual bool set_bucket_path(const char *bucket_dirname, const char *bucket_basename);
+
 protected:
 	bool test_resource_filter(ResourceTag tag, Hash hash) const;
 	bool add_to_implicit_whitelist(DatabaseInterface &iface);
@@ -234,4 +239,27 @@ DatabaseInterface *create_concurrent_database_with_encoded_extra_paths(const cha
 
 // Merges stream archives found in source_paths into append_database_path.
 bool merge_concurrent_databases(const char *append_database_path, const char * const *source_paths, size_t num_source_paths);
+
+// For set_bucket_path() behavior on a concurrent database:
+// Must be called before prepare().
+//
+// In this style, we intend to sort archives based on some global "variant" state when recording.
+// This can be very useful when an application has many different shader variants based on vendor ID,
+// engine version, enabled device features, etc, and the intention here is to completely
+// separate archives based on these keys.
+//
+// When prepare() is called and bucket_dirname is non-empty, the $base_path for the concurrent archive is adjusted,
+// and the implementation will create a new directory $base_path.$bucket_dirname/.
+// Directories are not created recursively.
+//
+// Instead of using $base_path.foz (read-only part) and $base_path.*.foz (write-only part), we use
+// $base_path.$bucket_dirname/$bucket_basename.foz (read-only) and
+// $base_path.$bucket_dirname/$bucket_basename.*.foz (write-only).
+//
+// A separate empty file $base_path.$bucket_dirname/TOUCH is created and/or touched in prepare()
+// to update last access time,
+// which lets external tools deduce which buckets are actually in use by the application in question.
+//
+// extra_read_only_database_paths are not modified by buckets, but the usefulness of extra_read_only archives
+// in append mode is somewhat questionable to begin with.
 }

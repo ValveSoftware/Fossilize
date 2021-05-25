@@ -29,6 +29,9 @@
 #include <windows.h>
 #else
 #include <unistd.h>
+#include <sys/stat.h>
+#include <errno.h>
+#include <fcntl.h>
 #ifdef __linux__
 #include <linux/limits.h>
 #endif
@@ -314,5 +317,67 @@ string get_executable_path()
 
 	return "";
 #endif
+}
+
+bool mkdir(const std::string &path)
+{
+#ifdef _WIN32
+	return false;
+#else
+	int ret = ::mkdir(path.c_str(), 0750);
+	if (ret == 0)
+		return true;
+	if (ret < 0 && errno != EEXIST)
+		return false;
+
+	// Verify the path is actually a directory.
+	struct stat s = {};
+	return ::stat(path.c_str(), &s) == 0 && (s.st_mode & S_IFDIR) != 0;
+#endif
+}
+
+bool touch(const std::string &path)
+{
+#ifdef _WIN32
+	return false;
+#else
+	int fd = ::open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0640);
+	if (fd < 0)
+		return false;
+
+	const struct timespec times[2] = {{ 0, UTIME_NOW }, { 0, UTIME_NOW }};
+	bool ret = ::futimens(fd, times) == 0;
+	::close(fd);
+	return ret;
+#endif
+}
+
+bool is_file(const std::string &path)
+{
+#ifdef _WIN32
+	return false;
+#else
+	struct stat s = {};
+	return ::stat(path.c_str(), &s) == 0 && (s.st_mode & S_IFREG) != 0;
+#endif
+}
+
+bool is_directory(const std::string &path)
+{
+#ifdef _WIN32
+	return false;
+#else
+	struct stat s = {};
+	return ::stat(path.c_str(), &s) == 0 && (s.st_mode & S_IFDIR) != 0;
+#endif
+}
+
+bool get_mtime_us(const std::string &path, uint64_t &mtime_us)
+{
+	struct stat s = {};
+	if (::stat(path.c_str(), &s) != 0)
+		return false;
+	mtime_us = s.st_mtim.tv_sec * 1000000ll + s.st_mtim.tv_nsec / 1000;
+	return true;
 }
 }
