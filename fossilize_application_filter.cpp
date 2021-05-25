@@ -50,6 +50,7 @@ struct AppInfo
 
 struct ApplicationInfoFilter::Impl
 {
+	~Impl();
 	std::unordered_set<std::string> blacklisted_application_names;
 	std::unordered_set<std::string> blacklisted_engine_names;
 	std::unordered_map<std::string, AppInfo> application_infos;
@@ -334,6 +335,12 @@ void ApplicationInfoFilter::Impl::parse_async(const char *path_)
 		parsing_success = ret;
 		parsing_done = true;
 	});
+}
+
+ApplicationInfoFilter::Impl::~Impl()
+{
+	if (task.valid())
+		task.wait();
 }
 
 ApplicationInfoFilter::ApplicationInfoFilter()

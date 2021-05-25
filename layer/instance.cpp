@@ -39,8 +39,42 @@
 
 namespace Fossilize
 {
+// We only need one global application info filter.
+// We can kick off async parse of this as early as the layer is loaded, e.g. vkCreateInstance.
+// Global ApplicationInfoFilter must outlive the recorder, so declare earlier in translation unit to guarantee this.
+static std::unique_ptr<ApplicationInfoFilter> globalInfoFilter;
+static std::mutex globalInfoFilterLock;
+static bool globalInfoFilterDone;
+
+#ifndef FOSSILIZE_APPLICATION_INFO_FILTER_PATH_ENV
+#define FOSSILIZE_APPLICATION_INFO_FILTER_PATH_ENV "FOSSILIZE_APPLICATION_INFO_FILTER_PATH"
+#endif
+
+static ApplicationInfoFilter *getApplicationInfoFilter()
+{
+	std::lock_guard<std::mutex> lock(globalInfoFilterLock);
+	if (globalInfoFilterDone)
+		return globalInfoFilter.get();
+
+#ifdef ANDROID
+	const char *filterPath = nullptr;
+#else
+	const char *filterPath = getenv(FOSSILIZE_APPLICATION_INFO_FILTER_PATH_ENV);
+#endif
+
+	if (filterPath)
+	{
+		globalInfoFilter.reset(new ApplicationInfoFilter);
+		globalInfoFilter->parse_async(filterPath);
+	}
+
+	globalInfoFilterDone = true;
+	return globalInfoFilter.get();
+}
+
 void Instance::init(VkInstance instance_, const VkApplicationInfo *pApp, VkLayerInstanceDispatchTable *pTable_, PFN_vkGetInstanceProcAddr gpa_)
 {
+	infoFilter = getApplicationInfoFilter();
 	instance = instance_;
 	pTable = pTable_;
 	gpa = gpa_;
@@ -75,7 +109,6 @@ static std::mutex recorderLock;
 
 struct Recorder
 {
-	std::unique_ptr<ApplicationInfoFilter> filter;
 	std::unique_ptr<DatabaseInterface> interface;
 	std::unique_ptr<StateRecorder> recorder;
 };
@@ -114,10 +147,6 @@ static std::string getSystemProperty(const char *key)
 
 #ifndef FOSSILIZE_DUMP_PATH_READ_ONLY_ENV
 #define FOSSILIZE_DUMP_PATH_READ_ONLY_ENV "FOSSILIZE_DUMP_PATH_READ_ONLY"
-#endif
-
-#ifndef FOSSILIZE_APPLICATION_INFO_FILTER_PATH_ENV
-#define FOSSILIZE_APPLICATION_INFO_FILTER_PATH_ENV "FOSSILIZE_APPLICATION_INFO_FILTER_PATH"
 #endif
 
 #ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
@@ -259,7 +288,6 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkApplicationInfo *appI
 		serializationPath = logPath;
 		LOGI("Overriding serialization path: \"%s\".\n", logPath.c_str());
 	}
-	const char *filterPath = nullptr;
 #else
 	serializationPath = "fossilize";
 	const char *path = getenv(FOSSILIZE_DUMP_PATH_ENV);
@@ -269,14 +297,7 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkApplicationInfo *appI
 		LOGI("Overriding serialization path: \"%s\".\n", path);
 	}
 	extraPaths = getenv(FOSSILIZE_DUMP_PATH_READ_ONLY_ENV);
-	const char *filterPath = getenv(FOSSILIZE_APPLICATION_INFO_FILTER_PATH_ENV);
 #endif
-
-	if (filterPath)
-	{
-		entry.filter.reset(new ApplicationInfoFilter);
-		entry.filter->parse_async(filterPath);
-	}
 
 	char hashString[17];
 	sprintf(hashString, "%016" PRIx64, hash);
@@ -291,7 +312,7 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkApplicationInfo *appI
 	entry.recorder.reset(recorder);
 	recorder->set_database_enable_compression(true);
 	recorder->set_database_enable_checksum(true);
-	recorder->set_application_info_filter(entry.filter.get());
+	recorder->set_application_info_filter(infoFilter);
 	if (appInfo)
 		if (!recorder->record_application_info(*appInfo))
 			LOGE_LEVEL("Failed to record application info.\n");

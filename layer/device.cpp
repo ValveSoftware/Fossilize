@@ -39,6 +39,6 @@ void Device::init(VkPhysicalDevice gpu_, VkDevice device_, Instance *pInstance_,
 	pInstance = pInstance_;
 	pInstanceTable = pInstance->getTable();
 	pTable = pTable_;
-	recorder = Instance::getStateRecorderForDevice(pInstance->getApplicationInfo(), &features);
+	recorder = pInstance->getStateRecorderForDevice(pInstance->getApplicationInfo(), &features);
 }
 }
