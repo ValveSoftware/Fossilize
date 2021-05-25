@@ -21,8 +21,11 @@
  */
 
 #pragma once
+#include "fossilize_types.hpp"
 
 struct VkApplicationInfo;
+struct VkPhysicalDeviceFeatures2;
+struct VkPhysicalDeviceProperties2;
 
 // Allows us to blacklist which applications and which app/engine-versions we don't want to capture.
 namespace Fossilize
@@ -49,6 +52,11 @@ public:
 	// Tests if application should be recorded.
 	// Blocks until parsing is complete. Called by recording thread when preparing for recording.
 	bool test_application_info(const VkApplicationInfo *info);
+
+	bool needs_buckets(const VkApplicationInfo *info);
+	Hash get_bucket_hash(const VkPhysicalDeviceProperties2 *props,
+	                     const VkApplicationInfo *info,
+	                     const VkPhysicalDeviceFeatures2 *features2);
 
 private:
 	struct Impl;

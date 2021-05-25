@@ -60,7 +60,16 @@ R"delim(
 		}
 	},
 	"engineFilters" : {
-		"test1" : { "minimumEngineVersion" : 10 },
+		"test1" : {
+			"minimumEngineVersion" : 10,
+			"bucketVariantDependencies" : [
+				"BindlessUBO",
+				"VendorID",
+				"MutableDescriptorType",
+				"BufferDeviceAddress",
+				"DummyIgnored"
+			]
+		},
 		"test2" : { "minimumEngineVersion" : 10, "minimumApplicationVersion" : 1000 },
 		"test3" : { "minimumApiVersion" : 50 },
 		"test4" : {
@@ -238,6 +247,68 @@ R"delim(
 		// Should fail
 		data.data = "";
 		if (filter.test_application_info(&appinfo))
+			return EXIT_FAILURE;
+	}
+
+	// Test bucket variant filter.
+	appinfo.pEngineName = nullptr;
+	appinfo.pApplicationName = "test1";
+	if (filter.needs_buckets(&appinfo))
+		return EXIT_FAILURE;
+
+	appinfo.pEngineName = "test1";
+	appinfo.pApplicationName = nullptr;
+	if (!filter.needs_buckets(&appinfo))
+		return EXIT_FAILURE;
+
+	{
+		// Make sure this doesn't crash.
+		filter.get_bucket_hash(nullptr, nullptr, nullptr);
+
+		auto hash0 = filter.get_bucket_hash(nullptr, &appinfo, nullptr);
+		VkPhysicalDeviceProperties2 props2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
+		props2.properties.vendorID = 1;
+		auto hash1 = filter.get_bucket_hash(&props2, &appinfo, nullptr);
+		if (hash0 == hash1)
+			return EXIT_FAILURE;
+
+		VkPhysicalDeviceBufferDeviceAddressFeatures bda_features = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES };
+		VkPhysicalDeviceVulkan12Features vulkan12_features = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
+		VkPhysicalDeviceDescriptorIndexingFeatures indexing_features = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES };
+		VkPhysicalDeviceMutableDescriptorTypeFeaturesVALVE mutable_features = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MUTABLE_DESCRIPTOR_TYPE_FEATURES_VALVE };
+
+		bda_features.pNext = &indexing_features;
+		indexing_features.pNext = &mutable_features;
+		VkPhysicalDeviceFeatures2 features2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+		features2.pNext = &bda_features;
+
+		auto hash2 = filter.get_bucket_hash(&props2, &appinfo, &features2);
+		if (hash1 != hash2)
+			return EXIT_FAILURE;
+
+		// Try to enable one feature at a time and verify it's the same.
+		bda_features.bufferDeviceAddress = VK_TRUE;
+		auto hash3 = filter.get_bucket_hash(&props2, &appinfo, &features2);
+		if (hash2 == hash3)
+			return EXIT_FAILURE;
+
+		indexing_features.descriptorBindingUniformBufferUpdateAfterBind = VK_TRUE;
+		auto hash4 = filter.get_bucket_hash(&props2, &appinfo, &features2);
+		if (hash3 == hash4)
+			return EXIT_FAILURE;
+
+		mutable_features.mutableDescriptorType = VK_TRUE;
+		auto hash5 = filter.get_bucket_hash(&props2, &appinfo, &features2);
+		if (hash4 == hash5)
+			return EXIT_FAILURE;
+
+		// Verify that the 1.2 structs can also be used.
+		mutable_features.pNext = &vulkan12_features;
+		features2.pNext = &mutable_features;
+		vulkan12_features.descriptorBindingUniformBufferUpdateAfterBind = VK_TRUE;
+		vulkan12_features.bufferDeviceAddress = VK_TRUE;
+		auto hash6 = filter.get_bucket_hash(&props2, &appinfo, &features2);
+		if (hash5 != hash6)
 			return EXIT_FAILURE;
 	}
 
