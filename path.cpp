@@ -421,7 +421,12 @@ bool get_mtime_us(const std::string &path, uint64_t &mtime_us)
 	struct stat s = {};
 	if (::stat(path.c_str(), &s) != 0)
 		return false;
+#if defined(__linux__)
 	mtime_us = s.st_mtim.tv_sec * 1000000ll + s.st_mtim.tv_nsec / 1000;
+#else
+	// Fallback.
+	mtime_us = s.st_mtime * 1000000ll;
+#endif
 	return true;
 #endif
 }

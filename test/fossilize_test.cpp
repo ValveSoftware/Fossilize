@@ -1055,7 +1055,13 @@ static bool test_concurrent_database_bucket_touch()
 	if (!Path::get_mtime_us(".__test_concurrent.buck/TOUCH", current_mtime))
 		return false;
 
+#ifdef __APPLE__
+	// Hack for now since there was no obvious way to get accurate mtime, it's only second granularity.
+	std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+#else
 	std::this_thread::sleep_for(std::chrono::milliseconds(10));
+#endif
+
 	{
 		auto db = std::unique_ptr<DatabaseInterface>(create_concurrent_database(".__test_concurrent",
 		                                                                         DatabaseMode::Append, nullptr, 0));
