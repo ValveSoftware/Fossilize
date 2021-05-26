@@ -44,7 +44,7 @@ int main()
 R"delim(
 {
 	"asset": "FossilizeApplicationInfoFilter",
-	"version" : 1,
+	"version" : 2,
 	"blacklistedApplicationNames" : [ "A",  "B", "C" ],
 	"blacklistedEngineNames" : [ "D", "E", "F" ],
 	"applicationFilters" : {

@@ -39,7 +39,7 @@ using namespace rapidjson;
 
 namespace Fossilize
 {
-enum { FOSSILIZE_APPLICATION_INFO_FILTER_VERSION = 1 };
+enum { FOSSILIZE_APPLICATION_INFO_FILTER_VERSION = 2 };
 
 struct EnvInfo
 {
@@ -645,7 +645,7 @@ bool ApplicationInfoFilter::Impl::parse(const std::string &path)
 	if (!get_safe_member_string(doc, "asset", json_str) || json_str != "FossilizeApplicationInfoFilter")
 		return false;
 
-	if (!get_safe_member_int(doc, "version", json_int) || json_int != FOSSILIZE_APPLICATION_INFO_FILTER_VERSION)
+	if (!get_safe_member_int(doc, "version", json_int) || json_int > FOSSILIZE_APPLICATION_INFO_FILTER_VERSION)
 		return false;
 
 	auto *blacklist = maybe_get_member(doc, "blacklistedApplicationNames");
