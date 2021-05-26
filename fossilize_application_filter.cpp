@@ -156,22 +156,19 @@ bool ApplicationInfoFilter::Impl::filter_env_info(const EnvInfo &info) const
 
 bool ApplicationInfoFilter::Impl::needs_buckets(const VkApplicationInfo *info)
 {
-	if (!info)
-		return false;
-
 	if (task.valid())
 		task.wait();
 	if (!parsing_success)
 		return false;
 
-	if (info->pApplicationName)
+	if (info && info->pApplicationName)
 	{
 		auto itr = application_infos.find(info->pApplicationName);
 		if (itr != application_infos.end() && !itr->second.variant_dependencies.empty())
 			return true;
 	}
 
-	if (info->pEngineName)
+	if (info && info->pEngineName)
 	{
 		auto itr = engine_infos.find(info->pEngineName);
 		if (itr != engine_infos.end() && !itr->second.variant_dependencies.empty())
@@ -201,6 +198,10 @@ static void hash_variant(Hasher &h, VariantDependency dep,
                          const VkApplicationInfo *info,
                          const VkPhysicalDeviceFeatures2 *features2)
 {
+	const VkApplicationInfo default_app_info = { VK_STRUCTURE_TYPE_APPLICATION_INFO };
+	if (!info)
+		info = &default_app_info;
+
 	switch (dep)
 	{
 	case VariantDependency::VendorID:
@@ -294,9 +295,6 @@ Hash ApplicationInfoFilter::Impl::get_bucket_hash(const VkPhysicalDeviceProperti
                                                   const VkApplicationInfo *info,
                                                   const VkPhysicalDeviceFeatures2 *features2)
 {
-	if (!info)
-		return 0;
-
 	if (task.valid())
 		task.wait();
 	if (!parsing_success)
@@ -306,7 +304,7 @@ Hash ApplicationInfoFilter::Impl::get_bucket_hash(const VkPhysicalDeviceProperti
 	bool use_default_variant = true;
 
 	h.u32(0);
-	if (info->pApplicationName)
+	if (info && info->pApplicationName)
 	{
 		auto itr = application_infos.find(info->pApplicationName);
 		if (itr != application_infos.end())
@@ -318,7 +316,7 @@ Hash ApplicationInfoFilter::Impl::get_bucket_hash(const VkPhysicalDeviceProperti
 	}
 
 	h.u32(0);
-	if (info->pEngineName)
+	if (info && info->pEngineName)
 	{
 		auto itr = engine_infos.find(info->pEngineName);
 		if (itr != engine_infos.end())
