@@ -29,6 +29,7 @@
 #include <string>
 #include <chrono>
 #include <thread>
+#include <future>
 #include "layer/utils.hpp"
 #include "fossilize_errors.hpp"
 #include "path.hpp"
@@ -1064,7 +1065,25 @@ static bool test_concurrent_database_bucket_touch()
 	if (update_mtime == current_mtime)
 		return false;
 
+	// Makes sure that we can spam TOUCH concurrently without issue.
+	auto touch_lambda = []() -> bool {
+		for (unsigned i = 0; i < 1024; i++)
+			if (!Path::touch(".__test_concurrent.buck/TOUCH2"))
+				return false;
+		return true;
+	};
+	std::vector<std::future<bool>> futures;
+	for (unsigned i = 0; i < 16; i++)
+		futures.push_back(std::async(std::launch::async, touch_lambda));
+	for (auto &fut : futures)
+		if (!fut.get())
+			return false;
+
+	if (!Path::is_file(".__test_concurrent.buck/TOUCH2"))
+		return false;
+
 	remove(".__test_concurrent.buck/TOUCH");
+	remove(".__test_concurrent.buck/TOUCH2");
 	remove(".__test_concurrent.buck");
 	return true;
 }
