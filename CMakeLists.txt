@@ -39,6 +39,11 @@ if (FOSSILIZE_SANITIZE_THREADS)
     set(FOSSILIZE_LINK_FLAGS "${FOSSILIZE_LINK_FLAGS} -fsanitize=thread")
 endif()
 
+if (CMAKE_COMPILER_IS_GNUCXX AND WIN32)
+    # MinGW build.
+    set(CMAKE_EXE_LINKER_FLAGS "${FOSSILIZE_LINK_FLAGS} -static -static-libstdc++ -static-libgcc -fstack-protector")
+endif()
+
 include(GNUInstallDirs)
 
 add_library(miniz STATIC miniz/miniz.h miniz/miniz.c)
