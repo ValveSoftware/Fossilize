@@ -80,7 +80,11 @@ R"delim(
 				"TEST" : { "nonnull" : true }
 			}
 		}
-	}
+	},
+	"defaultBucketVariantDependencies" : [
+		"ApplicationName",
+		"EngineName"
+	]
 }
 )delim";
 
@@ -254,7 +258,7 @@ R"delim(
 	// Test bucket variant filter.
 	appinfo.pEngineName = nullptr;
 	appinfo.pApplicationName = "test1";
-	if (filter.needs_buckets(&appinfo))
+	if (!filter.needs_buckets(&appinfo))
 		return EXIT_FAILURE;
 
 	appinfo.pEngineName = "test1";
@@ -316,6 +320,14 @@ R"delim(
 		appinfo.pApplicationName = "foo";
 		auto hash7 = filter.get_bucket_hash(&props2, &appinfo, &features2);
 		if (hash7 == hash6)
+			return EXIT_FAILURE;
+
+		// Check that the default variant hash is used.
+		appinfo.pApplicationName = "blah";
+		appinfo.pEngineName = "blah2";
+		auto hash8 = filter.get_bucket_hash(&props2, &appinfo, &features2);
+		auto hash9 = filter.get_bucket_hash(&props2, &appinfo, nullptr);
+		if (hash8 != hash9)
 			return EXIT_FAILURE;
 	}
 

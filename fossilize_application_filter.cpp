@@ -107,6 +107,7 @@ struct ApplicationInfoFilter::Impl
 	std::unordered_set<std::string> blacklisted_engine_names;
 	std::unordered_map<std::string, AppInfo> application_infos;
 	std::unordered_map<std::string, AppInfo> engine_infos;
+	std::vector<VariantDependency> default_variant_dependencies;
 
 	bool parsing_done = false;
 	bool parsing_success = false;
@@ -177,7 +178,7 @@ bool ApplicationInfoFilter::Impl::needs_buckets(const VkApplicationInfo *info)
 			return true;
 	}
 
-	return false;
+	return !default_variant_dependencies.empty();
 }
 
 template <typename T>
@@ -302,14 +303,18 @@ Hash ApplicationInfoFilter::Impl::get_bucket_hash(const VkPhysicalDeviceProperti
 		return 0;
 
 	Hasher h;
+	bool use_default_variant = true;
 
 	h.u32(0);
 	if (info->pApplicationName)
 	{
 		auto itr = application_infos.find(info->pApplicationName);
 		if (itr != application_infos.end())
+		{
+			use_default_variant = false;
 			for (auto &dep : itr->second.variant_dependencies)
 				hash_variant(h, dep, props, info, features2);
+		}
 	}
 
 	h.u32(0);
@@ -317,9 +322,16 @@ Hash ApplicationInfoFilter::Impl::get_bucket_hash(const VkPhysicalDeviceProperti
 	{
 		auto itr = engine_infos.find(info->pEngineName);
 		if (itr != engine_infos.end())
+		{
+			use_default_variant = false;
 			for (auto &dep : itr->second.variant_dependencies)
 				hash_variant(h, dep, props, info, features2);
+		}
 	}
+
+	if (use_default_variant)
+		for (auto &dep : default_variant_dependencies)
+			hash_variant(h, dep, props, info, features2);
 
 	return h.get();
 }
@@ -530,9 +542,8 @@ static bool add_blacklists(std::unordered_set<std::string> &output, const Value 
 	return true;
 }
 
-static bool parse_blacklist_environments(const Value &value, std::vector<EnvInfo> &infos)
+static bool parse_blacklist_environments(const Value &envs, std::vector<EnvInfo> &infos)
 {
-	auto &envs = value["blacklistedEnvironments"];
 	if (!envs.IsObject())
 	{
 		LOGE("blacklistedEnvironments must be an object.\n");
@@ -566,9 +577,8 @@ static bool parse_blacklist_environments(const Value &value, std::vector<EnvInfo
 	return true;
 }
 
-static bool parse_bucket_variant_dependencies(const Value &value, std::vector<VariantDependency> &variant_deps)
+static bool parse_bucket_variant_dependencies(const Value &deps, std::vector<VariantDependency> &variant_deps)
 {
-	auto &deps = value["bucketVariantDependencies"];
 	if (!deps.IsArray())
 	{
 		LOGE("bucketVariantDependencies must be an array.\n");
@@ -619,10 +629,10 @@ static bool add_application_filters(std::unordered_map<std::string, AppInfo> &ou
 		info.minimum_engine_version = default_get_member_uint(value, "minimumEngineVersion");
 		info.minimum_application_version = default_get_member_uint(value, "minimumApplicationVersion");
 		if (value.HasMember("blacklistedEnvironments"))
-			if (!parse_blacklist_environments(value, info.env_infos))
+			if (!parse_blacklist_environments(value["blacklistedEnvironments"], info.env_infos))
 				return false;
 		if (value.HasMember("bucketVariantDependencies"))
-			if (!parse_bucket_variant_dependencies(value, info.variant_dependencies))
+			if (!parse_bucket_variant_dependencies(value["bucketVariantDependencies"], info.variant_dependencies))
 				return false;
 		output[itr->name.GetString()] = std::move(info);
 	}
@@ -664,6 +674,11 @@ bool ApplicationInfoFilter::Impl::parse(const std::string &path)
 	filters = maybe_get_member(doc, "engineFilters");
 	if (filters)
 		if (!add_application_filters(engine_infos, filters))
+			return false;
+
+	auto *default_variants = maybe_get_member(doc, "defaultBucketVariantDependencies");
+	if (default_variants)
+		if (!parse_bucket_variant_dependencies(*default_variants, default_variant_dependencies))
 			return false;
 
 	return true;
