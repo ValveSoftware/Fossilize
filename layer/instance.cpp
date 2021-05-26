@@ -65,6 +65,9 @@ static ApplicationInfoFilter *getApplicationInfoFilter()
 	if (filterPath)
 	{
 		globalInfoFilter.reset(new ApplicationInfoFilter);
+		globalInfoFilter->set_environment_resolver([](const char *env, void *) -> const char * {
+			return getenv(env);
+		}, nullptr);
 		globalInfoFilter->parse_async(filterPath);
 	}
 
