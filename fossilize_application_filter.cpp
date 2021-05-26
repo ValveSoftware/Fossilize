@@ -54,7 +54,17 @@ enum class VariantDependency
 	VendorID,
 	MutableDescriptorType,
 	BindlessUBO,
-	BufferDeviceAddress
+	BufferDeviceAddress,
+	ApplicationVersion,
+	EngineVersion,
+	ApplicationVersionMajor,
+	ApplicationVersionMinor,
+	ApplicationVersionPatch,
+	EngineVersionMajor,
+	EngineVersionMinor,
+	EngineVersionPatch,
+	ApplicationName,
+	EngineName
 };
 
 struct VariantDependencyMap
@@ -68,6 +78,16 @@ static const VariantDependencyMap variant_dependency_map[] = {
 	DEF(MutableDescriptorType),
 	DEF(BindlessUBO),
 	DEF(BufferDeviceAddress),
+	DEF(ApplicationVersion),
+	DEF(EngineVersion),
+	DEF(ApplicationVersionMajor),
+	DEF(ApplicationVersionMinor),
+	DEF(ApplicationVersionPatch),
+	DEF(EngineVersionMajor),
+	DEF(EngineVersionMinor),
+	DEF(EngineVersionPatch),
+	DEF(ApplicationName),
+	DEF(EngineName),
 };
 #undef DEF
 
@@ -177,6 +197,7 @@ static inline const T *find_pnext(VkStructureType type, const void *pNext)
 
 static void hash_variant(Hasher &h, VariantDependency dep,
                          const VkPhysicalDeviceProperties2 *props,
+                         const VkApplicationInfo *info,
                          const VkPhysicalDeviceFeatures2 *features2)
 {
 	switch (dep)
@@ -223,6 +244,46 @@ static void hash_variant(Hasher &h, VariantDependency dep,
 		break;
 	}
 
+	case VariantDependency::ApplicationVersion:
+		h.u32(info->applicationVersion);
+		break;
+
+	case VariantDependency::ApplicationVersionMajor:
+		h.u32(VK_VERSION_MAJOR(info->applicationVersion));
+		break;
+
+	case VariantDependency::ApplicationVersionMinor:
+		h.u32(VK_VERSION_MINOR(info->applicationVersion));
+		break;
+
+	case VariantDependency::ApplicationVersionPatch:
+		h.u32(VK_VERSION_PATCH(info->applicationVersion));
+		break;
+
+	case VariantDependency::EngineVersion:
+		h.u32(info->engineVersion);
+		break;
+
+	case VariantDependency::EngineVersionMajor:
+		h.u32(VK_VERSION_MAJOR(info->engineVersion));
+		break;
+
+	case VariantDependency::EngineVersionMinor:
+		h.u32(VK_VERSION_MINOR(info->engineVersion));
+		break;
+
+	case VariantDependency::EngineVersionPatch:
+		h.u32(VK_VERSION_PATCH(info->engineVersion));
+		break;
+
+	case VariantDependency::ApplicationName:
+		h.string(info->pApplicationName ? info->pApplicationName : "");
+		break;
+
+	case VariantDependency::EngineName:
+		h.string(info->pEngineName ? info->pEngineName : "");
+		break;
+
 	default:
 		break;
 	}
@@ -248,7 +309,7 @@ Hash ApplicationInfoFilter::Impl::get_bucket_hash(const VkPhysicalDeviceProperti
 		auto itr = application_infos.find(info->pApplicationName);
 		if (itr != application_infos.end())
 			for (auto &dep : itr->second.variant_dependencies)
-				hash_variant(h, dep, props, features2);
+				hash_variant(h, dep, props, info, features2);
 	}
 
 	h.u32(0);
@@ -257,7 +318,7 @@ Hash ApplicationInfoFilter::Impl::get_bucket_hash(const VkPhysicalDeviceProperti
 		auto itr = engine_infos.find(info->pEngineName);
 		if (itr != engine_infos.end())
 			for (auto &dep : itr->second.variant_dependencies)
-				hash_variant(h, dep, props, features2);
+				hash_variant(h, dep, props, info, features2);
 	}
 
 	return h.get();

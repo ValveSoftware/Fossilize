@@ -67,7 +67,8 @@ R"delim(
 				"VendorID",
 				"MutableDescriptorType",
 				"BufferDeviceAddress",
-				"DummyIgnored"
+				"DummyIgnored",
+				"ApplicationName"
 			]
 		},
 		"test2" : { "minimumEngineVersion" : 10, "minimumApplicationVersion" : 1000 },
@@ -309,6 +310,12 @@ R"delim(
 		vulkan12_features.bufferDeviceAddress = VK_TRUE;
 		auto hash6 = filter.get_bucket_hash(&props2, &appinfo, &features2);
 		if (hash5 != hash6)
+			return EXIT_FAILURE;
+
+		// Spot check for ApplicationName.
+		appinfo.pApplicationName = "foo";
+		auto hash7 = filter.get_bucket_hash(&props2, &appinfo, &features2);
+		if (hash7 == hash6)
 			return EXIT_FAILURE;
 	}
 
