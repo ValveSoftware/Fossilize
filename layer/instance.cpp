@@ -304,7 +304,12 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDevicePropert
 	extraPaths = getenv(FOSSILIZE_DUMP_PATH_READ_ONLY_ENV);
 #endif
 
-	bool needs_bucket = infoFilter->needs_buckets(appInfo);
+	bool needs_bucket = infoFilter && infoFilter->needs_buckets(appInfo);
+
+	// Don't write a bucket if we're going to filter out the application.
+	if (needs_bucket && appInfo && infoFilter && !infoFilter->test_application_info(appInfo))
+		needs_bucket = false;
+
 	char hashString[17];
 
 	sprintf(hashString, "%016" PRIx64, hash);
