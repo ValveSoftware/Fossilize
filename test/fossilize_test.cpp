@@ -1039,6 +1039,13 @@ static bool test_concurrent_database_bucket_touch()
 			return false;
 	}
 
+	if (!Path::touch(".__test_concurrent.tmp"))
+		return false;
+	// This should fail.
+	if (Path::mkdir(".__test_concurrent.tmp"))
+		return false;
+	remove(".__test_concurrent.tmp");
+
 	if (!Path::is_directory(".__test_concurrent.buck"))
 		return false;
 	if (!Path::is_file(".__test_concurrent.buck/TOUCH"))
