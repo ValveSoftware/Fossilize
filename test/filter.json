@@ -1,0 +1,34 @@
+{
+	"asset": "FossilizeApplicationInfoFilter",
+	"version" : 2,
+	"blacklistedApplicationNames" : [ "A",  "B", "C" ],
+	"blacklistedEngineNames" : [ "D", "E", "F" ],
+	"engineFilters" : {
+		"X" : {
+			"blacklistedEnvironments" : {
+				"BLOCK_ENV" : { "contains" : "block" }
+			},
+			"bucketVariantDependencies" : [
+				"EngineName"
+			]
+		},
+		"Y" : {
+			"bucketVariantDependencies" : [
+				"EngineVersionMajor",
+				"EngineVersionMinor"
+			]
+		},
+		"Z" : {
+			"bucketVariantDependencies" : [
+				"EngineVersionMajor",
+				"EngineVersionMinor",
+				"VendorID",
+				"BufferDeviceAddress"
+			]
+		}
+	},
+	"defaultBucketVariantDependencies" : [
+		"ApplicationName",
+		"EngineName"
+	]
+}
