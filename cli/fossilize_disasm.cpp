@@ -46,6 +46,100 @@ static inline T fake_handle(uint64_t v)
 
 using namespace std;
 using namespace Fossilize;
+
+struct FilterReplayer : StateCreatorInterface
+{
+	bool enqueue_create_sampler(Hash hash, const VkSamplerCreateInfo *, VkSampler *sampler) override
+	{
+		*sampler = fake_handle<VkSampler>(hash);
+		return true;
+	}
+
+	bool enqueue_create_descriptor_set_layout(Hash hash, const VkDescriptorSetLayoutCreateInfo *, VkDescriptorSetLayout *layout) override
+	{
+		*layout = fake_handle<VkDescriptorSetLayout>(hash);
+		return true;
+	}
+
+	bool enqueue_create_pipeline_layout(Hash hash, const VkPipelineLayoutCreateInfo *, VkPipelineLayout *layout) override
+	{
+		*layout = fake_handle<VkPipelineLayout>(hash);
+		return true;
+	}
+
+	bool enqueue_create_render_pass(Hash hash, const VkRenderPassCreateInfo *, VkRenderPass *render_pass) override
+	{
+		*render_pass = fake_handle<VkRenderPass>(hash);
+		return true;
+	}
+
+	bool enqueue_create_render_pass2(Hash hash, const VkRenderPassCreateInfo2 *, VkRenderPass *render_pass) override
+	{
+		*render_pass = fake_handle<VkRenderPass>(hash);
+		return true;
+	}
+
+	bool enqueue_create_shader_module(Hash, const VkShaderModuleCreateInfo *, VkShaderModule*) override { return false; }
+
+	bool enqueue_create_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline) override
+	{
+		*pipeline = fake_handle<VkPipeline>(hash);
+
+		// We are active if we either explicitly add the pipeline, or we explicitly add one of the module dependencies.
+		bool active;
+		if (filter_graphics.count(hash) != 0)
+		{
+			active = true;
+		}
+		else
+		{
+			active = false;
+			for (uint32_t i = 0; !active && i < create_info->stageCount; i++)
+				active = filter_modules.count((Hash)create_info->pStages[i].module) != 0;
+		}
+
+		if (!active)
+			return true;
+
+		// If the pipeline is to be emitted, promote all dependencies to be active as well.
+		if (create_info->basePipelineHandle != VK_NULL_HANDLE)
+			filter_graphics.insert((Hash)create_info->basePipelineHandle);
+		for (uint32_t i = 0; i < create_info->stageCount; i++)
+			filter_modules_promoted.insert((Hash)create_info->pStages[i].module);
+		filter_graphics.insert(hash);
+
+		return true;
+	}
+
+	bool enqueue_create_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) override
+	{
+		*pipeline = fake_handle<VkPipeline>(hash);
+
+		// We are active if we either explicitly add the pipeline, or we explicitly add one of the module dependencies.
+		bool active;
+		if (filter_compute.count(hash) != 0)
+			active = true;
+		else
+			active = filter_modules.count((Hash)create_info->stage.module) != 0;
+
+		if (!active)
+			return true;
+
+		// If the pipeline is to be emitted, promote all dependencies to be active as well.
+		if (create_info->basePipelineHandle != VK_NULL_HANDLE)
+			filter_compute.insert((Hash)create_info->basePipelineHandle);
+		filter_modules_promoted.insert((Hash)create_info->stage.module);
+		filter_compute.insert(hash);
+
+		return true;
+	}
+
+	unordered_set<Hash> filter_graphics;
+	unordered_set<Hash> filter_compute;
+	unordered_set<Hash> filter_modules;
+	unordered_set<Hash> filter_modules_promoted;
+};
+
 struct DisasmReplayer : StateCreatorInterface
 {
 	DisasmReplayer(const VulkanDevice *device_)
@@ -150,6 +244,12 @@ struct DisasmReplayer : StateCreatorInterface
 
 	bool enqueue_create_shader_module(Hash hash, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module) override
 	{
+		if (!shader_module_is_active(hash))
+		{
+			*module = fake_handle<VkShaderModule>(hash);
+			return true;
+		}
+
 		if (device)
 		{
 			LOGI("Creating shader module 0%" PRIX64 "\n", hash);
@@ -212,6 +312,12 @@ struct DisasmReplayer : StateCreatorInterface
 
 	bool enqueue_create_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
+		if (!compute_pipeline_is_active(hash))
+		{
+			*pipeline = fake_handle<VkPipeline>(hash);
+			return true;
+		}
+
 		if (device)
 		{
 			if (device->has_pipeline_stats())
@@ -237,6 +343,12 @@ struct DisasmReplayer : StateCreatorInterface
 
 	bool enqueue_create_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
+		if (!graphics_pipeline_is_active(hash))
+		{
+			*pipeline = fake_handle<VkPipeline>(hash);
+			return true;
+		}
+
 		if (device)
 		{
 			if (device->has_pipeline_stats())
@@ -258,6 +370,26 @@ struct DisasmReplayer : StateCreatorInterface
 		graphics_infos.push_back(create_info);
 		graphics_hashes.push_back(hash);
 		return true;
+	}
+
+	bool shader_module_is_active(Hash hash) const
+	{
+		return !filter_is_active() || filter_modules.count(hash) != 0;
+	}
+
+	bool graphics_pipeline_is_active(Hash hash) const
+	{
+		return !filter_is_active() || filter_graphics.count(hash) != 0;
+	}
+
+	bool compute_pipeline_is_active(Hash hash) const
+	{
+		return !filter_is_active() || filter_compute.count(hash) != 0;
+	}
+
+	bool filter_is_active() const
+	{
+		return !filter_graphics.empty() || !filter_compute.empty() || !filter_modules.empty();
 	}
 
 	const VulkanDevice *device;
@@ -283,6 +415,10 @@ struct DisasmReplayer : StateCreatorInterface
 	vector<VkPipeline> compute_pipelines;
 	vector<VkPipeline> graphics_pipelines;
 	VkPipelineCache pipeline_cache = VK_NULL_HANDLE;
+
+	unordered_set<Hash> filter_graphics;
+	unordered_set<Hash> filter_compute;
+	unordered_set<Hash> filter_modules;
 };
 
 enum class DisasmMethod
@@ -542,6 +678,9 @@ static void print_help()
 	     "\t[--output <path>]\n"
 	     "\t[--target asm/glsl/isa]\n"
 	     "\t[--module-only]\n"
+	     "\t[--filter-graphics hash]\n"
+	     "\t[--filter-compute hash]\n"
+	     "\t[--filter-module hash]\n"
 	     "state.json\n");
 }
 
@@ -573,6 +712,54 @@ static string stage_to_string(VkShaderStageFlagBits stage)
 	}
 }
 
+static void replay_hash(ResourceTag tag, Hash hash, DatabaseInterface &db_iface,
+                        StateReplayer &replayer, StateCreatorInterface &iface,
+                        vector<uint8_t> &state_json)
+{
+	size_t state_json_size;
+	if (!db_iface.read_entry(tag, hash, &state_json_size, nullptr, 0))
+	{
+		LOGE("Failed to load blob from cache.\n");
+		exit(EXIT_FAILURE);
+	}
+
+	state_json.resize(state_json_size);
+
+	if (!db_iface.read_entry(tag, hash, &state_json_size, state_json.data(), 0))
+	{
+		LOGE("Failed to load blob from cache.\n");
+		exit(EXIT_FAILURE);
+	}
+
+	if (!replayer.parse(iface, &db_iface, state_json.data(), state_json.size()))
+		LOGE("Failed to parse blob (tag: %d, hash: 0x%016" PRIx64 ").\n", tag, hash);
+}
+
+static void replay_all_hashes(ResourceTag tag, DatabaseInterface &db_iface,
+                              StateReplayer &replayer, StateCreatorInterface &iface,
+                              vector<uint8_t> &state_json,
+                              const unordered_set<Hash> *filter)
+{
+	if (filter)
+	{
+		for (auto hash : *filter)
+			replay_hash(tag, hash, db_iface, replayer, iface, state_json);
+	}
+	else
+	{
+		size_t size;
+		if (!db_iface.get_hash_list_for_resource_tag(tag, &size, nullptr))
+			exit(EXIT_FAILURE);
+
+		vector<Hash> hashes(size);
+		if (!db_iface.get_hash_list_for_resource_tag(tag, &size, hashes.data()))
+			exit(EXIT_FAILURE);
+
+		for (auto hash : hashes)
+			replay_hash(tag, hash, db_iface, replayer, iface, state_json);
+	}
+}
+
 int main(int argc, char *argv[])
 {
 	string json_path;
@@ -580,6 +767,10 @@ int main(int argc, char *argv[])
 	VulkanDevice::Options opts;
 	DisasmMethod method = DisasmMethod::Asm;
 	bool module_only = false;
+
+	std::unordered_set<Hash> filter_graphics;
+	std::unordered_set<Hash> filter_compute;
+	std::unordered_set<Hash> filter_modules;
 
 	CLICallbacks cbs;
 	cbs.default_handler = [&](const char *arg) { json_path = arg; };
@@ -591,6 +782,15 @@ int main(int argc, char *argv[])
 		method = method_from_string(parser.next_string());
 	});
 	cbs.add("--module-only", [&](CLIParser &) { module_only = true; });
+	cbs.add("--filter-graphics", [&](CLIParser &parser) {
+		filter_graphics.insert(strtoull(parser.next_string(), nullptr, 16));
+	});
+	cbs.add("--filter-compute", [&](CLIParser &parser) {
+		filter_compute.insert(strtoull(parser.next_string(), nullptr, 16));
+	});
+	cbs.add("--filter-module", [&](CLIParser &parser) {
+		filter_modules.insert(strtoull(parser.next_string(), nullptr, 16));
+	});
 	cbs.error_handler = [] { print_help(); };
 
 	CLIParser parser(move(cbs), argc - 1, argv + 1);
@@ -631,14 +831,75 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	DisasmReplayer replayer(device.get_device() ? &device : nullptr);
-	StateReplayer state_replayer;
 	auto resolver = unique_ptr<DatabaseInterface>(create_database(json_path.c_str(), DatabaseMode::ReadOnly));
 	if (!resolver->prepare())
 	{
 		LOGE("Failed to open database: %s\n", json_path.c_str());
 		return EXIT_FAILURE;
 	}
+
+	vector<uint8_t> state_json;
+
+	bool use_filter = !filter_graphics.empty() || !filter_compute.empty() || !filter_modules.empty();
+
+	if (use_filter && !module_only)
+	{
+		FilterReplayer filter_replayer;
+		StateReplayer state_replayer;
+
+		state_replayer.set_resolve_derivative_pipeline_handles(false);
+		state_replayer.set_resolve_shader_module_handles(false);
+
+		filter_replayer.filter_graphics = std::move(filter_graphics);
+		filter_replayer.filter_compute = std::move(filter_compute);
+		filter_replayer.filter_modules = std::move(filter_modules);
+
+		// Don't know which pipelines depend on a module in question, so need to replay all pipelines and promote on demand.
+		bool replay_all = !filter_replayer.filter_modules.empty();
+
+		static const ResourceTag early_playback_order[] = {
+			RESOURCE_SAMPLER,
+			RESOURCE_DESCRIPTOR_SET_LAYOUT,
+			RESOURCE_PIPELINE_LAYOUT,
+			RESOURCE_RENDER_PASS,
+		};
+
+		for (auto tag : early_playback_order)
+			replay_all_hashes(tag, *resolver, state_replayer, filter_replayer, state_json, nullptr);
+
+		if (replay_all)
+		{
+			static const ResourceTag playback_order[] = {
+				RESOURCE_GRAPHICS_PIPELINE,
+				RESOURCE_COMPUTE_PIPELINE,
+			};
+
+			for (auto tag : playback_order)
+				replay_all_hashes(tag, *resolver, state_replayer, filter_replayer, state_json, nullptr);
+		}
+		else
+		{
+			// Need copies since we might modify the hashmap inside the replay callback.
+			auto replays_graphics = filter_replayer.filter_graphics;
+			auto replays_compute = filter_replayer.filter_compute;
+			replay_all_hashes(RESOURCE_GRAPHICS_PIPELINE, *resolver, state_replayer,
+			                  filter_replayer, state_json, &replays_graphics);
+			replay_all_hashes(RESOURCE_COMPUTE_PIPELINE, *resolver, state_replayer,
+			                  filter_replayer, state_json, &replays_compute);
+		}
+
+		filter_graphics = std::move(filter_replayer.filter_graphics);
+		filter_compute = std::move(filter_replayer.filter_compute);
+		filter_modules = std::move(filter_replayer.filter_modules);
+		for (auto hash : filter_replayer.filter_modules_promoted)
+			filter_modules.insert(hash);
+	}
+
+	StateReplayer state_replayer;
+	DisasmReplayer replayer(device.get_device() ? &device : nullptr);
+	replayer.filter_graphics = std::move(filter_graphics);
+	replayer.filter_compute = std::move(filter_compute);
+	replayer.filter_modules = std::move(filter_modules);
 
 	static const ResourceTag playback_order[] = {
 		RESOURCE_APPLICATION_INFO, // This will create the device, etc.
@@ -662,49 +923,26 @@ int main(int argc, char *argv[])
 		"Compute Pipeline",
 	};
 
-	vector<uint8_t> state_json;
-
 	for (auto &tag : playback_order)
 	{
 		if (module_only && tag != RESOURCE_SHADER_MODULE)
 			continue;
 
 		LOGI("Replaying tag: %s\n", tag_names[tag]);
-		size_t hash_count = 0;
-		if (!resolver->get_hash_list_for_resource_tag(tag, &hash_count, nullptr))
-		{
-			LOGE("Failed to get hashes.\n");
-			return EXIT_FAILURE;
-		}
+		const unordered_set<Hash> *filter = nullptr;
 
-		vector<Hash> hashes(hash_count);
-
-		if (!resolver->get_hash_list_for_resource_tag(tag, &hash_count, hashes.data()))
+		if (use_filter)
 		{
-			LOGE("Failed to get shader module hashes.\n");
-			return EXIT_FAILURE;
-		}
-
-		for (auto hash : hashes)
-		{
-			size_t state_json_size;
-			if (!resolver->read_entry(tag, hash, &state_json_size, nullptr, 0))
+			switch (tag)
 			{
-				LOGE("Failed to load blob from cache.\n");
-				return EXIT_FAILURE;
+			case RESOURCE_SHADER_MODULE: filter = &replayer.filter_modules; break;
+			case RESOURCE_GRAPHICS_PIPELINE: filter = &replayer.filter_graphics; break;
+			case RESOURCE_COMPUTE_PIPELINE: filter = &replayer.filter_compute; break;
+			default: break;
 			}
-
-			state_json.resize(state_json_size);
-
-			if (!resolver->read_entry(tag, hash, &state_json_size, state_json.data(), 0))
-			{
-				LOGE("Failed to load blob from cache.\n");
-				return EXIT_FAILURE;
-			}
-
-			if (!state_replayer.parse(replayer, resolver.get(), state_json.data(), state_json.size()))
-				LOGE("Failed to parse blob (tag: %d, hash: 0x%016" PRIx64 ").\n", tag, hash);
 		}
+
+		replay_all_hashes(tag, *resolver, state_replayer, replayer, state_json, filter);
 		LOGI("Replayed tag: %s\n", tag_names[tag]);
 	}
 
