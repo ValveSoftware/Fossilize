@@ -27,8 +27,12 @@
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <sys/stat.h>
 #else
 #include <unistd.h>
+#include <sys/stat.h>
+#include <errno.h>
+#include <fcntl.h>
 #ifdef __linux__
 #include <linux/limits.h>
 #endif
@@ -313,6 +317,117 @@ string get_executable_path()
 	}
 
 	return "";
+#endif
+}
+
+bool mkdir(const std::string &path)
+{
+#ifdef _WIN32
+	if (!CreateDirectoryA(path.c_str(), nullptr))
+	{
+		if (GetLastError() != ERROR_ALREADY_EXISTS)
+			return false;
+		if (!is_directory(path))
+			return false;
+	}
+	return true;
+#else
+	int ret = ::mkdir(path.c_str(), 0750);
+	if (ret == 0)
+		return true;
+	if (ret < 0 && errno != EEXIST)
+		return false;
+
+	// Verify the path is actually a directory.
+	struct stat s = {};
+	return ::stat(path.c_str(), &s) == 0 && (s.st_mode & S_IFDIR) != 0;
+#endif
+}
+
+bool touch(const std::string &path)
+{
+#ifdef _WIN32
+	HANDLE h = CreateFileA(path.c_str(), GENERIC_WRITE, FILE_SHARE_WRITE | FILE_SHARE_READ,
+	                       nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL,
+	                       INVALID_HANDLE_VALUE);
+	if (h == INVALID_HANDLE_VALUE)
+		return false;
+
+	SYSTEMTIME st;
+	FILETIME ft;
+	GetSystemTime(&st);
+	SystemTimeToFileTime(&st, &ft);
+	bool success = SetFileTime(h, nullptr, nullptr, &ft) != 0;
+	CloseHandle(h);
+	return success;
+#else
+	int fd = ::open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0640);
+	if (fd < 0)
+		return false;
+
+	const struct timespec times[2] = {{ 0, UTIME_NOW }, { 0, UTIME_NOW }};
+	bool ret = ::futimens(fd, times) == 0;
+	::close(fd);
+	return ret;
+#endif
+}
+
+bool is_file(const std::string &path)
+{
+#ifdef _WIN32
+	struct __stat64 s;
+	if (_stat64(path.c_str(), &s) < 0)
+		return false;
+	return (s.st_mode & _S_IFREG) != 0;
+#else
+	struct stat s = {};
+	return ::stat(path.c_str(), &s) == 0 && (s.st_mode & S_IFREG) != 0;
+#endif
+}
+
+bool is_directory(const std::string &path)
+{
+#ifdef _WIN32
+	struct __stat64 s;
+	if (_stat64(path.c_str(), &s) < 0)
+		return false;
+	return (s.st_mode & _S_IFDIR) != 0;
+#else
+	struct stat s = {};
+	return ::stat(path.c_str(), &s) == 0 && (s.st_mode & S_IFDIR) != 0;
+#endif
+}
+
+bool get_mtime_us(const std::string &path, uint64_t &mtime_us)
+{
+#ifdef _WIN32
+	HANDLE h = CreateFileA(path.c_str(), GENERIC_READ, FILE_SHARE_READ,
+	                       nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL,
+	                       INVALID_HANDLE_VALUE);
+	if (h == INVALID_HANDLE_VALUE)
+		return false;
+
+	FILETIME ft;
+	if (!GetFileTime(h, nullptr, nullptr, &ft))
+	{
+		CloseHandle(h);
+		return false;
+	}
+
+	mtime_us = ((uint64_t(ft.dwHighDateTime) << 32) | uint64_t(ft.dwLowDateTime)) / 10;
+	CloseHandle(h);
+	return true;
+#else
+	struct stat s = {};
+	if (::stat(path.c_str(), &s) != 0)
+		return false;
+#if defined(__linux__)
+	mtime_us = s.st_mtim.tv_sec * 1000000ll + s.st_mtim.tv_nsec / 1000;
+#else
+	// Fallback.
+	mtime_us = s.st_mtime * 1000000ll;
+#endif
+	return true;
 #endif
 }
 }

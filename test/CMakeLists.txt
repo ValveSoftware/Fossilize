@@ -25,6 +25,24 @@ target_link_libraries(object-cache-test fossilize)
 set_target_properties(object-cache-test PROPERTIES LINK_FLAGS "${FOSSILIZE_LINK_FLAGS}")
 add_test(NAME object-cache-test COMMAND object-cache-test)
 
+option(FOSSILIZE_TEST_RUNTIME_LAYER "Tests runtime layer" OFF)
+
+if (FOSSILIZE_TEST_RUNTIME_LAYER)
+    add_executable(layer-test layer_test.cpp)
+    target_link_libraries(layer-test PRIVATE vulkan)
+    add_test(NAME layer-test COMMAND layer-test)
+    set_property(TEST layer-test APPEND PROPERTY
+            ENVIRONMENT VK_LAYER_PATH=${CMAKE_BINARY_DIR}/layer)
+    set_property(TEST layer-test APPEND PROPERTY
+            ENVIRONMENT VK_INSTANCE_LAYERS=VK_LAYER_fossilize)
+    set_property(TEST layer-test APPEND PROPERTY
+            ENVIRONMENT FOSSILIZE_DUMP_PATH=${CMAKE_BINARY_DIR}/test-dump)
+    set_property(TEST layer-test APPEND PROPERTY
+            ENVIRONMENT FOSSILIZE_APPLICATION_INFO_FILTER_PATH=${CMAKE_CURRENT_SOURCE_DIR}/filter.json)
+    set_property(TEST layer-test APPEND PROPERTY
+            ENVIRONMENT BLOCK_ENV=ZblockZ)
+endif()
+
 if (NOT WIN32)
     add_executable(futex-test futex_test.cpp)
     target_link_libraries(futex-test fossilize -pthread)

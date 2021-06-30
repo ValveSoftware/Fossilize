@@ -394,6 +394,11 @@ void DatabaseInterface::add_imported_metadata(const ExportedMetadataHeader *head
 	impl->imported_metadata.push_back(header);
 }
 
+bool DatabaseInterface::set_bucket_path(const char *, const char *)
+{
+	return false;
+}
+
 static size_t deduce_imported_size(const void *mapped, size_t maximum_size)
 {
 	size_t total_size = 0;
@@ -1713,12 +1718,40 @@ struct ConcurrentDatabase : DatabaseInterface
 		}
 	}
 
+	bool setup_bucket()
+	{
+		base_path += ".";
+		base_path += bucket_dirname;
+
+		if (!Path::mkdir(base_path))
+		{
+			LOGE("Failed to create directory %s.\n", base_path.c_str());
+			return false;
+		}
+
+		base_path += "/";
+		if (!Path::touch(base_path + "TOUCH"))
+			LOGW("Failed to touch last access in %s.\n", base_path.c_str());
+		base_path += "/" + bucket_basename;
+
+		if (readonly_interface)
+			static_cast<StreamArchive &>(*readonly_interface).path = base_path + ".foz";
+
+		return true;
+	}
+
 	bool prepare() override
 	{
 		if (mode != DatabaseMode::Append && mode != DatabaseMode::ReadOnly)
 			return false;
 
 		if (mode != DatabaseMode::ReadOnly && !impl->sub_databases_in_whitelist.empty())
+			return false;
+
+		if (mode != DatabaseMode::Append && !bucket_dirname.empty() && !bucket_basename.empty())
+			return false;
+
+		if (!bucket_dirname.empty() && !setup_bucket())
 			return false;
 
 		// Set inherited metadata in sub-databases before we prepare them.
@@ -2116,7 +2149,24 @@ struct ConcurrentDatabase : DatabaseInterface
 		return true;
 	}
 
+	bool set_bucket_path(const char *bucket_dirname_, const char *bucket_basename_) override
+	{
+		if (bucket_dirname_)
+			bucket_dirname = bucket_dirname_;
+		else
+			bucket_dirname.clear();
+
+		if (bucket_basename_)
+			bucket_basename = bucket_basename_;
+		else
+			bucket_basename.clear();
+
+		return true;
+	}
+
 	std::string base_path;
+	std::string bucket_dirname;
+	std::string bucket_basename;
 	DatabaseMode mode;
 	std::unique_ptr<DatabaseInterface> readonly_interface;
 	std::unique_ptr<DatabaseInterface> writeonly_interface;

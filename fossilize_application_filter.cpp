@@ -21,14 +21,14 @@
  */
 
 #include "fossilize_application_filter.hpp"
+#include "fossilize_hasher.hpp"
 #include "layer/utils.hpp"
 #include "vulkan.h"
-#include <mutex>
-#include <condition_variable>
 #include <future>
 #include <vector>
 #include <unordered_set>
 #include <unordered_map>
+#include <algorithm>
 #include <stdio.h>
 
 #define RAPIDJSON_HAS_STDSTRING 1
@@ -39,21 +39,75 @@ using namespace rapidjson;
 
 namespace Fossilize
 {
-enum { FOSSILIZE_APPLICATION_INFO_FILTER_VERSION = 1 };
+enum { FOSSILIZE_APPLICATION_INFO_FILTER_VERSION = 2 };
+
+struct EnvInfo
+{
+	std::string env;
+	std::string contains;
+	std::string equals;
+	bool nonnull = false;
+};
+
+enum class VariantDependency
+{
+	VendorID,
+	MutableDescriptorType,
+	BindlessUBO,
+	BufferDeviceAddress,
+	ApplicationVersion,
+	EngineVersion,
+	ApplicationVersionMajor,
+	ApplicationVersionMinor,
+	ApplicationVersionPatch,
+	EngineVersionMajor,
+	EngineVersionMinor,
+	EngineVersionPatch,
+	ApplicationName,
+	EngineName
+};
+
+struct VariantDependencyMap
+{
+	const char *env;
+	VariantDependency dep;
+};
+#define DEF(x) { #x, VariantDependency::x }
+static const VariantDependencyMap variant_dependency_map[] = {
+	DEF(VendorID),
+	DEF(MutableDescriptorType),
+	DEF(BindlessUBO),
+	DEF(BufferDeviceAddress),
+	DEF(ApplicationVersion),
+	DEF(EngineVersion),
+	DEF(ApplicationVersionMajor),
+	DEF(ApplicationVersionMinor),
+	DEF(ApplicationVersionPatch),
+	DEF(EngineVersionMajor),
+	DEF(EngineVersionMinor),
+	DEF(EngineVersionPatch),
+	DEF(ApplicationName),
+	DEF(EngineName),
+};
+#undef DEF
 
 struct AppInfo
 {
 	uint32_t minimum_api_version = VK_MAKE_VERSION(1, 0, 0);
 	uint32_t minimum_application_version = 0;
 	uint32_t minimum_engine_version = 0;
+	std::vector<EnvInfo> env_infos;
+	std::vector<VariantDependency> variant_dependencies;
 };
 
 struct ApplicationInfoFilter::Impl
 {
+	~Impl();
 	std::unordered_set<std::string> blacklisted_application_names;
 	std::unordered_set<std::string> blacklisted_engine_names;
 	std::unordered_map<std::string, AppInfo> application_infos;
 	std::unordered_map<std::string, AppInfo> engine_infos;
+	std::vector<VariantDependency> default_variant_dependencies;
 
 	bool parsing_done = false;
 	bool parsing_success = false;
@@ -61,8 +115,17 @@ struct ApplicationInfoFilter::Impl
 
 	void parse_async(const char *path);
 	bool test_application_info(const VkApplicationInfo *info);
+	bool filter_env_info(const EnvInfo &info) const;
 	bool parse(const std::string &path);
 	bool check_success();
+
+	bool needs_buckets(const VkApplicationInfo *info);
+	Hash get_bucket_hash(const VkPhysicalDeviceProperties2 *props,
+	                     const VkApplicationInfo *info,
+	                     const VkPhysicalDeviceFeatures2 *features2);
+
+	const char *(*getenv_wrapper)(const char *, void *) = nullptr;
+	void *getenv_userdata = nullptr;
 };
 
 bool ApplicationInfoFilter::Impl::check_success()
@@ -70,6 +133,205 @@ bool ApplicationInfoFilter::Impl::check_success()
 	if (task.valid())
 		task.wait();
 	return parsing_success;
+}
+
+bool ApplicationInfoFilter::Impl::filter_env_info(const EnvInfo &info) const
+{
+	if (!getenv_wrapper)
+		return false;
+
+	const char *env = getenv_wrapper(info.env.c_str(), getenv_userdata);
+	if (!env)
+		return false;
+
+	if (info.nonnull)
+		return true;
+	else if (!info.equals.empty() && info.equals == env)
+		return true;
+	else if (!info.contains.empty() && strstr(env, info.contains.c_str()))
+		return true;
+	else
+		return false;
+}
+
+bool ApplicationInfoFilter::Impl::needs_buckets(const VkApplicationInfo *info)
+{
+	if (task.valid())
+		task.wait();
+	if (!parsing_success)
+		return false;
+
+	if (info && info->pApplicationName)
+	{
+		auto itr = application_infos.find(info->pApplicationName);
+		if (itr != application_infos.end() && !itr->second.variant_dependencies.empty())
+			return true;
+	}
+
+	if (info && info->pEngineName)
+	{
+		auto itr = engine_infos.find(info->pEngineName);
+		if (itr != engine_infos.end() && !itr->second.variant_dependencies.empty())
+			return true;
+	}
+
+	return !default_variant_dependencies.empty();
+}
+
+template <typename T>
+static inline const T *find_pnext(VkStructureType type, const void *pNext)
+{
+	while (pNext)
+	{
+		auto *sin = static_cast<const VkBaseInStructure *>(pNext);
+		if (sin->sType == type)
+			return static_cast<const T*>(pNext);
+
+		pNext = sin->pNext;
+	}
+
+	return nullptr;
+}
+
+static void hash_variant(Hasher &h, VariantDependency dep,
+                         const VkPhysicalDeviceProperties2 *props,
+                         const VkApplicationInfo *info,
+                         const VkPhysicalDeviceFeatures2 *features2)
+{
+	const VkApplicationInfo default_app_info = { VK_STRUCTURE_TYPE_APPLICATION_INFO };
+	if (!info)
+		info = &default_app_info;
+
+	switch (dep)
+	{
+	case VariantDependency::VendorID:
+		h.u32(props ? props->properties.vendorID : 0);
+		break;
+
+	case VariantDependency::MutableDescriptorType:
+	{
+		auto *mut = find_pnext<VkPhysicalDeviceMutableDescriptorTypeFeaturesVALVE>(
+				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MUTABLE_DESCRIPTOR_TYPE_FEATURES_VALVE,
+				features2 ? features2->pNext : nullptr);
+		h.u32(uint32_t(mut && mut->mutableDescriptorType));
+		break;
+	}
+
+	case VariantDependency::BufferDeviceAddress:
+	{
+		auto *bda = find_pnext<VkPhysicalDeviceBufferDeviceAddressFeatures>(
+				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES,
+				features2 ? features2->pNext : nullptr);
+		auto *features12 = find_pnext<VkPhysicalDeviceVulkan12Features>(
+				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+				features2 ? features2->pNext : nullptr);
+
+		bool enabled = (bda && bda->bufferDeviceAddress) ||
+		               (features12 && features12->bufferDeviceAddress);
+		h.u32(uint32_t(enabled));
+		break;
+	}
+
+	case VariantDependency::BindlessUBO:
+	{
+		auto *indexing = find_pnext<VkPhysicalDeviceDescriptorIndexingFeatures>(
+				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES,
+				features2 ? features2->pNext : nullptr);
+		auto *features12 = find_pnext<VkPhysicalDeviceVulkan12Features>(
+				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+				features2 ? features2->pNext : nullptr);
+		bool enabled = (indexing && indexing->descriptorBindingUniformBufferUpdateAfterBind) ||
+		               (features12 && features12->descriptorBindingUniformBufferUpdateAfterBind);
+		h.u32(uint32_t(enabled));
+		break;
+	}
+
+	case VariantDependency::ApplicationVersion:
+		h.u32(info->applicationVersion);
+		break;
+
+	case VariantDependency::ApplicationVersionMajor:
+		h.u32(VK_VERSION_MAJOR(info->applicationVersion));
+		break;
+
+	case VariantDependency::ApplicationVersionMinor:
+		h.u32(VK_VERSION_MINOR(info->applicationVersion));
+		break;
+
+	case VariantDependency::ApplicationVersionPatch:
+		h.u32(VK_VERSION_PATCH(info->applicationVersion));
+		break;
+
+	case VariantDependency::EngineVersion:
+		h.u32(info->engineVersion);
+		break;
+
+	case VariantDependency::EngineVersionMajor:
+		h.u32(VK_VERSION_MAJOR(info->engineVersion));
+		break;
+
+	case VariantDependency::EngineVersionMinor:
+		h.u32(VK_VERSION_MINOR(info->engineVersion));
+		break;
+
+	case VariantDependency::EngineVersionPatch:
+		h.u32(VK_VERSION_PATCH(info->engineVersion));
+		break;
+
+	case VariantDependency::ApplicationName:
+		h.string(info->pApplicationName ? info->pApplicationName : "");
+		break;
+
+	case VariantDependency::EngineName:
+		h.string(info->pEngineName ? info->pEngineName : "");
+		break;
+
+	default:
+		break;
+	}
+}
+
+Hash ApplicationInfoFilter::Impl::get_bucket_hash(const VkPhysicalDeviceProperties2 *props,
+                                                  const VkApplicationInfo *info,
+                                                  const VkPhysicalDeviceFeatures2 *features2)
+{
+	if (task.valid())
+		task.wait();
+	if (!parsing_success)
+		return 0;
+
+	Hasher h;
+	bool use_default_variant = true;
+
+	h.u32(0);
+	if (info && info->pApplicationName)
+	{
+		auto itr = application_infos.find(info->pApplicationName);
+		if (itr != application_infos.end())
+		{
+			use_default_variant = false;
+			for (auto &dep : itr->second.variant_dependencies)
+				hash_variant(h, dep, props, info, features2);
+		}
+	}
+
+	h.u32(0);
+	if (info && info->pEngineName)
+	{
+		auto itr = engine_infos.find(info->pEngineName);
+		if (itr != engine_infos.end())
+		{
+			use_default_variant = false;
+			for (auto &dep : itr->second.variant_dependencies)
+				hash_variant(h, dep, props, info, features2);
+		}
+	}
+
+	if (use_default_variant)
+		for (auto &dep : default_variant_dependencies)
+			hash_variant(h, dep, props, info, features2);
+
+	return h.get();
 }
 
 bool ApplicationInfoFilter::Impl::test_application_info(const VkApplicationInfo *info)
@@ -119,6 +381,15 @@ bool ApplicationInfoFilter::Impl::test_application_info(const VkApplicationInfo 
 				     info->apiVersion, info->pApplicationName);
 				return false;
 			}
+
+			for (auto &env_info : itr->second.env_infos)
+			{
+				if (filter_env_info(env_info))
+				{
+					LOGI("Skipping recording due to environment rule for: %s.\n", env_info.env.c_str());
+					return false;
+				}
+			}
 		}
 	}
 
@@ -140,6 +411,15 @@ bool ApplicationInfoFilter::Impl::test_application_info(const VkApplicationInfo 
 				LOGI("apiVersion %u is too low for pEngineName %s. Skipping.\n",
 				     info->apiVersion, info->pEngineName);
 				return false;
+			}
+
+			for (auto &env_info : itr->second.env_infos)
+			{
+				if (filter_env_info(env_info))
+				{
+					LOGI("Skipping recording due to environment rule for: %s.\n", env_info.env.c_str());
+					return false;
+				}
 			}
 		}
 	}
@@ -260,6 +540,70 @@ static bool add_blacklists(std::unordered_set<std::string> &output, const Value 
 	return true;
 }
 
+static bool parse_blacklist_environments(const Value &envs, std::vector<EnvInfo> &infos)
+{
+	if (!envs.IsObject())
+	{
+		LOGE("blacklistedEnvironments must be an object.\n");
+		return false;
+	}
+
+	infos.clear();
+
+	for (auto itr = envs.MemberBegin(); itr != envs.MemberEnd(); ++itr)
+	{
+		auto &elem = itr->value;
+		if (!elem.IsObject())
+		{
+			LOGE("blacklistEnvironment element must be object.\n");
+			return false;
+		}
+
+		EnvInfo env_info;
+
+		env_info.env = itr->name.GetString();
+		if (elem.HasMember("contains") && elem["contains"].IsString())
+			env_info.contains = elem["contains"].GetString();
+		if (elem.HasMember("equals") && elem["equals"].IsString())
+			env_info.equals = elem["equals"].GetString();
+		if (elem.HasMember("nonnull") && elem["nonnull"].IsBool())
+			env_info.nonnull = elem["nonnull"].GetBool();
+
+		infos.push_back(std::move(env_info));
+	}
+
+	return true;
+}
+
+static bool parse_bucket_variant_dependencies(const Value &deps, std::vector<VariantDependency> &variant_deps)
+{
+	if (!deps.IsArray())
+	{
+		LOGE("bucketVariantDependencies must be an array.\n");
+		return false;
+	}
+
+	variant_deps.clear();
+
+	for (auto itr = deps.Begin(); itr != deps.End(); ++itr)
+	{
+		auto &elem = *itr;
+		if (!elem.IsString())
+			return false;
+
+		const char *str = elem.GetString();
+
+		auto find_itr = std::find_if(std::begin(variant_dependency_map), std::end(variant_dependency_map),
+		                             [str](const VariantDependencyMap &m) { return strcmp(str, m.env) == 0; });
+		if (find_itr != std::end(variant_dependency_map))
+			variant_deps.push_back(find_itr->dep);
+		else
+			LOGW("Couldn't find variant dependency for %s, ignoring.\n", str);
+	}
+
+	return true;
+}
+
 static bool add_application_filters(std::unordered_map<std::string, AppInfo> &output, const Value *filters)
 {
 	if (!filters->IsObject())
@@ -282,7 +626,13 @@ static bool add_application_filters(std::unordered_map<std::string, AppInfo> &ou
 		info.minimum_api_version = default_get_member_uint(value, "minimumApiVersion");
 		info.minimum_engine_version = default_get_member_uint(value, "minimumEngineVersion");
 		info.minimum_application_version = default_get_member_uint(value, "minimumApplicationVersion");
-		output[itr->name.GetString()] = info;
+		if (value.HasMember("blacklistedEnvironments"))
+			if (!parse_blacklist_environments(value["blacklistedEnvironments"], info.env_infos))
+				return false;
+		if (value.HasMember("bucketVariantDependencies"))
+			if (!parse_bucket_variant_dependencies(value["bucketVariantDependencies"], info.variant_dependencies))
+				return false;
+		output[itr->name.GetString()] = std::move(info);
 	}
 
 	return true;
@@ -302,7 +652,8 @@ bool ApplicationInfoFilter::Impl::parse(const std::string &path)
 
 	if (!get_safe_member_string(doc, "asset", json_str) || json_str != "FossilizeApplicationInfoFilter")
 		return false;
-	if (!get_safe_member_int(doc, "version", json_int) || json_int != FOSSILIZE_APPLICATION_INFO_FILTER_VERSION)
+
+	if (!get_safe_member_int(doc, "version", json_int) || json_int > FOSSILIZE_APPLICATION_INFO_FILTER_VERSION)
 		return false;
 
 	auto *blacklist = maybe_get_member(doc, "blacklistedApplicationNames");
@@ -323,6 +674,11 @@ bool ApplicationInfoFilter::Impl::parse(const std::string &path)
 		if (!add_application_filters(engine_infos, filters))
 			return false;
 
+	auto *default_variants = maybe_get_member(doc, "defaultBucketVariantDependencies");
+	if (default_variants)
+		if (!parse_bucket_variant_dependencies(*default_variants, default_variant_dependencies))
+			return false;
+
 	return true;
 }
 
@@ -334,6 +690,12 @@ void ApplicationInfoFilter::Impl::parse_async(const char *path_)
 		parsing_success = ret;
 		parsing_done = true;
 	});
+}
+
+ApplicationInfoFilter::Impl::~Impl()
+{
+	if (task.valid())
+		task.wait();
 }
 
 ApplicationInfoFilter::ApplicationInfoFilter()
@@ -351,9 +713,27 @@ bool ApplicationInfoFilter::test_application_info(const VkApplicationInfo *info)
 	return impl->test_application_info(info);
 }
 
+bool ApplicationInfoFilter::needs_buckets(const VkApplicationInfo *info)
+{
+	return impl->needs_buckets(info);
+}
+
+Hash ApplicationInfoFilter::get_bucket_hash(const VkPhysicalDeviceProperties2 *props,
+                                            const VkApplicationInfo *info,
+                                            const VkPhysicalDeviceFeatures2 *features2)
+{
+	return impl->get_bucket_hash(props, info, features2);
+}
+
 bool ApplicationInfoFilter::check_success()
 {
 	return impl->check_success();
+}
+
+void ApplicationInfoFilter::set_environment_resolver(const char *(*getenv_wrapper)(const char *, void *), void *userdata)
+{
+	impl->getenv_wrapper = getenv_wrapper;
+	impl->getenv_userdata = userdata;
 }
 
 ApplicationInfoFilter::~ApplicationInfoFilter()

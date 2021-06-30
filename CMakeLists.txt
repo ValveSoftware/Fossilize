@@ -39,6 +39,11 @@ if (FOSSILIZE_SANITIZE_THREADS)
     set(FOSSILIZE_LINK_FLAGS "${FOSSILIZE_LINK_FLAGS} -fsanitize=thread")
 endif()
 
+if (CMAKE_COMPILER_IS_GNUCXX AND WIN32)
+    # MinGW build.
+    set(CMAKE_EXE_LINKER_FLAGS "${FOSSILIZE_LINK_FLAGS} -static -static-libstdc++ -static-libgcc -fstack-protector")
+endif()
+
 include(GNUInstallDirs)
 
 add_library(miniz STATIC miniz/miniz.h miniz/miniz.c)
@@ -55,7 +60,7 @@ add_library(fossilize STATIC
         fossilize.hpp fossilize.cpp
         fossilize_errors.hpp
         fossilize_application_filter.hpp fossilize_application_filter.cpp
-        fossilize_types.hpp
+        fossilize_types.hpp fossilize_hasher.hpp
         varint.cpp varint.hpp
         fossilize_db.cpp fossilize_db.hpp
         fossilize_inttypes.h
