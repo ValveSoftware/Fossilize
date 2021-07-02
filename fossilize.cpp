@@ -2245,6 +2245,7 @@ bool StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, D
 	auto &stage = obj["stage"];
 	info.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 	info.stage.stage = static_cast<VkShaderStageFlagBits>(stage["stage"].GetUint());
+	info.stage.flags = stage["flags"].GetUint();
 
 	if (stage.HasMember("pNext"))
 		if (!parse_pnext_chain(stage["pNext"], &info.stage.pNext))
