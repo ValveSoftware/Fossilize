@@ -152,6 +152,8 @@ struct FeatureFilter::Impl
 	bool subpass_dependency_is_supported(const VkSubpassDependency &dep) const;
 	bool subpass_dependency2_is_supported(const VkSubpassDependency2 &dep) const;
 
+	bool subgroup_size_control_is_supported(const VkPipelineShaderStageCreateInfo &stage) const;
+
 	bool multiview_mask_is_supported(uint32_t mask) const;
 	bool image_layout_is_supported(VkImageLayout layout) const;
 	bool format_is_supported(VkFormat, VkFormatFeatureFlags format_features) const;
@@ -494,13 +496,8 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 		}
 
 		case VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT:
-		{
-			// Should correlate with stage.
-			if (features.subgroup_size_control.subgroupSizeControl == VK_FALSE ||
-			    !props.subgroup_size_control.requiredSubgroupSizeStages)
-				return false;
+			// The details are validated explicitly elsewhere since we need to know the shader create info to deduce correctness.
 			break;
-		}
 
 		case VK_STRUCTURE_TYPE_MUTABLE_DESCRIPTOR_TYPE_CREATE_INFO_VALVE:
 		{
@@ -1484,6 +1481,40 @@ bool FeatureFilter::Impl::subpass_dependency2_is_supported(const VkSubpassDepend
 	return true;
 }
 
+bool FeatureFilter::Impl::subgroup_size_control_is_supported(const VkPipelineShaderStageCreateInfo &stage) const
+{
+	if ((stage.flags & VK_PIPELINE_SHADER_STAGE_CREATE_ALLOW_VARYING_SUBGROUP_SIZE_BIT_EXT) != 0 &&
+	    features.subgroup_size_control.subgroupSizeControl == VK_FALSE)
+	{
+		return false;
+	}
+
+	if ((stage.flags & VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT_EXT) != 0 &&
+	    (stage.stage != VK_SHADER_STAGE_COMPUTE_BIT ||
+	     features.subgroup_size_control.computeFullSubgroups == VK_FALSE ||
+	     features.subgroup_size_control.subgroupSizeControl == VK_FALSE))
+	{
+		return false;
+	}
+
+	auto *required = find_pnext<VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT>(
+			stage.pNext,
+			VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT);
+
+	if (required)
+	{
+		if (features.subgroup_size_control.subgroupSizeControl == VK_FALSE ||
+		    (props.subgroup_size_control.requiredSubgroupSizeStages & stage.stage) == 0 ||
+		    required->requiredSubgroupSize > props.subgroup_size_control.maxSubgroupSize ||
+		    required->requiredSubgroupSize < props.subgroup_size_control.minSubgroupSize)
+		{
+			return false;
+		}
+	}
+
+	return true;
+}
+
 bool FeatureFilter::Impl::render_pass2_is_supported(const VkRenderPassCreateInfo2 *info) const
 {
 	if (null_device)
@@ -1691,12 +1722,8 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 
 	for (uint32_t i = 0; i < info->stageCount; i++)
 	{
-		if ((info->pStages[i].flags & VK_PIPELINE_SHADER_STAGE_CREATE_ALLOW_VARYING_SUBGROUP_SIZE_BIT_EXT) != 0 &&
-		    features.subgroup_size_control.subgroupSizeControl == VK_FALSE)
-		{
+		if (!subgroup_size_control_is_supported(info->pStages[i]))
 			return false;
-		}
-
 		if (!pnext_chain_is_supported(info->pStages[i].pNext))
 			return false;
 	}
@@ -1708,20 +1735,9 @@ bool FeatureFilter::Impl::compute_pipeline_is_supported(const VkComputePipelineC
 {
 	if (null_device)
 		return true;
-	if (!pnext_chain_is_supported(info->stage.pNext))
-		return false;
 
-	if ((info->stage.flags & VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT_EXT) != 0 &&
-	    features.subgroup_size_control.computeFullSubgroups == VK_FALSE)
-	{
+	if (!subgroup_size_control_is_supported(info->stage))
 		return false;
-	}
-
-	if ((info->stage.flags & VK_PIPELINE_SHADER_STAGE_CREATE_ALLOW_VARYING_SUBGROUP_SIZE_BIT_EXT) != 0 &&
-	    features.subgroup_size_control.subgroupSizeControl == VK_FALSE)
-	{
-		return false;
-	}
 
 	return pnext_chain_is_supported(info->pNext);
 }
