@@ -653,7 +653,7 @@ bool FeatureFilter::Impl::sampler_is_supported(const VkSamplerCreateInfo *info) 
 }
 
 template <typename T>
-static const T *find_pnext(const void *pNext, VkStructureType sType)
+static const T *find_pnext(VkStructureType sType, const void *pNext)
 {
 	while (pNext)
 	{
@@ -688,12 +688,12 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 	DescriptorCounts counts = {};
 
 	auto *flags = find_pnext<VkDescriptorSetLayoutBindingFlagsCreateInfo>(
-			info->pNext,
-			VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO);
+			VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
+			info->pNext);
 
 	auto *mutable_info = find_pnext<VkMutableDescriptorTypeCreateInfoVALVE>(
-			info->pNext,
-			VK_STRUCTURE_TYPE_MUTABLE_DESCRIPTOR_TYPE_CREATE_INFO_VALVE);
+			VK_STRUCTURE_TYPE_MUTABLE_DESCRIPTOR_TYPE_CREATE_INFO_VALVE,
+			info->pNext);
 
 	bool pool_is_update_after_bind = (info->flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT) != 0;
 
@@ -1498,8 +1498,8 @@ bool FeatureFilter::Impl::subgroup_size_control_is_supported(const VkPipelineSha
 	}
 
 	auto *required = find_pnext<VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT>(
-			stage.pNext,
-			VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT);
+			VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT,
+			stage.pNext);
 
 	if (required)
 	{
@@ -1555,7 +1555,7 @@ bool FeatureFilter::Impl::render_pass2_is_supported(const VkRenderPassCreateInfo
 			}
 
 			auto *ds_resolve = find_pnext<VkSubpassDescriptionDepthStencilResolve>(
-					info->pSubpasses[j].pNext, VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_DEPTH_STENCIL_RESOLVE);
+					VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_DEPTH_STENCIL_RESOLVE, info->pSubpasses[j].pNext);
 			if (ds_resolve &&
 			    ds_resolve->pDepthStencilResolveAttachment &&
 			    ds_resolve->pDepthStencilResolveAttachment->attachment == i)
@@ -1564,7 +1564,7 @@ bool FeatureFilter::Impl::render_pass2_is_supported(const VkRenderPassCreateInfo
 			}
 
 			auto *rate_attachment = find_pnext<VkFragmentShadingRateAttachmentInfoKHR>(
-					info->pSubpasses[j].pNext, VK_STRUCTURE_TYPE_FRAGMENT_SHADING_RATE_ATTACHMENT_INFO_KHR);
+					VK_STRUCTURE_TYPE_FRAGMENT_SHADING_RATE_ATTACHMENT_INFO_KHR, info->pSubpasses[j].pNext);
 			if (rate_attachment &&
 			    rate_attachment->pFragmentShadingRateAttachment &&
 			    rate_attachment->pFragmentShadingRateAttachment->attachment == i)
