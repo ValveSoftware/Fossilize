@@ -22,6 +22,7 @@
 
 #include "instance.hpp"
 #include "utils.hpp"
+#include "path.hpp"
 #include <mutex>
 #include <unordered_map>
 #include <memory>
@@ -327,7 +328,14 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDevicePropert
 		char bucketPath[17];
 		Hash bucketHash = infoFilter->get_bucket_hash(props, appInfo, features);
 		sprintf(bucketPath, "%016" PRIx64, bucketHash);
-		entry.interface->set_bucket_path(bucketPath, hashString);
+
+		// For convenience. Makes filenames similar in top-level directory and bucket directories.
+		auto prefix = Path::basename(serializationPath);
+		if (!prefix.empty())
+			prefix += ".";
+		prefix += hashString;
+
+		entry.interface->set_bucket_path(bucketPath, prefix.c_str());
 	}
 
 	entry.recorder.reset(new StateRecorder);
