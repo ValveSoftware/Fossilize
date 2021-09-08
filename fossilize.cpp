@@ -189,6 +189,7 @@ struct StateRecorder::Impl
 	std::unordered_map<VkShaderModule, Hash> shader_module_to_hash;
 	std::unordered_map<VkPipeline, Hash> graphics_pipeline_to_hash;
 	std::unordered_map<VkPipeline, Hash> compute_pipeline_to_hash;
+	std::unordered_map<VkPipeline, Hash> raytracing_pipeline_to_hash;
 	std::unordered_map<VkRenderPass, Hash> render_pass_to_hash;
 	std::unordered_map<VkSampler, Hash> sampler_to_hash;
 
@@ -759,6 +760,28 @@ static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const voi
 	return true;
 }
 
+static bool compute_hash_stage(const StateRecorder &recorder, Hasher &h, const VkPipelineShaderStageCreateInfo &stage)
+{
+	h.u32(stage.flags);
+	h.string(stage.pName);
+	h.u32(stage.stage);
+
+	Hash hash;
+	if (!recorder.get_hash_for_shader_module(stage.module, &hash))
+		return false;
+	h.u64(hash);
+
+	if (stage.pSpecializationInfo)
+		hash_specialization_info(h, *stage.pSpecializationInfo);
+	else
+		h.u32(0);
+
+	if (!hash_pnext_chain(&recorder, h, stage.pNext))
+		return false;
+
+	return true;
+}
+
 bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraphicsPipelineCreateInfo &create_info, Hash *out_hash)
 {
 	Hasher h;
@@ -1083,20 +1106,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 	for (uint32_t i = 0; i < create_info.stageCount; i++)
 	{
 		auto &stage = create_info.pStages[i];
-		h.u32(stage.flags);
-		h.string(stage.pName);
-		h.u32(stage.stage);
-
-		if (!recorder.get_hash_for_shader_module(stage.module, &hash))
-			return false;
-		h.u64(hash);
-
-		if (stage.pSpecializationInfo)
-			hash_specialization_info(h, *stage.pSpecializationInfo);
-		else
-			h.u32(0);
-
-		if (!hash_pnext_chain(&recorder, h, stage.pNext))
+		if (!compute_hash_stage(recorder, h, stage))
 			return false;
 	}
 
@@ -1126,6 +1136,8 @@ bool compute_hash_compute_pipeline(const StateRecorder &recorder, const VkComput
 	else
 		h.u32(0);
 
+	// Unfortunately, the hash order is incompatible with compute_hash_stage().
+	// For compatibility, cannot change this without a clean break.
 	if (!recorder.get_hash_for_shader_module(create_info.stage.module, &hash))
 		return false;
 	h.u64(hash);
@@ -1140,6 +1152,96 @@ bool compute_hash_compute_pipeline(const StateRecorder &recorder, const VkComput
 		h.u32(0);
 
 	if (!hash_pnext_chain(&recorder, h, create_info.stage.pNext))
+		return false;
+
+	*out_hash = h.get();
+	return true;
+}
+
+bool compute_hash_raytracing_pipeline(const StateRecorder &recorder,
+                                      const VkRayTracingPipelineCreateInfoKHR &create_info,
+                                      Hash *out_hash)
+{
+	Hasher h;
+	Hash hash;
+
+	h.u32(create_info.flags);
+	h.u32(create_info.maxPipelineRayRecursionDepth);
+
+	if (!recorder.get_hash_for_pipeline_layout(create_info.layout, &hash))
+		return false;
+	h.u64(hash);
+
+	if ((create_info.flags & VK_PIPELINE_CREATE_DERIVATIVE_BIT) != 0 &&
+	    create_info.basePipelineHandle != VK_NULL_HANDLE)
+	{
+		if (!recorder.get_hash_for_raytracing_pipeline_handle(create_info.basePipelineHandle, &hash))
+			return false;
+		h.u64(hash);
+		h.s32(create_info.basePipelineIndex);
+	}
+	else
+		h.u32(0);
+
+	h.u32(create_info.stageCount);
+	for (uint32_t i = 0; i < create_info.stageCount; i++)
+	{
+		auto &stage = create_info.pStages[i];
+		if (!compute_hash_stage(recorder, h, stage))
+			return false;
+	}
+
+	if (create_info.pLibraryInterface)
+	{
+		h.u32(create_info.pLibraryInterface->maxPipelineRayHitAttributeSize);
+		h.u32(create_info.pLibraryInterface->maxPipelineRayPayloadSize);
+		if (!hash_pnext_chain(&recorder, h, create_info.pLibraryInterface->pNext))
+			return false;
+	}
+	else
+		h.u32(0);
+
+	if (create_info.pDynamicState)
+	{
+		h.u32(create_info.pDynamicState->dynamicStateCount);
+		h.u32(create_info.pDynamicState->flags);
+		for (uint32_t i = 0; i < create_info.pDynamicState->dynamicStateCount; i++)
+			h.u32(create_info.pDynamicState->pDynamicStates[i]);
+		if (!hash_pnext_chain(&recorder, h, create_info.pDynamicState->pNext))
+			return false;
+	}
+	else
+		h.u32(0);
+
+	h.u32(create_info.groupCount);
+	for (uint32_t i = 0; i < create_info.groupCount; i++)
+	{
+		auto &group = create_info.pGroups[i];
+		h.u32(group.type);
+		h.u32(group.anyHitShader);
+		h.u32(group.closestHitShader);
+		h.u32(group.generalShader);
+		h.u32(group.intersectionShader);
+		if (!hash_pnext_chain(&recorder, h, group.pNext))
+			return false;
+	}
+
+	if (create_info.pLibraryInfo)
+	{
+		h.u32(create_info.pLibraryInfo->libraryCount);
+		for (uint32_t i = 0; i < create_info.pLibraryInfo->libraryCount; i++)
+		{
+			if (!recorder.get_hash_for_raytracing_pipeline_handle(create_info.pLibraryInfo->pLibraries[i], &hash))
+				return false;
+			h.u64(hash);
+		}
+		if (!hash_pnext_chain(&recorder, h, create_info.pLibraryInfo->pNext))
+			return false;
+	}
+	else
+		h.u32(0);
+
+	if (!hash_pnext_chain(&recorder, h, create_info.pNext))
 		return false;
 
 	*out_hash = h.get();
@@ -4054,6 +4156,21 @@ bool StateRecorder::get_hash_for_compute_pipeline_handle(VkPipeline pipeline, Ha
 	if (itr == end(impl->compute_pipeline_to_hash))
 	{
 		log_failed_hash("Compute pipeline", pipeline);
+		return false;
+	}
+	else
+	{
+		*hash = itr->second;
+		return true;
+	}
+}
+
+bool StateRecorder::get_hash_for_raytracing_pipeline_handle(VkPipeline pipeline, Hash *hash) const
+{
+	auto itr = impl->raytracing_pipeline_to_hash.find(pipeline);
+	if (itr == end(impl->raytracing_pipeline_to_hash))
+	{
+		log_failed_hash("Raytracing pipeline", pipeline);
 		return false;
 	}
 	else
