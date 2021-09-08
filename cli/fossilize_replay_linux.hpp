@@ -118,6 +118,7 @@ struct ProcessProgress
 
 	uint32_t index = 0;
 	bool stopped = false;
+	bool expect_kill = false;
 };
 
 void ProcessProgress::parse(const char *cmd)
@@ -255,6 +256,12 @@ bool ProcessProgress::process_shutdown(int wstatus)
 	// If application exited in normal manner, we are done.
 	if (WIFEXITED(wstatus) && WEXITSTATUS(wstatus) == 0)
 		return false;
+
+	if (WIFSIGNALED(wstatus) && WTERMSIG(wstatus) == SIGKILL && expect_kill)
+	{
+		LOGI("Parent process is shutting down. Expected SIGKILL.\n");
+		return false;
+	}
 
 	if (WIFSIGNALED(wstatus) && WTERMSIG(wstatus) == SIGKILL)
 	{
@@ -923,9 +930,13 @@ static int run_master_process(const VulkanDevice::Options &opts,
 	// Block delivery of signals in the normal way.
 	// For this to work, there cannot be any other threads in the process
 	// which may capture SIGCHLD anyways.
+	// Also block SIGINT/SIGTERM,
+	// we'll need to cleanly take down the process group when this triggers.
 	sigset_t mask;
 	sigemptyset(&mask);
 	sigaddset(&mask, SIGCHLD);
+	sigaddset(&mask, SIGINT);
+	sigaddset(&mask, SIGTERM);
 	if (pthread_sigmask(SIG_BLOCK, &mask, &Global::old_mask) != 0)
 	{
 		LOGE("Failed to block signal mask.\n");
@@ -1130,6 +1141,24 @@ static int run_master_process(const VulkanDevice::Options &opts,
 							}
 							else
 								LOGE("Got SIGCHLD from unknown process PID %d.\n", pid);
+						}
+					}
+					else if (info.ssi_signo == SIGINT || info.ssi_signo == SIGTERM)
+					{
+						// This process specifically received a request to be terminated.
+						// If we have children in a SIGSTOP state, they will not die unless
+						// someone explicitly SIGKILLs it, so make sure we take down our children
+						// before we go.
+						LOGI("Received signal %s, cleaning up ...\n", info.ssi_signo == SIGINT ? "SIGINT" : "SIGTERM");
+
+						for (auto &child_process : child_processes)
+						{
+							if (child_process.pid >= 0)
+							{
+								child_process.stopped = false;
+								child_process.expect_kill = true;
+								kill(child_process.pid, SIGKILL);
+							}
 						}
 					}
 				}
