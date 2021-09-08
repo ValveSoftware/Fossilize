@@ -118,6 +118,7 @@ struct ProcessProgress
 
 	uint32_t index = 0;
 	bool stopped = false;
+	bool expect_kill = false;
 };
 
 void ProcessProgress::parse(const char *cmd)
@@ -255,6 +256,12 @@ bool ProcessProgress::process_shutdown(int wstatus)
 	// If application exited in normal manner, we are done.
 	if (WIFEXITED(wstatus) && WEXITSTATUS(wstatus) == 0)
 		return false;
+
+	if (WIFSIGNALED(wstatus) && WTERMSIG(wstatus) == SIGKILL && expect_kill)
+	{
+		LOGI("Parent process is shutting down. Expected SIGKILL.\n");
+		return false;
+	}
 
 	if (WIFSIGNALED(wstatus) && WTERMSIG(wstatus) == SIGKILL)
 	{
@@ -697,7 +704,7 @@ static void update_target_running_processes(std::vector<ProcessProgress> &child_
 		size_t num_processes = child_processes.size();
 		for (size_t i = 0; i < num_processes && to_stop; i++)
 		{
-			if (child_processes[i].pid >= 0 && !child_processes[i].stopped)
+			if (child_processes[i].pid >= 0 && !child_processes[i].stopped && !child_processes[i].expect_kill)
 			{
 				if (::kill(child_processes[i].pid, SIGSTOP) == 0)
 				{
@@ -715,7 +722,7 @@ static void update_target_running_processes(std::vector<ProcessProgress> &child_
 		size_t num_processes = child_processes.size();
 		for (size_t i = 0; i < num_processes && to_wake_up; i++)
 		{
-			if (child_processes[i].pid > 0 && child_processes[i].stopped)
+			if (child_processes[i].pid > 0 && child_processes[i].stopped && !child_processes[i].expect_kill)
 			{
 				if (::kill(child_processes[i].pid, SIGCONT) == 0)
 				{
@@ -751,7 +758,20 @@ static void handle_control_command(const char *command)
 		LOGE("Unrecognized control command: %s.\n", command);
 }
 
-static void handle_control_commands()
+static void shutdown_processes(std::vector<ProcessProgress> &child_processes)
+{
+	for (auto &child_process : child_processes)
+	{
+		if (child_process.pid >= 0)
+		{
+			child_process.stopped = false;
+			child_process.expect_kill = true;
+			kill(child_process.pid, SIGKILL);
+		}
+	}
+}
+
+static void handle_control_commands(std::vector<ProcessProgress> &child_processes)
 {
 	char buffer[4096];
 	ssize_t ret;
@@ -768,12 +788,7 @@ static void handle_control_commands()
 		if (Global::control_fd_is_sentinel)
 		{
 			LOGI("Parent process closed control FD with no notification, terminating early ...\n");
-			// control FD in parent process was hung, kill every child process and ourselves and then exit.
-			if (killpg(getpid(), SIGKILL) < 0)
-			{
-				LOGE("Failed to kill process group ... This should not happen.\n");
-				abort();
-			}
+			shutdown_processes(child_processes);
 		}
 		close_fd = true;
 	}
@@ -923,9 +938,13 @@ static int run_master_process(const VulkanDevice::Options &opts,
 	// Block delivery of signals in the normal way.
 	// For this to work, there cannot be any other threads in the process
 	// which may capture SIGCHLD anyways.
+	// Also block SIGINT/SIGTERM,
+	// we'll need to cleanly take down the process group when this triggers.
 	sigset_t mask;
 	sigemptyset(&mask);
 	sigaddset(&mask, SIGCHLD);
+	sigaddset(&mask, SIGINT);
+	sigaddset(&mask, SIGTERM);
 	if (pthread_sigmask(SIG_BLOCK, &mask, &Global::old_mask) != 0)
 	{
 		LOGE("Failed to block signal mask.\n");
@@ -1132,10 +1151,19 @@ static int run_master_process(const VulkanDevice::Options &opts,
 								LOGE("Got SIGCHLD from unknown process PID %d.\n", pid);
 						}
 					}
+					else if (info.ssi_signo == SIGINT || info.ssi_signo == SIGTERM)
+					{
+						// This process specifically received a request to be terminated.
+						// If we have children in a SIGSTOP state, they will not die unless
+						// someone explicitly SIGKILLs it, so make sure we take down our children
+						// before we go.
+						LOGI("Received signal %s, cleaning up ...\n", info.ssi_signo == SIGINT ? "SIGINT" : "SIGTERM");
+						shutdown_processes(child_processes);
+					}
 				}
 				else if (e.data.u32 == POLL_VALUE_CONTROL_FD)
 				{
-					handle_control_commands();
+					handle_control_commands(child_processes);
 					// After a control command treat it as having received a timer event
 					// so we react quickly to requested changes.
 					update_target_running_processes(child_processes);
