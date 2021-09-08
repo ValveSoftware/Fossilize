@@ -1650,6 +1650,14 @@ struct StreamArchive : DatabaseInterface
 		return true;
 	}
 
+	void resolve_path(const std::string &read_only_part)
+	{
+		constexpr char cmpstr[] = "$bucketdir/";
+		constexpr size_t offset = sizeof(cmpstr) - 1;
+		if (path.compare(0, offset, cmpstr) == 0)
+			path = Path::relpath(read_only_part, path.substr(offset));
+	}
+
 	const ExportedMetadataHeader *imported_metadata = nullptr;
 	FILE *file = nullptr;
 	string path;
@@ -1776,8 +1784,14 @@ struct ConcurrentDatabase : DatabaseInterface
 				readonly_interface.reset();
 
 			for (auto &extra : extra_readonly)
-				if (extra && !extra->prepare())
-					extra.reset();
+			{
+				if (extra)
+				{
+					static_cast<StreamArchive &>(*extra).resolve_path(base_path);
+					if (!extra->prepare())
+						extra.reset();
+				}
+			}
 
 			// Promote databases to whitelist.
 			for (unsigned index : impl->sub_databases_in_whitelist)
