@@ -1105,7 +1105,8 @@ static bool test_concurrent_database_bucket_write()
 {
 	{
 		auto db = std::unique_ptr<DatabaseInterface>(create_concurrent_database(".__test_concurrent",
-		                                                                         DatabaseMode::Append, nullptr, 0));
+		                                                                        DatabaseMode::Append,
+		                                                                        nullptr, 0));
 		if (!db->set_bucket_path("buck", "base"))
 			return false;
 		if (!db->prepare())
@@ -1132,6 +1133,71 @@ static bool test_concurrent_database_bucket_write()
 
 	remove(".__test_concurrent.buck/TOUCH");
 	remove(".__test_concurrent.buck/base.1.foz");
+	remove(".__test_concurrent.buck");
+	return true;
+}
+
+static bool test_concurrent_database_bucket_extra_paths()
+{
+	{
+		auto db = std::unique_ptr<DatabaseInterface>(create_concurrent_database(
+				".__test_concurrent", DatabaseMode::Append,
+				nullptr, 0));
+		if (!db->set_bucket_path("buck", "base"))
+			return false;
+		if (!db->prepare())
+			return false;
+
+		const uint8_t blob[] = { 1, 2, 3 };
+		if (!db->write_entry(RESOURCE_SHADER_MODULE, 100, blob, sizeof(blob), 0))
+			return false;
+	}
+
+	{
+		const char *extra_read_only = "$bucketdir/base.1.foz";
+		auto db = std::unique_ptr<DatabaseInterface>(create_concurrent_database_with_encoded_extra_paths(
+				".__test_concurrent", DatabaseMode::Append, extra_read_only));
+		if (!db->set_bucket_path("buck", "base-other"))
+			return false;
+		if (!db->prepare())
+			return false;
+
+		const uint8_t blob[] = { 1, 2, 3 };
+		// This should be ignored since it's already in the read-only archive.
+		if (!db->write_entry(RESOURCE_SHADER_MODULE, 100, blob, sizeof(blob), 0))
+			return false;
+		if (!db->write_entry(RESOURCE_SHADER_MODULE, 101, blob, sizeof(blob), 0))
+			return false;
+	}
+
+	// Sanity check
+	{
+		auto db = std::unique_ptr<DatabaseInterface>(create_stream_archive_database(
+				".__test_concurrent.buck/base.1.foz", DatabaseMode::ReadOnly));
+		if (!db->prepare())
+			return false;
+
+		if (!db->has_entry(RESOURCE_SHADER_MODULE, 100))
+			return false;
+		if (db->has_entry(RESOURCE_SHADER_MODULE, 101))
+			return false;
+	}
+
+	{
+		auto db = std::unique_ptr<DatabaseInterface>(create_stream_archive_database(
+				".__test_concurrent.buck/base-other.1.foz", DatabaseMode::ReadOnly));
+		if (!db->prepare())
+			return false;
+
+		if (db->has_entry(RESOURCE_SHADER_MODULE, 100))
+			return false;
+		if (!db->has_entry(RESOURCE_SHADER_MODULE, 101))
+			return false;
+	}
+
+	remove(".__test_concurrent.buck/TOUCH");
+	remove(".__test_concurrent.buck/base.1.foz");
+	remove(".__test_concurrent.buck/base-other.1.foz");
 	remove(".__test_concurrent.buck");
 	return true;
 }
@@ -1241,6 +1307,8 @@ static bool test_concurrent_database_bucket()
 	if (!test_concurrent_database_bucket_write())
 		return false;
 	if (!test_concurrent_database_bucket_append())
+		return false;
+	if (!test_concurrent_database_bucket_extra_paths())
 		return false;
 
 	return true;
