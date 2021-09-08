@@ -1153,8 +1153,8 @@ static bool test_concurrent_database_bucket_extra_paths()
 			return false;
 	}
 
+	const char *extra_read_only = "$bucketdir/base.1.foz";
 	{
-		const char *extra_read_only = "$bucketdir/base.1.foz";
 		auto db = std::unique_ptr<DatabaseInterface>(create_concurrent_database_with_encoded_extra_paths(
 				".__test_concurrent", DatabaseMode::Append, extra_read_only));
 		if (!db->set_bucket_path("buck", "base-other"))
@@ -1170,6 +1170,21 @@ static bool test_concurrent_database_bucket_extra_paths()
 			return false;
 	}
 
+	// Also check that $bucketdir is honored without buckets.
+	{
+		auto db = std::unique_ptr<DatabaseInterface>(create_concurrent_database_with_encoded_extra_paths(
+				".__test_concurrent.buck/base-other", DatabaseMode::Append, extra_read_only));
+		if (!db->prepare())
+			return false;
+
+		const uint8_t blob[] = { 1, 2, 3 };
+		// This should be ignored since it's already in the read-only archive.
+		if (!db->write_entry(RESOURCE_SHADER_MODULE, 100, blob, sizeof(blob), 0))
+			return false;
+		if (!db->write_entry(RESOURCE_SHADER_MODULE, 102, blob, sizeof(blob), 0))
+			return false;
+	}
+
 	// Sanity check
 	{
 		auto db = std::unique_ptr<DatabaseInterface>(create_stream_archive_database(
@@ -1180,6 +1195,8 @@ static bool test_concurrent_database_bucket_extra_paths()
 		if (!db->has_entry(RESOURCE_SHADER_MODULE, 100))
 			return false;
 		if (db->has_entry(RESOURCE_SHADER_MODULE, 101))
+			return false;
+		if (db->has_entry(RESOURCE_SHADER_MODULE, 102))
 			return false;
 	}
 
@@ -1195,9 +1212,22 @@ static bool test_concurrent_database_bucket_extra_paths()
 			return false;
 	}
 
+	{
+		auto db = std::unique_ptr<DatabaseInterface>(create_stream_archive_database(
+				".__test_concurrent.buck/base-other.2.foz", DatabaseMode::ReadOnly));
+		if (!db->prepare())
+			return false;
+
+		if (db->has_entry(RESOURCE_SHADER_MODULE, 100))
+			return false;
+		if (!db->has_entry(RESOURCE_SHADER_MODULE, 102))
+			return false;
+	}
+
 	remove(".__test_concurrent.buck/TOUCH");
 	remove(".__test_concurrent.buck/base.1.foz");
 	remove(".__test_concurrent.buck/base-other.1.foz");
+	remove(".__test_concurrent.buck/base-other.2.foz");
 	remove(".__test_concurrent.buck");
 	return true;
 }
