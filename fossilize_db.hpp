@@ -260,6 +260,13 @@ bool merge_concurrent_databases(const char *append_database_path, const char * c
 // to update last access time,
 // which lets external tools deduce which buckets are actually in use by the application in question.
 //
-// extra_read_only_database_paths are not modified by buckets, but the usefulness of extra_read_only archives
-// in append mode is somewhat questionable to begin with.
+// extra_read_only_database_paths are not modified by buckets directly,
+// but to make the system work well with buckets, it is possible to encode a relative path
+// to the basedir of the read-only part of the bucket as, e.g.:
+// "$bucketdir/static_archive.foz"
+// The relative path is always honored, even if bucket paths are not enabled.
+// If the selected read-only path is e.g.:
+// $base_path.$bucket_dirname/$bucket_basename.foz
+// the resulting path for the extra read only archive is:
+// $base_path.$bucket_dirname/static_archive.foz
 }
