@@ -1153,8 +1153,8 @@ static bool test_concurrent_database_bucket_extra_paths()
 			return false;
 	}
 
-	const char *extra_read_only = "$bucketdir/base.1.foz";
 	{
+		const char *extra_read_only = "$bucketdir/base.1.foz";
 		auto db = std::unique_ptr<DatabaseInterface>(create_concurrent_database_with_encoded_extra_paths(
 				".__test_concurrent", DatabaseMode::Append, extra_read_only));
 		if (!db->set_bucket_path("buck", "base-other"))
@@ -1172,6 +1172,8 @@ static bool test_concurrent_database_bucket_extra_paths()
 
 	// Also check that $bucketdir is honored without buckets.
 	{
+		// Test that Win32 style backslash also works just in case ...
+		const char *extra_read_only = "$bucketdir\\base.1.foz";
 		auto db = std::unique_ptr<DatabaseInterface>(create_concurrent_database_with_encoded_extra_paths(
 				".__test_concurrent.buck/base-other", DatabaseMode::Append, extra_read_only));
 		if (!db->prepare())

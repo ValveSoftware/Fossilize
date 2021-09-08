@@ -1652,10 +1652,14 @@ struct StreamArchive : DatabaseInterface
 
 	void resolve_path(const std::string &read_only_part)
 	{
-		constexpr char cmpstr[] = "$bucketdir/";
+		constexpr char cmpstr[] = "$bucketdir";
 		constexpr size_t offset = sizeof(cmpstr) - 1;
-		if (path.compare(0, offset, cmpstr) == 0)
-			path = Path::relpath(read_only_part, path.substr(offset));
+		if (path.compare(0, offset, cmpstr) == 0 &&
+		    path.size() > offset &&
+		    (path[offset] == '/' || path[offset] == '\\'))
+		{
+			path = Path::relpath(read_only_part, path.substr(offset + 1));
+		}
 	}
 
 	const ExportedMetadataHeader *imported_metadata = nullptr;
