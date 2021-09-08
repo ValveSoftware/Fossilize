@@ -222,6 +222,9 @@ struct StateRecorder::Impl
 	template <typename CreateInfo>
 	bool copy_dynamic_state(CreateInfo *info, ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 
+	template <typename SubCreateInfo>
+	bool copy_sub_create_info(const SubCreateInfo *&info, ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+
 	void *copy_pnext_struct(const VkPipelineTessellationDomainOriginStateCreateInfo *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPipelineVertexInputDivisorStateCreateInfoEXT *create_info,
@@ -4449,6 +4452,21 @@ bool StateRecorder::Impl::copy_dynamic_state(CreateInfo *info, ScratchAllocator 
 	return true;
 }
 
+template <typename SubCreateInfo>
+bool StateRecorder::Impl::copy_sub_create_info(const SubCreateInfo *&sub_info, ScratchAllocator &alloc)
+{
+	if (sub_info)
+	{
+		sub_info = copy(sub_info, 1, alloc);
+		const void *pNext = nullptr;
+		if (!copy_pnext_chain(sub_info->pNext, alloc, &pNext))
+			return false;
+		const_cast<SubCreateInfo *>(sub_info)->pNext = pNext;
+	}
+
+	return true;
+}
+
 bool StateRecorder::Impl::copy_compute_pipeline(const VkComputePipelineCreateInfo *create_info, ScratchAllocator &alloc,
                                                 const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
                                                 VkComputePipelineCreateInfo **out_create_info)
@@ -4480,93 +4498,26 @@ bool StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateI
 	if (!update_derived_pipeline(info, base_pipelines, base_pipeline_count))
 		return false;
 
-	if (info->pTessellationState)
-	{
-		info->pTessellationState = copy(info->pTessellationState, 1, alloc);
-
-		const void *pNext = nullptr;
-		if (!copy_pnext_chain(info->pTessellationState->pNext, alloc, &pNext))
-			return false;
-		const_cast<VkPipelineTessellationStateCreateInfo *>(info->pTessellationState)->pNext = pNext;
-	}
-
-	if (info->pColorBlendState)
-	{
-		info->pColorBlendState = copy(info->pColorBlendState, 1, alloc);
-		const void *pNext = nullptr;
-		if (!copy_pnext_chain(info->pColorBlendState->pNext, alloc, &pNext))
-			return false;
-
-		const_cast<VkPipelineColorBlendStateCreateInfo *>(info->pColorBlendState)->pNext = pNext;
-	}
-
-	if (info->pVertexInputState)
-	{
-		info->pVertexInputState = copy(info->pVertexInputState, 1, alloc);
-
-		const void *pNext = nullptr;
-		if (!copy_pnext_chain(info->pVertexInputState->pNext, alloc, &pNext))
-			return false;
-
-		const_cast<VkPipelineVertexInputStateCreateInfo *>(info->pVertexInputState)->pNext = pNext;
-	}
-
-	if (info->pMultisampleState)
-	{
-		if (info->pMultisampleState->pNext)
-		{
-			log_error_pnext_chain("pNext in VkPipelineMultisampleStateCreateInfo not supported.",
-			                      info->pMultisampleState->pNext);
-			return false;
-		}
-		info->pMultisampleState = copy(info->pMultisampleState, 1, alloc);
-	}
-
-	if (info->pViewportState)
-	{
-		if (info->pViewportState->pNext)
-		{
-			log_error_pnext_chain("pNext in VkPipelineViewportStateCreateInfo not supported.",
-			                      info->pViewportState->pNext);
-			return false;
-		}
-		info->pViewportState = copy(info->pViewportState, 1, alloc);
-	}
-
-	if (info->pInputAssemblyState)
-	{
-		if (info->pInputAssemblyState->pNext)
-		{
-			log_error_pnext_chain("pNext in VkPipelineInputAssemblyStateCreateInfo not supported.",
-			                      info->pInputAssemblyState->pNext);
-			return false;
-		}
-		info->pInputAssemblyState = copy(info->pInputAssemblyState, 1, alloc);
-	}
-
-	if (info->pDepthStencilState)
-	{
-		if (info->pDepthStencilState->pNext)
-		{
-			log_error_pnext_chain("pNext in VkPipelineDepthStencilStateCreateInfo not supported.",
-			                      info->pDepthStencilState->pNext);
-			return false;
-		}
-		info->pDepthStencilState = copy(info->pDepthStencilState, 1, alloc);
-	}
-
-	if (info->pRasterizationState)
-	{
-		info->pRasterizationState = copy(info->pRasterizationState, 1, alloc);
-		if (!info->pRasterizationState)
-			return false;
-
-		const void *pNext = nullptr;
-		if (!copy_pnext_chain(info->pRasterizationState->pNext, alloc, &pNext))
-			return false;
-
-		const_cast<VkPipelineRasterizationStateCreateInfo *>(info->pRasterizationState)->pNext = pNext;
-	}
+	if (!copy_sub_create_info(info->pTessellationState, alloc))
+		return false;
+	if (!copy_sub_create_info(info->pColorBlendState, alloc))
+		return false;
+	if (!copy_sub_create_info(info->pVertexInputState, alloc))
+		return false;
+	if (!copy_sub_create_info(info->pMultisampleState, alloc))
+		return false;
+	if (!copy_sub_create_info(info->pViewportState, alloc))
+		return false;
+	if (!copy_sub_create_info(info->pInputAssemblyState, alloc))
+		return false;
+	if (!copy_sub_create_info(info->pDepthStencilState, alloc))
+		return false;
+	if (!copy_sub_create_info(info->pRasterizationState, alloc))
+		return false;
+	if (!copy_stages(info, alloc))
+		return false;
+	if (!copy_dynamic_state(info, alloc))
+		return false;
 
 	if (info->pColorBlendState)
 	{
@@ -4596,12 +4547,6 @@ bool StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateI
 		if (ms.pSampleMask)
 			ms.pSampleMask = copy(ms.pSampleMask, (ms.rasterizationSamples + 31) / 32, alloc);
 	}
-
-	if (!copy_stages(info, alloc))
-		return false;
-
-	if (!copy_dynamic_state(info, alloc))
-		return false;
 
 	*out_create_info = info;
 	return true;
