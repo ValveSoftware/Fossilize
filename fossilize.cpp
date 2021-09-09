@@ -6181,6 +6181,63 @@ static bool json_value(const VkRenderPassCreateInfo2 &pass, Allocator &alloc, Va
 }
 
 template <typename Allocator>
+static bool json_value(const VkPipelineShaderStageCreateInfo *pStages, uint32_t stageCount,
+                       Allocator &alloc, Value *out_value)
+{
+	Value stages(kArrayType);
+	for (uint32_t i = 0; i < stageCount; i++)
+	{
+		auto &s = pStages[i];
+		Value stage(kObjectType);
+		stage.AddMember("flags", s.flags, alloc);
+		stage.AddMember("name", StringRef(s.pName), alloc);
+		stage.AddMember("module", uint64_string(api_object_cast<uint64_t>(s.module), alloc), alloc);
+		stage.AddMember("stage", s.stage, alloc);
+		if (s.pSpecializationInfo)
+		{
+			Value spec(kObjectType);
+			spec.AddMember("dataSize", uint64_t(s.pSpecializationInfo->dataSize), alloc);
+			spec.AddMember("data",
+			               encode_base64(s.pSpecializationInfo->pData,
+			                             s.pSpecializationInfo->dataSize), alloc);
+			Value map_entries(kArrayType);
+			for (uint32_t j = 0; j < s.pSpecializationInfo->mapEntryCount; j++)
+			{
+				auto &e = s.pSpecializationInfo->pMapEntries[j];
+				Value map_entry(kObjectType);
+				map_entry.AddMember("offset", e.offset, alloc);
+				map_entry.AddMember("size", uint64_t(e.size), alloc);
+				map_entry.AddMember("constantID", e.constantID, alloc);
+				map_entries.PushBack(map_entry, alloc);
+			}
+			spec.AddMember("mapEntries", map_entries, alloc);
+			stage.AddMember("specializationInfo", spec, alloc);
+		}
+
+		if (!pnext_chain_add_json_value(stage, s, alloc))
+			return false;
+		stages.PushBack(stage, alloc);
+	}
+
+	*out_value = stages;
+	return true;
+}
+
+template <typename Allocator>
+static bool json_value(const VkPipelineDynamicStateCreateInfo &dynamic, Allocator &alloc, Value *out_value)
+{
+	Value dyn(kObjectType);
+	dyn.AddMember("flags", dynamic.flags, alloc);
+	Value dynamics(kArrayType);
+	for (uint32_t i = 0; i < dynamic.dynamicStateCount; i++)
+		dynamics.PushBack(dynamic.pDynamicStates[i], alloc);
+	dyn.AddMember("dynamicState", dynamics, alloc);
+
+	*out_value = dyn;
+	return true;
+}
+
+template <typename Allocator>
 static bool json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& alloc, Value *out_value)
 {
 	Value p(kObjectType);
@@ -6203,12 +6260,9 @@ static bool json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& allo
 
 	if (pipe.pDynamicState)
 	{
-		Value dyn(kObjectType);
-		dyn.AddMember("flags", pipe.pDynamicState->flags, alloc);
-		Value dynamics(kArrayType);
-		for (uint32_t i = 0; i < pipe.pDynamicState->dynamicStateCount; i++)
-			dynamics.PushBack(pipe.pDynamicState->pDynamicStates[i], alloc);
-		dyn.AddMember("dynamicState", dynamics, alloc);
+		Value dyn;
+		if (!json_value(*pipe.pDynamicState, alloc, &dyn))
+			return false;
 		p.AddMember("dynamicState", dyn, alloc);
 	}
 
@@ -6398,40 +6452,9 @@ static bool json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& allo
 		p.AddMember("depthStencilState", ds, alloc);
 	}
 
-	Value stages(kArrayType);
-	for (uint32_t i = 0; i < pipe.stageCount; i++)
-	{
-		auto &s = pipe.pStages[i];
-		Value stage(kObjectType);
-		stage.AddMember("flags", s.flags, alloc);
-		stage.AddMember("name", StringRef(s.pName), alloc);
-		stage.AddMember("module", uint64_string(api_object_cast<uint64_t>(s.module), alloc), alloc);
-		stage.AddMember("stage", s.stage, alloc);
-		if (s.pSpecializationInfo)
-		{
-			Value spec(kObjectType);
-			spec.AddMember("dataSize", uint64_t(s.pSpecializationInfo->dataSize), alloc);
-			spec.AddMember("data",
-						   encode_base64(s.pSpecializationInfo->pData,
-										 s.pSpecializationInfo->dataSize), alloc);
-			Value map_entries(kArrayType);
-			for (uint32_t j = 0; j < s.pSpecializationInfo->mapEntryCount; j++)
-			{
-				auto &e = s.pSpecializationInfo->pMapEntries[j];
-				Value map_entry(kObjectType);
-				map_entry.AddMember("offset", e.offset, alloc);
-				map_entry.AddMember("size", uint64_t(e.size), alloc);
-				map_entry.AddMember("constantID", e.constantID, alloc);
-				map_entries.PushBack(map_entry, alloc);
-			}
-			spec.AddMember("mapEntries", map_entries, alloc);
-			stage.AddMember("specializationInfo", spec, alloc);
-		}
-
-		if (!pnext_chain_add_json_value(stage, s, alloc))
-			return false;
-		stages.PushBack(stage, alloc);
-	}
+	Value stages;
+	if (!json_value(pipe.pStages, pipe.stageCount, alloc, &stages))
+		return false;
 	p.AddMember("stages", stages, alloc);
 
 	*out_value = p;
