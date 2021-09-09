@@ -594,6 +594,7 @@ static void record_graphics_pipelines(StateRecorder &recorder)
 	pipe.subpass = 1;
 	pipe.renderPass = fake_handle<VkRenderPass>(30001);
 	pipe.stageCount = 2;
+
 	VkPipelineShaderStageCreateInfo stages[2] = {};
 	stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 	stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
@@ -790,6 +791,80 @@ static void record_graphics_pipelines(StateRecorder &recorder)
 	pipe.basePipelineHandle = fake_handle<VkPipeline>(100000);
 	pipe.basePipelineIndex = 200;
 	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100001), pipe, nullptr, 0))
+		abort();
+}
+
+static void record_raytracing_pipelines(StateRecorder &recorder)
+{
+	VkRayTracingPipelineCreateInfoKHR pipe = {VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR };
+
+	pipe.maxPipelineRayRecursionDepth = 3;
+	pipe.flags = VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT | VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT;
+	pipe.layout = fake_handle<VkPipelineLayout>(10002);
+
+	VkSpecializationInfo spec = {};
+	VkSpecializationMapEntry map_entry = {};
+	const uint32_t spec_data = 100;
+	spec.dataSize = 4;
+	spec.mapEntryCount = 1;
+	spec.pData = &spec_data;
+	map_entry.offset = 0;
+	map_entry.size = 4;
+	map_entry.constantID = 5;
+	spec.pMapEntries = &map_entry;
+
+	VkPipelineShaderStageCreateInfo stages[2] = {};
+	pipe.stageCount = 2;
+	pipe.pStages = stages;
+	stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	stages[0].stage = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+	stages[0].pName = "gen";
+	stages[0].module = fake_handle<VkShaderModule>(5000);
+	stages[0].pSpecializationInfo = &spec;
+	stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	stages[1].stage = VK_SHADER_STAGE_MISS_BIT_KHR;
+	stages[1].pName = "miss";
+	stages[1].module = fake_handle<VkShaderModule>(5001);
+	stages[1].pSpecializationInfo = &spec;
+
+	VkRayTracingShaderGroupCreateInfoKHR groups[2] = {};
+	pipe.groupCount = 2;
+	pipe.pGroups = groups;
+	groups[0].sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+	groups[0].type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
+	groups[0].closestHitShader = 1;
+	groups[0].anyHitShader = 2;
+	groups[0].generalShader = 3;
+	groups[0].intersectionShader = VK_SHADER_UNUSED_KHR;
+	groups[1].sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+	groups[1].type = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
+	groups[1].closestHitShader = 4;
+	groups[1].anyHitShader = 5;
+	groups[1].generalShader = 6;
+	groups[1].intersectionShader = 7;
+
+	if (!recorder.record_raytracing_pipeline(fake_handle<VkPipeline>(40), pipe, nullptr, 0))
+		abort();
+
+	pipe.flags = VK_PIPELINE_CREATE_DERIVATIVE_BIT;
+	pipe.basePipelineHandle = fake_handle<VkPipeline>(40);
+	pipe.basePipelineIndex = -1;
+	if (!recorder.record_raytracing_pipeline(fake_handle<VkPipeline>(41), pipe, nullptr, 0))
+		abort();
+
+	VkRayTracingPipelineInterfaceCreateInfoKHR iface = { VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_INTERFACE_CREATE_INFO_KHR };
+	iface.maxPipelineRayHitAttributeSize = 8;
+	iface.maxPipelineRayPayloadSize = 12;
+	pipe.pLibraryInterface = &iface;
+	if (!recorder.record_raytracing_pipeline(fake_handle<VkPipeline>(42), pipe, nullptr, 0))
+		abort();
+
+	VkPipelineLibraryCreateInfoKHR lib = { VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR };
+	lib.libraryCount = 2;
+	const VkPipeline lib_pipelines[] = { fake_handle<VkPipeline>(40), fake_handle<VkPipeline>(41) };
+	lib.pLibraries = lib_pipelines;
+	pipe.pLibraryInfo = &lib;
+	if (!recorder.record_raytracing_pipeline(fake_handle<VkPipeline>(43), pipe, nullptr, 0))
 		abort();
 }
 
@@ -2158,6 +2233,7 @@ int main()
 		record_render_passes2(recorder);
 		record_compute_pipelines(recorder);
 		record_graphics_pipelines(recorder);
+		record_raytracing_pipelines(recorder);
 
 		uint8_t *serialized;
 		size_t serialized_size;
