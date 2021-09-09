@@ -224,14 +224,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(VkDevice device, V
 
 #ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
 	if (layer->getInstance()->capturesCrashes())
-		CreateGraphicsPipelinesParanoid(layer, device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
+		return CreateGraphicsPipelinesParanoid(layer, device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
 	else
-		CreateGraphicsPipelinesNormal(layer, device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
+		return CreateGraphicsPipelinesNormal(layer, device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
 #else
-	CreateGraphicsPipelinesNormal(layer, device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
+	return CreateGraphicsPipelinesNormal(layer, device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
 #endif
-
-	return VK_SUCCESS;
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelinesNormal(Device *layer,
@@ -308,14 +306,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelines(VkDevice device, Vk
 
 #ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
 	if (layer->getInstance()->capturesCrashes())
-		CreateComputePipelinesParanoid(layer, device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
+		return CreateComputePipelinesParanoid(layer, device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
 	else
-		CreateComputePipelinesNormal(layer, device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
+		return CreateComputePipelinesNormal(layer, device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
 #else
-	CreateComputePipelinesNormal(layer, device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
+	return CreateComputePipelinesNormal(layer, device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
 #endif
-
-	return VK_SUCCESS;
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(VkDevice device,
