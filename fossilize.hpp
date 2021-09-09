@@ -123,6 +123,8 @@ public:
 	virtual bool enqueue_create_render_pass2(Hash hash, const VkRenderPassCreateInfo2 *create_info, VkRenderPass *render_pass) = 0;
 	virtual bool enqueue_create_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) = 0;
 	virtual bool enqueue_create_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline) = 0;
+	virtual bool enqueue_create_raytracing_pipeline(Hash hash, const VkRayTracingPipelineCreateInfoKHR *create_info,
+	                                                VkPipeline *pipeline) = 0;
 
 	// Hard dependency, replayer must sync all its workers. This is only called for derived pipelines,
 	// which need to have their parent be compiled before we can create the derived one.

@@ -110,6 +110,11 @@ struct OptimizeReplayer : StateCreatorInterface
 		*pipeline = fake_handle<VkPipeline>(hash);
 		return recorder.record_graphics_pipeline(*pipeline, *create_info, nullptr, 0, hash);
 	}
+
+	bool enqueue_create_raytracing_pipeline(Hash, const VkRayTracingPipelineCreateInfoKHR *, VkPipeline *) override
+	{
+		return false;
+	}
 };
 
 static void print_help()

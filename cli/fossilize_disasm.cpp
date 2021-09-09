@@ -134,6 +134,11 @@ struct FilterReplayer : StateCreatorInterface
 		return true;
 	}
 
+	bool enqueue_create_raytracing_pipeline(Hash, const VkRayTracingPipelineCreateInfoKHR *, VkPipeline *) override
+	{
+		return false;
+	}
+
 	unordered_set<Hash> filter_graphics;
 	unordered_set<Hash> filter_compute;
 	unordered_set<Hash> filter_modules;
@@ -370,6 +375,11 @@ struct DisasmReplayer : StateCreatorInterface
 		graphics_infos.push_back(create_info);
 		graphics_hashes.push_back(hash);
 		return true;
+	}
+
+	bool enqueue_create_raytracing_pipeline(Hash, const VkRayTracingPipelineCreateInfoKHR *, VkPipeline *) override
+	{
+		return false;
 	}
 
 	bool shader_module_is_active(Hash hash) const

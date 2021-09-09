@@ -160,6 +160,19 @@ struct ReplayInterface : StateCreatorInterface
 		*pipeline = fake_handle<VkPipeline>(hash);
 		return recorder.record_graphics_pipeline(*pipeline, *create_info, nullptr, 0);
 	}
+
+	bool enqueue_create_raytracing_pipeline(Hash hash, const VkRayTracingPipelineCreateInfoKHR *create_info,
+	                                        VkPipeline *pipeline) override
+	{
+		Hash recorded_hash;
+		if (!Hashing::compute_hash_raytracing_pipeline(recorder, *create_info, &recorded_hash))
+			return false;
+		if (recorded_hash != hash)
+			return false;
+
+		*pipeline = fake_handle<VkPipeline>(hash);
+		return recorder.record_raytracing_pipeline(*pipeline, *create_info, nullptr, 0);
+	}
 };
 
 static void record_samplers(StateRecorder &recorder)
