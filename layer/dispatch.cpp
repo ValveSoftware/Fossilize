@@ -314,6 +314,101 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelines(VkDevice device, Vk
 #endif
 }
 
+static VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesNormal(Device *layer,
+                                                                      VkDevice device, VkDeferredOperationKHR deferredOperation,
+                                                                      VkPipelineCache pipelineCache,
+                                                                      uint32_t createInfoCount,
+                                                                      const VkRayTracingPipelineCreateInfoKHR *pCreateInfos,
+                                                                      const VkAllocationCallbacks *pAllocator,
+                                                                      VkPipeline *pPipelines)
+{
+	// Have to create all pipelines here, in case the application makes use of basePipelineIndex.
+	auto res = layer->getTable()->CreateRayTracingPipelinesKHR(
+			device, deferredOperation, pipelineCache,
+			createInfoCount, pCreateInfos, pAllocator, pPipelines);
+
+	if (res != VK_SUCCESS)
+		return res;
+
+	for (uint32_t i = 0; i < createInfoCount; i++)
+	{
+		if (!layer->getRecorder().record_raytracing_pipeline(pPipelines[i], pCreateInfos[i], pPipelines, createInfoCount))
+			LOGW_LEVEL("Failed to record compute pipeline, usually caused by unsupported pNext.\n");
+	}
+
+	return VK_SUCCESS;
+}
+
+#ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
+static VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesParanoid(Device *layer,
+                                                                        VkDevice device, VkDeferredOperationKHR deferredOperation,
+                                                                        VkPipelineCache pipelineCache,
+                                                                        uint32_t createInfoCount,
+                                                                        const VkRayTracingPipelineCreateInfoKHR *pCreateInfos,
+                                                                        const VkAllocationCallbacks *pAllocator,
+                                                                        VkPipeline *pPipelines)
+{
+	for (uint32_t i = 0; i < createInfoCount; i++)
+	{
+		// Fixup base pipeline index since we unroll the Create call.
+		auto info = pCreateInfos[i];
+		if ((info.flags & VK_PIPELINE_CREATE_DERIVATIVE_BIT) != 0 &&
+		    info.basePipelineHandle == VK_NULL_HANDLE &&
+		    info.basePipelineIndex >= 0)
+		{
+			info.basePipelineHandle = pPipelines[info.basePipelineIndex];
+			info.basePipelineIndex = -1;
+		}
+
+		// Have to create all pipelines here, in case the application makes use of basePipelineIndex.
+		// Write arguments in TLS in-case we crash here.
+		Instance::braceForRayTracingPipelineCrash(&layer->getRecorder(), &info);
+		auto res = layer->getTable()->CreateRayTracingPipelinesKHR(device, deferredOperation, pipelineCache, 1, &info,
+		                                                           pAllocator, &pPipelines[i]);
+		Instance::completedPipelineCompilation();
+
+		// Record failing pipelines for repro.
+		if (!layer->getRecorder().record_raytracing_pipeline(res == VK_SUCCESS ? pPipelines[i] : VK_NULL_HANDLE, info, nullptr, 0))
+			LOGW_LEVEL("Failed to record compute pipeline, usually caused by unsupported pNext.\n");
+
+		if (res != VK_SUCCESS)
+		{
+			for (uint32_t j = 0; j < i; j++)
+				layer->getTable()->DestroyPipeline(device, pPipelines[j], pAllocator);
+			return res;
+		}
+	}
+
+	return VK_SUCCESS;
+}
+#endif
+
+static VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(
+		VkDevice device, VkDeferredOperationKHR deferredOperation,
+		VkPipelineCache pipelineCache, uint32_t createInfoCount,
+		const VkRayTracingPipelineCreateInfoKHR *pCreateInfos,
+		const VkAllocationCallbacks *pAllocator,
+		VkPipeline *pPipelines)
+{
+	auto *layer = get_device_layer(device);
+
+#ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
+	if (layer->getInstance()->capturesCrashes())
+	{
+		return CreateRayTracingPipelinesParanoid(layer, device, deferredOperation, pipelineCache,
+		                                         createInfoCount, pCreateInfos, pAllocator, pPipelines);
+	}
+	else
+	{
+		return CreateRayTracingPipelinesNormal(layer, device, deferredOperation, pipelineCache,
+		                                       createInfoCount, pCreateInfos, pAllocator, pPipelines);
+	}
+#else
+	return CreateRayTracingPipelinesNormal(layer, device, deferredOperation, pipelineCache,
+										   createInfoCount, pCreateInfos, pAllocator, pPipelines);
+#endif
+}
+
 static VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(VkDevice device,
                                                            const VkPipelineLayoutCreateInfo *pCreateInfo,
                                                            const VkAllocationCallbacks *pAllocator,
@@ -479,6 +574,7 @@ static PFN_vkVoidFunction interceptCoreDeviceCommand(const char *pName)
 		{ "vkCreateRenderPass", reinterpret_cast<PFN_vkVoidFunction>(CreateRenderPass) },
 		{ "vkCreateRenderPass2", reinterpret_cast<PFN_vkVoidFunction>(CreateRenderPass2) },
 		{ "vkCreateRenderPass2KHR", reinterpret_cast<PFN_vkVoidFunction>(CreateRenderPass2KHR) },
+		{ "vkCreateRayTracingPipelinesKHR", reinterpret_cast<PFN_vkVoidFunction>(CreateRayTracingPipelinesKHR) },
 	};
 
 	for (auto &cmd : coreDeviceCommands)
