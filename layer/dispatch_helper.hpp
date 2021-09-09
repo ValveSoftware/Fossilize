@@ -31,11 +31,37 @@
 #include <unordered_map>
 #include <algorithm>
 #include "vk_layer.h"
-#include "vk_layer_dispatch_table.h"
 #include "vulkan.h"
 
 namespace Fossilize
 {
+// Isolate to just what we need. Should improve layer init time.
+
+// Instance function pointer dispatch table
+struct VkLayerInstanceDispatchTable
+{
+	PFN_vkDestroyInstance DestroyInstance;
+	PFN_vkGetPhysicalDeviceProperties GetPhysicalDeviceProperties;
+};
+
+// Device function pointer dispatch table
+struct VkLayerDispatchTable
+{
+	PFN_vkGetDeviceProcAddr GetDeviceProcAddr;
+	PFN_vkDestroyDevice DestroyDevice;
+	PFN_vkCreateShaderModule CreateShaderModule;
+	PFN_vkCreateGraphicsPipelines CreateGraphicsPipelines;
+	PFN_vkCreateComputePipelines CreateComputePipelines;
+	PFN_vkDestroyPipeline DestroyPipeline;
+	PFN_vkCreatePipelineLayout CreatePipelineLayout;
+	PFN_vkCreateSampler CreateSampler;
+	PFN_vkCreateDescriptorSetLayout CreateDescriptorSetLayout;
+	PFN_vkCreateRenderPass CreateRenderPass;
+	PFN_vkCreateRenderPass2 CreateRenderPass2;
+	PFN_vkCreateRenderPass2KHR CreateRenderPass2KHR;
+	PFN_vkCreateRayTracingPipelinesKHR CreateRayTracingPipelinesKHR;
+};
+
 using InstanceTable = std::unordered_map<void *, std::unique_ptr<VkLayerInstanceDispatchTable>>;
 using DeviceTable = std::unordered_map<void *, std::unique_ptr<VkLayerDispatchTable>>;
 
