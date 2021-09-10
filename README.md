@@ -187,6 +187,11 @@ The layer and JSON is placed in `layer/` in the build folder.
 By default the layer will serialize to `fossilize.$hash.$index.foz` in the working directory on `vkDestroyDevice`.
 However, due to the nature of some drivers, there might be crashes in-between. For this, there are two other modes.
 
+#### `export FOSSILIZE=1`
+
+Fossilize in an implicit layer with an `enable_environment` mechanism.
+Set this environment variable to automatically load the Fossilize layer.
+
 #### `export FOSSILIZE_DUMP_SIGSEGV=1`
 
 On Linux and Android, a SIGSEGV handler is registered on instance creation,
