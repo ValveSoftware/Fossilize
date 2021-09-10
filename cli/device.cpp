@@ -548,6 +548,17 @@ create_compute_pipelines(VkDevice, VkPipelineCache, uint32_t count, const VkComp
 	return VK_SUCCESS;
 }
 
+static VKAPI_ATTR VkResult VKAPI_CALL
+create_raytracing_pipelines_khr(VkDevice, VkDeferredOperationKHR, VkPipelineCache,
+                                uint32_t count, const VkRayTracingPipelineCreateInfoKHR *,
+                                const VkAllocationCallbacks *,
+                                VkPipeline *pipelines)
+{
+	for (uint32_t i = 0; i < count; i++)
+		pipelines[i] = allocate_dummy<VkPipeline>(64 * 1024);
+	return VK_SUCCESS;
+}
+
 static VKAPI_ATTR void VKAPI_CALL
 destroy_pipeline(VkDevice, VkPipeline pipeline, const VkAllocationCallbacks *)
 {
@@ -606,6 +617,7 @@ void VulkanDevice::init_null_device()
 	vkDestroyPipelineCache = destroy_pipeline_cache;
 	vkGetPipelineCacheData = get_pipeline_cache_data;
 	vkGetPhysicalDeviceProperties = get_physical_device_properties;
+	vkCreateRayTracingPipelinesKHR = create_raytracing_pipelines_khr;
 	is_null_device = true;
 
 	feature_filter.init_null_device();
