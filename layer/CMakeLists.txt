@@ -53,10 +53,10 @@ else()
 	if (NOT ANDROID)
 		if (APPLE)
 			# Second one is for installation, where we want to rely on LD_LIBRARY_PATH
-			set(FOSSILIZE_LAYER_PATH "${CMAKE_INSTALL_PREFIX}/lib/libVkLayer_fossilize.dylib")
+			set(FOSSILIZE_LAYER_PATH "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/libVkLayer_fossilize.dylib")
 		else()
 			# Second one is for installation, where we want to rely on LD_LIBRARY_PATH
-			set(FOSSILIZE_LAYER_PATH "${CMAKE_INSTALL_PREFIX}/lib/libVkLayer_fossilize.so")
+			set(FOSSILIZE_LAYER_PATH "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/libVkLayer_fossilize.so")
 		endif()
 		configure_file(${CMAKE_CURRENT_SOURCE_DIR}/VkLayer_fossilize.json.in ${CMAKE_BINARY_DIR}/VkLayer_fossilize.json @ONLY)
 		install(FILES ${CMAKE_BINARY_DIR}/VkLayer_fossilize.json DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/vulkan/explicit_layer.d)
