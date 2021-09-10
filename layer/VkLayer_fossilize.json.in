@@ -10,6 +10,12 @@
         "functions": {
             "vkGetInstanceProcAddr": "VK_LAYER_fossilize_GetInstanceProcAddr",
             "vkGetDeviceProcAddr": "VK_LAYER_fossilize_GetDeviceProcAddr"
+        },
+        "enable_environment": {
+            "FOSSILIZE": "1"
+        },
+        "disable_environment": {
+            "DISABLE_FOSSILIZE": "1"
         }
     }
 }
