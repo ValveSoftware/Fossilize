@@ -72,6 +72,7 @@ struct VulkanFeatures
 };
 
 void *build_pnext_chain(VulkanFeatures &features);
+void filter_feature_enablement(VulkanFeatures &features);
 
 struct VulkanProperties
 {

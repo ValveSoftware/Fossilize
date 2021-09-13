@@ -95,6 +95,18 @@ void *build_pnext_chain(VulkanFeatures &features)
 	return pNext;
 }
 
+void filter_feature_enablement(VulkanFeatures &features)
+{
+	// These feature bits conflict according to validation layers.
+	if (features.fragment_shading_rate.pipelineFragmentShadingRate == VK_TRUE ||
+	    features.fragment_shading_rate.attachmentFragmentShadingRate == VK_TRUE ||
+	    features.fragment_shading_rate.primitiveFragmentShadingRate == VK_TRUE)
+	{
+		features.shading_rate_nv.shadingRateImage = VK_FALSE;
+		features.shading_rate_nv.shadingRateCoarseSampleOrder = VK_FALSE;
+	}
+}
+
 void *build_pnext_chain(VulkanProperties &props)
 {
 	props = {};

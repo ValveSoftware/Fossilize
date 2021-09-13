@@ -274,6 +274,7 @@ bool VulkanDevice::init_device(const Options &opts)
 	{
 		stats_feature.pNext = build_pnext_chain(features);
 		vkGetPhysicalDeviceFeatures2KHR(gpu, &gpu_features2);
+		filter_feature_enablement(features);
 
 		pipeline_stats = stats_feature.pipelineExecutableInfo;
 		if (pipeline_stats && opts.want_pipeline_stats)
