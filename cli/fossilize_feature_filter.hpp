@@ -46,6 +46,9 @@ struct VulkanFeatures
 	VkPhysicalDeviceBufferDeviceAddressFeatures buffer_device_address;
 	VkPhysicalDeviceShaderClockFeaturesKHR shader_clock;
 	VkPhysicalDeviceFragmentShadingRateFeaturesKHR fragment_shading_rate;
+	VkPhysicalDeviceRayQueryFeaturesKHR ray_query;
+	VkPhysicalDeviceRayTracingPipelineFeaturesKHR ray_tracing_pipeline;
+	VkPhysicalDeviceAccelerationStructureFeaturesKHR acceleration_structure;
 	VkPhysicalDeviceTransformFeedbackFeaturesEXT transform_feedback;
 	VkPhysicalDeviceDepthClipEnableFeaturesEXT depth_clip;
 	VkPhysicalDeviceInlineUniformBlockFeaturesEXT inline_uniform_block;
@@ -81,6 +84,8 @@ struct VulkanProperties
 	VkPhysicalDeviceFragmentShadingRatePropertiesKHR fragment_shading_rate;
 	VkPhysicalDeviceDepthStencilResolveProperties ds_resolve;
 	VkPhysicalDeviceMultiviewProperties multiview;
+	VkPhysicalDeviceRayTracingPipelinePropertiesKHR ray_tracing_pipeline;
+	VkPhysicalDeviceAccelerationStructurePropertiesKHR acceleration_structure;
 };
 
 void *build_pnext_chain(VulkanProperties &properties);
@@ -120,6 +125,7 @@ public:
 	bool render_pass2_is_supported(const VkRenderPassCreateInfo2 *info) const;
 	bool graphics_pipeline_is_supported(const VkGraphicsPipelineCreateInfo *info) const;
 	bool compute_pipeline_is_supported(const VkComputePipelineCreateInfo *info) const;
+	bool raytracing_pipeline_is_supported(const VkRayTracingPipelineCreateInfoKHR *info) const;
 
 	bool supports_scalar_block_layout() const;
 
