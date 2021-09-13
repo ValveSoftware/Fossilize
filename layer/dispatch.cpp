@@ -159,7 +159,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelinesNormal(Device *laye
 {
 	// Have to create all pipelines here, in case the application makes use of basePipelineIndex.
 	auto res = layer->getTable()->CreateGraphicsPipelines(device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
-	if (res != VK_SUCCESS)
+	if (res < 0)
 		return res;
 
 	for (uint32_t i = 0; i < createInfoCount; i++)
@@ -168,7 +168,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelinesNormal(Device *laye
 			LOGW_LEVEL("Recording graphics pipeline failed, usually caused by unsupported pNext.\n");
 	}
 
-	return VK_SUCCESS;
+	return res;
 }
 
 #ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
@@ -202,7 +202,8 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelinesParanoid(Device *la
 		if (!layer->getRecorder().record_graphics_pipeline(res == VK_SUCCESS ? pPipelines[i] : VK_NULL_HANDLE, info, nullptr, 0))
 			LOGW_LEVEL("Failed to record graphics pipeline, usually caused by unsupported pNext.\n");
 
-		if (res != VK_SUCCESS)
+		// FIXME: Unsure how to deal with divergent success codes.
+		if (res < 0)
 		{
 			for (uint32_t j = 0; j < i; j++)
 				layer->getTable()->DestroyPipeline(device, pPipelines[j], pAllocator);
@@ -241,7 +242,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelinesNormal(Device *layer
 {
 	// Have to create all pipelines here, in case the application makes use of basePipelineIndex.
 	auto res = layer->getTable()->CreateComputePipelines(device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
-	if (res != VK_SUCCESS)
+	if (res < 0)
 		return res;
 
 	for (uint32_t i = 0; i < createInfoCount; i++)
@@ -250,7 +251,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelinesNormal(Device *layer
 			LOGW_LEVEL("Failed to record compute pipeline, usually caused by unsupported pNext.\n");
 	}
 
-	return VK_SUCCESS;
+	return res;
 }
 
 #ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
@@ -284,7 +285,8 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelinesParanoid(Device *lay
 		if (!layer->getRecorder().record_compute_pipeline(res == VK_SUCCESS ? pPipelines[i] : VK_NULL_HANDLE, info, nullptr, 0))
 			LOGW_LEVEL("Failed to record compute pipeline, usually caused by unsupported pNext.\n");
 
-		if (res != VK_SUCCESS)
+		// FIXME: Unsure how to deal with divergent success codes.
+		if (res < 0)
 		{
 			for (uint32_t j = 0; j < i; j++)
 				layer->getTable()->DestroyPipeline(device, pPipelines[j], pAllocator);
@@ -327,7 +329,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesNormal(Device *la
 			device, deferredOperation, pipelineCache,
 			createInfoCount, pCreateInfos, pAllocator, pPipelines);
 
-	if (res != VK_SUCCESS)
+	if (res < 0)
 		return res;
 
 	for (uint32_t i = 0; i < createInfoCount; i++)
@@ -336,7 +338,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesNormal(Device *la
 			LOGW_LEVEL("Failed to record compute pipeline, usually caused by unsupported pNext.\n");
 	}
 
-	return VK_SUCCESS;
+	return res;
 }
 
 #ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
@@ -363,6 +365,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesParanoid(Device *
 		// Have to create all pipelines here, in case the application makes use of basePipelineIndex.
 		// Write arguments in TLS in-case we crash here.
 		Instance::braceForRayTracingPipelineCrash(&layer->getRecorder(), &info);
+		// FIXME: Can we meaningfully deal with deferredOperation here?
 		auto res = layer->getTable()->CreateRayTracingPipelinesKHR(device, deferredOperation, pipelineCache, 1, &info,
 		                                                           pAllocator, &pPipelines[i]);
 		Instance::completedPipelineCompilation();
@@ -371,7 +374,8 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesParanoid(Device *
 		if (!layer->getRecorder().record_raytracing_pipeline(res == VK_SUCCESS ? pPipelines[i] : VK_NULL_HANDLE, info, nullptr, 0))
 			LOGW_LEVEL("Failed to record compute pipeline, usually caused by unsupported pNext.\n");
 
-		if (res != VK_SUCCESS)
+		// FIXME: Unsure how to deal with divergent success codes.
+		if (res < 0)
 		{
 			for (uint32_t j = 0; j < i; j++)
 				layer->getTable()->DestroyPipeline(device, pPipelines[j], pAllocator);
