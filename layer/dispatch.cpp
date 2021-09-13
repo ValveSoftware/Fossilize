@@ -80,6 +80,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(VkPhysicalDevice gpu, const V
                                                    const VkAllocationCallbacks *pAllocator, VkDevice *pDevice)
 {
 	auto *layer = get_instance_layer(gpu);
+	layer->setLogCallback();
 	auto *chainInfo = getChainInfo(pCreateInfo, VK_LAYER_LINK_INFO);
 
 	auto fpGetInstanceProcAddr = chainInfo->u.pLayerInfo->pfnNextGetInstanceProcAddr;
@@ -222,6 +223,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(VkDevice device, V
                                                               VkPipeline *pPipelines)
 {
 	auto *layer = get_device_layer(device);
+	layer->getInstance()->setLogCallback();
 
 #ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
 	if (layer->getInstance()->capturesCrashes())
@@ -305,6 +307,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelines(VkDevice device, Vk
                                                              VkPipeline *pPipelines)
 {
 	auto *layer = get_device_layer(device);
+	layer->getInstance()->setLogCallback();
 
 #ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
 	if (layer->getInstance()->capturesCrashes())
@@ -395,6 +398,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(
 		VkPipeline *pPipelines)
 {
 	auto *layer = get_device_layer(device);
+	layer->getInstance()->setLogCallback();
 
 #ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
 	if (layer->getInstance()->capturesCrashes())
@@ -419,6 +423,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(VkDevice device,
                                                            VkPipelineLayout *pLayout)
 {
 	auto *layer = get_device_layer(device);
+	layer->getInstance()->setLogCallback();
 
 	VkResult result = layer->getTable()->CreatePipelineLayout(device, pCreateInfo, pAllocator, pLayout);
 
@@ -436,6 +441,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(VkDevice device,
                                                                 VkDescriptorSetLayout *pSetLayout)
 {
 	auto *layer = get_device_layer(device);
+	layer->getInstance()->setLogCallback();
 
 	VkResult result = layer->getTable()->CreateDescriptorSetLayout(device, pCreateInfo, pAllocator, pSetLayout);
 
@@ -473,6 +479,7 @@ static VKAPI_ATTR void VKAPI_CALL DestroyDevice(VkDevice device, const VkAllocat
 
 	void *key = getDispatchKey(device);
 	auto *layer = getLayerData(key, deviceData);
+	layer->getInstance()->setLogCallback();
 
 	layer->getTable()->DestroyDevice(device, pAllocator);
 	destroyLayerData(key, deviceData);
@@ -482,6 +489,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateSampler(VkDevice device, const VkSam
                                                     const VkAllocationCallbacks *pCallbacks, VkSampler *pSampler)
 {
 	auto *layer = get_device_layer(device);
+	layer->getInstance()->setLogCallback();
 	auto res = layer->getTable()->CreateSampler(device, pCreateInfo, pCallbacks, pSampler);
 
 	if (res == VK_SUCCESS)
@@ -498,6 +506,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateShaderModule(VkDevice device, const 
                                                          VkShaderModule *pShaderModule)
 {
 	auto *layer = get_device_layer(device);
+	layer->getInstance()->setLogCallback();
 
 	*pShaderModule = VK_NULL_HANDLE;
 
@@ -516,6 +525,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass(VkDevice device, const Vk
                                                        const VkAllocationCallbacks *pCallbacks, VkRenderPass *pRenderPass)
 {
 	auto *layer = get_device_layer(device);
+	layer->getInstance()->setLogCallback();
 
 	auto res = layer->getTable()->CreateRenderPass(device, pCreateInfo, pCallbacks, pRenderPass);
 
@@ -531,6 +541,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass2(VkDevice device, const V
                                                         const VkAllocationCallbacks *pCallbacks, VkRenderPass *pRenderPass)
 {
 	auto *layer = get_device_layer(device);
+	layer->getInstance()->setLogCallback();
 
 	// Split calls since 2 and KHR variants might not be present even if the other one is.
 	auto res = layer->getTable()->CreateRenderPass2(device, pCreateInfo, pCallbacks, pRenderPass);
@@ -547,6 +558,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass2KHR(VkDevice device, cons
                                                            const VkAllocationCallbacks *pCallbacks, VkRenderPass *pRenderPass)
 {
 	auto *layer = get_device_layer(device);
+	layer->getInstance()->setLogCallback();
 
 	// Split calls since 2 and KHR variants might not be present even if the other one is.
 	auto res = layer->getTable()->CreateRenderPass2KHR(device, pCreateInfo, pCallbacks, pRenderPass);
@@ -600,6 +612,7 @@ VK_LAYER_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL VK_LAYER_fossilize_GetD
 		layer = getLayerData(getDispatchKey(device), deviceData);
 	}
 
+	layer->getInstance()->setLogCallback();
 	auto proc = layer->getTable()->GetDeviceProcAddr(device, pName);
 
 	// If the underlying implementation returns nullptr, we also need to return nullptr.
@@ -626,6 +639,7 @@ VK_LAYER_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL VK_LAYER_fossilize_GetI
 		lock_guard<mutex> holder{globalLock};
 		layer = getLayerData(getDispatchKey(instance), instanceData);
 	}
+	layer->setLogCallback();
 
 	proc = layer->getProcAddr(pName);
 
