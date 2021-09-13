@@ -149,6 +149,10 @@ static std::string getSystemProperty(const char *key)
 #define FOSSILIZE_DUMP_PATH_ENV "FOSSILIZE_DUMP_PATH"
 #endif
 
+#ifndef FOSSILIZE_LOG_PATH_ENV
+#define FOSSILIZE_LOG_PATH_ENV "FOSSILIZE_LOG_PATH"
+#endif
+
 #ifndef FOSSILIZE_DUMP_PATH_READ_ONLY_ENV
 #define FOSSILIZE_DUMP_PATH_READ_ONLY_ENV "FOSSILIZE_DUMP_PATH_READ_ONLY"
 #endif
@@ -283,6 +287,32 @@ Instance::Instance()
 	}
 #endif
 #endif
+
+	const char *log_path = getenv(FOSSILIZE_LOG_PATH_ENV);
+	if (log_path)
+	{
+		log_file = fopen(log_path, "w");
+		setLogCallback();
+	}
+}
+
+Instance::~Instance()
+{
+	set_thread_log_callback(nullptr, nullptr);
+	if (log_file)
+		fclose(log_file);
+}
+
+void Instance::setLogCallback()
+{
+	if (log_file)
+	{
+		set_thread_log_callback([](LogLevel, const char *message, void *userdata) {
+			auto *file = static_cast<FILE *>(userdata);
+			fprintf(file, "%s", message);
+			fflush(file);
+		}, log_file);
+	}
 }
 
 StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDeviceProperties2 *props,
