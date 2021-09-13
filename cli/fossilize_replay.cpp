@@ -1959,7 +1959,7 @@ struct ThreadedReplayer : StateCreatorInterface
 				return b_derived;
 		});
 
-		unsigned end_index_non_derived = deferred.size();
+		unsigned end_index_non_derived = 0;
 		unsigned index = 0;
 		for (auto &def : deferred)
 		{
