@@ -78,6 +78,7 @@ void ExternalReplayer::compute_condensed_progress(const Progress &progress, unsi
 	// Due to all these quirks, it is somewhat complicated to provide an accurate metric on completion.
 	unsigned total_actions = 2 * progress.total_graphics_pipeline_blobs +
 	                         2 * progress.total_compute_pipeline_blobs +
+	                         2 * progress.total_raytracing_pipeline_blobs +
 	                         progress.total_modules;
 
 	// If we have crashes or other unexpected behavior, these values might increase beyond the expected value.
@@ -86,12 +87,16 @@ void ExternalReplayer::compute_condensed_progress(const Progress &progress, unsi
 	// but UI can always report something here when we know we're not done yet.
 	unsigned parsed_graphics = (std::min)(progress.graphics.parsed + progress.graphics.parsed_fail + progress.graphics.cached, progress.total_graphics_pipeline_blobs);
 	unsigned parsed_compute = (std::min)(progress.compute.parsed + progress.compute.parsed_fail + progress.compute.cached, progress.total_compute_pipeline_blobs);
+	unsigned parsed_raytracing = (std::min)(progress.raytracing.parsed + progress.raytracing.parsed_fail + progress.raytracing.cached, progress.total_raytracing_pipeline_blobs);
 	unsigned compiled_graphics = (std::min)(progress.graphics.completed + progress.graphics.skipped + progress.graphics.cached, progress.total_graphics_pipeline_blobs);
 	unsigned compiled_compute = (std::min)(progress.compute.completed + progress.compute.skipped + progress.compute.cached, progress.total_compute_pipeline_blobs);
+	unsigned compiled_raytracing = (std::min)(progress.raytracing.completed + progress.raytracing.skipped + progress.raytracing.cached, progress.total_raytracing_pipeline_blobs);
 	unsigned decompressed_modules = (std::min)(progress.completed_modules + progress.module_validation_failures +
 	                                           progress.banned_modules + progress.missing_modules, progress.total_modules);
 
-	completed = parsed_graphics + parsed_compute + compiled_graphics + compiled_compute + decompressed_modules;
+	completed = parsed_graphics + parsed_compute + parsed_raytracing +
+	            compiled_graphics + compiled_compute + compiled_raytracing +
+	            decompressed_modules;
 	total = total_actions;
 }
 
@@ -115,6 +120,11 @@ bool ExternalReplayer::get_faulty_compute_pipelines(size_t *num_hashes, unsigned
 	return impl->get_faulty_compute_pipelines(num_hashes, indices, hashes);
 }
 
+bool ExternalReplayer::get_faulty_raytracing_pipelines(size_t *num_hashes, unsigned *indices, Hash *hashes) const
+{
+	return impl->get_faulty_raytracing_pipelines(num_hashes, indices, hashes);
+}
+
 bool ExternalReplayer::get_graphics_failed_validation(size_t *num_hashes, Hash *hashes) const
 {
 	return impl->get_graphics_failed_validation(num_hashes, hashes);
@@ -123,6 +133,11 @@ bool ExternalReplayer::get_graphics_failed_validation(size_t *num_hashes, Hash *
 bool ExternalReplayer::get_compute_failed_validation(size_t *num_hashes, Hash *hashes) const
 {
 	return impl->get_compute_failed_validation(num_hashes, hashes);
+}
+
+bool ExternalReplayer::get_raytracing_failed_validation(size_t *num_hashes, Hash *hashes) const
+{
+	return impl->get_raytracing_failed_validation(num_hashes, hashes);
 }
 
 bool ExternalReplayer::poll_memory_usage(uint32_t *num_processes, ProcessStats *stats) const

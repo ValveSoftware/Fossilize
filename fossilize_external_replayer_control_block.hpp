@@ -32,7 +32,7 @@ static_assert(sizeof(std::atomic<uint32_t>) == sizeof(uint32_t), "Atomic size mi
 namespace Fossilize
 {
 enum { ControlBlockMessageSize = 64 };
-enum { ControlBlockMagic = 0x19bcde1b };
+enum { ControlBlockMagic = 0x19bcde1c };
 enum { MaxProcessStats = 256 };
 
 struct SharedControlBlock
@@ -46,19 +46,25 @@ struct SharedControlBlock
 	std::atomic<uint32_t> successful_modules;
 	std::atomic<uint32_t> successful_graphics;
 	std::atomic<uint32_t> successful_compute;
+	std::atomic<uint32_t> successful_raytracing;
 	std::atomic<uint32_t> skipped_graphics;
 	std::atomic<uint32_t> skipped_compute;
+	std::atomic<uint32_t> skipped_raytracing;
 	std::atomic<uint32_t> cached_graphics;
 	std::atomic<uint32_t> cached_compute;
+	std::atomic<uint32_t> cached_raytracing;
 	std::atomic<uint32_t> clean_process_deaths;
 	std::atomic<uint32_t> dirty_process_deaths;
 	std::atomic<uint32_t> parsed_graphics;
 	std::atomic<uint32_t> parsed_compute;
+	std::atomic<uint32_t> parsed_raytracing;
 	std::atomic<uint32_t> parsed_graphics_failures;
 	std::atomic<uint32_t> parsed_compute_failures;
+	std::atomic<uint32_t> parsed_raytracing_failures;
 	std::atomic<uint32_t> parsed_module_failures;
 	std::atomic<uint32_t> total_graphics;
 	std::atomic<uint32_t> total_compute;
+	std::atomic<uint32_t> total_raytracing;
 	std::atomic<uint32_t> total_modules;
 	std::atomic<uint32_t> banned_modules;
 	std::atomic<uint32_t> module_validation_failures;
@@ -67,6 +73,7 @@ struct SharedControlBlock
 
 	std::atomic<uint32_t> static_total_count_graphics;
 	std::atomic<uint32_t> static_total_count_compute;
+	std::atomic<uint32_t> static_total_count_raytracing;
 
 	std::atomic<uint32_t> num_running_processes;
 	std::atomic<uint32_t> num_processes_memory_stats;
