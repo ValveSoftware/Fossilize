@@ -4501,11 +4501,22 @@ bool StateRecorder::Impl::copy_sub_create_info(const SubCreateInfo *&sub_info, S
 	return true;
 }
 
+static VkPipelineCreateFlags normalize_pipeline_creation_flags(VkPipelineCreateFlags flags)
+{
+	// Remove flags which do not meaningfully contribute to compilation.
+	flags &= ~(VK_PIPELINE_CREATE_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR |
+	           VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR |
+	           VK_PIPELINE_CREATE_EARLY_RETURN_ON_FAILURE_BIT_EXT |
+	           VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT_EXT);
+	return flags;
+}
+
 bool StateRecorder::Impl::copy_compute_pipeline(const VkComputePipelineCreateInfo *create_info, ScratchAllocator &alloc,
                                                 const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
                                                 VkComputePipelineCreateInfo **out_create_info)
 {
 	auto *info = copy(create_info, 1, alloc);
+	info->flags = normalize_pipeline_creation_flags(info->flags);
 
 	if (!update_derived_pipeline(info, base_pipelines, base_pipeline_count))
 		return false;
@@ -4529,6 +4540,7 @@ bool StateRecorder::Impl::copy_raytracing_pipeline(const VkRayTracingPipelineCre
                                                    VkRayTracingPipelineCreateInfoKHR **out_info)
 {
 	auto *info = copy(create_info, 1, alloc);
+	info->flags = normalize_pipeline_creation_flags(info->flags);
 
 	if (!update_derived_pipeline(info, base_pipelines, base_pipeline_count))
 		return false;
@@ -4569,6 +4581,7 @@ bool StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateI
                                                  VkGraphicsPipelineCreateInfo **out_create_info)
 {
 	auto *info = copy(create_info, 1, alloc);
+	info->flags = normalize_pipeline_creation_flags(info->flags);
 
 	if (!update_derived_pipeline(info, base_pipelines, base_pipeline_count))
 		return false;
