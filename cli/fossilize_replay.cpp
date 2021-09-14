@@ -3117,6 +3117,35 @@ static void log_faulty_compute(ExternalReplayer &replayer)
 	}
 }
 
+static void log_faulty_raytracing(ExternalReplayer &replayer)
+{
+	size_t count;
+	if (!replayer.get_raytracing_failed_validation(&count, nullptr))
+		return;
+	vector<Hash> hashes(count);
+	if (!replayer.get_raytracing_failed_validation(&count, hashes.data()))
+		return;
+
+	sort(begin(hashes), end(hashes));
+
+	for (auto &h : hashes)
+		LOGI("Raytracing pipeline failed validation: %016" PRIx64 "\n", h);
+
+	vector<unsigned> indices;
+	if (!replayer.get_faulty_raytracing_pipelines(&count, nullptr, nullptr))
+		return;
+	indices.resize(count);
+	hashes.resize(count);
+	if (!replayer.get_faulty_raytracing_pipelines(&count, indices.data(), hashes.data()))
+		return;
+
+	for (unsigned i = 0; i < count; i++)
+	{
+		LOGI("Raytracing pipeline crashed or hung: %016" PRIx64 ". Repro with: --raytracing-pipeline-range %u %u\n",
+			 hashes[i], indices[i], indices[i] + 1);
+	}
+}
+
 static int run_progress_process(const VulkanDevice::Options &device_opts,
                                 const ThreadedReplayer::Options &replayer_opts,
                                 const vector<const char *> &databases,
@@ -3186,6 +3215,7 @@ static int run_progress_process(const VulkanDevice::Options &device_opts,
 			log_faulty_modules(replayer);
 			log_faulty_graphics(replayer);
 			log_faulty_compute(replayer);
+			log_faulty_raytracing(replayer);
 			return replayer.wait();
 		}
 
@@ -3226,6 +3256,7 @@ static int run_progress_process(const VulkanDevice::Options &device_opts,
 				log_faulty_modules(replayer);
 				log_faulty_graphics(replayer);
 				log_faulty_compute(replayer);
+				log_faulty_raytracing(replayer);
 				return replayer.wait();
 			}
 			break;

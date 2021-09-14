@@ -149,7 +149,9 @@ void ProcessProgress::parse(const char *cmd)
 		else
 			LOGE("Failed to creater timerfd. Cannot support timeout for process.\n");
 	}
-	else if (strncmp(cmd, "GRAPHICS_VERR", 13) == 0 || strncmp(cmd, "COMPUTE_VERR", 12) == 0)
+	else if (strncmp(cmd, "GRAPHICS_VERR", 13) == 0 ||
+	         strncmp(cmd, "RAYTRACE_VERR", 13) == 0 ||
+	         strncmp(cmd, "COMPUTE_VERR", 12) == 0)
 	{
 		if (Global::control_block)
 		{
@@ -174,6 +176,24 @@ void ProcessProgress::parse(const char *cmd)
 			{
 				char buffer[ControlBlockMessageSize];
 				sprintf(buffer, "GRAPHICS %d %" PRIx64 "\n", graphics_progress - 1, graphics_pipeline);
+				futex_wrapper_lock(&Global::control_block->futex_lock);
+				shared_control_block_write(Global::control_block, buffer, sizeof(buffer));
+				futex_wrapper_unlock(&Global::control_block->futex_lock);
+			}
+		}
+	}
+	else if (strncmp(cmd, "RAYTRACE", 8) == 0)
+	{
+		char *end = nullptr;
+		raytracing_progress = int(strtol(cmd + 8, &end, 0));
+		if (end)
+		{
+			Hash raytracing_pipeline = strtoull(end, nullptr, 16);
+			// raytracing_progress tells us where to start on next iteration, but -1 was actually the pipeline index that crashed.
+			if (Global::control_block && raytracing_progress > 0 && raytracing_pipeline != 0)
+			{
+				char buffer[ControlBlockMessageSize];
+				sprintf(buffer, "RAYTRACE %d %" PRIx64 "\n", raytracing_progress - 1, raytracing_pipeline);
 				futex_wrapper_lock(&Global::control_block->futex_lock);
 				shared_control_block_write(Global::control_block, buffer, sizeof(buffer));
 				futex_wrapper_unlock(&Global::control_block->futex_lock);
