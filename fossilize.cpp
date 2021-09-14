@@ -217,6 +217,11 @@ struct StateRecorder::Impl
 
 	bool copy_specialization_info(const VkSpecializationInfo *info, ScratchAllocator &alloc, const VkSpecializationInfo **out_info) FOSSILIZE_WARN_UNUSED;
 
+	template <typename CreateInfo>
+	bool copy_stages(CreateInfo *info, ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	template <typename CreateInfo>
+	bool copy_dynamic_state(CreateInfo *info, ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+
 	void *copy_pnext_struct(const VkPipelineTessellationDomainOriginStateCreateInfo *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPipelineVertexInputDivisorStateCreateInfoEXT *create_info,
@@ -789,7 +794,8 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 
 	h.u32(create_info.flags);
 
-	if (create_info.basePipelineHandle != VK_NULL_HANDLE)
+	if ((create_info.flags & VK_PIPELINE_CREATE_DERIVATIVE_BIT) != 0 &&
+	    create_info.basePipelineHandle != VK_NULL_HANDLE)
 	{
 		if (!recorder.get_hash_for_graphics_pipeline_handle(create_info.basePipelineHandle, &hash))
 			return false;
@@ -1125,12 +1131,12 @@ bool compute_hash_compute_pipeline(const StateRecorder &recorder, const VkComput
 
 	h.u32(create_info.flags);
 
-	if (create_info.basePipelineHandle != VK_NULL_HANDLE)
+	if ((create_info.flags & VK_PIPELINE_CREATE_DERIVATIVE_BIT) != 0 &&
+	    create_info.basePipelineHandle != VK_NULL_HANDLE)
 	{
 		if (!recorder.get_hash_for_compute_pipeline_handle(create_info.basePipelineHandle, &hash))
 			return false;
 		h.u64(hash);
-
 		h.s32(create_info.basePipelineIndex);
 	}
 	else
@@ -4368,19 +4374,15 @@ bool StateRecorder::Impl::copy_specialization_info(const VkSpecializationInfo *i
 	return true;
 }
 
-bool StateRecorder::Impl::copy_compute_pipeline(const VkComputePipelineCreateInfo *create_info, ScratchAllocator &alloc,
-                                                const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
-                                                VkComputePipelineCreateInfo **out_create_info)
+template <typename CreateInfo>
+static bool update_derived_pipeline(CreateInfo *info, const VkPipeline *base_pipelines, uint32_t base_pipeline_count)
 {
-	auto *info = copy(create_info, 1, alloc);
-
 	// Check for case where application made use of derivative pipelines and relied on the indexing behavior
 	// into an array of pCreateInfos. In the replayer, we only do it one by one,
 	// so we need to pass the correct handle to the create pipeline calls.
 	if ((info->flags & VK_PIPELINE_CREATE_DERIVATIVE_BIT) != 0)
 	{
-		if (info->basePipelineHandle == VK_NULL_HANDLE &&
-		    info->basePipelineIndex >= 0)
+		if (info->basePipelineHandle == VK_NULL_HANDLE && info->basePipelineIndex >= 0)
 		{
 			if (uint32_t(info->basePipelineIndex) >= base_pipeline_count)
 			{
@@ -4389,9 +4391,72 @@ bool StateRecorder::Impl::copy_compute_pipeline(const VkComputePipelineCreateInf
 			}
 
 			info->basePipelineHandle = base_pipelines[info->basePipelineIndex];
-			info->basePipelineIndex = -1;
 		}
+		info->basePipelineIndex = -1;
 	}
+	else
+	{
+		// Explicitly ignore parameter.
+		info->basePipelineHandle = VK_NULL_HANDLE;
+		info->basePipelineIndex = -1;
+	}
+
+	return true;
+}
+
+template <typename CreateInfo>
+bool StateRecorder::Impl::copy_stages(CreateInfo *info, ScratchAllocator &alloc)
+{
+	info->pStages = copy(info->pStages, info->stageCount, alloc);
+	for (uint32_t i = 0; i < info->stageCount; i++)
+	{
+		auto &stage = const_cast<VkPipelineShaderStageCreateInfo &>(info->pStages[i]);
+
+		stage.pName = copy(stage.pName, strlen(stage.pName) + 1, alloc);
+		if (stage.pSpecializationInfo)
+			if (!copy_specialization_info(stage.pSpecializationInfo, alloc, &stage.pSpecializationInfo))
+				return false;
+
+		const void *pNext = nullptr;
+		if (!copy_pnext_chain(stage.pNext, alloc, &pNext))
+			return false;
+		stage.pNext = pNext;
+	}
+
+	return true;
+}
+
+template <typename CreateInfo>
+bool StateRecorder::Impl::copy_dynamic_state(CreateInfo *info, ScratchAllocator &alloc)
+{
+	if (info->pDynamicState)
+	{
+		if (info->pDynamicState->pNext)
+		{
+			log_error_pnext_chain("pNext in VkPipelineDynamicStateCreateInfo not supported.",
+								  info->pDynamicState->pNext);
+			return false;
+		}
+		info->pDynamicState = copy(info->pDynamicState, 1, alloc);
+	}
+
+	if (info->pDynamicState)
+	{
+		const_cast<VkPipelineDynamicStateCreateInfo *>(info->pDynamicState)->pDynamicStates =
+				copy(info->pDynamicState->pDynamicStates, info->pDynamicState->dynamicStateCount, alloc);
+	}
+
+	return true;
+}
+
+bool StateRecorder::Impl::copy_compute_pipeline(const VkComputePipelineCreateInfo *create_info, ScratchAllocator &alloc,
+                                                const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
+                                                VkComputePipelineCreateInfo **out_create_info)
+{
+	auto *info = copy(create_info, 1, alloc);
+
+	if (!update_derived_pipeline(info, base_pipelines, base_pipeline_count))
+		return false;
 
 	if (info->stage.pSpecializationInfo)
 		if (!copy_specialization_info(info->stage.pSpecializationInfo, alloc, &info->stage.pSpecializationInfo))
@@ -4412,26 +4477,9 @@ bool StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateI
 {
 	auto *info = copy(create_info, 1, alloc);
 
-	// Check for case where application made use of derivative pipelines and relied on the indexing behavior
-	// into an array of pCreateInfos. In the replayer, we only do it one by one,
-	// so we need to pass the correct handle to the create pipeline calls.
-	if ((info->flags & VK_PIPELINE_CREATE_DERIVATIVE_BIT) != 0)
-	{
-		if (info->basePipelineHandle == VK_NULL_HANDLE &&
-		    info->basePipelineIndex >= 0)
-		{
-			if (uint32_t(info->basePipelineIndex) >= base_pipeline_count)
-			{
-				LOGE_LEVEL("Base pipeline index is out of range.\n");
-				return false;
-			}
+	if (!update_derived_pipeline(info, base_pipelines, base_pipeline_count))
+		return false;
 
-			info->basePipelineHandle = base_pipelines[info->basePipelineIndex];
-			info->basePipelineIndex = -1;
-		}
-	}
-
-	info->pStages = copy(info->pStages, info->stageCount, alloc);
 	if (info->pTessellationState)
 	{
 		info->pTessellationState = copy(info->pTessellationState, 1, alloc);
@@ -4520,32 +4568,6 @@ bool StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateI
 		const_cast<VkPipelineRasterizationStateCreateInfo *>(info->pRasterizationState)->pNext = pNext;
 	}
 
-	if (info->pDynamicState)
-	{
-		if (info->pDynamicState->pNext)
-		{
-			log_error_pnext_chain("pNext in VkPipelineDynamicStateCreateInfo not supported.",
-			                      info->pDynamicState->pNext);
-			return false;
-		}
-		info->pDynamicState = copy(info->pDynamicState, 1, alloc);
-	}
-
-	for (uint32_t i = 0; i < info->stageCount; i++)
-	{
-		auto &stage = const_cast<VkPipelineShaderStageCreateInfo &>(info->pStages[i]);
-
-		stage.pName = copy(stage.pName, strlen(stage.pName) + 1, alloc);
-		if (stage.pSpecializationInfo)
-			if (!copy_specialization_info(stage.pSpecializationInfo, alloc, &stage.pSpecializationInfo))
-				return false;
-
-		const void *pNext = nullptr;
-		if (!copy_pnext_chain(stage.pNext, alloc, &pNext))
-			return false;
-		stage.pNext = pNext;
-	}
-
 	if (info->pColorBlendState)
 	{
 		auto &blend = const_cast<VkPipelineColorBlendStateCreateInfo &>(*info->pColorBlendState);
@@ -4575,11 +4597,11 @@ bool StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateI
 			ms.pSampleMask = copy(ms.pSampleMask, (ms.rasterizationSamples + 31) / 32, alloc);
 	}
 
-	if (info->pDynamicState)
-	{
-		const_cast<VkPipelineDynamicStateCreateInfo *>(info->pDynamicState)->pDynamicStates =
-				copy(info->pDynamicState->pDynamicStates, info->pDynamicState->dynamicStateCount, alloc);
-	}
+	if (!copy_stages(info, alloc))
+		return false;
+
+	if (!copy_dynamic_state(info, alloc))
+		return false;
 
 	*out_create_info = info;
 	return true;
