@@ -85,6 +85,7 @@ struct StateReplayer::Impl
 	std::unordered_map<Hash, VkRenderPass> replayed_render_passes;
 	std::unordered_map<Hash, VkPipeline> replayed_compute_pipelines;
 	std::unordered_map<Hash, VkPipeline> replayed_graphics_pipelines;
+	std::unordered_map<Hash, VkPipeline> replayed_raytracing_pipelines;
 
 	void copy_handle_references(const Impl &impl);
 	void forget_handle_references();
@@ -96,8 +97,10 @@ struct StateReplayer::Impl
 	bool parse_render_passes2(StateCreatorInterface &iface, const Value &passes) FOSSILIZE_WARN_UNUSED;
 	bool parse_compute_pipelines(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines) FOSSILIZE_WARN_UNUSED;
 	bool parse_graphics_pipelines(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines) FOSSILIZE_WARN_UNUSED;
+	bool parse_raytracing_pipelines(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines) FOSSILIZE_WARN_UNUSED;
 	bool parse_compute_pipeline(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines, const Value &member) FOSSILIZE_WARN_UNUSED;
 	bool parse_graphics_pipeline(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines, const Value &member) FOSSILIZE_WARN_UNUSED;
+	bool parse_raytracing_pipeline(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines, const Value &member) FOSSILIZE_WARN_UNUSED;
 	bool parse_application_info(StateCreatorInterface &iface, const Value &app_info, const Value &pdf_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_application_info_link(StateCreatorInterface &iface, const Value &link) FOSSILIZE_WARN_UNUSED;
 
@@ -132,6 +135,8 @@ struct StateReplayer::Impl
 	bool parse_derived_pipeline_handle(StateCreatorInterface &iface, DatabaseInterface *resolver,
 	                                   const Value &state, const Value &pipelines,
 	                                   ResourceTag tag, VkPipeline *pipeline) FOSSILIZE_WARN_UNUSED;
+	bool parse_raytracing_groups(const Value &state, const VkRayTracingShaderGroupCreateInfoKHR **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_library_interface(const Value &state, const VkRayTracingPipelineInterfaceCreateInfoKHR **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_tessellation_state(const Value &state, const VkPipelineTessellationStateCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_stages(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &stages, const VkPipelineShaderStageCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_vertex_attributes(const Value &attributes, const VkVertexInputAttributeDescription **out_desc) FOSSILIZE_WARN_UNUSED;
@@ -2609,6 +2614,47 @@ bool StateReplayer::Impl::parse_dynamic_state(const Value &dyn, const VkPipeline
 	return true;
 }
 
+bool StateReplayer::Impl::parse_raytracing_groups(const Value &groups,
+                                                  const VkRayTracingShaderGroupCreateInfoKHR **out_info)
+{
+	auto *state = allocator.allocate_n_cleared<VkRayTracingShaderGroupCreateInfoKHR>(groups.Size());
+	*out_info = state;
+
+	for (auto itr = groups.Begin(); itr != groups.End(); ++itr, state++)
+	{
+		auto &group = *itr;
+		state->sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+		state->intersectionShader = group["intersectionShader"].GetUint();
+		state->anyHitShader = group["anyHitShader"].GetUint();
+		state->closestHitShader = group["closestHitShader"].GetUint();
+		state->generalShader = group["generalShader"].GetUint();
+		state->type = static_cast<VkRayTracingShaderGroupTypeKHR>(group["type"].GetUint());
+
+		if (group.HasMember("pNext"))
+			if (!parse_pnext_chain(group["pNext"], &state->pNext))
+				return false;
+	}
+
+	return true;
+}
+
+bool StateReplayer::Impl::parse_library_interface(const Value &lib,
+                                                  const VkRayTracingPipelineInterfaceCreateInfoKHR **out_info)
+{
+	auto *state = allocator.allocate_cleared<VkRayTracingPipelineInterfaceCreateInfoKHR>();
+
+	state->sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_INTERFACE_CREATE_INFO_KHR;
+	state->maxPipelineRayPayloadSize = lib["maxPipelineRayPayloadSize"].GetUint();
+	state->maxPipelineRayHitAttributeSize = lib["maxPipelineRayHitAttributeSize"].GetUint();
+
+	if (lib.HasMember("pNext"))
+		if (!parse_pnext_chain(lib["pNext"], &state->pNext))
+			return false;
+
+	*out_info = state;
+	return true;
+}
+
 bool StateReplayer::Impl::parse_viewports(const Value &viewports, const VkViewport **out_viewports)
 {
 	auto *vps = allocator.allocate_n_cleared<VkViewport>(viewports.Size());
@@ -2765,8 +2811,8 @@ bool StateReplayer::Impl::parse_derived_pipeline_handle(StateCreatorInterface &i
 		replayed_pipelines = &replayed_graphics_pipelines;
 	else if (tag == RESOURCE_COMPUTE_PIPELINE)
 		replayed_pipelines = &replayed_compute_pipelines;
-	//else if (tag == RESOURCE_RAYTRACING_PIPELINE)
-	//	replayed_pipelines = &replayed_raytracing_pipelines;
+	else if (tag == RESOURCE_RAYTRACING_PIPELINE)
+		replayed_pipelines = &replayed_raytracing_pipelines;
 	else
 		return false;
 
@@ -2792,10 +2838,10 @@ bool StateReplayer::Impl::parse_derived_pipeline_handle(StateCreatorInterface &i
 					return false;
 				break;
 
-			//case RESOURCE_RAYTRACING_PIPELINE:
-			//	if (!parse_raytracing_pipeline(iface, resolver, pipelines, state))
-			//		return false;
-			//	break;
+			case RESOURCE_RAYTRACING_PIPELINE:
+				if (!parse_raytracing_pipeline(iface, resolver, pipelines, state))
+					return false;
+				break;
 
 			default:
 				return false;
@@ -2845,6 +2891,80 @@ bool StateReplayer::Impl::parse_derived_pipeline_handle(StateCreatorInterface &i
 	}
 	else
 		*out_pipeline = api_object_cast<VkPipeline>(pipeline);
+
+	return true;
+}
+
+bool StateReplayer::Impl::parse_raytracing_pipeline(StateCreatorInterface &iface, DatabaseInterface *resolver,
+                                                    const Value &pipelines, const Value &member)
+{
+	Hash hash = string_to_uint64(member.GetString());
+	if (replayed_raytracing_pipelines.count(hash))
+		return true;
+
+	auto *info_allocated = allocator.allocate_cleared<VkRayTracingPipelineCreateInfoKHR>();
+	auto &obj = pipelines[member];
+	auto &info = *info_allocated;
+	info.sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR;
+	info.flags = obj["flags"].GetUint();
+	info.basePipelineIndex = obj["basePipelineIndex"].GetInt();
+	info.maxPipelineRayRecursionDepth = obj["maxPipelineRayRecursionDepth"].GetUint();
+
+	if (obj.HasMember("stages"))
+	{
+		info.stageCount = obj["stages"].Size();
+		if (!parse_stages(iface, resolver, obj["stages"], &info.pStages))
+			return false;
+	}
+
+	if (obj.HasMember("groups"))
+	{
+		info.groupCount = obj["groups"].Size();
+		if (!parse_raytracing_groups(obj["groups"], &info.pGroups))
+			return false;
+	}
+
+	if (obj.HasMember("libraryInterface"))
+		if (!parse_library_interface(obj["libraryInterface"], &info.pLibraryInterface))
+			return false;
+
+	if (obj.HasMember("libraryInfo"))
+	{
+		auto &lib_info = obj["libraryInfo"];
+		auto &library_list = lib_info["libraries"];
+		auto *library_info = allocator.allocate_cleared<VkPipelineLibraryCreateInfoKHR>();
+		auto *libraries = allocator.allocate_n<VkPipeline>(library_list.Size());
+
+		library_info->sType = VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR;
+		library_info->libraryCount = library_list.Size();
+		library_info->pLibraries = libraries;
+		info.pLibraryInfo = library_info;
+
+		for (auto itr = library_list.Begin(); itr != library_list.End(); ++itr, libraries++)
+		{
+			if (!parse_derived_pipeline_handle(iface, resolver, *itr, pipelines,
+			                                   RESOURCE_RAYTRACING_PIPELINE, libraries))
+				return false;
+		}
+
+		if (lib_info.HasMember("pNext"))
+			if (!parse_pnext_chain(lib_info["pNext"], &library_info->pNext))
+				return false;
+	}
+
+	if (obj.HasMember("dynamicState"))
+		if (!parse_dynamic_state(obj["dynamicState"], &info.pDynamicState))
+			return false;
+
+	if (!parse_derived_pipeline_handle(iface, resolver, obj["basePipelineHandle"], pipelines,
+	                                   RESOURCE_RAYTRACING_PIPELINE, &info.basePipelineHandle))
+		return false;
+
+	if (!parse_pipeline_layout_handle(obj["layout"], &info.layout))
+		return false;
+
+	if (!iface.enqueue_create_raytracing_pipeline(hash, &info, &replayed_raytracing_pipelines[hash]))
+		return false;
 
 	return true;
 }
@@ -2942,6 +3062,16 @@ bool StateReplayer::Impl::parse_graphics_pipelines(StateCreatorInterface &iface,
 {
 	for (auto itr = pipelines.MemberBegin(); itr != pipelines.MemberEnd(); ++itr)
 		if (!parse_graphics_pipeline(iface, resolver, pipelines, itr->name))
+			return false;
+	iface.notify_replayed_resources_for_type();
+	return true;
+}
+
+bool StateReplayer::Impl::parse_raytracing_pipelines(StateCreatorInterface &iface, DatabaseInterface *resolver,
+                                                     const Value &pipelines)
+{
+	for (auto itr = pipelines.MemberBegin(); itr != pipelines.MemberEnd(); ++itr)
+		if (!parse_raytracing_pipeline(iface, resolver, pipelines, itr->name))
 			return false;
 	iface.notify_replayed_resources_for_type();
 	return true;
@@ -3497,6 +3627,10 @@ bool StateReplayer::Impl::parse(StateCreatorInterface &iface, DatabaseInterface 
 
 	if (doc.HasMember("graphicsPipelines"))
 		if (!parse_graphics_pipelines(iface, resolver, doc["graphicsPipelines"]))
+			return false;
+
+	if (doc.HasMember("raytracingPipelines"))
+		if (!parse_raytracing_pipelines(iface, resolver, doc["raytracingPipelines"]))
 			return false;
 
 	return true;
