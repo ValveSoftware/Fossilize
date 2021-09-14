@@ -128,6 +128,7 @@ struct StateReplayer::Impl
 	bool parse_multisample_state(const Value &state, const VkPipelineMultisampleStateCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_viewport_state(const Value &state, const VkPipelineViewportStateCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_dynamic_state(const Value &state, const VkPipelineDynamicStateCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_pipeline_layout_handle(const Value &state, VkPipelineLayout *out_layout) FOSSILIZE_WARN_UNUSED;
 	bool parse_tessellation_state(const Value &state, const VkPipelineTessellationStateCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_stages(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &stages, const VkPipelineShaderStageCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_vertex_attributes(const Value &attributes, const VkVertexInputAttributeDescription **out_desc) FOSSILIZE_WARN_UNUSED;
@@ -2344,23 +2345,8 @@ bool StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, D
 	else
 		info.basePipelineHandle = api_object_cast<VkPipeline>(pipeline);
 
-	auto layout = string_to_uint64(obj["layout"].GetString());
-	if (layout > 0)
-	{
-		auto layout_itr = replayed_pipeline_layouts.find(layout);
-		if (layout_itr == end(replayed_pipeline_layouts))
-		{
-			log_missing_resource("Pipeline layout", layout);
-			return false;
-		}
-		else if (layout_itr->second == VK_NULL_HANDLE)
-		{
-			log_invalid_resource("Pipeline layout", layout);
-			return false;
-		}
-		else
-			info.layout = layout_itr->second;
-	}
+	if (!parse_pipeline_layout_handle(obj["layout"], &info.layout))
+		return false;
 
 	auto &stage = obj["stage"];
 	info.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -2795,6 +2781,26 @@ bool StateReplayer::Impl::parse_stages(StateCreatorInterface &iface, DatabaseInt
 	return true;
 }
 
+bool StateReplayer::Impl::parse_pipeline_layout_handle(const Value &state, VkPipelineLayout *out_layout)
+{
+	auto layout = string_to_uint64(state.GetString());
+	if (layout > 0)
+	{
+		auto layout_itr = replayed_pipeline_layouts.find(layout);
+		if (layout_itr == end(replayed_pipeline_layouts) || layout_itr->second == VK_NULL_HANDLE)
+		{
+			log_missing_resource("Pipeline layout", layout);
+			return false;
+		}
+		else
+			*out_layout = layout_itr->second;
+	}
+	else
+		*out_layout = VK_NULL_HANDLE;
+
+	return true;
+}
+
 bool StateReplayer::Impl::parse_graphics_pipeline(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines, const Value &member)
 {
 	Hash hash = string_to_uint64(member.GetString());
@@ -2865,23 +2871,8 @@ bool StateReplayer::Impl::parse_graphics_pipeline(StateCreatorInterface &iface, 
 	else
 		info.basePipelineHandle = api_object_cast<VkPipeline>(pipeline);
 
-	auto layout = string_to_uint64(obj["layout"].GetString());
-	if (layout > 0)
-	{
-		auto layout_itr = replayed_pipeline_layouts.find(layout);
-		if (layout_itr == end(replayed_pipeline_layouts))
-		{
-			log_missing_resource("Pipeline layout", layout);
-			return false;
-		}
-		else if (layout_itr->second == VK_NULL_HANDLE)
-		{
-			log_invalid_resource("Pipeline layout", layout);
-			return false;
-		}
-		else
-			info.layout = layout_itr->second;
-	}
+	if (!parse_pipeline_layout_handle(obj["layout"], &info.layout))
+		return false;
 
 	auto render_pass = string_to_uint64(obj["renderPass"].GetString());
 	if (render_pass > 0)
