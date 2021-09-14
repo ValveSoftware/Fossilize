@@ -52,8 +52,10 @@ struct ExternalReplayer::Impl
 	std::unordered_set<Hash> faulty_spirv_modules;
 	std::vector<std::pair<unsigned, Hash>> faulty_graphics_pipelines;
 	std::vector<std::pair<unsigned, Hash>> faulty_compute_pipelines;
+	std::vector<std::pair<unsigned, Hash>> faulty_raytracing_pipelines;
 	std::unordered_set<Hash> graphics_failed_validation;
 	std::unordered_set<Hash> compute_failed_validation;
+	std::unordered_set<Hash> raytracing_failed_validation;
 
 	bool start(const ExternalReplayer::Options &options);
 	ExternalReplayer::PollResult poll_progress(Progress &progress);
@@ -66,8 +68,10 @@ struct ExternalReplayer::Impl
 	bool get_faulty_spirv_modules(size_t *count, Hash *hashes) const;
 	bool get_faulty_graphics_pipelines(size_t *count, unsigned *indices, Hash *hashes) const;
 	bool get_faulty_compute_pipelines(size_t *count, unsigned *indices, Hash *hashes) const;
+	bool get_faulty_raytracing_pipelines(size_t *count, unsigned *indices, Hash *hashes) const;
 	bool get_graphics_failed_validation(size_t *count, Hash *hashes) const;
 	bool get_compute_failed_validation(size_t *count, Hash *hashes) const;
+	bool get_raytracing_failed_validation(size_t *count, Hash *hashes) const;
 	bool get_failed(const std::unordered_set<Hash> &failed, size_t *count, Hash *hashes) const;
 	bool get_failed(const std::vector<std::pair<unsigned, Hash>> &failed, size_t *count,
 	                unsigned *indices, Hash *hashes) const;
@@ -121,12 +125,21 @@ ExternalReplayer::PollResult ExternalReplayer::Impl::poll_progress(ExternalRepla
 	progress.compute.skipped = shm_block->skipped_compute.load(std::memory_order_relaxed);
 	progress.compute.cached = shm_block->cached_compute.load(std::memory_order_relaxed);
 	progress.compute.completed = shm_block->successful_compute.load(std::memory_order_relaxed);
+
 	progress.graphics.total = shm_block->total_graphics.load(std::memory_order_relaxed);
 	progress.graphics.parsed = shm_block->parsed_graphics.load(std::memory_order_relaxed);
 	progress.graphics.parsed_fail = shm_block->parsed_graphics_failures.load(std::memory_order_relaxed);
 	progress.graphics.skipped = shm_block->skipped_graphics.load(std::memory_order_relaxed);
 	progress.graphics.cached = shm_block->cached_graphics.load(std::memory_order_relaxed);
 	progress.graphics.completed = shm_block->successful_graphics.load(std::memory_order_relaxed);
+
+	progress.raytracing.total = shm_block->total_raytracing.load(std::memory_order_relaxed);
+	progress.raytracing.parsed = shm_block->parsed_raytracing.load(std::memory_order_relaxed);
+	progress.raytracing.parsed_fail = shm_block->parsed_raytracing.load(std::memory_order_relaxed);
+	progress.raytracing.skipped = shm_block->skipped_raytracing.load(std::memory_order_relaxed);
+	progress.raytracing.cached = shm_block->cached_raytracing.load(std::memory_order_relaxed);
+	progress.raytracing.completed = shm_block->successful_raytracing.load(std::memory_order_relaxed);
+
 	progress.completed_modules = shm_block->successful_modules.load(std::memory_order_relaxed);
 	progress.missing_modules = shm_block->parsed_module_failures.load(std::memory_order_relaxed);
 	progress.total_modules = shm_block->total_modules.load(std::memory_order_relaxed);
@@ -137,6 +150,7 @@ ExternalReplayer::PollResult ExternalReplayer::Impl::poll_progress(ExternalRepla
 
 	progress.total_graphics_pipeline_blobs = shm_block->static_total_count_graphics.load(std::memory_order_relaxed);
 	progress.total_compute_pipeline_blobs = shm_block->static_total_count_compute.load(std::memory_order_relaxed);
+	progress.total_raytracing_pipeline_blobs = shm_block->static_total_count_raytracing.load(std::memory_order_relaxed);
 
 	if (WaitForSingleObject(mutex, INFINITE) == WAIT_OBJECT_0)
 	{
@@ -169,6 +183,11 @@ void ExternalReplayer::Impl::parse_message(const char *msg)
 		auto hash = strtoull(msg + 12, nullptr, 16);
 		compute_failed_validation.insert(hash);
 	}
+	else if (strncmp(msg, "RAYTRACE_VERR", 13) == 0)
+	{
+		auto hash = strtoull(msg + 13, nullptr, 16);
+		raytracing_failed_validation.insert(hash);
+	}
 	else if (strncmp(msg, "GRAPHICS", 8) == 0)
 	{
 		char *end = nullptr;
@@ -177,6 +196,16 @@ void ExternalReplayer::Impl::parse_message(const char *msg)
 		{
 			Hash graphics_pipeline = strtoull(end, nullptr, 16);
 			faulty_graphics_pipelines.push_back({ unsigned(index), graphics_pipeline });
+		}
+	}
+	else if (strncmp(msg, "RAYTRACE", 8) == 0)
+	{
+		char *end = nullptr;
+		int index = int(strtol(msg + 8, &end, 0));
+		if (index >= 0 && end)
+		{
+			Hash raytrace_pipeline = strtoull(end, nullptr, 16);
+			faulty_raytracing_pipelines.push_back({ unsigned(index), raytrace_pipeline });
 		}
 	}
 	else if (strncmp(msg, "COMPUTE", 7) == 0)
@@ -306,6 +335,11 @@ bool ExternalReplayer::Impl::get_faulty_compute_pipelines(size_t *count, unsigne
 	return get_failed(faulty_compute_pipelines, count, indices, hashes);
 }
 
+bool ExternalReplayer::Impl::get_faulty_raytracing_pipelines(size_t *count, unsigned int *indices, Hash *hashes) const
+{
+	return get_failed(faulty_raytracing_pipelines, count, indices, hashes);
+}
+
 bool ExternalReplayer::Impl::get_graphics_failed_validation(size_t *count, Hash *hashes) const
 {
 	return get_failed(graphics_failed_validation, count, hashes);
@@ -314,6 +348,11 @@ bool ExternalReplayer::Impl::get_graphics_failed_validation(size_t *count, Hash 
 bool ExternalReplayer::Impl::get_compute_failed_validation(size_t *count, Hash *hashes) const
 {
 	return get_failed(compute_failed_validation, count, hashes);
+}
+
+bool ExternalReplayer::Impl::get_raytracing_failed_validation(size_t *count, Hash *hashes) const
+{
+	return get_failed(raytracing_failed_validation, count, hashes);
 }
 
 static char *create_modified_environment(unsigned num_environment_variables, const ExternalReplayer::Environment *environment_variables)
@@ -551,6 +590,11 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 		cmdline += std::to_string(options.start_compute_index);
 		cmdline += " ";
 		cmdline += std::to_string(options.end_compute_index);
+
+		cmdline += " --raytracing-pipeline-range ";
+		cmdline += std::to_string(options.start_raytracing_index);
+		cmdline += " ";
+		cmdline += std::to_string(options.end_raytracing_index);
 	}
 
 	if (options.pipeline_stats_path)

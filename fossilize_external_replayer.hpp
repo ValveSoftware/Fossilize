@@ -105,6 +105,8 @@ public:
 		unsigned end_graphics_index;
 		unsigned start_compute_index;
 		unsigned end_compute_index;
+		unsigned start_raytracing_index;
+		unsigned end_raytracing_index;
 		bool use_pipeline_range;
 
 		// Redirect stdout and stderr to /dev/null or NUL.
@@ -182,10 +184,12 @@ public:
 	// with a given pipeline range.
 	bool get_faulty_graphics_pipelines(size_t *num_pipelines, unsigned *indices, Hash *hashes) const;
 	bool get_faulty_compute_pipelines(size_t *num_pipelines, unsigned *indices, Hash *hashes) const;
+	bool get_faulty_raytracing_pipelines(size_t *num_pipelines, unsigned *indices, Hash *hashes) const;
 
 	// If validation is enabled, gets a list of all pipelines which failed validation.
 	bool get_graphics_failed_validation(size_t *num_hashes, Hash *hashes) const;
 	bool get_compute_failed_validation(size_t *num_hashes, Hash *hashes) const;
+	bool get_raytracing_failed_validation(size_t *num_hashes, Hash *hashes) const;
 
 	enum class PollResult : unsigned
 	{
@@ -211,6 +215,7 @@ public:
 	{
 		TypeProgress compute;
 		TypeProgress graphics;
+		TypeProgress raytracing;
 
 		uint32_t completed_modules;
 		uint32_t missing_modules;
@@ -224,6 +229,7 @@ public:
 		// These values are static and represents the total amount pipelines in the archive that we expect to replay.
 		uint32_t total_graphics_pipeline_blobs;
 		uint32_t total_compute_pipeline_blobs;
+		uint32_t total_raytracing_pipeline_blobs;
 	};
 
 	PollResult poll_progress(Progress &progress);
