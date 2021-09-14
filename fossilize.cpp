@@ -274,6 +274,8 @@ struct StateRecorder::Impl
 	bool remap_compute_pipeline_ci(VkComputePipelineCreateInfo *create_info) FOSSILIZE_WARN_UNUSED;
 	bool remap_sampler_ci(VkSamplerCreateInfo *create_info) FOSSILIZE_WARN_UNUSED;
 	bool remap_render_pass_ci(VkRenderPassCreateInfo *create_info) FOSSILIZE_WARN_UNUSED;
+	template <typename CreateInfo>
+	bool remap_shader_module_handles(CreateInfo *info) FOSSILIZE_WARN_UNUSED;
 
 	bool serialize_application_info(std::vector<uint8_t> &blob) const FOSSILIZE_WARN_UNUSED;
 	bool serialize_application_blob_link(Hash hash, ResourceTag tag, std::vector<uint8_t> &blob) const FOSSILIZE_WARN_UNUSED;
@@ -4864,6 +4866,19 @@ bool StateRecorder::Impl::remap_shader_module_ci(VkShaderModuleCreateInfo *)
 	return true;
 }
 
+template <typename CreateInfo>
+bool StateRecorder::Impl::remap_shader_module_handles(CreateInfo *info)
+{
+	for (uint32_t i = 0; i < info->stageCount; i++)
+	{
+		auto &stage = const_cast<VkPipelineShaderStageCreateInfo &>(info->pStages[i]);
+		if (!remap_shader_module_handle(stage.module, &stage.module))
+			return false;
+	}
+
+	return true;
+}
+
 bool StateRecorder::Impl::remap_graphics_pipeline_ci(VkGraphicsPipelineCreateInfo *info)
 {
 	if (!remap_render_pass_handle(info->renderPass, &info->renderPass))
@@ -4875,12 +4890,8 @@ bool StateRecorder::Impl::remap_graphics_pipeline_ci(VkGraphicsPipelineCreateInf
 		if (!remap_graphics_pipeline_handle(info->basePipelineHandle, &info->basePipelineHandle))
 			return false;
 
-	for (uint32_t i = 0; i < info->stageCount; i++)
-	{
-		auto &stage = const_cast<VkPipelineShaderStageCreateInfo &>(info->pStages[i]);
-		if (!remap_shader_module_handle(stage.module, &stage.module))
-			return false;
-	}
+	if (!remap_shader_module_handles(info))
+		return false;
 
 	return true;
 }
