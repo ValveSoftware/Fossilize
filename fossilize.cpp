@@ -129,6 +129,9 @@ struct StateReplayer::Impl
 	bool parse_viewport_state(const Value &state, const VkPipelineViewportStateCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_dynamic_state(const Value &state, const VkPipelineDynamicStateCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_pipeline_layout_handle(const Value &state, VkPipelineLayout *out_layout) FOSSILIZE_WARN_UNUSED;
+	bool parse_derived_pipeline_handle(StateCreatorInterface &iface, DatabaseInterface *resolver,
+	                                   const Value &state, const Value &pipelines,
+	                                   ResourceTag tag, VkPipeline *pipeline) FOSSILIZE_WARN_UNUSED;
 	bool parse_tessellation_state(const Value &state, const VkPipelineTessellationStateCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_stages(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &stages, const VkPipelineShaderStageCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_vertex_attributes(const Value &attributes, const VkVertexInputAttributeDescription **out_desc) FOSSILIZE_WARN_UNUSED;
@@ -2293,57 +2296,9 @@ bool StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, D
 	info.flags = obj["flags"].GetUint();
 	info.basePipelineIndex = obj["basePipelineIndex"].GetInt();
 
-	auto pipeline = string_to_uint64(obj["basePipelineHandle"].GetString());
-	if (pipeline > 0 && resolve_derivative_pipelines)
-	{
-		// This is pretty bad for multithreaded replay, but this should be very rare.
-		iface.sync_threads();
-		auto pipeline_iter = replayed_compute_pipelines.find(pipeline);
-
-		// If we don't have the pipeline, we might have it later in the array of graphics pipelines, queue up out of order.
-		if (pipeline_iter == replayed_compute_pipelines.end() && pipelines.HasMember(obj["basePipelineHandle"].GetString()))
-		{
-			if (!parse_compute_pipeline(iface, resolver, pipelines, obj["basePipelineHandle"]))
-				return false;
-			iface.sync_threads();
-			pipeline_iter = replayed_compute_pipelines.find(pipeline);
-		}
-
-		// Still don't have it? Look into database.
-		if (pipeline_iter == replayed_compute_pipelines.end())
-		{
-			size_t external_state_size = 0;
-			if (!resolver || !resolver->read_entry(RESOURCE_COMPUTE_PIPELINE, pipeline, &external_state_size, nullptr,
-			                                       PAYLOAD_READ_NO_FLAGS))
-			{
-				log_missing_resource("Base pipeline", pipeline);
-				return false;
-			}
-
-			vector<uint8_t> external_state(external_state_size);
-
-			if (!resolver->read_entry(RESOURCE_COMPUTE_PIPELINE, pipeline, &external_state_size, external_state.data(),
-			                          PAYLOAD_READ_NO_FLAGS))
-			{
-				log_missing_resource("Base pipeline", pipeline);
-				return false;
-			}
-
-			if (!this->parse(iface, resolver, external_state.data(), external_state.size()))
-				return false;
-			iface.sync_threads();
-
-			pipeline_iter = replayed_compute_pipelines.find(pipeline);
-			if (pipeline_iter == replayed_compute_pipelines.end())
-			{
-				log_missing_resource("Base pipeline", pipeline);
-				return false;
-			}
-		}
-		info.basePipelineHandle = pipeline_iter->second;
-	}
-	else
-		info.basePipelineHandle = api_object_cast<VkPipeline>(pipeline);
+	if (!parse_derived_pipeline_handle(iface, resolver, obj["basePipelineHandle"], pipelines,
+	                                   RESOURCE_COMPUTE_PIPELINE, &info.basePipelineHandle))
+		return false;
 
 	if (!parse_pipeline_layout_handle(obj["layout"], &info.layout))
 		return false;
@@ -2801,6 +2756,99 @@ bool StateReplayer::Impl::parse_pipeline_layout_handle(const Value &state, VkPip
 	return true;
 }
 
+bool StateReplayer::Impl::parse_derived_pipeline_handle(StateCreatorInterface &iface, DatabaseInterface *resolver,
+                                                        const Value &state, const Value &pipelines,
+                                                        ResourceTag tag, VkPipeline *out_pipeline)
+{
+	unordered_map<Hash, VkPipeline> *replayed_pipelines = nullptr;
+	if (tag == RESOURCE_GRAPHICS_PIPELINE)
+		replayed_pipelines = &replayed_graphics_pipelines;
+	else if (tag == RESOURCE_COMPUTE_PIPELINE)
+		replayed_pipelines = &replayed_compute_pipelines;
+	//else if (tag == RESOURCE_RAYTRACING_PIPELINE)
+	//	replayed_pipelines = &replayed_raytracing_pipelines;
+	else
+		return false;
+
+	auto pipeline = string_to_uint64(state.GetString());
+	if (pipeline > 0 && resolve_derivative_pipelines)
+	{
+		// This is pretty bad for multithreaded replay, but this should be very rare.
+		iface.sync_threads();
+		auto pipeline_iter = replayed_pipelines->find(pipeline);
+
+		// If we don't have the pipeline, we might have it later in the array of graphics pipelines, queue up out of order.
+		if (pipeline_iter == replayed_pipelines->end() && pipelines.HasMember(state.GetString()))
+		{
+			switch (tag)
+			{
+			case RESOURCE_GRAPHICS_PIPELINE:
+				if (!parse_graphics_pipeline(iface, resolver, pipelines, state))
+					return false;
+				break;
+
+			case RESOURCE_COMPUTE_PIPELINE:
+				if (!parse_compute_pipeline(iface, resolver, pipelines, state))
+					return false;
+				break;
+
+			//case RESOURCE_RAYTRACING_PIPELINE:
+			//	if (!parse_raytracing_pipeline(iface, resolver, pipelines, state))
+			//		return false;
+			//	break;
+
+			default:
+				return false;
+			}
+
+			iface.sync_threads();
+			pipeline_iter = replayed_pipelines->find(pipeline);
+		}
+
+		// Still don't have it? Look into database.
+		if (pipeline_iter == replayed_pipelines->end())
+		{
+			size_t external_state_size = 0;
+			if (!resolver || !resolver->read_entry(tag, pipeline, &external_state_size, nullptr,
+			                                       PAYLOAD_READ_NO_FLAGS))
+			{
+				log_missing_resource("Base pipeline", pipeline);
+				return false;
+			}
+
+			vector<uint8_t> external_state(external_state_size);
+
+			if (!resolver->read_entry(tag, pipeline, &external_state_size, external_state.data(),
+			                          PAYLOAD_READ_NO_FLAGS))
+			{
+				log_missing_resource("Base pipeline", pipeline);
+				return false;
+			}
+
+			if (!this->parse(iface, resolver, external_state.data(), external_state.size()))
+				return false;
+
+			iface.sync_threads();
+			pipeline_iter = replayed_pipelines->find(pipeline);
+			if (pipeline_iter == replayed_pipelines->end())
+			{
+				log_missing_resource("Base pipeline", pipeline);
+				return false;
+			}
+			else if (pipeline_iter->second == VK_NULL_HANDLE)
+			{
+				log_invalid_resource("Base pipeline", pipeline);
+				return false;
+			}
+		}
+		*out_pipeline = pipeline_iter->second;
+	}
+	else
+		*out_pipeline = api_object_cast<VkPipeline>(pipeline);
+
+	return true;
+}
+
 bool StateReplayer::Impl::parse_graphics_pipeline(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines, const Value &member)
 {
 	Hash hash = string_to_uint64(member.GetString());
@@ -2814,62 +2862,9 @@ bool StateReplayer::Impl::parse_graphics_pipeline(StateCreatorInterface &iface, 
 	info.flags = obj["flags"].GetUint();
 	info.basePipelineIndex = obj["basePipelineIndex"].GetInt();
 
-	auto pipeline = string_to_uint64(obj["basePipelineHandle"].GetString());
-	if (pipeline > 0 && resolve_derivative_pipelines)
-	{
-		// This is pretty bad for multithreaded replay, but this should be very rare.
-		iface.sync_threads();
-		auto pipeline_iter = replayed_graphics_pipelines.find(pipeline);
-
-		// If we don't have the pipeline, we might have it later in the array of graphics pipelines, queue up out of order.
-		if (pipeline_iter == replayed_graphics_pipelines.end() && pipelines.HasMember(obj["basePipelineHandle"].GetString()))
-		{
-			if (!parse_graphics_pipeline(iface, resolver, pipelines, obj["basePipelineHandle"]))
-				return false;
-			iface.sync_threads();
-			pipeline_iter = replayed_graphics_pipelines.find(pipeline);
-		}
-
-		// Still don't have it? Look into database.
-		if (pipeline_iter == replayed_graphics_pipelines.end())
-		{
-			size_t external_state_size = 0;
-			if (!resolver || !resolver->read_entry(RESOURCE_GRAPHICS_PIPELINE, pipeline, &external_state_size, nullptr,
-			                                       PAYLOAD_READ_NO_FLAGS))
-			{
-				log_missing_resource("Base pipeline", pipeline);
-				return false;
-			}
-
-			vector<uint8_t> external_state(external_state_size);
-
-			if (!resolver->read_entry(RESOURCE_GRAPHICS_PIPELINE, pipeline, &external_state_size, external_state.data(),
-			                          PAYLOAD_READ_NO_FLAGS))
-			{
-				log_missing_resource("Base pipeline", pipeline);
-				return false;
-			}
-
-			if (!this->parse(iface, resolver, external_state.data(), external_state.size()))
-				return false;
-
-			iface.sync_threads();
-			pipeline_iter = replayed_graphics_pipelines.find(pipeline);
-			if (pipeline_iter == replayed_graphics_pipelines.end())
-			{
-				log_missing_resource("Base pipeline", pipeline);
-				return false;
-			}
-			else if (pipeline_iter->second == VK_NULL_HANDLE)
-			{
-				log_invalid_resource("Base pipeline", pipeline);
-				return false;
-			}
-		}
-		info.basePipelineHandle = pipeline_iter->second;
-	}
-	else
-		info.basePipelineHandle = api_object_cast<VkPipeline>(pipeline);
+	if (!parse_derived_pipeline_handle(iface, resolver, obj["basePipelineHandle"], pipelines,
+	                                   RESOURCE_GRAPHICS_PIPELINE, &info.basePipelineHandle))
+		return false;
 
 	if (!parse_pipeline_layout_handle(obj["layout"], &info.layout))
 		return false;
