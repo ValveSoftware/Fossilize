@@ -181,6 +181,7 @@ struct StateRecorder::Impl
 	std::unordered_map<Hash, VkShaderModuleCreateInfo *> shader_modules;
 	std::unordered_map<Hash, VkGraphicsPipelineCreateInfo *> graphics_pipelines;
 	std::unordered_map<Hash, VkComputePipelineCreateInfo *> compute_pipelines;
+	std::unordered_map<Hash, VkRayTracingPipelineCreateInfoKHR *> raytracing_pipelines;
 	std::unordered_map<Hash, void *> render_passes;
 	std::unordered_map<Hash, VkSamplerCreateInfo *> samplers;
 
@@ -266,12 +267,14 @@ struct StateRecorder::Impl
 	bool remap_shader_module_handle(VkShaderModule shader_module, VkShaderModule *out_shader_module) const FOSSILIZE_WARN_UNUSED;
 	bool remap_compute_pipeline_handle(VkPipeline pipeline, VkPipeline *out_pipeline) const FOSSILIZE_WARN_UNUSED;
 	bool remap_graphics_pipeline_handle(VkPipeline pipeline, VkPipeline *out_pipeline) const FOSSILIZE_WARN_UNUSED;
+	bool remap_raytracing_pipeline_handle(VkPipeline pipeline, VkPipeline *out_pipeline) const FOSSILIZE_WARN_UNUSED;
 
 	bool remap_descriptor_set_layout_ci(VkDescriptorSetLayoutCreateInfo *create_info) FOSSILIZE_WARN_UNUSED;
 	bool remap_pipeline_layout_ci(VkPipelineLayoutCreateInfo *create_info) FOSSILIZE_WARN_UNUSED;
 	bool remap_shader_module_ci(VkShaderModuleCreateInfo *create_info) FOSSILIZE_WARN_UNUSED;
 	bool remap_graphics_pipeline_ci(VkGraphicsPipelineCreateInfo *create_info) FOSSILIZE_WARN_UNUSED;
 	bool remap_compute_pipeline_ci(VkComputePipelineCreateInfo *create_info) FOSSILIZE_WARN_UNUSED;
+	bool remap_raytracing_pipeline_ci(VkRayTracingPipelineCreateInfoKHR *create_info) FOSSILIZE_WARN_UNUSED;
 	bool remap_sampler_ci(VkSamplerCreateInfo *create_info) FOSSILIZE_WARN_UNUSED;
 	bool remap_render_pass_ci(VkRenderPassCreateInfo *create_info) FOSSILIZE_WARN_UNUSED;
 	template <typename CreateInfo>
@@ -289,6 +292,7 @@ struct StateRecorder::Impl
 	bool serialize_shader_module(Hash hash, const VkShaderModuleCreateInfo &create_info, std::vector<uint8_t> &blob, ScratchAllocator &allocator) const FOSSILIZE_WARN_UNUSED;
 	bool serialize_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo &create_info, std::vector<uint8_t> &blob) const FOSSILIZE_WARN_UNUSED;
 	bool serialize_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo &create_info, std::vector<uint8_t> &blob) const FOSSILIZE_WARN_UNUSED;
+	bool serialize_raytracing_pipeline(Hash hash, const VkRayTracingPipelineCreateInfoKHR &create_info, std::vector<uint8_t> &blob) const FOSSILIZE_WARN_UNUSED;
 
 	std::mutex record_lock;
 	std::condition_variable record_cv;
@@ -4816,6 +4820,22 @@ bool StateRecorder::Impl::remap_graphics_pipeline_handle(VkPipeline pipeline, Vk
 	}
 }
 
+bool StateRecorder::Impl::remap_raytracing_pipeline_handle(VkPipeline pipeline, VkPipeline *out_pipeline) const
+{
+	auto itr = raytracing_pipeline_to_hash.find(pipeline);
+	if (itr == end(raytracing_pipeline_to_hash))
+	{
+		LOGW_LEVEL("Cannot find raytracing pipeline in hashmap.\n"
+		           "Object has either not been recorded, or it was not supported by Fossilize.\n");
+		return false;
+	}
+	else
+	{
+		*out_pipeline = api_object_cast<VkPipeline>(uint64_t(itr->second));
+		return true;
+	}
+}
+
 bool StateRecorder::Impl::remap_compute_pipeline_handle(VkPipeline pipeline, VkPipeline *out_pipeline) const
 {
 	auto itr = compute_pipeline_to_hash.find(pipeline);
@@ -4907,6 +4927,31 @@ bool StateRecorder::Impl::remap_compute_pipeline_ci(VkComputePipelineCreateInfo 
 
 	if (!remap_pipeline_layout_handle(info->layout, &info->layout))
 		return false;
+
+	return true;
+}
+
+bool StateRecorder::Impl::remap_raytracing_pipeline_ci(VkRayTracingPipelineCreateInfoKHR *info)
+{
+	if (!remap_shader_module_handles(info))
+		return false;
+
+	if (info->basePipelineHandle != VK_NULL_HANDLE)
+		if (!remap_raytracing_pipeline_handle(info->basePipelineHandle, &info->basePipelineHandle))
+			return false;
+
+	if (!remap_pipeline_layout_handle(info->layout, &info->layout))
+		return false;
+
+	if (info->pLibraryInfo)
+	{
+		auto *libraries = const_cast<VkPipeline *>(info->pLibraryInfo->pLibraries);
+		for (uint32_t i = 0; i < info->pLibraryInfo->libraryCount; i++)
+		{
+			if (!remap_raytracing_pipeline_handle(libraries[i], &libraries[i]))
+				return false;
+		}
+	}
 
 	return true;
 }
@@ -5253,6 +5298,53 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 				if (!pipeline_layouts.count(hash))
 					pipeline_layouts[hash] = create_info_copy;
 			}
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR:
+		{
+			auto *create_info = reinterpret_cast<VkRayTracingPipelineCreateInfoKHR *>(record_item.create_info);
+			auto hash = record_item.custom_hash;
+			if (hash == 0)
+				if (!Hashing::compute_hash_raytracing_pipeline(*recorder, *create_info, &hash))
+					break;
+
+			VkRayTracingPipelineCreateInfoKHR *create_info_copy = nullptr;
+			if (!copy_raytracing_pipeline(create_info, allocator, nullptr, 0, &create_info_copy))
+				break;
+			if (!remap_raytracing_pipeline_ci(create_info_copy))
+				break;
+
+			raytracing_pipeline_to_hash[api_object_cast<VkPipeline>(record_item.handle)] = hash;
+
+			if (database_iface)
+			{
+				if (write_database_entries)
+				{
+					if (register_application_link_hash(RESOURCE_RAYTRACING_PIPELINE, hash, blob))
+						need_flush = true;
+
+					if (!database_iface->has_entry(RESOURCE_RAYTRACING_PIPELINE, hash))
+					{
+						if (serialize_raytracing_pipeline(hash, *create_info_copy, blob))
+						{
+							database_iface->write_entry(RESOURCE_RAYTRACING_PIPELINE, hash, blob.data(), blob.size(),
+							                            payload_flags);
+							need_flush = true;
+						}
+					}
+				}
+
+				// Don't need to keep copied data around, reset the allocator.
+				allocator.reset();
+			}
+			else
+			{
+				// Retain for combined serialize() later.
+				if (!raytracing_pipelines.count(hash))
+					raytracing_pipelines[hash] = create_info_copy;
+			}
+
 			break;
 		}
 
@@ -6249,6 +6341,70 @@ static bool json_value(const VkPipelineDynamicStateCreateInfo &dynamic, Allocato
 }
 
 template <typename Allocator>
+static bool json_value(const VkRayTracingPipelineCreateInfoKHR &pipe, Allocator &alloc, Value *out_value)
+{
+	Value p(kObjectType);
+	p.AddMember("flags", pipe.flags, alloc);
+	p.AddMember("layout", uint64_string(api_object_cast<uint64_t>(pipe.layout), alloc), alloc);
+	p.AddMember("basePipelineHandle", uint64_string(api_object_cast<uint64_t>(pipe.basePipelineHandle), alloc), alloc);
+	p.AddMember("basePipelineIndex", pipe.basePipelineIndex, alloc);
+	p.AddMember("maxPipelineRayRecursionDepth", pipe.maxPipelineRayRecursionDepth, alloc);
+
+	if (pipe.pDynamicState)
+	{
+		Value dyn;
+		if (!json_value(*pipe.pDynamicState, alloc, &dyn))
+			return false;
+		p.AddMember("dynamicState", dyn, alloc);
+	}
+
+	Value stages;
+	if (!json_value(pipe.pStages, pipe.stageCount, alloc, &stages))
+		return false;
+	p.AddMember("stages", stages, alloc);
+
+	if (pipe.pLibraryInterface)
+	{
+		Value iface(kObjectType);
+		iface.AddMember("maxPipelineRayPayloadSize", pipe.pLibraryInterface->maxPipelineRayPayloadSize, alloc);
+		iface.AddMember("maxPipelineRayHitAttributeSize", pipe.pLibraryInterface->maxPipelineRayHitAttributeSize, alloc);
+		if (!pnext_chain_add_json_value(iface, *pipe.pLibraryInterface, alloc))
+			return false;
+		p.AddMember("libraryInterface", iface, alloc);
+	}
+
+	if (pipe.pLibraryInfo)
+	{
+		Value library_info(kObjectType);
+		Value libraries(kArrayType);
+		for (uint32_t i = 0; i < pipe.pLibraryInfo->libraryCount; i++)
+			libraries.PushBack(uint64_string(api_object_cast<uint64_t>(pipe.pLibraryInfo->pLibraries[i]), alloc), alloc);
+		library_info.AddMember("libraries", libraries, alloc);
+		if (!pnext_chain_add_json_value(library_info, *pipe.pLibraryInfo, alloc))
+			return false;
+		p.AddMember("libraryInfo", library_info, alloc);
+	}
+
+	Value groups(kArrayType);
+	for (uint32_t i = 0; i < pipe.groupCount; i++)
+	{
+		Value group(kObjectType);
+		group.AddMember("anyHitShader", pipe.pGroups[i].anyHitShader, alloc);
+		group.AddMember("intersectionShader", pipe.pGroups[i].intersectionShader, alloc);
+		group.AddMember("generalShader", pipe.pGroups[i].generalShader, alloc);
+		group.AddMember("closestHitShader", pipe.pGroups[i].closestHitShader, alloc);
+		group.AddMember("type", pipe.pGroups[i].type, alloc);
+		if (!pnext_chain_add_json_value(group, pipe.pGroups[i], alloc))
+			return false;
+		groups.PushBack(group, alloc);
+	}
+	p.AddMember("groups", groups, alloc);
+
+	*out_value = p;
+	return true;
+}
+
+template <typename Allocator>
 static bool json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& alloc, Value *out_value)
 {
 	Value p(kObjectType);
@@ -6745,6 +6901,32 @@ bool StateRecorder::Impl::serialize_compute_pipeline(Hash hash, const VkComputeP
 	return true;
 }
 
+bool StateRecorder::Impl::serialize_raytracing_pipeline(Hash hash, const VkRayTracingPipelineCreateInfoKHR &create_info,
+                                                        std::vector<uint8_t> &blob) const
+{
+	Document doc;
+	doc.SetObject();
+	auto &alloc = doc.GetAllocator();
+
+	Value value;
+	if (!json_value(create_info, alloc, &value))
+		return false;
+
+	Value serialized_raytracing_pipelines(kObjectType);
+	serialized_raytracing_pipelines.AddMember(uint64_string(hash, alloc), value, alloc);
+
+	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
+	doc.AddMember("raytracingPipelines", serialized_raytracing_pipelines, alloc);
+
+	StringBuffer buffer;
+	CustomWriter writer(buffer);
+	doc.Accept(writer);
+
+	blob.resize(buffer.GetSize());
+	memcpy(blob.data(), buffer.GetString(), buffer.GetSize());
+	return true;
+}
+
 bool StateRecorder::Impl::serialize_shader_module(Hash hash, const VkShaderModuleCreateInfo &create_info,
                                                   vector<uint8_t> &blob, ScratchAllocator &blob_allocator) const
 {
@@ -6884,6 +7066,15 @@ bool StateRecorder::serialize(uint8_t **serialized_data, size_t *serialized_size
 		graphics_pipelines.AddMember(uint64_string(pipe.first, alloc), value, alloc);
 	}
 	doc.AddMember("graphicsPipelines", graphics_pipelines, alloc);
+
+	Value raytracing_pipelines(kObjectType);
+	for (auto &pipe : impl->raytracing_pipelines)
+	{
+		if (!json_value(*pipe.second, alloc, &value))
+			return false;
+		raytracing_pipelines.AddMember(uint64_string(pipe.first, alloc), value, alloc);
+	}
+	doc.AddMember("raytracingPipelines", raytracing_pipelines, alloc);
 
 	StringBuffer buffer;
 	PrettyWriter<StringBuffer> writer(buffer);
