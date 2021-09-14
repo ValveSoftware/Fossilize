@@ -3049,101 +3049,48 @@ static void log_faulty_modules(ExternalReplayer &replayer)
 		LOGI("Detected faulty SPIR-V module: %016" PRIx64 "\n", h);
 }
 
-static void log_faulty_graphics(ExternalReplayer &replayer)
+using ValidationFunc = bool (ExternalReplayer::*)(size_t *, Hash *) const;
+using FaultFunc = bool (ExternalReplayer::*)(size_t *, unsigned *, Hash *) const;
+static void log_faulty_pipelines(ExternalReplayer &replayer,
+                                 ValidationFunc validation_query,
+                                 FaultFunc fault_query,
+                                 const char *tag)
 {
 	size_t count;
-	if (!replayer.get_graphics_failed_validation(&count, nullptr))
+	if (!(replayer.*validation_query)(&count, nullptr))
 		return;
 	vector<Hash> hashes(count);
-	if (!replayer.get_graphics_failed_validation(&count, hashes.data()))
+	if (!(replayer.*validation_query)(&count, hashes.data()))
 		return;
 
 	sort(begin(hashes), end(hashes));
 
 	for (auto &h : hashes)
-	{
-		LOGI("Graphics pipeline failed validation: %016" PRIx64 "\n", h);
-
-		// Ad-hoc hack to test automatic pruning ideas ...
-		//printf("--skip-graphics %016llx ", static_cast<unsigned long long>(h));
-	}
+		LOGI("%s pipeline failed validation: %016" PRIx64 "\n", tag, h);
 
 	vector<unsigned> indices;
-	if (!replayer.get_faulty_graphics_pipelines(&count, nullptr, nullptr))
+	if (!(replayer.*fault_query)(&count, nullptr, nullptr))
 		return;
 	indices.resize(count);
 	hashes.resize(count);
-	if (!replayer.get_faulty_graphics_pipelines(&count, indices.data(), hashes.data()))
+	if (!(replayer.*fault_query)(&count, indices.data(), hashes.data()))
 		return;
 
 	for (unsigned i = 0; i < count; i++)
 	{
-		LOGI("Graphics pipeline crashed or hung: %016" PRIx64 ". Repro with: --graphics-pipeline-range %u %u\n",
-		     hashes[i], indices[i], indices[i] + 1);
+		LOGI("%s pipeline crashed or hung: %016" PRIx64 ". Repro with: --%s-pipeline-range %u %u\n",
+		     tag, hashes[i], tag, indices[i], indices[i] + 1);
 	}
 }
 
-static void log_faulty_compute(ExternalReplayer &replayer)
+static void log_faulty_pipelines(ExternalReplayer &replayer)
 {
-	size_t count;
-	if (!replayer.get_compute_failed_validation(&count, nullptr))
-		return;
-	vector<Hash> hashes(count);
-	if (!replayer.get_compute_failed_validation(&count, hashes.data()))
-		return;
-
-	sort(begin(hashes), end(hashes));
-
-	for (auto &h : hashes)
-	{
-		LOGI("Compute pipeline failed validation: %016" PRIx64 "\n", h);
-
-		// Ad-hoc hack to test automatic pruning ideas ...
-		//printf("--skip-compute %016llx ", static_cast<unsigned long long>(h));
-	}
-
-	vector<unsigned> indices;
-	if (!replayer.get_faulty_compute_pipelines(&count, nullptr, nullptr))
-		return;
-	indices.resize(count);
-	hashes.resize(count);
-	if (!replayer.get_faulty_compute_pipelines(&count, indices.data(), hashes.data()))
-		return;
-
-	for (unsigned i = 0; i < count; i++)
-	{
-		LOGI("Compute pipeline crashed or hung: %016" PRIx64 ". Repro with: --compute-pipeline-range %u %u\n",
-		     hashes[i], indices[i], indices[i] + 1);
-	}
-}
-
-static void log_faulty_raytracing(ExternalReplayer &replayer)
-{
-	size_t count;
-	if (!replayer.get_raytracing_failed_validation(&count, nullptr))
-		return;
-	vector<Hash> hashes(count);
-	if (!replayer.get_raytracing_failed_validation(&count, hashes.data()))
-		return;
-
-	sort(begin(hashes), end(hashes));
-
-	for (auto &h : hashes)
-		LOGI("Raytracing pipeline failed validation: %016" PRIx64 "\n", h);
-
-	vector<unsigned> indices;
-	if (!replayer.get_faulty_raytracing_pipelines(&count, nullptr, nullptr))
-		return;
-	indices.resize(count);
-	hashes.resize(count);
-	if (!replayer.get_faulty_raytracing_pipelines(&count, indices.data(), hashes.data()))
-		return;
-
-	for (unsigned i = 0; i < count; i++)
-	{
-		LOGI("Raytracing pipeline crashed or hung: %016" PRIx64 ". Repro with: --raytracing-pipeline-range %u %u\n",
-			 hashes[i], indices[i], indices[i] + 1);
-	}
+	log_faulty_pipelines(replayer, &ExternalReplayer::get_graphics_failed_validation,
+	                     &ExternalReplayer::get_faulty_graphics_pipelines, "graphics");
+	log_faulty_pipelines(replayer, &ExternalReplayer::get_compute_failed_validation,
+	                     &ExternalReplayer::get_faulty_compute_pipelines, "compute");
+	log_faulty_pipelines(replayer, &ExternalReplayer::get_raytracing_failed_validation,
+	                     &ExternalReplayer::get_faulty_raytracing_pipelines, "raytracing");
 }
 
 static int run_progress_process(const VulkanDevice::Options &device_opts,
@@ -3213,9 +3160,7 @@ static int run_progress_process(const VulkanDevice::Options &device_opts,
 			if (result != ExternalReplayer::PollResult::ResultNotReady)
 				log_progress(progress);
 			log_faulty_modules(replayer);
-			log_faulty_graphics(replayer);
-			log_faulty_compute(replayer);
-			log_faulty_raytracing(replayer);
+			log_faulty_pipelines(replayer);
 			return replayer.wait();
 		}
 
@@ -3254,9 +3199,7 @@ static int run_progress_process(const VulkanDevice::Options &device_opts,
 			if (result == ExternalReplayer::PollResult::Complete)
 			{
 				log_faulty_modules(replayer);
-				log_faulty_graphics(replayer);
-				log_faulty_compute(replayer);
-				log_faulty_raytracing(replayer);
+				log_faulty_pipelines(replayer);
 				return replayer.wait();
 			}
 			break;
