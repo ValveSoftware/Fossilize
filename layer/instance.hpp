@@ -67,6 +67,7 @@ public:
 
 	static void braceForGraphicsPipelineCrash(StateRecorder *recorder, const VkGraphicsPipelineCreateInfo *info);
 	static void braceForComputePipelineCrash(StateRecorder *recorder, const VkComputePipelineCreateInfo *info);
+	static void braceForRayTracingPipelineCrash(StateRecorder *recorder, const VkRayTracingPipelineCreateInfoKHR *info);
 	static void completedPipelineCompilation();
 #endif
 

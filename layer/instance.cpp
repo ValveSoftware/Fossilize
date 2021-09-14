@@ -156,6 +156,7 @@ static std::string getSystemProperty(const char *key)
 #ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
 static thread_local const VkComputePipelineCreateInfo *tls_compute_create_info = nullptr;
 static thread_local const VkGraphicsPipelineCreateInfo *tls_graphics_create_info = nullptr;
+static thread_local const VkRayTracingPipelineCreateInfoKHR *tls_raytracing_create_info = nullptr;
 static thread_local StateRecorder *tls_recorder = nullptr;
 
 static bool emergencyRecord()
@@ -167,6 +168,8 @@ static bool emergencyRecord()
 			ret = tls_recorder->record_graphics_pipeline(VK_NULL_HANDLE, *tls_graphics_create_info, nullptr, 0);
 		if (tls_compute_create_info)
 			ret = tls_recorder->record_compute_pipeline(VK_NULL_HANDLE, *tls_compute_create_info, nullptr, 0);
+		if (tls_raytracing_create_info)
+			ret = tls_recorder->record_raytracing_pipeline(VK_NULL_HANDLE, *tls_raytracing_create_info, nullptr, 0);
 
 		// Flush out the recording thread.
 		tls_recorder->tear_down_recording_thread();
@@ -231,6 +234,7 @@ void Instance::braceForGraphicsPipelineCrash(StateRecorder *recorder,
 	tls_recorder = recorder;
 	tls_graphics_create_info = info;
 	tls_compute_create_info = nullptr;
+	tls_raytracing_create_info = nullptr;
 }
 
 void Instance::braceForComputePipelineCrash(StateRecorder *recorder,
@@ -239,6 +243,16 @@ void Instance::braceForComputePipelineCrash(StateRecorder *recorder,
 	tls_recorder = recorder;
 	tls_compute_create_info = info;
 	tls_graphics_create_info = nullptr;
+	tls_raytracing_create_info = nullptr;
+}
+
+void Instance::braceForRayTracingPipelineCrash(StateRecorder *recorder,
+                                               const VkRayTracingPipelineCreateInfoKHR *info)
+{
+	tls_recorder = recorder;
+	tls_compute_create_info = nullptr;
+	tls_graphics_create_info = nullptr;
+	tls_raytracing_create_info = info;
 }
 
 void Instance::completedPipelineCompilation()
@@ -246,6 +260,7 @@ void Instance::completedPipelineCompilation()
 	tls_recorder = nullptr;
 	tls_graphics_create_info = nullptr;
 	tls_compute_create_info = nullptr;
+	tls_raytracing_create_info = nullptr;
 }
 #endif
 
