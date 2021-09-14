@@ -123,6 +123,8 @@ public:
 	virtual bool enqueue_create_render_pass2(Hash hash, const VkRenderPassCreateInfo2 *create_info, VkRenderPass *render_pass) = 0;
 	virtual bool enqueue_create_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) = 0;
 	virtual bool enqueue_create_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline) = 0;
+	virtual bool enqueue_create_raytracing_pipeline(Hash hash, const VkRayTracingPipelineCreateInfoKHR *create_info,
+	                                                VkPipeline *pipeline) = 0;
 
 	// Hard dependency, replayer must sync all its workers. This is only called for derived pipelines,
 	// which need to have their parent be compiled before we can create the derived one.
@@ -218,6 +220,9 @@ public:
 	                         Hash custom_hash = 0) FOSSILIZE_WARN_UNUSED;
 	bool record_sampler(VkSampler sampler, const VkSamplerCreateInfo &create_info,
 	                    Hash custom_hash = 0) FOSSILIZE_WARN_UNUSED;
+	bool record_raytracing_pipeline(VkPipeline pipeline, const VkRayTracingPipelineCreateInfoKHR &create_info,
+	                                const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
+	                                Hash custom_hash = 0) FOSSILIZE_WARN_UNUSED;
 
 	// Used by hashing functions in Hashing namespace. Should be considered an implementation detail.
 	bool get_hash_for_descriptor_set_layout(VkDescriptorSetLayout layout, Hash *hash) const FOSSILIZE_WARN_UNUSED;
@@ -225,6 +230,7 @@ public:
 	bool get_hash_for_shader_module(VkShaderModule module, Hash *hash) const FOSSILIZE_WARN_UNUSED;
 	bool get_hash_for_graphics_pipeline_handle(VkPipeline pipeline, Hash *hash) const FOSSILIZE_WARN_UNUSED;
 	bool get_hash_for_compute_pipeline_handle(VkPipeline pipeline, Hash *hash) const FOSSILIZE_WARN_UNUSED;
+	bool get_hash_for_raytracing_pipeline_handle(VkPipeline pipeline, Hash *hash) const FOSSILIZE_WARN_UNUSED;
 	bool get_hash_for_render_pass(VkRenderPass render_pass, Hash *hash) const FOSSILIZE_WARN_UNUSED;
 	bool get_hash_for_sampler(VkSampler sampler, Hash *hash) const FOSSILIZE_WARN_UNUSED;
 
@@ -282,6 +288,7 @@ bool compute_hash_descriptor_set_layout(const StateRecorder &recorder, const VkD
 bool compute_hash_pipeline_layout(const StateRecorder &recorder, const VkPipelineLayoutCreateInfo &layout, Hash *hash) FOSSILIZE_WARN_UNUSED;
 bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraphicsPipelineCreateInfo &create_info, Hash *hash) FOSSILIZE_WARN_UNUSED;
 bool compute_hash_compute_pipeline(const StateRecorder &recorder, const VkComputePipelineCreateInfo &create_info, Hash *hash) FOSSILIZE_WARN_UNUSED;
+bool compute_hash_raytracing_pipeline(const StateRecorder &recorder, const VkRayTracingPipelineCreateInfoKHR &create_info, Hash *hash) FOSSILIZE_WARN_UNUSED;
 }
 
 }

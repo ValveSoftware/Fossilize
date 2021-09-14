@@ -1838,6 +1838,11 @@ struct ThreadedReplayer : StateCreatorInterface
 		return true;
 	}
 
+	bool enqueue_create_raytracing_pipeline(Hash, const VkRayTracingPipelineCreateInfoKHR *, VkPipeline *) override
+	{
+		return false;
+	}
+
 	bool enqueue_pipeline(Hash hash, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline,
 	                      unsigned index, unsigned memory_context_index)
 	{

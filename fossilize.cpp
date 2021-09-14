@@ -85,6 +85,7 @@ struct StateReplayer::Impl
 	std::unordered_map<Hash, VkRenderPass> replayed_render_passes;
 	std::unordered_map<Hash, VkPipeline> replayed_compute_pipelines;
 	std::unordered_map<Hash, VkPipeline> replayed_graphics_pipelines;
+	std::unordered_map<Hash, VkPipeline> replayed_raytracing_pipelines;
 
 	void copy_handle_references(const Impl &impl);
 	void forget_handle_references();
@@ -96,8 +97,10 @@ struct StateReplayer::Impl
 	bool parse_render_passes2(StateCreatorInterface &iface, const Value &passes) FOSSILIZE_WARN_UNUSED;
 	bool parse_compute_pipelines(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines) FOSSILIZE_WARN_UNUSED;
 	bool parse_graphics_pipelines(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines) FOSSILIZE_WARN_UNUSED;
+	bool parse_raytracing_pipelines(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines) FOSSILIZE_WARN_UNUSED;
 	bool parse_compute_pipeline(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines, const Value &member) FOSSILIZE_WARN_UNUSED;
 	bool parse_graphics_pipeline(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines, const Value &member) FOSSILIZE_WARN_UNUSED;
+	bool parse_raytracing_pipeline(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines, const Value &member) FOSSILIZE_WARN_UNUSED;
 	bool parse_application_info(StateCreatorInterface &iface, const Value &app_info, const Value &pdf_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_application_info_link(StateCreatorInterface &iface, const Value &link) FOSSILIZE_WARN_UNUSED;
 
@@ -128,6 +131,12 @@ struct StateReplayer::Impl
 	bool parse_multisample_state(const Value &state, const VkPipelineMultisampleStateCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_viewport_state(const Value &state, const VkPipelineViewportStateCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_dynamic_state(const Value &state, const VkPipelineDynamicStateCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_pipeline_layout_handle(const Value &state, VkPipelineLayout *out_layout) FOSSILIZE_WARN_UNUSED;
+	bool parse_derived_pipeline_handle(StateCreatorInterface &iface, DatabaseInterface *resolver,
+	                                   const Value &state, const Value &pipelines,
+	                                   ResourceTag tag, VkPipeline *pipeline) FOSSILIZE_WARN_UNUSED;
+	bool parse_raytracing_groups(const Value &state, const VkRayTracingShaderGroupCreateInfoKHR **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_library_interface(const Value &state, const VkRayTracingPipelineInterfaceCreateInfoKHR **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_tessellation_state(const Value &state, const VkPipelineTessellationStateCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_stages(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &stages, const VkPipelineShaderStageCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_vertex_attributes(const Value &attributes, const VkVertexInputAttributeDescription **out_desc) FOSSILIZE_WARN_UNUSED;
@@ -181,6 +190,7 @@ struct StateRecorder::Impl
 	std::unordered_map<Hash, VkShaderModuleCreateInfo *> shader_modules;
 	std::unordered_map<Hash, VkGraphicsPipelineCreateInfo *> graphics_pipelines;
 	std::unordered_map<Hash, VkComputePipelineCreateInfo *> compute_pipelines;
+	std::unordered_map<Hash, VkRayTracingPipelineCreateInfoKHR *> raytracing_pipelines;
 	std::unordered_map<Hash, void *> render_passes;
 	std::unordered_map<Hash, VkSamplerCreateInfo *> samplers;
 
@@ -189,6 +199,7 @@ struct StateRecorder::Impl
 	std::unordered_map<VkShaderModule, Hash> shader_module_to_hash;
 	std::unordered_map<VkPipeline, Hash> graphics_pipeline_to_hash;
 	std::unordered_map<VkPipeline, Hash> compute_pipeline_to_hash;
+	std::unordered_map<VkPipeline, Hash> raytracing_pipeline_to_hash;
 	std::unordered_map<VkRenderPass, Hash> render_pass_to_hash;
 	std::unordered_map<VkSampler, Hash> sampler_to_hash;
 
@@ -205,6 +216,9 @@ struct StateRecorder::Impl
 	bool copy_compute_pipeline(const VkComputePipelineCreateInfo *create_info, ScratchAllocator &alloc,
 	                           const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
 	                           VkComputePipelineCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
+	bool copy_raytracing_pipeline(const VkRayTracingPipelineCreateInfoKHR *create_info, ScratchAllocator &alloc,
+	                              const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
+	                              VkRayTracingPipelineCreateInfoKHR **out_info) FOSSILIZE_WARN_UNUSED;
 	bool copy_sampler(const VkSamplerCreateInfo *create_info, ScratchAllocator &alloc,
 	                  VkSamplerCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
 	bool copy_render_pass(const VkRenderPassCreateInfo *create_info, ScratchAllocator &alloc,
@@ -215,6 +229,14 @@ struct StateRecorder::Impl
 	bool copy_physical_device_features(const VkPhysicalDeviceFeatures2 *pdf, ScratchAllocator &alloc, VkPhysicalDeviceFeatures2 **out_features) FOSSILIZE_WARN_UNUSED;
 
 	bool copy_specialization_info(const VkSpecializationInfo *info, ScratchAllocator &alloc, const VkSpecializationInfo **out_info) FOSSILIZE_WARN_UNUSED;
+
+	template <typename CreateInfo>
+	bool copy_stages(CreateInfo *info, ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	template <typename CreateInfo>
+	bool copy_dynamic_state(CreateInfo *info, ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+
+	template <typename SubCreateInfo>
+	bool copy_sub_create_info(const SubCreateInfo *&info, ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 
 	void *copy_pnext_struct(const VkPipelineTessellationDomainOriginStateCreateInfo *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
@@ -254,14 +276,18 @@ struct StateRecorder::Impl
 	bool remap_shader_module_handle(VkShaderModule shader_module, VkShaderModule *out_shader_module) const FOSSILIZE_WARN_UNUSED;
 	bool remap_compute_pipeline_handle(VkPipeline pipeline, VkPipeline *out_pipeline) const FOSSILIZE_WARN_UNUSED;
 	bool remap_graphics_pipeline_handle(VkPipeline pipeline, VkPipeline *out_pipeline) const FOSSILIZE_WARN_UNUSED;
+	bool remap_raytracing_pipeline_handle(VkPipeline pipeline, VkPipeline *out_pipeline) const FOSSILIZE_WARN_UNUSED;
 
 	bool remap_descriptor_set_layout_ci(VkDescriptorSetLayoutCreateInfo *create_info) FOSSILIZE_WARN_UNUSED;
 	bool remap_pipeline_layout_ci(VkPipelineLayoutCreateInfo *create_info) FOSSILIZE_WARN_UNUSED;
 	bool remap_shader_module_ci(VkShaderModuleCreateInfo *create_info) FOSSILIZE_WARN_UNUSED;
 	bool remap_graphics_pipeline_ci(VkGraphicsPipelineCreateInfo *create_info) FOSSILIZE_WARN_UNUSED;
 	bool remap_compute_pipeline_ci(VkComputePipelineCreateInfo *create_info) FOSSILIZE_WARN_UNUSED;
+	bool remap_raytracing_pipeline_ci(VkRayTracingPipelineCreateInfoKHR *create_info) FOSSILIZE_WARN_UNUSED;
 	bool remap_sampler_ci(VkSamplerCreateInfo *create_info) FOSSILIZE_WARN_UNUSED;
 	bool remap_render_pass_ci(VkRenderPassCreateInfo *create_info) FOSSILIZE_WARN_UNUSED;
+	template <typename CreateInfo>
+	bool remap_shader_module_handles(CreateInfo *info) FOSSILIZE_WARN_UNUSED;
 
 	bool serialize_application_info(std::vector<uint8_t> &blob) const FOSSILIZE_WARN_UNUSED;
 	bool serialize_application_blob_link(Hash hash, ResourceTag tag, std::vector<uint8_t> &blob) const FOSSILIZE_WARN_UNUSED;
@@ -275,6 +301,7 @@ struct StateRecorder::Impl
 	bool serialize_shader_module(Hash hash, const VkShaderModuleCreateInfo &create_info, std::vector<uint8_t> &blob, ScratchAllocator &allocator) const FOSSILIZE_WARN_UNUSED;
 	bool serialize_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo &create_info, std::vector<uint8_t> &blob) const FOSSILIZE_WARN_UNUSED;
 	bool serialize_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo &create_info, std::vector<uint8_t> &blob) const FOSSILIZE_WARN_UNUSED;
+	bool serialize_raytracing_pipeline(Hash hash, const VkRayTracingPipelineCreateInfoKHR &create_info, std::vector<uint8_t> &blob) const FOSSILIZE_WARN_UNUSED;
 
 	std::mutex record_lock;
 	std::condition_variable record_cv;
@@ -759,6 +786,28 @@ static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const voi
 	return true;
 }
 
+static bool compute_hash_stage(const StateRecorder &recorder, Hasher &h, const VkPipelineShaderStageCreateInfo &stage)
+{
+	h.u32(stage.flags);
+	h.string(stage.pName);
+	h.u32(stage.stage);
+
+	Hash hash;
+	if (!recorder.get_hash_for_shader_module(stage.module, &hash))
+		return false;
+	h.u64(hash);
+
+	if (stage.pSpecializationInfo)
+		hash_specialization_info(h, *stage.pSpecializationInfo);
+	else
+		h.u32(0);
+
+	if (!hash_pnext_chain(&recorder, h, stage.pNext))
+		return false;
+
+	return true;
+}
+
 bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraphicsPipelineCreateInfo &create_info, Hash *out_hash)
 {
 	Hasher h;
@@ -766,7 +815,8 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 
 	h.u32(create_info.flags);
 
-	if (create_info.basePipelineHandle != VK_NULL_HANDLE)
+	if ((create_info.flags & VK_PIPELINE_CREATE_DERIVATIVE_BIT) != 0 &&
+	    create_info.basePipelineHandle != VK_NULL_HANDLE)
 	{
 		if (!recorder.get_hash_for_graphics_pipeline_handle(create_info.basePipelineHandle, &hash))
 			return false;
@@ -1083,20 +1133,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 	for (uint32_t i = 0; i < create_info.stageCount; i++)
 	{
 		auto &stage = create_info.pStages[i];
-		h.u32(stage.flags);
-		h.string(stage.pName);
-		h.u32(stage.stage);
-
-		if (!recorder.get_hash_for_shader_module(stage.module, &hash))
-			return false;
-		h.u64(hash);
-
-		if (stage.pSpecializationInfo)
-			hash_specialization_info(h, *stage.pSpecializationInfo);
-		else
-			h.u32(0);
-
-		if (!hash_pnext_chain(&recorder, h, stage.pNext))
+		if (!compute_hash_stage(recorder, h, stage))
 			return false;
 	}
 
@@ -1115,17 +1152,19 @@ bool compute_hash_compute_pipeline(const StateRecorder &recorder, const VkComput
 
 	h.u32(create_info.flags);
 
-	if (create_info.basePipelineHandle != VK_NULL_HANDLE)
+	if ((create_info.flags & VK_PIPELINE_CREATE_DERIVATIVE_BIT) != 0 &&
+	    create_info.basePipelineHandle != VK_NULL_HANDLE)
 	{
 		if (!recorder.get_hash_for_compute_pipeline_handle(create_info.basePipelineHandle, &hash))
 			return false;
 		h.u64(hash);
-
 		h.s32(create_info.basePipelineIndex);
 	}
 	else
 		h.u32(0);
 
+	// Unfortunately, the hash order is incompatible with compute_hash_stage().
+	// For compatibility, cannot change this without a clean break.
 	if (!recorder.get_hash_for_shader_module(create_info.stage.module, &hash))
 		return false;
 	h.u64(hash);
@@ -1140,6 +1179,96 @@ bool compute_hash_compute_pipeline(const StateRecorder &recorder, const VkComput
 		h.u32(0);
 
 	if (!hash_pnext_chain(&recorder, h, create_info.stage.pNext))
+		return false;
+
+	*out_hash = h.get();
+	return true;
+}
+
+bool compute_hash_raytracing_pipeline(const StateRecorder &recorder,
+                                      const VkRayTracingPipelineCreateInfoKHR &create_info,
+                                      Hash *out_hash)
+{
+	Hasher h;
+	Hash hash;
+
+	h.u32(create_info.flags);
+	h.u32(create_info.maxPipelineRayRecursionDepth);
+
+	if (!recorder.get_hash_for_pipeline_layout(create_info.layout, &hash))
+		return false;
+	h.u64(hash);
+
+	if ((create_info.flags & VK_PIPELINE_CREATE_DERIVATIVE_BIT) != 0 &&
+	    create_info.basePipelineHandle != VK_NULL_HANDLE)
+	{
+		if (!recorder.get_hash_for_raytracing_pipeline_handle(create_info.basePipelineHandle, &hash))
+			return false;
+		h.u64(hash);
+		h.s32(create_info.basePipelineIndex);
+	}
+	else
+		h.u32(0);
+
+	h.u32(create_info.stageCount);
+	for (uint32_t i = 0; i < create_info.stageCount; i++)
+	{
+		auto &stage = create_info.pStages[i];
+		if (!compute_hash_stage(recorder, h, stage))
+			return false;
+	}
+
+	if (create_info.pLibraryInterface)
+	{
+		h.u32(create_info.pLibraryInterface->maxPipelineRayHitAttributeSize);
+		h.u32(create_info.pLibraryInterface->maxPipelineRayPayloadSize);
+		if (!hash_pnext_chain(&recorder, h, create_info.pLibraryInterface->pNext))
+			return false;
+	}
+	else
+		h.u32(0);
+
+	if (create_info.pDynamicState)
+	{
+		h.u32(create_info.pDynamicState->dynamicStateCount);
+		h.u32(create_info.pDynamicState->flags);
+		for (uint32_t i = 0; i < create_info.pDynamicState->dynamicStateCount; i++)
+			h.u32(create_info.pDynamicState->pDynamicStates[i]);
+		if (!hash_pnext_chain(&recorder, h, create_info.pDynamicState->pNext))
+			return false;
+	}
+	else
+		h.u32(0);
+
+	h.u32(create_info.groupCount);
+	for (uint32_t i = 0; i < create_info.groupCount; i++)
+	{
+		auto &group = create_info.pGroups[i];
+		h.u32(group.type);
+		h.u32(group.anyHitShader);
+		h.u32(group.closestHitShader);
+		h.u32(group.generalShader);
+		h.u32(group.intersectionShader);
+		if (!hash_pnext_chain(&recorder, h, group.pNext))
+			return false;
+	}
+
+	if (create_info.pLibraryInfo)
+	{
+		h.u32(create_info.pLibraryInfo->libraryCount);
+		for (uint32_t i = 0; i < create_info.pLibraryInfo->libraryCount; i++)
+		{
+			if (!recorder.get_hash_for_raytracing_pipeline_handle(create_info.pLibraryInfo->pLibraries[i], &hash))
+				return false;
+			h.u64(hash);
+		}
+		if (!hash_pnext_chain(&recorder, h, create_info.pLibraryInfo->pNext))
+			return false;
+	}
+	else
+		h.u32(0);
+
+	if (!hash_pnext_chain(&recorder, h, create_info.pNext))
 		return false;
 
 	*out_hash = h.get();
@@ -2172,75 +2301,12 @@ bool StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, D
 	info.flags = obj["flags"].GetUint();
 	info.basePipelineIndex = obj["basePipelineIndex"].GetInt();
 
-	auto pipeline = string_to_uint64(obj["basePipelineHandle"].GetString());
-	if (pipeline > 0 && resolve_derivative_pipelines)
-	{
-		// This is pretty bad for multithreaded replay, but this should be very rare.
-		iface.sync_threads();
-		auto pipeline_iter = replayed_compute_pipelines.find(pipeline);
+	if (!parse_derived_pipeline_handle(iface, resolver, obj["basePipelineHandle"], pipelines,
+	                                   RESOURCE_COMPUTE_PIPELINE, &info.basePipelineHandle))
+		return false;
 
-		// If we don't have the pipeline, we might have it later in the array of graphics pipelines, queue up out of order.
-		if (pipeline_iter == replayed_compute_pipelines.end() && pipelines.HasMember(obj["basePipelineHandle"].GetString()))
-		{
-			if (!parse_compute_pipeline(iface, resolver, pipelines, obj["basePipelineHandle"]))
-				return false;
-			iface.sync_threads();
-			pipeline_iter = replayed_compute_pipelines.find(pipeline);
-		}
-
-		// Still don't have it? Look into database.
-		if (pipeline_iter == replayed_compute_pipelines.end())
-		{
-			size_t external_state_size = 0;
-			if (!resolver || !resolver->read_entry(RESOURCE_COMPUTE_PIPELINE, pipeline, &external_state_size, nullptr,
-			                                       PAYLOAD_READ_NO_FLAGS))
-			{
-				log_missing_resource("Base pipeline", pipeline);
-				return false;
-			}
-
-			vector<uint8_t> external_state(external_state_size);
-
-			if (!resolver->read_entry(RESOURCE_COMPUTE_PIPELINE, pipeline, &external_state_size, external_state.data(),
-			                          PAYLOAD_READ_NO_FLAGS))
-			{
-				log_missing_resource("Base pipeline", pipeline);
-				return false;
-			}
-
-			if (!this->parse(iface, resolver, external_state.data(), external_state.size()))
-				return false;
-			iface.sync_threads();
-
-			pipeline_iter = replayed_compute_pipelines.find(pipeline);
-			if (pipeline_iter == replayed_compute_pipelines.end())
-			{
-				log_missing_resource("Base pipeline", pipeline);
-				return false;
-			}
-		}
-		info.basePipelineHandle = pipeline_iter->second;
-	}
-	else
-		info.basePipelineHandle = api_object_cast<VkPipeline>(pipeline);
-
-	auto layout = string_to_uint64(obj["layout"].GetString());
-	if (layout > 0)
-	{
-		auto layout_itr = replayed_pipeline_layouts.find(layout);
-		if (layout_itr == end(replayed_pipeline_layouts))
-		{
-			log_missing_resource("Pipeline layout", layout);
-			return false;
-		}
-		else if (layout_itr->second == VK_NULL_HANDLE)
-		{
-			log_invalid_resource("Pipeline layout", layout);
-			return false;
-		}
-		else
-			info.layout = layout_itr->second;
-	}
+	if (!parse_pipeline_layout_handle(obj["layout"], &info.layout))
+		return false;
 
 	auto &stage = obj["stage"];
 	info.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -2548,6 +2614,47 @@ bool StateReplayer::Impl::parse_dynamic_state(const Value &dyn, const VkPipeline
 	return true;
 }
 
+bool StateReplayer::Impl::parse_raytracing_groups(const Value &groups,
+                                                  const VkRayTracingShaderGroupCreateInfoKHR **out_info)
+{
+	auto *state = allocator.allocate_n_cleared<VkRayTracingShaderGroupCreateInfoKHR>(groups.Size());
+	*out_info = state;
+
+	for (auto itr = groups.Begin(); itr != groups.End(); ++itr, state++)
+	{
+		auto &group = *itr;
+		state->sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+		state->intersectionShader = group["intersectionShader"].GetUint();
+		state->anyHitShader = group["anyHitShader"].GetUint();
+		state->closestHitShader = group["closestHitShader"].GetUint();
+		state->generalShader = group["generalShader"].GetUint();
+		state->type = static_cast<VkRayTracingShaderGroupTypeKHR>(group["type"].GetUint());
+
+		if (group.HasMember("pNext"))
+			if (!parse_pnext_chain(group["pNext"], &state->pNext))
+				return false;
+	}
+
+	return true;
+}
+
+bool StateReplayer::Impl::parse_library_interface(const Value &lib,
+                                                  const VkRayTracingPipelineInterfaceCreateInfoKHR **out_info)
+{
+	auto *state = allocator.allocate_cleared<VkRayTracingPipelineInterfaceCreateInfoKHR>();
+
+	state->sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_INTERFACE_CREATE_INFO_KHR;
+	state->maxPipelineRayPayloadSize = lib["maxPipelineRayPayloadSize"].GetUint();
+	state->maxPipelineRayHitAttributeSize = lib["maxPipelineRayHitAttributeSize"].GetUint();
+
+	if (lib.HasMember("pNext"))
+		if (!parse_pnext_chain(lib["pNext"], &state->pNext))
+			return false;
+
+	*out_info = state;
+	return true;
+}
+
 bool StateReplayer::Impl::parse_viewports(const Value &viewports, const VkViewport **out_viewports)
 {
 	auto *vps = allocator.allocate_n_cleared<VkViewport>(viewports.Size());
@@ -2675,6 +2782,193 @@ bool StateReplayer::Impl::parse_stages(StateCreatorInterface &iface, DatabaseInt
 	return true;
 }
 
+bool StateReplayer::Impl::parse_pipeline_layout_handle(const Value &state, VkPipelineLayout *out_layout)
+{
+	auto layout = string_to_uint64(state.GetString());
+	if (layout > 0)
+	{
+		auto layout_itr = replayed_pipeline_layouts.find(layout);
+		if (layout_itr == end(replayed_pipeline_layouts) || layout_itr->second == VK_NULL_HANDLE)
+		{
+			log_missing_resource("Pipeline layout", layout);
+			return false;
+		}
+		else
+			*out_layout = layout_itr->second;
+	}
+	else
+		*out_layout = VK_NULL_HANDLE;
+
+	return true;
+}
+
+bool StateReplayer::Impl::parse_derived_pipeline_handle(StateCreatorInterface &iface, DatabaseInterface *resolver,
+                                                        const Value &state, const Value &pipelines,
+                                                        ResourceTag tag, VkPipeline *out_pipeline)
+{
+	unordered_map<Hash, VkPipeline> *replayed_pipelines = nullptr;
+	if (tag == RESOURCE_GRAPHICS_PIPELINE)
+		replayed_pipelines = &replayed_graphics_pipelines;
+	else if (tag == RESOURCE_COMPUTE_PIPELINE)
+		replayed_pipelines = &replayed_compute_pipelines;
+	else if (tag == RESOURCE_RAYTRACING_PIPELINE)
+		replayed_pipelines = &replayed_raytracing_pipelines;
+	else
+		return false;
+
+	auto pipeline = string_to_uint64(state.GetString());
+	if (pipeline > 0 && resolve_derivative_pipelines)
+	{
+		// This is pretty bad for multithreaded replay, but this should be very rare.
+		iface.sync_threads();
+		auto pipeline_iter = replayed_pipelines->find(pipeline);
+
+		// If we don't have the pipeline, we might have it later in the array of graphics pipelines, queue up out of order.
+		if (pipeline_iter == replayed_pipelines->end() && pipelines.HasMember(state.GetString()))
+		{
+			switch (tag)
+			{
+			case RESOURCE_GRAPHICS_PIPELINE:
+				if (!parse_graphics_pipeline(iface, resolver, pipelines, state))
+					return false;
+				break;
+
+			case RESOURCE_COMPUTE_PIPELINE:
+				if (!parse_compute_pipeline(iface, resolver, pipelines, state))
+					return false;
+				break;
+
+			case RESOURCE_RAYTRACING_PIPELINE:
+				if (!parse_raytracing_pipeline(iface, resolver, pipelines, state))
+					return false;
+				break;
+
+			default:
+				return false;
+			}
+
+			iface.sync_threads();
+			pipeline_iter = replayed_pipelines->find(pipeline);
+		}
+
+		// Still don't have it? Look into database.
+		if (pipeline_iter == replayed_pipelines->end())
+		{
+			size_t external_state_size = 0;
+			if (!resolver || !resolver->read_entry(tag, pipeline, &external_state_size, nullptr,
+			                                       PAYLOAD_READ_NO_FLAGS))
+			{
+				log_missing_resource("Base pipeline", pipeline);
+				return false;
+			}
+
+			vector<uint8_t> external_state(external_state_size);
+
+			if (!resolver->read_entry(tag, pipeline, &external_state_size, external_state.data(),
+			                          PAYLOAD_READ_NO_FLAGS))
+			{
+				log_missing_resource("Base pipeline", pipeline);
+				return false;
+			}
+
+			if (!this->parse(iface, resolver, external_state.data(), external_state.size()))
+				return false;
+
+			iface.sync_threads();
+			pipeline_iter = replayed_pipelines->find(pipeline);
+			if (pipeline_iter == replayed_pipelines->end())
+			{
+				log_missing_resource("Base pipeline", pipeline);
+				return false;
+			}
+			else if (pipeline_iter->second == VK_NULL_HANDLE)
+			{
+				log_invalid_resource("Base pipeline", pipeline);
+				return false;
+			}
+		}
+		*out_pipeline = pipeline_iter->second;
+	}
+	else
+		*out_pipeline = api_object_cast<VkPipeline>(pipeline);
+
+	return true;
+}
+
+bool StateReplayer::Impl::parse_raytracing_pipeline(StateCreatorInterface &iface, DatabaseInterface *resolver,
+                                                    const Value &pipelines, const Value &member)
+{
+	Hash hash = string_to_uint64(member.GetString());
+	if (replayed_raytracing_pipelines.count(hash))
+		return true;
+
+	auto *info_allocated = allocator.allocate_cleared<VkRayTracingPipelineCreateInfoKHR>();
+	auto &obj = pipelines[member];
+	auto &info = *info_allocated;
+	info.sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR;
+	info.flags = obj["flags"].GetUint();
+	info.basePipelineIndex = obj["basePipelineIndex"].GetInt();
+	info.maxPipelineRayRecursionDepth = obj["maxPipelineRayRecursionDepth"].GetUint();
+
+	if (obj.HasMember("stages"))
+	{
+		info.stageCount = obj["stages"].Size();
+		if (!parse_stages(iface, resolver, obj["stages"], &info.pStages))
+			return false;
+	}
+
+	if (obj.HasMember("groups"))
+	{
+		info.groupCount = obj["groups"].Size();
+		if (!parse_raytracing_groups(obj["groups"], &info.pGroups))
+			return false;
+	}
+
+	if (obj.HasMember("libraryInterface"))
+		if (!parse_library_interface(obj["libraryInterface"], &info.pLibraryInterface))
+			return false;
+
+	if (obj.HasMember("libraryInfo"))
+	{
+		auto &lib_info = obj["libraryInfo"];
+		auto &library_list = lib_info["libraries"];
+		auto *library_info = allocator.allocate_cleared<VkPipelineLibraryCreateInfoKHR>();
+		auto *libraries = allocator.allocate_n<VkPipeline>(library_list.Size());
+
+		library_info->sType = VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR;
+		library_info->libraryCount = library_list.Size();
+		library_info->pLibraries = libraries;
+		info.pLibraryInfo = library_info;
+
+		for (auto itr = library_list.Begin(); itr != library_list.End(); ++itr, libraries++)
+		{
+			if (!parse_derived_pipeline_handle(iface, resolver, *itr, pipelines,
+			                                   RESOURCE_RAYTRACING_PIPELINE, libraries))
+				return false;
+		}
+
+		if (lib_info.HasMember("pNext"))
+			if (!parse_pnext_chain(lib_info["pNext"], &library_info->pNext))
+				return false;
+	}
+
+	if (obj.HasMember("dynamicState"))
+		if (!parse_dynamic_state(obj["dynamicState"], &info.pDynamicState))
+			return false;
+
+	if (!parse_derived_pipeline_handle(iface, resolver, obj["basePipelineHandle"], pipelines,
+	                                   RESOURCE_RAYTRACING_PIPELINE, &info.basePipelineHandle))
+		return false;
+
+	if (!parse_pipeline_layout_handle(obj["layout"], &info.layout))
+		return false;
+
+	if (!iface.enqueue_create_raytracing_pipeline(hash, &info, &replayed_raytracing_pipelines[hash]))
+		return false;
+
+	return true;
+}
+
 bool StateReplayer::Impl::parse_graphics_pipeline(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &pipelines, const Value &member)
 {
 	Hash hash = string_to_uint64(member.GetString());
@@ -2688,80 +2982,12 @@ bool StateReplayer::Impl::parse_graphics_pipeline(StateCreatorInterface &iface, 
 	info.flags = obj["flags"].GetUint();
 	info.basePipelineIndex = obj["basePipelineIndex"].GetInt();
 
-	auto pipeline = string_to_uint64(obj["basePipelineHandle"].GetString());
-	if (pipeline > 0 && resolve_derivative_pipelines)
-	{
-		// This is pretty bad for multithreaded replay, but this should be very rare.
-		iface.sync_threads();
-		auto pipeline_iter = replayed_graphics_pipelines.find(pipeline);
+	if (!parse_derived_pipeline_handle(iface, resolver, obj["basePipelineHandle"], pipelines,
+	                                   RESOURCE_GRAPHICS_PIPELINE, &info.basePipelineHandle))
+		return false;
 
-		// If we don't have the pipeline, we might have it later in the array of graphics pipelines, queue up out of order.
-		if (pipeline_iter == replayed_graphics_pipelines.end() && pipelines.HasMember(obj["basePipelineHandle"].GetString()))
-		{
-			if (!parse_graphics_pipeline(iface, resolver, pipelines, obj["basePipelineHandle"]))
-				return false;
-			iface.sync_threads();
-			pipeline_iter = replayed_graphics_pipelines.find(pipeline);
-		}
-
-		// Still don't have it? Look into database.
-		if (pipeline_iter == replayed_graphics_pipelines.end())
-		{
-			size_t external_state_size = 0;
-			if (!resolver || !resolver->read_entry(RESOURCE_GRAPHICS_PIPELINE, pipeline, &external_state_size, nullptr,
-			                                       PAYLOAD_READ_NO_FLAGS))
-			{
-				log_missing_resource("Base pipeline", pipeline);
-				return false;
-			}
-
-			vector<uint8_t> external_state(external_state_size);
-
-			if (!resolver->read_entry(RESOURCE_GRAPHICS_PIPELINE, pipeline, &external_state_size, external_state.data(),
-			                          PAYLOAD_READ_NO_FLAGS))
-			{
-				log_missing_resource("Base pipeline", pipeline);
-				return false;
-			}
-
-			if (!this->parse(iface, resolver, external_state.data(), external_state.size()))
-				return false;
-
-			iface.sync_threads();
-			pipeline_iter = replayed_graphics_pipelines.find(pipeline);
-			if (pipeline_iter == replayed_graphics_pipelines.end())
-			{
-				log_missing_resource("Base pipeline", pipeline);
-				return false;
-			}
-			else if (pipeline_iter->second == VK_NULL_HANDLE)
-			{
-				log_invalid_resource("Base pipeline", pipeline);
-				return false;
-			}
-		}
-		info.basePipelineHandle = pipeline_iter->second;
-	}
-	else
-		info.basePipelineHandle = api_object_cast<VkPipeline>(pipeline);
-
-	auto layout = string_to_uint64(obj["layout"].GetString());
-	if (layout > 0)
-	{
-		auto layout_itr = replayed_pipeline_layouts.find(layout);
-		if (layout_itr == end(replayed_pipeline_layouts))
-		{
-			log_missing_resource("Pipeline layout", layout);
-			return false;
-		}
-		else if (layout_itr->second == VK_NULL_HANDLE)
-		{
-			log_invalid_resource("Pipeline layout", layout);
-			return false;
-		}
-		else
-			info.layout = layout_itr->second;
-	}
+	if (!parse_pipeline_layout_handle(obj["layout"], &info.layout))
+		return false;
 
 	auto render_pass = string_to_uint64(obj["renderPass"].GetString());
 	if (render_pass > 0)
@@ -2836,6 +3062,16 @@ bool StateReplayer::Impl::parse_graphics_pipelines(StateCreatorInterface &iface,
 {
 	for (auto itr = pipelines.MemberBegin(); itr != pipelines.MemberEnd(); ++itr)
 		if (!parse_graphics_pipeline(iface, resolver, pipelines, itr->name))
+			return false;
+	iface.notify_replayed_resources_for_type();
+	return true;
+}
+
+bool StateReplayer::Impl::parse_raytracing_pipelines(StateCreatorInterface &iface, DatabaseInterface *resolver,
+                                                     const Value &pipelines)
+{
+	for (auto itr = pipelines.MemberBegin(); itr != pipelines.MemberEnd(); ++itr)
+		if (!parse_raytracing_pipeline(iface, resolver, pipelines, itr->name))
 			return false;
 	iface.notify_replayed_resources_for_type();
 	return true;
@@ -3391,6 +3627,10 @@ bool StateReplayer::Impl::parse(StateCreatorInterface &iface, DatabaseInterface 
 
 	if (doc.HasMember("graphicsPipelines"))
 		if (!parse_graphics_pipelines(iface, resolver, doc["graphicsPipelines"]))
+			return false;
+
+	if (doc.HasMember("raytracingPipelines"))
+		if (!parse_raytracing_pipelines(iface, resolver, doc["raytracingPipelines"]))
 			return false;
 
 	return true;
@@ -3972,6 +4212,37 @@ bool StateRecorder::record_compute_pipeline(VkPipeline pipeline, const VkCompute
 	return true;
 }
 
+bool StateRecorder::record_raytracing_pipeline(
+		VkPipeline pipeline, const VkRayTracingPipelineCreateInfoKHR &create_info,
+		const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
+		Hash custom_hash)
+{
+	{
+		if (create_info.pNext)
+		{
+			log_error_pnext_chain("pNext in VkRayTracingPipelineCreateInfo not supported.", create_info.pNext);
+			return false;
+		}
+		std::lock_guard<std::mutex> lock(impl->record_lock);
+
+		VkRayTracingPipelineCreateInfoKHR *new_info = nullptr;
+		if (!impl->copy_raytracing_pipeline(&create_info, impl->temp_allocator,
+		                                    base_pipelines, base_pipeline_count, &new_info))
+		{
+			return false;
+		}
+
+		impl->record_queue.push({api_object_cast<uint64_t>(pipeline), new_info, custom_hash});
+		impl->record_cv.notify_one();
+	}
+
+	// Thread is not running, drain the queue ourselves.
+	if (!impl->worker_thread.joinable())
+		impl->record_task(this, false);
+
+	return true;
+}
+
 bool StateRecorder::record_render_pass(VkRenderPass render_pass, const VkRenderPassCreateInfo &create_info,
                                        Hash custom_hash)
 {
@@ -4054,6 +4325,21 @@ bool StateRecorder::get_hash_for_compute_pipeline_handle(VkPipeline pipeline, Ha
 	if (itr == end(impl->compute_pipeline_to_hash))
 	{
 		log_failed_hash("Compute pipeline", pipeline);
+		return false;
+	}
+	else
+	{
+		*hash = itr->second;
+		return true;
+	}
+}
+
+bool StateRecorder::get_hash_for_raytracing_pipeline_handle(VkPipeline pipeline, Hash *hash) const
+{
+	auto itr = impl->raytracing_pipeline_to_hash.find(pipeline);
+	if (itr == end(impl->raytracing_pipeline_to_hash))
+	{
+		log_failed_hash("Raytracing pipeline", pipeline);
 		return false;
 	}
 	else
@@ -4251,19 +4537,15 @@ bool StateRecorder::Impl::copy_specialization_info(const VkSpecializationInfo *i
 	return true;
 }
 
-bool StateRecorder::Impl::copy_compute_pipeline(const VkComputePipelineCreateInfo *create_info, ScratchAllocator &alloc,
-                                                const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
-                                                VkComputePipelineCreateInfo **out_create_info)
+template <typename CreateInfo>
+static bool update_derived_pipeline(CreateInfo *info, const VkPipeline *base_pipelines, uint32_t base_pipeline_count)
 {
-	auto *info = copy(create_info, 1, alloc);
-
 	// Check for case where application made use of derivative pipelines and relied on the indexing behavior
 	// into an array of pCreateInfos. In the replayer, we only do it one by one,
 	// so we need to pass the correct handle to the create pipeline calls.
 	if ((info->flags & VK_PIPELINE_CREATE_DERIVATIVE_BIT) != 0)
 	{
-		if (info->basePipelineHandle == VK_NULL_HANDLE &&
-		    info->basePipelineIndex >= 0)
+		if (info->basePipelineHandle == VK_NULL_HANDLE && info->basePipelineIndex >= 0)
 		{
 			if (uint32_t(info->basePipelineIndex) >= base_pipeline_count)
 			{
@@ -4272,148 +4554,23 @@ bool StateRecorder::Impl::copy_compute_pipeline(const VkComputePipelineCreateInf
 			}
 
 			info->basePipelineHandle = base_pipelines[info->basePipelineIndex];
-			info->basePipelineIndex = -1;
 		}
+		info->basePipelineIndex = -1;
+	}
+	else
+	{
+		// Explicitly ignore parameter.
+		info->basePipelineHandle = VK_NULL_HANDLE;
+		info->basePipelineIndex = -1;
 	}
 
-	if (info->stage.pSpecializationInfo)
-		if (!copy_specialization_info(info->stage.pSpecializationInfo, alloc, &info->stage.pSpecializationInfo))
-			return false;
-
-	info->stage.pName = copy(info->stage.pName, strlen(info->stage.pName) + 1, alloc);
-
-	if (!copy_pnext_chain(info->stage.pNext, alloc, &info->stage.pNext))
-		return false;
-
-	*out_create_info = info;
 	return true;
 }
 
-bool StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateInfo *create_info, ScratchAllocator &alloc,
-                                                 const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
-                                                 VkGraphicsPipelineCreateInfo **out_create_info)
+template <typename CreateInfo>
+bool StateRecorder::Impl::copy_stages(CreateInfo *info, ScratchAllocator &alloc)
 {
-	auto *info = copy(create_info, 1, alloc);
-
-	// Check for case where application made use of derivative pipelines and relied on the indexing behavior
-	// into an array of pCreateInfos. In the replayer, we only do it one by one,
-	// so we need to pass the correct handle to the create pipeline calls.
-	if ((info->flags & VK_PIPELINE_CREATE_DERIVATIVE_BIT) != 0)
-	{
-		if (info->basePipelineHandle == VK_NULL_HANDLE &&
-		    info->basePipelineIndex >= 0)
-		{
-			if (uint32_t(info->basePipelineIndex) >= base_pipeline_count)
-			{
-				LOGE_LEVEL("Base pipeline index is out of range.\n");
-				return false;
-			}
-
-			info->basePipelineHandle = base_pipelines[info->basePipelineIndex];
-			info->basePipelineIndex = -1;
-		}
-	}
-
 	info->pStages = copy(info->pStages, info->stageCount, alloc);
-	if (info->pTessellationState)
-	{
-		info->pTessellationState = copy(info->pTessellationState, 1, alloc);
-
-		const void *pNext = nullptr;
-		if (!copy_pnext_chain(info->pTessellationState->pNext, alloc, &pNext))
-			return false;
-		const_cast<VkPipelineTessellationStateCreateInfo *>(info->pTessellationState)->pNext = pNext;
-	}
-
-	if (info->pColorBlendState)
-	{
-		info->pColorBlendState = copy(info->pColorBlendState, 1, alloc);
-		const void *pNext = nullptr;
-		if (!copy_pnext_chain(info->pColorBlendState->pNext, alloc, &pNext))
-			return false;
-
-		const_cast<VkPipelineColorBlendStateCreateInfo *>(info->pColorBlendState)->pNext = pNext;
-	}
-
-	if (info->pVertexInputState)
-	{
-		info->pVertexInputState = copy(info->pVertexInputState, 1, alloc);
-
-		const void *pNext = nullptr;
-		if (!copy_pnext_chain(info->pVertexInputState->pNext, alloc, &pNext))
-			return false;
-
-		const_cast<VkPipelineVertexInputStateCreateInfo *>(info->pVertexInputState)->pNext = pNext;
-	}
-
-	if (info->pMultisampleState)
-	{
-		if (info->pMultisampleState->pNext)
-		{
-			log_error_pnext_chain("pNext in VkPipelineMultisampleStateCreateInfo not supported.",
-			                      info->pMultisampleState->pNext);
-			return false;
-		}
-		info->pMultisampleState = copy(info->pMultisampleState, 1, alloc);
-	}
-
-	if (info->pViewportState)
-	{
-		if (info->pViewportState->pNext)
-		{
-			log_error_pnext_chain("pNext in VkPipelineViewportStateCreateInfo not supported.",
-			                      info->pViewportState->pNext);
-			return false;
-		}
-		info->pViewportState = copy(info->pViewportState, 1, alloc);
-	}
-
-	if (info->pInputAssemblyState)
-	{
-		if (info->pInputAssemblyState->pNext)
-		{
-			log_error_pnext_chain("pNext in VkPipelineInputAssemblyStateCreateInfo not supported.",
-			                      info->pInputAssemblyState->pNext);
-			return false;
-		}
-		info->pInputAssemblyState = copy(info->pInputAssemblyState, 1, alloc);
-	}
-
-	if (info->pDepthStencilState)
-	{
-		if (info->pDepthStencilState->pNext)
-		{
-			log_error_pnext_chain("pNext in VkPipelineDepthStencilStateCreateInfo not supported.",
-			                      info->pDepthStencilState->pNext);
-			return false;
-		}
-		info->pDepthStencilState = copy(info->pDepthStencilState, 1, alloc);
-	}
-
-	if (info->pRasterizationState)
-	{
-		info->pRasterizationState = copy(info->pRasterizationState, 1, alloc);
-		if (!info->pRasterizationState)
-			return false;
-
-		const void *pNext = nullptr;
-		if (!copy_pnext_chain(info->pRasterizationState->pNext, alloc, &pNext))
-			return false;
-
-		const_cast<VkPipelineRasterizationStateCreateInfo *>(info->pRasterizationState)->pNext = pNext;
-	}
-
-	if (info->pDynamicState)
-	{
-		if (info->pDynamicState->pNext)
-		{
-			log_error_pnext_chain("pNext in VkPipelineDynamicStateCreateInfo not supported.",
-			                      info->pDynamicState->pNext);
-			return false;
-		}
-		info->pDynamicState = copy(info->pDynamicState, 1, alloc);
-	}
-
 	for (uint32_t i = 0; i < info->stageCount; i++)
 	{
 		auto &stage = const_cast<VkPipelineShaderStageCreateInfo &>(info->pStages[i]);
@@ -4428,6 +4585,153 @@ bool StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateI
 			return false;
 		stage.pNext = pNext;
 	}
+
+	return true;
+}
+
+template <typename CreateInfo>
+bool StateRecorder::Impl::copy_dynamic_state(CreateInfo *info, ScratchAllocator &alloc)
+{
+	if (info->pDynamicState)
+	{
+		if (info->pDynamicState->pNext)
+		{
+			log_error_pnext_chain("pNext in VkPipelineDynamicStateCreateInfo not supported.",
+								  info->pDynamicState->pNext);
+			return false;
+		}
+		info->pDynamicState = copy(info->pDynamicState, 1, alloc);
+	}
+
+	if (info->pDynamicState)
+	{
+		const_cast<VkPipelineDynamicStateCreateInfo *>(info->pDynamicState)->pDynamicStates =
+				copy(info->pDynamicState->pDynamicStates, info->pDynamicState->dynamicStateCount, alloc);
+	}
+
+	return true;
+}
+
+template <typename SubCreateInfo>
+bool StateRecorder::Impl::copy_sub_create_info(const SubCreateInfo *&sub_info, ScratchAllocator &alloc)
+{
+	if (sub_info)
+	{
+		sub_info = copy(sub_info, 1, alloc);
+		const void *pNext = nullptr;
+		if (!copy_pnext_chain(sub_info->pNext, alloc, &pNext))
+			return false;
+		const_cast<SubCreateInfo *>(sub_info)->pNext = pNext;
+	}
+
+	return true;
+}
+
+static VkPipelineCreateFlags normalize_pipeline_creation_flags(VkPipelineCreateFlags flags)
+{
+	// Remove flags which do not meaningfully contribute to compilation.
+	flags &= ~(VK_PIPELINE_CREATE_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR |
+	           VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR |
+	           VK_PIPELINE_CREATE_EARLY_RETURN_ON_FAILURE_BIT_EXT |
+	           VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT_EXT);
+	return flags;
+}
+
+bool StateRecorder::Impl::copy_compute_pipeline(const VkComputePipelineCreateInfo *create_info, ScratchAllocator &alloc,
+                                                const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
+                                                VkComputePipelineCreateInfo **out_create_info)
+{
+	auto *info = copy(create_info, 1, alloc);
+	info->flags = normalize_pipeline_creation_flags(info->flags);
+
+	if (!update_derived_pipeline(info, base_pipelines, base_pipeline_count))
+		return false;
+
+	if (info->stage.pSpecializationInfo)
+		if (!copy_specialization_info(info->stage.pSpecializationInfo, alloc, &info->stage.pSpecializationInfo))
+			return false;
+
+	info->stage.pName = copy(info->stage.pName, strlen(info->stage.pName) + 1, alloc);
+
+	if (!copy_pnext_chain(info->stage.pNext, alloc, &info->stage.pNext))
+		return false;
+
+	*out_create_info = info;
+	return true;
+}
+
+bool StateRecorder::Impl::copy_raytracing_pipeline(const VkRayTracingPipelineCreateInfoKHR *create_info,
+                                                   ScratchAllocator &alloc, const VkPipeline *base_pipelines,
+                                                   uint32_t base_pipeline_count,
+                                                   VkRayTracingPipelineCreateInfoKHR **out_info)
+{
+	auto *info = copy(create_info, 1, alloc);
+	info->flags = normalize_pipeline_creation_flags(info->flags);
+
+	if (!update_derived_pipeline(info, base_pipelines, base_pipeline_count))
+		return false;
+
+	if (!copy_stages(info, alloc))
+		return false;
+	if (!copy_dynamic_state(info, alloc))
+		return false;
+
+	if (!copy_sub_create_info(info->pLibraryInfo, alloc))
+		return false;
+	if (!copy_sub_create_info(info->pLibraryInterface, alloc))
+		return false;
+
+	if (info->pLibraryInfo)
+	{
+		const_cast<VkPipelineLibraryCreateInfoKHR *>(info->pLibraryInfo)->pLibraries =
+				copy(info->pLibraryInfo->pLibraries, info->pLibraryInfo->libraryCount, alloc);
+	}
+
+	info->pGroups = copy(info->pGroups, info->groupCount, alloc);
+	for (uint32_t i = 0; i < info->groupCount; i++)
+	{
+		auto &group = const_cast<VkRayTracingShaderGroupCreateInfoKHR &>(info->pGroups[i]);
+		const void *pNext = nullptr;
+		if (!copy_pnext_chain(group.pNext, alloc, &pNext))
+			return false;
+		group.pNext = pNext;
+		group.pShaderGroupCaptureReplayHandle = nullptr;
+	}
+
+	*out_info = info;
+	return true;
+}
+
+bool StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateInfo *create_info, ScratchAllocator &alloc,
+                                                 const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
+                                                 VkGraphicsPipelineCreateInfo **out_create_info)
+{
+	auto *info = copy(create_info, 1, alloc);
+	info->flags = normalize_pipeline_creation_flags(info->flags);
+
+	if (!update_derived_pipeline(info, base_pipelines, base_pipeline_count))
+		return false;
+
+	if (!copy_sub_create_info(info->pTessellationState, alloc))
+		return false;
+	if (!copy_sub_create_info(info->pColorBlendState, alloc))
+		return false;
+	if (!copy_sub_create_info(info->pVertexInputState, alloc))
+		return false;
+	if (!copy_sub_create_info(info->pMultisampleState, alloc))
+		return false;
+	if (!copy_sub_create_info(info->pViewportState, alloc))
+		return false;
+	if (!copy_sub_create_info(info->pInputAssemblyState, alloc))
+		return false;
+	if (!copy_sub_create_info(info->pDepthStencilState, alloc))
+		return false;
+	if (!copy_sub_create_info(info->pRasterizationState, alloc))
+		return false;
+	if (!copy_stages(info, alloc))
+		return false;
+	if (!copy_dynamic_state(info, alloc))
+		return false;
 
 	if (info->pColorBlendState)
 	{
@@ -4456,12 +4760,6 @@ bool StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateI
 		auto &ms = const_cast<VkPipelineMultisampleStateCreateInfo &>(*info->pMultisampleState);
 		if (ms.pSampleMask)
 			ms.pSampleMask = copy(ms.pSampleMask, (ms.rasterizationSamples + 31) / 32, alloc);
-	}
-
-	if (info->pDynamicState)
-	{
-		const_cast<VkPipelineDynamicStateCreateInfo *>(info->pDynamicState)->pDynamicStates =
-				copy(info->pDynamicState->pDynamicStates, info->pDynamicState->dynamicStateCount, alloc);
 	}
 
 	*out_create_info = info;
@@ -4642,6 +4940,22 @@ bool StateRecorder::Impl::remap_graphics_pipeline_handle(VkPipeline pipeline, Vk
 	}
 }
 
+bool StateRecorder::Impl::remap_raytracing_pipeline_handle(VkPipeline pipeline, VkPipeline *out_pipeline) const
+{
+	auto itr = raytracing_pipeline_to_hash.find(pipeline);
+	if (itr == end(raytracing_pipeline_to_hash))
+	{
+		LOGW_LEVEL("Cannot find raytracing pipeline in hashmap.\n"
+		           "Object has either not been recorded, or it was not supported by Fossilize.\n");
+		return false;
+	}
+	else
+	{
+		*out_pipeline = api_object_cast<VkPipeline>(uint64_t(itr->second));
+		return true;
+	}
+}
+
 bool StateRecorder::Impl::remap_compute_pipeline_handle(VkPipeline pipeline, VkPipeline *out_pipeline) const
 {
 	auto itr = compute_pipeline_to_hash.find(pipeline);
@@ -4692,6 +5006,19 @@ bool StateRecorder::Impl::remap_shader_module_ci(VkShaderModuleCreateInfo *)
 	return true;
 }
 
+template <typename CreateInfo>
+bool StateRecorder::Impl::remap_shader_module_handles(CreateInfo *info)
+{
+	for (uint32_t i = 0; i < info->stageCount; i++)
+	{
+		auto &stage = const_cast<VkPipelineShaderStageCreateInfo &>(info->pStages[i]);
+		if (!remap_shader_module_handle(stage.module, &stage.module))
+			return false;
+	}
+
+	return true;
+}
+
 bool StateRecorder::Impl::remap_graphics_pipeline_ci(VkGraphicsPipelineCreateInfo *info)
 {
 	if (!remap_render_pass_handle(info->renderPass, &info->renderPass))
@@ -4703,12 +5030,8 @@ bool StateRecorder::Impl::remap_graphics_pipeline_ci(VkGraphicsPipelineCreateInf
 		if (!remap_graphics_pipeline_handle(info->basePipelineHandle, &info->basePipelineHandle))
 			return false;
 
-	for (uint32_t i = 0; i < info->stageCount; i++)
-	{
-		auto &stage = const_cast<VkPipelineShaderStageCreateInfo &>(info->pStages[i]);
-		if (!remap_shader_module_handle(stage.module, &stage.module))
-			return false;
-	}
+	if (!remap_shader_module_handles(info))
+		return false;
 
 	return true;
 }
@@ -4724,6 +5047,31 @@ bool StateRecorder::Impl::remap_compute_pipeline_ci(VkComputePipelineCreateInfo 
 
 	if (!remap_pipeline_layout_handle(info->layout, &info->layout))
 		return false;
+
+	return true;
+}
+
+bool StateRecorder::Impl::remap_raytracing_pipeline_ci(VkRayTracingPipelineCreateInfoKHR *info)
+{
+	if (!remap_shader_module_handles(info))
+		return false;
+
+	if (info->basePipelineHandle != VK_NULL_HANDLE)
+		if (!remap_raytracing_pipeline_handle(info->basePipelineHandle, &info->basePipelineHandle))
+			return false;
+
+	if (!remap_pipeline_layout_handle(info->layout, &info->layout))
+		return false;
+
+	if (info->pLibraryInfo)
+	{
+		auto *libraries = const_cast<VkPipeline *>(info->pLibraryInfo->pLibraries);
+		for (uint32_t i = 0; i < info->pLibraryInfo->libraryCount; i++)
+		{
+			if (!remap_raytracing_pipeline_handle(libraries[i], &libraries[i]))
+				return false;
+		}
+	}
 
 	return true;
 }
@@ -5070,6 +5418,53 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 				if (!pipeline_layouts.count(hash))
 					pipeline_layouts[hash] = create_info_copy;
 			}
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR:
+		{
+			auto *create_info = reinterpret_cast<VkRayTracingPipelineCreateInfoKHR *>(record_item.create_info);
+			auto hash = record_item.custom_hash;
+			if (hash == 0)
+				if (!Hashing::compute_hash_raytracing_pipeline(*recorder, *create_info, &hash))
+					break;
+
+			VkRayTracingPipelineCreateInfoKHR *create_info_copy = nullptr;
+			if (!copy_raytracing_pipeline(create_info, allocator, nullptr, 0, &create_info_copy))
+				break;
+			if (!remap_raytracing_pipeline_ci(create_info_copy))
+				break;
+
+			raytracing_pipeline_to_hash[api_object_cast<VkPipeline>(record_item.handle)] = hash;
+
+			if (database_iface)
+			{
+				if (write_database_entries)
+				{
+					if (register_application_link_hash(RESOURCE_RAYTRACING_PIPELINE, hash, blob))
+						need_flush = true;
+
+					if (!database_iface->has_entry(RESOURCE_RAYTRACING_PIPELINE, hash))
+					{
+						if (serialize_raytracing_pipeline(hash, *create_info_copy, blob))
+						{
+							database_iface->write_entry(RESOURCE_RAYTRACING_PIPELINE, hash, blob.data(), blob.size(),
+							                            payload_flags);
+							need_flush = true;
+						}
+					}
+				}
+
+				// Don't need to keep copied data around, reset the allocator.
+				allocator.reset();
+			}
+			else
+			{
+				// Retain for combined serialize() later.
+				if (!raytracing_pipelines.count(hash))
+					raytracing_pipelines[hash] = create_info_copy;
+			}
+
 			break;
 		}
 
@@ -6009,6 +6404,127 @@ static bool json_value(const VkRenderPassCreateInfo2 &pass, Allocator &alloc, Va
 }
 
 template <typename Allocator>
+static bool json_value(const VkPipelineShaderStageCreateInfo *pStages, uint32_t stageCount,
+                       Allocator &alloc, Value *out_value)
+{
+	Value stages(kArrayType);
+	for (uint32_t i = 0; i < stageCount; i++)
+	{
+		auto &s = pStages[i];
+		Value stage(kObjectType);
+		stage.AddMember("flags", s.flags, alloc);
+		stage.AddMember("name", StringRef(s.pName), alloc);
+		stage.AddMember("module", uint64_string(api_object_cast<uint64_t>(s.module), alloc), alloc);
+		stage.AddMember("stage", s.stage, alloc);
+		if (s.pSpecializationInfo)
+		{
+			Value spec(kObjectType);
+			spec.AddMember("dataSize", uint64_t(s.pSpecializationInfo->dataSize), alloc);
+			spec.AddMember("data",
+			               encode_base64(s.pSpecializationInfo->pData,
+			                             s.pSpecializationInfo->dataSize), alloc);
+			Value map_entries(kArrayType);
+			for (uint32_t j = 0; j < s.pSpecializationInfo->mapEntryCount; j++)
+			{
+				auto &e = s.pSpecializationInfo->pMapEntries[j];
+				Value map_entry(kObjectType);
+				map_entry.AddMember("offset", e.offset, alloc);
+				map_entry.AddMember("size", uint64_t(e.size), alloc);
+				map_entry.AddMember("constantID", e.constantID, alloc);
+				map_entries.PushBack(map_entry, alloc);
+			}
+			spec.AddMember("mapEntries", map_entries, alloc);
+			stage.AddMember("specializationInfo", spec, alloc);
+		}
+
+		if (!pnext_chain_add_json_value(stage, s, alloc))
+			return false;
+		stages.PushBack(stage, alloc);
+	}
+
+	*out_value = stages;
+	return true;
+}
+
+template <typename Allocator>
+static bool json_value(const VkPipelineDynamicStateCreateInfo &dynamic, Allocator &alloc, Value *out_value)
+{
+	Value dyn(kObjectType);
+	dyn.AddMember("flags", dynamic.flags, alloc);
+	Value dynamics(kArrayType);
+	for (uint32_t i = 0; i < dynamic.dynamicStateCount; i++)
+		dynamics.PushBack(dynamic.pDynamicStates[i], alloc);
+	dyn.AddMember("dynamicState", dynamics, alloc);
+
+	*out_value = dyn;
+	return true;
+}
+
+template <typename Allocator>
+static bool json_value(const VkRayTracingPipelineCreateInfoKHR &pipe, Allocator &alloc, Value *out_value)
+{
+	Value p(kObjectType);
+	p.AddMember("flags", pipe.flags, alloc);
+	p.AddMember("layout", uint64_string(api_object_cast<uint64_t>(pipe.layout), alloc), alloc);
+	p.AddMember("basePipelineHandle", uint64_string(api_object_cast<uint64_t>(pipe.basePipelineHandle), alloc), alloc);
+	p.AddMember("basePipelineIndex", pipe.basePipelineIndex, alloc);
+	p.AddMember("maxPipelineRayRecursionDepth", pipe.maxPipelineRayRecursionDepth, alloc);
+
+	if (pipe.pDynamicState)
+	{
+		Value dyn;
+		if (!json_value(*pipe.pDynamicState, alloc, &dyn))
+			return false;
+		p.AddMember("dynamicState", dyn, alloc);
+	}
+
+	Value stages;
+	if (!json_value(pipe.pStages, pipe.stageCount, alloc, &stages))
+		return false;
+	p.AddMember("stages", stages, alloc);
+
+	if (pipe.pLibraryInterface)
+	{
+		Value iface(kObjectType);
+		iface.AddMember("maxPipelineRayPayloadSize", pipe.pLibraryInterface->maxPipelineRayPayloadSize, alloc);
+		iface.AddMember("maxPipelineRayHitAttributeSize", pipe.pLibraryInterface->maxPipelineRayHitAttributeSize, alloc);
+		if (!pnext_chain_add_json_value(iface, *pipe.pLibraryInterface, alloc))
+			return false;
+		p.AddMember("libraryInterface", iface, alloc);
+	}
+
+	if (pipe.pLibraryInfo)
+	{
+		Value library_info(kObjectType);
+		Value libraries(kArrayType);
+		for (uint32_t i = 0; i < pipe.pLibraryInfo->libraryCount; i++)
+			libraries.PushBack(uint64_string(api_object_cast<uint64_t>(pipe.pLibraryInfo->pLibraries[i]), alloc), alloc);
+		library_info.AddMember("libraries", libraries, alloc);
+		if (!pnext_chain_add_json_value(library_info, *pipe.pLibraryInfo, alloc))
+			return false;
+		p.AddMember("libraryInfo", library_info, alloc);
+	}
+
+	Value groups(kArrayType);
+	for (uint32_t i = 0; i < pipe.groupCount; i++)
+	{
+		Value group(kObjectType);
+		group.AddMember("anyHitShader", pipe.pGroups[i].anyHitShader, alloc);
+		group.AddMember("intersectionShader", pipe.pGroups[i].intersectionShader, alloc);
+		group.AddMember("generalShader", pipe.pGroups[i].generalShader, alloc);
+		group.AddMember("closestHitShader", pipe.pGroups[i].closestHitShader, alloc);
+		group.AddMember("type", pipe.pGroups[i].type, alloc);
+		if (!pnext_chain_add_json_value(group, pipe.pGroups[i], alloc))
+			return false;
+		groups.PushBack(group, alloc);
+	}
+	p.AddMember("groups", groups, alloc);
+
+	*out_value = p;
+	return true;
+}
+
+template <typename Allocator>
 static bool json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& alloc, Value *out_value)
 {
 	Value p(kObjectType);
@@ -6031,12 +6547,9 @@ static bool json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& allo
 
 	if (pipe.pDynamicState)
 	{
-		Value dyn(kObjectType);
-		dyn.AddMember("flags", pipe.pDynamicState->flags, alloc);
-		Value dynamics(kArrayType);
-		for (uint32_t i = 0; i < pipe.pDynamicState->dynamicStateCount; i++)
-			dynamics.PushBack(pipe.pDynamicState->pDynamicStates[i], alloc);
-		dyn.AddMember("dynamicState", dynamics, alloc);
+		Value dyn;
+		if (!json_value(*pipe.pDynamicState, alloc, &dyn))
+			return false;
 		p.AddMember("dynamicState", dyn, alloc);
 	}
 
@@ -6226,40 +6739,9 @@ static bool json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& allo
 		p.AddMember("depthStencilState", ds, alloc);
 	}
 
-	Value stages(kArrayType);
-	for (uint32_t i = 0; i < pipe.stageCount; i++)
-	{
-		auto &s = pipe.pStages[i];
-		Value stage(kObjectType);
-		stage.AddMember("flags", s.flags, alloc);
-		stage.AddMember("name", StringRef(s.pName), alloc);
-		stage.AddMember("module", uint64_string(api_object_cast<uint64_t>(s.module), alloc), alloc);
-		stage.AddMember("stage", s.stage, alloc);
-		if (s.pSpecializationInfo)
-		{
-			Value spec(kObjectType);
-			spec.AddMember("dataSize", uint64_t(s.pSpecializationInfo->dataSize), alloc);
-			spec.AddMember("data",
-						   encode_base64(s.pSpecializationInfo->pData,
-										 s.pSpecializationInfo->dataSize), alloc);
-			Value map_entries(kArrayType);
-			for (uint32_t j = 0; j < s.pSpecializationInfo->mapEntryCount; j++)
-			{
-				auto &e = s.pSpecializationInfo->pMapEntries[j];
-				Value map_entry(kObjectType);
-				map_entry.AddMember("offset", e.offset, alloc);
-				map_entry.AddMember("size", uint64_t(e.size), alloc);
-				map_entry.AddMember("constantID", e.constantID, alloc);
-				map_entries.PushBack(map_entry, alloc);
-			}
-			spec.AddMember("mapEntries", map_entries, alloc);
-			stage.AddMember("specializationInfo", spec, alloc);
-		}
-
-		if (!pnext_chain_add_json_value(stage, s, alloc))
-			return false;
-		stages.PushBack(stage, alloc);
-	}
+	Value stages;
+	if (!json_value(pipe.pStages, pipe.stageCount, alloc, &stages))
+		return false;
 	p.AddMember("stages", stages, alloc);
 
 	*out_value = p;
@@ -6539,6 +7021,32 @@ bool StateRecorder::Impl::serialize_compute_pipeline(Hash hash, const VkComputeP
 	return true;
 }
 
+bool StateRecorder::Impl::serialize_raytracing_pipeline(Hash hash, const VkRayTracingPipelineCreateInfoKHR &create_info,
+                                                        std::vector<uint8_t> &blob) const
+{
+	Document doc;
+	doc.SetObject();
+	auto &alloc = doc.GetAllocator();
+
+	Value value;
+	if (!json_value(create_info, alloc, &value))
+		return false;
+
+	Value serialized_raytracing_pipelines(kObjectType);
+	serialized_raytracing_pipelines.AddMember(uint64_string(hash, alloc), value, alloc);
+
+	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
+	doc.AddMember("raytracingPipelines", serialized_raytracing_pipelines, alloc);
+
+	StringBuffer buffer;
+	CustomWriter writer(buffer);
+	doc.Accept(writer);
+
+	blob.resize(buffer.GetSize());
+	memcpy(blob.data(), buffer.GetString(), buffer.GetSize());
+	return true;
+}
+
 bool StateRecorder::Impl::serialize_shader_module(Hash hash, const VkShaderModuleCreateInfo &create_info,
                                                   vector<uint8_t> &blob, ScratchAllocator &blob_allocator) const
 {
@@ -6678,6 +7186,15 @@ bool StateRecorder::serialize(uint8_t **serialized_data, size_t *serialized_size
 		graphics_pipelines.AddMember(uint64_string(pipe.first, alloc), value, alloc);
 	}
 	doc.AddMember("graphicsPipelines", graphics_pipelines, alloc);
+
+	Value raytracing_pipelines(kObjectType);
+	for (auto &pipe : impl->raytracing_pipelines)
+	{
+		if (!json_value(*pipe.second, alloc, &value))
+			return false;
+		raytracing_pipelines.AddMember(uint64_string(pipe.first, alloc), value, alloc);
+	}
+	doc.AddMember("raytracingPipelines", raytracing_pipelines, alloc);
 
 	StringBuffer buffer;
 	PrettyWriter<StringBuffer> writer(buffer);

@@ -286,6 +286,11 @@ struct PruneReplayer : StateCreatorInterface
 		}
 		return true;
 	}
+
+	bool enqueue_create_raytracing_pipeline(Hash, const VkRayTracingPipelineCreateInfoKHR *, VkPipeline *) override
+	{
+		return false;
+	}
 };
 
 static bool copy_accessed_types(DatabaseInterface &input_db,

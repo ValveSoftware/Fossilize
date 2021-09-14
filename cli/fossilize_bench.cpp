@@ -233,6 +233,11 @@ struct ReplayInterface : StateCreatorInterface
 	{
 		return true;
 	}
+
+	bool enqueue_create_raytracing_pipeline(Hash, const VkRayTracingPipelineCreateInfoKHR *, VkPipeline *) override
+	{
+		return true;
+	}
 };
 
 static bool dummy_replay_archive(const char *path)
