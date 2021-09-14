@@ -33,6 +33,7 @@ class Instance
 {
 public:
 	Instance();
+	~Instance();
 
 	VkInstance getInstance()
 	{
@@ -71,6 +72,8 @@ public:
 	static void completedPipelineCompilation();
 #endif
 
+	void setLogCallback();
+
 private:
 	ScratchAllocator alloc;
 	VkApplicationInfo *pAppInfo = nullptr;
@@ -81,5 +84,6 @@ private:
 #ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
 	bool enableCrashHandler = false;
 #endif
+	FILE *log_file = nullptr;
 };
 }
