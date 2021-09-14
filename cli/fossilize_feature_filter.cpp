@@ -64,6 +64,9 @@ void *build_pnext_chain(VulkanFeatures &features)
 	F(BUFFER_DEVICE_ADDRESS, buffer_device_address);
 	FE(SHADER_CLOCK, shader_clock, KHR);
 	FE(FRAGMENT_SHADING_RATE, fragment_shading_rate, KHR);
+	FE(RAY_TRACING_PIPELINE, ray_tracing_pipeline, KHR);
+	FE(ACCELERATION_STRUCTURE, acceleration_structure, KHR);
+	FE(RAY_QUERY, ray_query, KHR);
 	FE(TRANSFORM_FEEDBACK, transform_feedback, EXT);
 	FE(DEPTH_CLIP_ENABLE, depth_clip, EXT);
 	FE(INLINE_UNIFORM_BLOCK, inline_uniform_block, EXT);
@@ -92,6 +95,18 @@ void *build_pnext_chain(VulkanFeatures &features)
 	return pNext;
 }
 
+void filter_feature_enablement(VulkanFeatures &features)
+{
+	// These feature bits conflict according to validation layers.
+	if (features.fragment_shading_rate.pipelineFragmentShadingRate == VK_TRUE ||
+	    features.fragment_shading_rate.attachmentFragmentShadingRate == VK_TRUE ||
+	    features.fragment_shading_rate.primitiveFragmentShadingRate == VK_TRUE)
+	{
+		features.shading_rate_nv.shadingRateImage = VK_FALSE;
+		features.shading_rate_nv.shadingRateCoarseSampleOrder = VK_FALSE;
+	}
+}
+
 void *build_pnext_chain(VulkanProperties &props)
 {
 	props = {};
@@ -115,6 +130,8 @@ void *build_pnext_chain(VulkanProperties &props)
 	P(DEPTH_STENCIL_RESOLVE, ds_resolve);
 	P(MULTIVIEW, multiview);
 	PE(FRAGMENT_SHADING_RATE, fragment_shading_rate, KHR);
+	PE(RAY_TRACING_PIPELINE, ray_tracing_pipeline, KHR);
+	PE(ACCELERATION_STRUCTURE, acceleration_structure, KHR);
 	PE(SUBGROUP_SIZE_CONTROL, subgroup_size_control, EXT);
 	PE(INLINE_UNIFORM_BLOCK, inline_uniform_block, EXT);
 	PE(VERTEX_ATTRIBUTE_DIVISOR, attribute_divisor, EXT);
@@ -140,6 +157,7 @@ struct FeatureFilter::Impl
 	bool render_pass2_is_supported(const VkRenderPassCreateInfo2 *info) const;
 	bool graphics_pipeline_is_supported(const VkGraphicsPipelineCreateInfo *info) const;
 	bool compute_pipeline_is_supported(const VkComputePipelineCreateInfo *info) const;
+	bool raytracing_pipeline_is_supported(const VkRayTracingPipelineCreateInfoKHR *info) const;
 
 	bool attachment_reference_is_supported(const VkAttachmentReference &ref) const;
 	bool attachment_reference2_is_supported(const VkAttachmentReference2 &ref) const;
@@ -221,6 +239,9 @@ void FeatureFilter::Impl::init_features(const void *pNext)
 		F(BUFFER_DEVICE_ADDRESS, buffer_device_address);
 		FE(SHADER_CLOCK, shader_clock, KHR);
 		FE(FRAGMENT_SHADING_RATE, fragment_shading_rate, KHR);
+		FE(RAY_TRACING_PIPELINE, ray_tracing_pipeline, KHR);
+		FE(ACCELERATION_STRUCTURE, acceleration_structure, KHR);
+		FE(RAY_QUERY, ray_query, KHR);
 		FE(TRANSFORM_FEEDBACK, transform_feedback, EXT);
 		FE(DEPTH_CLIP_ENABLE, depth_clip, EXT);
 		FE(INLINE_UNIFORM_BLOCK, inline_uniform_block, EXT);
@@ -276,6 +297,8 @@ void FeatureFilter::Impl::init_properties(const void *pNext)
 		P(DEPTH_STENCIL_RESOLVE, ds_resolve);
 		P(MULTIVIEW, multiview);
 		PE(FRAGMENT_SHADING_RATE, fragment_shading_rate, KHR);
+		PE(RAY_TRACING_PIPELINE, ray_tracing_pipeline, KHR);
+		PE(ACCELERATION_STRUCTURE, acceleration_structure, KHR);
 		PE(SUBGROUP_SIZE_CONTROL, subgroup_size_control, EXT);
 		PE(INLINE_UNIFORM_BLOCK, inline_uniform_block, EXT);
 		PE(VERTEX_ATTRIBUTE_DIVISOR, attribute_divisor, EXT);
@@ -684,6 +707,7 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 		uint32_t sampler;
 		uint32_t ubo_dynamic;
 		uint32_t ssbo_dynamic;
+		uint32_t acceleration_structure;
 	};
 	DescriptorCounts counts = {};
 
@@ -777,6 +801,15 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 			count = &counts.ssbo_dynamic;
 			break;
 
+		case VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR:
+			if (binding_is_update_after_bind &&
+			    features.acceleration_structure.descriptorBindingAccelerationStructureUpdateAfterBind == VK_FALSE)
+				return false;
+			if (features.acceleration_structure.accelerationStructure == VK_FALSE)
+				return false;
+			count = &counts.acceleration_structure;
+			break;
+
 		case VK_DESCRIPTOR_TYPE_MUTABLE_VALVE:
 		{
 			DescriptorCounts mutable_counts = {};
@@ -865,6 +898,8 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 			return false;
 		if (counts.input_attachment > props.descriptor_indexing.maxDescriptorSetUpdateAfterBindInputAttachments)
 			return false;
+		if (counts.acceleration_structure > props.acceleration_structure.maxDescriptorSetUpdateAfterBindAccelerationStructures)
+			return false;
 	}
 	else
 	{
@@ -883,6 +918,8 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 		if (counts.sampler > props2.properties.limits.maxDescriptorSetSamplers)
 			return false;
 		if (counts.input_attachment > props2.properties.limits.maxDescriptorSetInputAttachments)
+			return false;
+		if (counts.acceleration_structure > props.acceleration_structure.maxDescriptorSetAccelerationStructures)
 			return false;
 	}
 
@@ -1158,6 +1195,13 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 		return features.demote_to_helper.shaderDemoteToHelperInvocation == VK_TRUE;
 	case spv::CapabilityFragmentShadingRateKHR:
 		return features.fragment_shading_rate.primitiveFragmentShadingRate == VK_TRUE;
+	case spv::CapabilityRayQueryKHR:
+		return features.ray_query.rayQuery == VK_TRUE;
+	case spv::CapabilityRayTracingKHR:
+		return features.ray_tracing_pipeline.rayTracingPipeline == VK_TRUE;
+	case spv::CapabilityRayTraversalPrimitiveCullingKHR:
+		return features.ray_tracing_pipeline.rayTraversalPrimitiveCulling == VK_TRUE ||
+		       features.ray_query.rayQuery == VK_TRUE;
 
 	default:
 		LOGE("Unrecognized SPIR-V capability %u, treating as unsupported.\n", unsigned(cap));
@@ -1742,6 +1786,71 @@ bool FeatureFilter::Impl::compute_pipeline_is_supported(const VkComputePipelineC
 	return pnext_chain_is_supported(info->pNext);
 }
 
+bool FeatureFilter::Impl::raytracing_pipeline_is_supported(const VkRayTracingPipelineCreateInfoKHR *info) const
+{
+	if (null_device)
+		return true;
+
+	if (features.ray_tracing_pipeline.rayTracingPipeline == VK_FALSE)
+		return false;
+	if (info->maxPipelineRayRecursionDepth > props.ray_tracing_pipeline.maxRayRecursionDepth)
+		return false;
+
+	if ((info->flags & (VK_PIPELINE_CREATE_RAY_TRACING_SKIP_AABBS_BIT_KHR |
+	                    VK_PIPELINE_CREATE_RAY_TRACING_SKIP_TRIANGLES_BIT_KHR)) != 0 &&
+	    features.ray_tracing_pipeline.rayTraversalPrimitiveCulling == VK_FALSE)
+	{
+		return false;
+	}
+
+	if (info->pDynamicState)
+	{
+		for (uint32_t i = 0; i < info->pDynamicState->dynamicStateCount; i++)
+			if (info->pDynamicState->pDynamicStates[i] != VK_DYNAMIC_STATE_RAY_TRACING_PIPELINE_STACK_SIZE_KHR)
+				return false;
+		if (!pnext_chain_is_supported(info->pDynamicState->pNext))
+			return false;
+	}
+
+	if ((info->pLibraryInfo || info->pLibraryInterface) &&
+	    !enabled_extensions.count(VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME))
+		return false;
+
+	if ((info->flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0 &&
+	    !enabled_extensions.count(VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME))
+		return false;
+
+	for (uint32_t i = 0; i < info->stageCount; i++)
+	{
+		if (!subgroup_size_control_is_supported(info->pStages[i]))
+			return false;
+		if (!pnext_chain_is_supported(info->pStages[i].pNext))
+			return false;
+	}
+
+	if (info->pLibraryInterface)
+	{
+		if (info->pLibraryInterface->maxPipelineRayHitAttributeSize > props.ray_tracing_pipeline.maxRayHitAttributeSize)
+			return false;
+		if (!pnext_chain_is_supported(info->pLibraryInterface->pNext))
+			return false;
+	}
+
+	if (info->pLibraryInfo)
+	{
+		if (!pnext_chain_is_supported(info->pLibraryInfo->pNext))
+			return false;
+	}
+
+	for (uint32_t i = 0; i < info->groupCount; i++)
+	{
+		if (!pnext_chain_is_supported(info->pGroups[i].pNext))
+			return false;
+	}
+
+	return pnext_chain_is_supported(info->pNext);
+}
+
 bool FeatureFilter::sampler_is_supported(const VkSamplerCreateInfo *info) const
 {
 	return impl->sampler_is_supported(info);
@@ -1780,6 +1889,11 @@ bool FeatureFilter::graphics_pipeline_is_supported(const VkGraphicsPipelineCreat
 bool FeatureFilter::compute_pipeline_is_supported(const VkComputePipelineCreateInfo *info) const
 {
 	return impl->compute_pipeline_is_supported(info);
+}
+
+bool FeatureFilter::raytracing_pipeline_is_supported(const VkRayTracingPipelineCreateInfoKHR *info) const
+{
+	return impl->raytracing_pipeline_is_supported(info);
 }
 
 bool FeatureFilter::supports_scalar_block_layout() const
