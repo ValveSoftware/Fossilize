@@ -206,6 +206,9 @@ struct StateRecorder::Impl
 	bool copy_compute_pipeline(const VkComputePipelineCreateInfo *create_info, ScratchAllocator &alloc,
 	                           const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
 	                           VkComputePipelineCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
+	bool copy_raytracing_pipeline(const VkRayTracingPipelineCreateInfoKHR *create_info, ScratchAllocator &alloc,
+	                              const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
+	                              VkRayTracingPipelineCreateInfoKHR **out_info) FOSSILIZE_WARN_UNUSED;
 	bool copy_sampler(const VkSamplerCreateInfo *create_info, ScratchAllocator &alloc,
 	                  VkSamplerCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
 	bool copy_render_pass(const VkRenderPassCreateInfo *create_info, ScratchAllocator &alloc,
@@ -4083,6 +4086,37 @@ bool StateRecorder::record_compute_pipeline(VkPipeline pipeline, const VkCompute
 	return true;
 }
 
+bool StateRecorder::record_raytracing_pipeline(
+		VkPipeline pipeline, const VkRayTracingPipelineCreateInfoKHR &create_info,
+		const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
+		Hash custom_hash)
+{
+	{
+		if (create_info.pNext)
+		{
+			log_error_pnext_chain("pNext in VkRayTracingPipelineCreateInfo not supported.", create_info.pNext);
+			return false;
+		}
+		std::lock_guard<std::mutex> lock(impl->record_lock);
+
+		VkRayTracingPipelineCreateInfoKHR *new_info = nullptr;
+		if (!impl->copy_raytracing_pipeline(&create_info, impl->temp_allocator,
+		                                    base_pipelines, base_pipeline_count, &new_info))
+		{
+			return false;
+		}
+
+		impl->record_queue.push({api_object_cast<uint64_t>(pipeline), new_info, custom_hash});
+		impl->record_cv.notify_one();
+	}
+
+	// Thread is not running, drain the queue ourselves.
+	if (!impl->worker_thread.joinable())
+		impl->record_task(this, false);
+
+	return true;
+}
+
 bool StateRecorder::record_render_pass(VkRenderPass render_pass, const VkRenderPassCreateInfo &create_info,
                                        Hash custom_hash)
 {
@@ -4486,6 +4520,47 @@ bool StateRecorder::Impl::copy_compute_pipeline(const VkComputePipelineCreateInf
 		return false;
 
 	*out_create_info = info;
+	return true;
+}
+
+bool StateRecorder::Impl::copy_raytracing_pipeline(const VkRayTracingPipelineCreateInfoKHR *create_info,
+                                                   ScratchAllocator &alloc, const VkPipeline *base_pipelines,
+                                                   uint32_t base_pipeline_count,
+                                                   VkRayTracingPipelineCreateInfoKHR **out_info)
+{
+	auto *info = copy(create_info, 1, alloc);
+
+	if (!update_derived_pipeline(info, base_pipelines, base_pipeline_count))
+		return false;
+
+	if (!copy_stages(info, alloc))
+		return false;
+	if (!copy_dynamic_state(info, alloc))
+		return false;
+
+	if (!copy_sub_create_info(info->pLibraryInfo, alloc))
+		return false;
+	if (!copy_sub_create_info(info->pLibraryInterface, alloc))
+		return false;
+
+	if (info->pLibraryInfo)
+	{
+		const_cast<VkPipelineLibraryCreateInfoKHR *>(info->pLibraryInfo)->pLibraries =
+				copy(info->pLibraryInfo->pLibraries, info->pLibraryInfo->libraryCount, alloc);
+	}
+
+	info->pGroups = copy(info->pGroups, info->groupCount, alloc);
+	for (uint32_t i = 0; i < info->groupCount; i++)
+	{
+		auto &group = const_cast<VkRayTracingShaderGroupCreateInfoKHR &>(info->pGroups[i]);
+		const void *pNext = nullptr;
+		if (!copy_pnext_chain(group.pNext, alloc, &pNext))
+			return false;
+		group.pNext = pNext;
+		group.pShaderGroupCaptureReplayHandle = nullptr;
+	}
+
+	*out_info = info;
 	return true;
 }
 

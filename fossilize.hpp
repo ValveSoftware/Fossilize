@@ -218,6 +218,9 @@ public:
 	                         Hash custom_hash = 0) FOSSILIZE_WARN_UNUSED;
 	bool record_sampler(VkSampler sampler, const VkSamplerCreateInfo &create_info,
 	                    Hash custom_hash = 0) FOSSILIZE_WARN_UNUSED;
+	bool record_raytracing_pipeline(VkPipeline pipeline, const VkRayTracingPipelineCreateInfoKHR &create_info,
+	                                const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
+	                                Hash custom_hash = 0) FOSSILIZE_WARN_UNUSED;
 
 	// Used by hashing functions in Hashing namespace. Should be considered an implementation detail.
 	bool get_hash_for_descriptor_set_layout(VkDescriptorSetLayout layout, Hash *hash) const FOSSILIZE_WARN_UNUSED;
