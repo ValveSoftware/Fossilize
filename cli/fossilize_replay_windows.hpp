@@ -71,8 +71,10 @@ struct ProcessProgress
 {
 	unsigned start_graphics_index = 0u;
 	unsigned start_compute_index = 0u;
+	unsigned start_raytracing_index = 0u;
 	unsigned end_graphics_index = ~0u;
 	unsigned end_compute_index = ~0u;
+	unsigned end_raytracing_index = ~0u;
 	HANDLE process = nullptr;
 	HANDLE crash_file_handle = INVALID_HANDLE_VALUE;
 	HANDLE timer_handle = nullptr;
@@ -83,6 +85,7 @@ struct ProcessProgress
 
 	int compute_progress = -1;
 	int graphics_progress = -1;
+	int raytracing_progress = -1;
 
 	bool process_once();
 	bool process_shutdown();
@@ -131,7 +134,9 @@ void ProcessProgress::parse(const char *cmd)
 		else
 			LOGE("Failed to create waitable timer.\n");
 	}
-	else if (strncmp(cmd, "GRAPHICS_VERR", 13) == 0 || strncmp(cmd, "COMPUTE_VERR", 12) == 0)
+	else if (strncmp(cmd, "GRAPHICS_VERR", 13) == 0 ||
+	         strncmp(cmd, "RAYTRACE_VERR", 13) == 0 ||
+	         strncmp(cmd, "COMPUTE_VERR", 12) == 0)
 	{
 		if (Global::control_block)
 		{
@@ -158,6 +163,27 @@ void ProcessProgress::parse(const char *cmd)
 			{
 				char buffer[ControlBlockMessageSize];
 				sprintf(buffer, "GRAPHICS %d %" PRIx64 "\n", graphics_progress - 1, graphics_pipeline);
+
+				if (WaitForSingleObject(Global::shared_mutex, INFINITE) == WAIT_OBJECT_0)
+				{
+					shared_control_block_write(Global::control_block, buffer, sizeof(buffer));
+					ReleaseMutex(Global::shared_mutex);
+				}
+			}
+		}
+	}
+	else if (strncmp(cmd, "RAYTRACE", 8) == 0)
+	{
+		char *end = nullptr;
+		raytracing_progress = int(strtol(cmd + 8, &end, 0));
+		if (end)
+		{
+			Hash raytracing_pipeline = strtoull(end, nullptr, 16);
+			// raytracing_progress tells us where to start on next iteration, but -1 was actually the pipeline index that crashed.
+			if (Global::control_block && raytracing_progress > 0 && raytracing_pipeline != 0)
+			{
+				char buffer[ControlBlockMessageSize];
+				sprintf(buffer, "RAYTRACE %d %" PRIx64 "\n", raytracing_progress - 1, raytracing_pipeline);
 
 				if (WaitForSingleObject(Global::shared_mutex, INFINITE) == WAIT_OBJECT_0)
 				{
@@ -296,7 +322,10 @@ bool ProcessProgress::process_shutdown()
 
 	start_graphics_index = uint32_t(graphics_progress);
 	start_compute_index = uint32_t(compute_progress);
-	if (start_graphics_index >= end_graphics_index && start_compute_index >= end_compute_index)
+	start_raytracing_index = uint32_t(raytracing_progress);
+	if (start_graphics_index >= end_graphics_index &&
+	    start_compute_index >= end_compute_index &&
+	    start_raytracing_index >= end_raytracing_index)
 	{
 		LOGE("Process index %u crashed, but there is nothing more to replay.\n", index);
 		return false;
@@ -306,6 +335,7 @@ bool ProcessProgress::process_shutdown()
 		LOGE("Process index %u crashed, but will retry.\n", index);
 		LOGE("  New graphics range (%u, %u)\n", start_graphics_index, end_graphics_index);
 		LOGE("  New compute range (%u, %u)\n", start_compute_index, end_compute_index);
+		LOGE("  New raytracing range (%u, %u)\n", start_raytracing_index, end_raytracing_index);
 		return true;
 	}
 }
@@ -353,8 +383,11 @@ bool ProcessProgress::start_child_process()
 {
 	graphics_progress = -1;
 	compute_progress = -1;
+	raytracing_progress = -1;
 
-	if (start_graphics_index >= end_graphics_index && start_compute_index >= end_compute_index)
+	if (start_graphics_index >= end_graphics_index &&
+	    start_compute_index >= end_compute_index &&
+	    start_raytracing_index >= end_raytracing_index)
 	{
 		// Nothing to do.
 		return true;
@@ -388,6 +421,10 @@ bool ProcessProgress::start_child_process()
 	cmdline += to_string(start_compute_index);
 	cmdline += " ";
 	cmdline += to_string(end_compute_index);
+	cmdline += " --raytracing-pipeline-range ";
+	cmdline += to_string(start_raytracing_index);
+	cmdline += " ";
+	cmdline += to_string(end_raytracing_index);
 
 	cmdline += " --device-index ";
 	cmdline += std::to_string(Global::device_options.device_index);
@@ -736,11 +773,14 @@ static int run_master_process(const VulkanDevice::Options &opts,
 
 	size_t num_graphics_pipelines;
 	size_t num_compute_pipelines;
+	size_t num_raytracing_pipelines;
 
 	size_t requested_graphic_pipelines = replayer_opts.end_graphics_index - replayer_opts.start_graphics_index;
 	size_t graphics_pipeline_offset = 0;
 	size_t requested_compute_pipelines = replayer_opts.end_compute_index - replayer_opts.start_compute_index;
 	size_t compute_pipeline_offset = 0;
+	unsigned requested_raytracing_pipelines = replayer_opts.end_raytracing_index - replayer_opts.start_raytracing_index;
+	unsigned raytracing_pipeline_offset = 0;
 
 	{
 		auto db = create_database(databases);
@@ -785,6 +825,13 @@ static int run_master_process(const VulkanDevice::Options &opts,
 			return EXIT_FAILURE;
 		}
 
+		if (!db->get_hash_list_for_resource_tag(RESOURCE_RAYTRACING_PIPELINE, &num_raytracing_pipelines, nullptr))
+		{
+			for (auto &path : databases)
+				LOGE("Failed to parse database %s.\n", path);
+			return EXIT_FAILURE;
+		}
+
 		if (requested_graphic_pipelines < num_graphics_pipelines)
 		{
 			num_graphics_pipelines = requested_graphic_pipelines;
@@ -797,10 +844,17 @@ static int run_master_process(const VulkanDevice::Options &opts,
 			compute_pipeline_offset = replayer_opts.start_compute_index;
 		}
 
+		if (requested_raytracing_pipelines < num_raytracing_pipelines)
+		{
+			num_raytracing_pipelines = requested_raytracing_pipelines;
+			raytracing_pipeline_offset = replayer_opts.start_raytracing_index;
+		}
+
 		if (Global::control_block)
 		{
 			Global::control_block->static_total_count_graphics = num_graphics_pipelines;
 			Global::control_block->static_total_count_compute = num_compute_pipelines;
+			Global::control_block->static_total_count_raytracing = num_raytracing_pipelines;
 		}
 	}
 
@@ -819,6 +873,8 @@ static int run_master_process(const VulkanDevice::Options &opts,
 		progress.end_graphics_index = graphics_pipeline_offset + ((i + 1) * unsigned(num_graphics_pipelines)) / processes;
 		progress.start_compute_index = compute_pipeline_offset + (i * unsigned(num_compute_pipelines)) / processes;
 		progress.end_compute_index = compute_pipeline_offset + ((i + 1) * unsigned(num_compute_pipelines)) / processes;
+		progress.start_raytracing_index = raytracing_pipeline_offset + (i * unsigned(num_raytracing_pipelines)) / processes;
+		progress.end_raytracing_index = raytracing_pipeline_offset + ((i + 1) * unsigned(num_raytracing_pipelines)) / processes;
 		progress.index = i;
 		if (!progress.start_child_process())
 		{
@@ -938,6 +994,12 @@ static void validation_error_cb(ThreadedReplayer *replayer)
 		sprintf(buffer, "COMPUTE_VERR %" PRIx64 "\n", per_thread.current_compute_pipeline);
 		write_all(crash_handle, buffer);
 	}
+
+	if (per_thread.current_raytracing_pipeline)
+	{
+		sprintf(buffer, "RAYTRACE_VERR %" PRIx64 "\n", per_thread.current_raytracing_pipeline);
+		write_all(crash_handle, buffer);
+	}
 }
 
 static void crash_handler(ThreadedReplayer &replayer, ThreadedReplayer::PerThreadData &per_thread)
@@ -959,6 +1021,10 @@ static void crash_handler(ThreadedReplayer &replayer, ThreadedReplayer::PerThrea
 		ExitProcess(2);
 
 	sprintf(buffer, "COMPUTE %d %" PRIx64 "\n", per_thread.current_compute_index, per_thread.current_compute_pipeline);
+	if (!write_all(crash_handle, buffer))
+		ExitProcess(2);
+
+	sprintf(buffer, "RAYTRACE %d %" PRIx64 "\n", per_thread.current_raytracing_index, per_thread.current_raytracing_pipeline);
 	if (!write_all(crash_handle, buffer))
 		ExitProcess(2);
 

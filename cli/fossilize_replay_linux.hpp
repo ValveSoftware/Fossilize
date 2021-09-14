@@ -102,14 +102,17 @@ struct ProcessProgress
 {
 	unsigned start_graphics_index = 0u;
 	unsigned start_compute_index = 0u;
+	unsigned start_raytracing_index = 0u;
 	unsigned end_graphics_index = ~0u;
 	unsigned end_compute_index = ~0u;
+	unsigned end_raytracing_index = ~0u;
 	pid_t pid = -1;
 	FILE *crash_file = nullptr;
 	int timer_fd = -1;
 
 	int compute_progress = -1;
 	int graphics_progress = -1;
+	int raytracing_progress = -1;
 
 	bool process_once();
 	bool process_shutdown(int wstatus);
@@ -146,7 +149,9 @@ void ProcessProgress::parse(const char *cmd)
 		else
 			LOGE("Failed to creater timerfd. Cannot support timeout for process.\n");
 	}
-	else if (strncmp(cmd, "GRAPHICS_VERR", 13) == 0 || strncmp(cmd, "COMPUTE_VERR", 12) == 0)
+	else if (strncmp(cmd, "GRAPHICS_VERR", 13) == 0 ||
+	         strncmp(cmd, "RAYTRACE_VERR", 13) == 0 ||
+	         strncmp(cmd, "COMPUTE_VERR", 12) == 0)
 	{
 		if (Global::control_block)
 		{
@@ -171,6 +176,24 @@ void ProcessProgress::parse(const char *cmd)
 			{
 				char buffer[ControlBlockMessageSize];
 				sprintf(buffer, "GRAPHICS %d %" PRIx64 "\n", graphics_progress - 1, graphics_pipeline);
+				futex_wrapper_lock(&Global::control_block->futex_lock);
+				shared_control_block_write(Global::control_block, buffer, sizeof(buffer));
+				futex_wrapper_unlock(&Global::control_block->futex_lock);
+			}
+		}
+	}
+	else if (strncmp(cmd, "RAYTRACE", 8) == 0)
+	{
+		char *end = nullptr;
+		raytracing_progress = int(strtol(cmd + 8, &end, 0));
+		if (end)
+		{
+			Hash raytracing_pipeline = strtoull(end, nullptr, 16);
+			// raytracing_progress tells us where to start on next iteration, but -1 was actually the pipeline index that crashed.
+			if (Global::control_block && raytracing_progress > 0 && raytracing_pipeline != 0)
+			{
+				char buffer[ControlBlockMessageSize];
+				sprintf(buffer, "RAYTRACE %d %" PRIx64 "\n", raytracing_progress - 1, raytracing_pipeline);
 				futex_wrapper_lock(&Global::control_block->futex_lock);
 				shared_control_block_write(Global::control_block, buffer, sizeof(buffer));
 				futex_wrapper_unlock(&Global::control_block->futex_lock);
@@ -284,7 +307,7 @@ bool ProcessProgress::process_shutdown(int wstatus)
 
 	// We might have crashed, but we never saw any progress marker.
 	// We do not know what to do from here, so we just terminate.
-	if (graphics_progress < 0 || compute_progress < 0)
+	if (graphics_progress < 0 || compute_progress < 0 || raytracing_progress < 0)
 	{
 		LOGE("Child process %d terminated before we could receive progress. Cannot continue.\n",
 		     wait_pid);
@@ -298,7 +321,10 @@ bool ProcessProgress::process_shutdown(int wstatus)
 
 	start_graphics_index = uint32_t(graphics_progress);
 	start_compute_index = uint32_t(compute_progress);
-	if (start_graphics_index >= end_graphics_index && start_compute_index >= end_compute_index)
+	start_raytracing_index = uint32_t(raytracing_progress);
+	if (start_graphics_index >= end_graphics_index &&
+	    start_compute_index >= end_compute_index &&
+	    start_raytracing_index >= end_raytracing_index)
 	{
 		LOGE("Process index %u (PID: %d) crashed, but there is nothing more to replay.\n", index, wait_pid);
 		return false;
@@ -308,6 +334,7 @@ bool ProcessProgress::process_shutdown(int wstatus)
 		LOGE("Process index %u (PID: %d) crashed, but will retry.\n", index, wait_pid);
 		LOGE("  New graphics range (%u, %u)\n", start_graphics_index, end_graphics_index);
 		LOGE("  New compute range (%u, %u)\n", start_compute_index, end_compute_index);
+		LOGE("  New raytracing range (%u, %u)\n", start_raytracing_index, end_raytracing_index);
 		return true;
 	}
 }
@@ -403,10 +430,12 @@ bool ProcessProgress::start_child_process(vector<ProcessProgress> &siblings)
 {
 	graphics_progress = -1;
 	compute_progress = -1;
+	raytracing_progress = -1;
 	stopped = false;
 
 	if (start_graphics_index >= end_graphics_index &&
-	    start_compute_index >= end_compute_index)
+	    start_compute_index >= end_compute_index &&
+	    start_raytracing_index >= end_raytracing_index)
 	{
 		// Nothing to do.
 		return true;
@@ -505,6 +534,8 @@ bool ProcessProgress::start_child_process(vector<ProcessProgress> &siblings)
 		copy_opts.end_graphics_index = end_graphics_index;
 		copy_opts.start_compute_index = start_compute_index;
 		copy_opts.end_compute_index = end_compute_index;
+		copy_opts.start_raytracing_index = start_raytracing_index;
+		copy_opts.end_raytracing_index = end_raytracing_index;
 		copy_opts.control_block = Global::control_block;
 		if (!copy_opts.on_disk_pipeline_cache_path.empty() && index != 0)
 		{
@@ -851,11 +882,14 @@ static int run_master_process(const VulkanDevice::Options &opts,
 
 	size_t num_graphics_pipelines;
 	size_t num_compute_pipelines;
+	size_t num_raytracing_pipelines;
 
 	unsigned requested_graphic_pipelines = replayer_opts.end_graphics_index - replayer_opts.start_graphics_index;
 	unsigned graphics_pipeline_offset = 0;
 	unsigned requested_compute_pipelines = replayer_opts.end_compute_index - replayer_opts.start_compute_index;
 	unsigned compute_pipeline_offset = 0;
+	unsigned requested_raytracing_pipelines = replayer_opts.end_raytracing_index - replayer_opts.start_raytracing_index;
+	unsigned raytracing_pipeline_offset = 0;
 
 	{
 		auto db = create_database(databases);
@@ -908,6 +942,13 @@ static int run_master_process(const VulkanDevice::Options &opts,
 			return EXIT_FAILURE;
 		}
 
+		if (!db->get_hash_list_for_resource_tag(RESOURCE_RAYTRACING_PIPELINE, &num_raytracing_pipelines, nullptr))
+		{
+			for (auto &path : databases)
+				LOGE("Failed to parse database %s.\n", path);
+			return EXIT_FAILURE;
+		}
+
 		if (requested_graphic_pipelines < num_graphics_pipelines)
 		{
 			num_graphics_pipelines = requested_graphic_pipelines;
@@ -920,10 +961,17 @@ static int run_master_process(const VulkanDevice::Options &opts,
 			compute_pipeline_offset = replayer_opts.start_compute_index;
 		}
 
+		if (requested_raytracing_pipelines < num_raytracing_pipelines)
+		{
+			num_raytracing_pipelines = requested_raytracing_pipelines;
+			raytracing_pipeline_offset = replayer_opts.start_raytracing_index;
+		}
+
 		if (Global::control_block)
 		{
 			Global::control_block->static_total_count_graphics = num_graphics_pipelines;
 			Global::control_block->static_total_count_compute = num_compute_pipelines;
+			Global::control_block->static_total_count_raytracing = num_raytracing_pipelines;
 		}
 	}
 
@@ -1051,6 +1099,8 @@ static int run_master_process(const VulkanDevice::Options &opts,
 		progress.end_graphics_index = graphics_pipeline_offset + ((i + 1) * unsigned(num_graphics_pipelines)) / processes;
 		progress.start_compute_index = compute_pipeline_offset + (i * unsigned(num_compute_pipelines)) / processes;
 		progress.end_compute_index = compute_pipeline_offset + ((i + 1) * unsigned(num_compute_pipelines)) / processes;
+		progress.start_raytracing_index = raytracing_pipeline_offset + (i * unsigned(num_raytracing_pipelines)) / processes;
+		progress.end_raytracing_index = raytracing_pipeline_offset + ((i + 1) * unsigned(num_raytracing_pipelines)) / processes;
 		progress.index = i;
 		if (!progress.start_child_process(child_processes))
 		{
@@ -1224,6 +1274,12 @@ static void validation_error_cb(ThreadedReplayer *replayer)
 		sprintf(buffer, "COMPUTE_VERR %" PRIx64 "\n", per_thread.current_compute_pipeline);
 		write_all(crash_fd, buffer);
 	}
+
+	if (per_thread.current_raytracing_pipeline)
+	{
+		sprintf(buffer, "RAYTRACE_VERR %" PRIx64 "\n", per_thread.current_raytracing_pipeline);
+		write_all(crash_fd, buffer);
+	}
 }
 
 static void crash_handler(ThreadedReplayer &replayer, ThreadedReplayer::PerThreadData &per_thread)
@@ -1245,6 +1301,10 @@ static void crash_handler(ThreadedReplayer &replayer, ThreadedReplayer::PerThrea
 		_exit(2);
 
 	sprintf(buffer, "COMPUTE %d %" PRIx64 "\n", per_thread.current_compute_index, per_thread.current_compute_pipeline);
+	if (!write_all(crash_fd, buffer))
+		_exit(2);
+
+	sprintf(buffer, "RAYTRACE %d %" PRIx64 "\n", per_thread.current_raytracing_index, per_thread.current_raytracing_pipeline);
 	if (!write_all(crash_fd, buffer))
 		_exit(2);
 
@@ -1294,6 +1354,12 @@ static void report_failed_pipeline()
 			unsigned index = per_thread->current_compute_index - 1;
 			LOGE("Compute pipeline crashed or hung, hash: %016" PRIx64 ". Rerun with: --compute-pipeline-range %u %u.\n",
 			     per_thread->current_compute_pipeline, index, index + 1);
+		}
+		else if (per_thread->current_raytracing_pipeline)
+		{
+			unsigned index = per_thread->current_raytracing_index - 1;
+			LOGE("Raytracing pipeline crashed or hung, hash: %016" PRIx64 ". Rerun with: --raytracing-pipeline-range %u %u.\n",
+			     per_thread->current_raytracing_pipeline, index, index + 1);
 		}
 	}
 }
