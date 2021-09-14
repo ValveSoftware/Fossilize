@@ -134,13 +134,44 @@ struct FilterReplayer : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_raytracing_pipeline(Hash, const VkRayTracingPipelineCreateInfoKHR *, VkPipeline *) override
+	bool enqueue_create_raytracing_pipeline(Hash hash, const VkRayTracingPipelineCreateInfoKHR *create_info, VkPipeline *pipeline) override
 	{
-		return false;
+		*pipeline = fake_handle<VkPipeline>(hash);
+
+		// We are active if we either explicitly add the pipeline, or we explicitly add one of the module dependencies.
+		bool active;
+		if (filter_raytracing.count(hash) != 0)
+		{
+			active = true;
+		}
+		else
+		{
+			active = false;
+			for (uint32_t i = 0; !active && i < create_info->stageCount; i++)
+				active = filter_modules.count((Hash)create_info->pStages[i].module) != 0;
+			for (uint32_t i = 0; !active && create_info->pLibraryInfo && i < create_info->pLibraryInfo->libraryCount; i++)
+				active = filter_raytracing.count((Hash)create_info->pLibraryInfo->pLibraries[i]) != 0;
+		}
+
+		if (!active)
+			return true;
+
+		// If the pipeline is to be emitted, promote all dependencies to be active as well.
+		if (create_info->basePipelineHandle != VK_NULL_HANDLE)
+			filter_raytracing.insert((Hash)create_info->basePipelineHandle);
+		for (uint32_t i = 0; i < create_info->stageCount; i++)
+			filter_modules_promoted.insert((Hash)create_info->pStages[i].module);
+		if (create_info->pLibraryInfo)
+			for (uint32_t i = 0; i < create_info->pLibraryInfo->libraryCount; i++)
+				filter_raytracing.insert((Hash)create_info->pLibraryInfo->pLibraries[i]);
+		filter_raytracing.insert(hash);
+
+		return true;
 	}
 
 	unordered_set<Hash> filter_graphics;
 	unordered_set<Hash> filter_compute;
+	unordered_set<Hash> filter_raytracing;
 	unordered_set<Hash> filter_modules;
 	unordered_set<Hash> filter_modules_promoted;
 };
@@ -182,6 +213,9 @@ struct DisasmReplayer : StateCreatorInterface
 				if (pipeline)
 					vkDestroyPipeline(device->get_device(), pipeline, nullptr);
 			for (auto &pipeline : graphics_pipelines)
+				if (pipeline)
+					vkDestroyPipeline(device->get_device(), pipeline, nullptr);
+			for (auto &pipeline : raytracing_pipelines)
 				if (pipeline)
 					vkDestroyPipeline(device->get_device(), pipeline, nullptr);
 		}
@@ -377,9 +411,38 @@ struct DisasmReplayer : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_raytracing_pipeline(Hash, const VkRayTracingPipelineCreateInfoKHR *, VkPipeline *) override
+	bool enqueue_create_raytracing_pipeline(Hash hash, const VkRayTracingPipelineCreateInfoKHR *create_info, VkPipeline *pipeline) override
 	{
-		return false;
+		if (!raytracing_pipeline_is_active(hash))
+		{
+			*pipeline = fake_handle<VkPipeline>(hash);
+			return true;
+		}
+
+		if (device)
+		{
+			if (device->has_pipeline_stats())
+			{
+				const_cast<VkRayTracingPipelineCreateInfoKHR *>(create_info)->flags |=
+						VK_PIPELINE_CREATE_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR;
+			}
+
+			LOGI("Creating raytracing pipeline %0" PRIX64 "\n", hash);
+			if (vkCreateRayTracingPipelinesKHR(device->get_device(), VK_NULL_HANDLE, pipeline_cache,
+			                                   1, create_info, nullptr, pipeline) != VK_SUCCESS)
+			{
+				LOGE(" ... Failed!\n");
+				return false;
+			}
+			LOGI(" ... Succeeded!\n");
+		}
+		else
+			*pipeline = fake_handle<VkPipeline>(hash);
+
+		raytracing_pipelines.push_back(*pipeline);
+		raytracing_infos.push_back(create_info);
+		raytracing_hashes.push_back(hash);
+		return true;
 	}
 
 	bool shader_module_is_active(Hash hash) const
@@ -397,9 +460,15 @@ struct DisasmReplayer : StateCreatorInterface
 		return !filter_is_active() || filter_compute.count(hash) != 0;
 	}
 
+	bool raytracing_pipeline_is_active(Hash hash) const
+	{
+		return !filter_is_active() || filter_raytracing.count(hash) != 0;
+	}
+
 	bool filter_is_active() const
 	{
-		return !filter_graphics.empty() || !filter_compute.empty() || !filter_modules.empty();
+		return !filter_graphics.empty() || !filter_compute.empty() ||
+		       !filter_raytracing.empty() || !filter_modules.empty();
 	}
 
 	const VulkanDevice *device;
@@ -411,9 +480,11 @@ struct DisasmReplayer : StateCreatorInterface
 	vector<const void *> render_pass_infos;
 	vector<const VkGraphicsPipelineCreateInfo *> graphics_infos;
 	vector<const VkComputePipelineCreateInfo *> compute_infos;
+	vector<const VkRayTracingPipelineCreateInfoKHR *> raytracing_infos;
 
 	vector<Hash> graphics_hashes;
 	vector<Hash> compute_hashes;
+	vector<Hash> raytracing_hashes;
 	vector<Hash> module_hashes;
 	unordered_map<VkShaderModule, unsigned> module_to_index;
 
@@ -424,10 +495,12 @@ struct DisasmReplayer : StateCreatorInterface
 	vector<VkRenderPass> render_passes;
 	vector<VkPipeline> compute_pipelines;
 	vector<VkPipeline> graphics_pipelines;
+	vector<VkPipeline> raytracing_pipelines;
 	VkPipelineCache pipeline_cache = VK_NULL_HANDLE;
 
 	unordered_set<Hash> filter_graphics;
 	unordered_set<Hash> filter_compute;
+	unordered_set<Hash> filter_raytracing;
 	unordered_set<Hash> filter_modules;
 };
 
@@ -479,7 +552,7 @@ static VkShaderStageFlagBits stage_from_string(const char *stage)
 static string disassemble_spirv_asm(const VkShaderModuleCreateInfo *create_info)
 {
 	string str;
-	spvtools::SpirvTools tools(SPV_ENV_VULKAN_1_1);
+	spvtools::SpirvTools tools(SPV_ENV_VULKAN_1_2);
 	if (!tools.Disassemble(create_info->pCode, create_info->codeSize / sizeof(uint32_t), &str))
 		return "";
 	return str;
@@ -519,35 +592,61 @@ static string disassemble_spirv_glsl(const VkShaderModuleCreateInfo *create_info
 
 	if (entry)
 	{
+		SpvExecutionModel model = SpvExecutionModelMax;
 		switch (stage)
 		{
 		case VK_SHADER_STAGE_VERTEX_BIT:
-			spvc_compiler_set_entry_point(comp, entry, SpvExecutionModelVertex);
+			model = SpvExecutionModelVertex;
 			break;
 
 		case VK_SHADER_STAGE_FRAGMENT_BIT:
-			spvc_compiler_set_entry_point(comp, entry, SpvExecutionModelFragment);
+			model = SpvExecutionModelFragment;
 			break;
 
 		case VK_SHADER_STAGE_GEOMETRY_BIT:
-			spvc_compiler_set_entry_point(comp, entry, SpvExecutionModelGeometry);
+			model = SpvExecutionModelGeometry;
 			break;
 
 		case VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT:
-			spvc_compiler_set_entry_point(comp, entry, SpvExecutionModelTessellationControl);
+			model = SpvExecutionModelTessellationControl;
 			break;
 
 		case VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT:
-			spvc_compiler_set_entry_point(comp, entry, SpvExecutionModelTessellationEvaluation);
+			model = SpvExecutionModelTessellationEvaluation;
 			break;
 
 		case VK_SHADER_STAGE_COMPUTE_BIT:
-			spvc_compiler_set_entry_point(comp, entry, SpvExecutionModelGLCompute);
+			model = SpvExecutionModelGLCompute;
+			break;
+
+		case VK_SHADER_STAGE_RAYGEN_BIT_KHR:
+			model = SpvExecutionModelRayGenerationKHR;
+			break;
+
+		case VK_SHADER_STAGE_INTERSECTION_BIT_KHR:
+			model = SpvExecutionModelIntersectionKHR;
+			break;
+
+		case VK_SHADER_STAGE_ANY_HIT_BIT_KHR:
+			model = SpvExecutionModelAnyHitKHR;
+			break;
+
+		case VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR:
+			model = SpvExecutionModelClosestHitKHR;
+			break;
+
+		case VK_SHADER_STAGE_MISS_BIT_KHR:
+			model = SpvExecutionModelMissKHR;
+			break;
+
+		case VK_SHADER_STAGE_CALLABLE_BIT_KHR:
+			model = SpvExecutionModelCallableKHR;
 			break;
 
 		default:
 			return "// Failed";
 		}
+		spvc_compiler_set_entry_point(comp, entry, model);
 	}
 
 	const char *output;
@@ -690,6 +789,7 @@ static void print_help()
 	     "\t[--module-only]\n"
 	     "\t[--filter-graphics hash]\n"
 	     "\t[--filter-compute hash]\n"
+	     "\t[--filter-raytracing hash]\n"
 	     "\t[--filter-module hash]\n"
 	     "state.json\n");
 }
@@ -717,6 +817,18 @@ static string stage_to_string(VkShaderStageFlagBits stage)
 		return "frag";
 	case VK_SHADER_STAGE_COMPUTE_BIT:
 		return "comp";
+	case VK_SHADER_STAGE_RAYGEN_BIT_KHR:
+		return "rgen";
+	case VK_SHADER_STAGE_INTERSECTION_BIT_KHR:
+		return "rint";
+	case VK_SHADER_STAGE_MISS_BIT_KHR:
+		return "rmiss";
+	case VK_SHADER_STAGE_ANY_HIT_BIT_KHR:
+		return "rahit";
+	case VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR:
+		return "rchit";
+	case VK_SHADER_STAGE_CALLABLE_BIT_KHR:
+		return "rcall";
 	default:
 		return "????";
 	}
@@ -780,6 +892,7 @@ int main(int argc, char *argv[])
 
 	std::unordered_set<Hash> filter_graphics;
 	std::unordered_set<Hash> filter_compute;
+	std::unordered_set<Hash> filter_raytracing;
 	std::unordered_set<Hash> filter_modules;
 
 	CLICallbacks cbs;
@@ -797,6 +910,9 @@ int main(int argc, char *argv[])
 	});
 	cbs.add("--filter-compute", [&](CLIParser &parser) {
 		filter_compute.insert(strtoull(parser.next_string(), nullptr, 16));
+	});
+	cbs.add("--filter-raytracing", [&](CLIParser &parser) {
+		filter_raytracing.insert(strtoull(parser.next_string(), nullptr, 16));
 	});
 	cbs.add("--filter-module", [&](CLIParser &parser) {
 		filter_modules.insert(strtoull(parser.next_string(), nullptr, 16));
@@ -850,7 +966,8 @@ int main(int argc, char *argv[])
 
 	vector<uint8_t> state_json;
 
-	bool use_filter = !filter_graphics.empty() || !filter_compute.empty() || !filter_modules.empty();
+	bool use_filter = !filter_graphics.empty() || !filter_compute.empty() ||
+	                  !filter_raytracing.empty() || !filter_modules.empty();
 
 	if (use_filter && !module_only)
 	{
@@ -862,6 +979,7 @@ int main(int argc, char *argv[])
 
 		filter_replayer.filter_graphics = std::move(filter_graphics);
 		filter_replayer.filter_compute = std::move(filter_compute);
+		filter_replayer.filter_raytracing = std::move(filter_raytracing);
 		filter_replayer.filter_modules = std::move(filter_modules);
 
 		// Don't know which pipelines depend on a module in question, so need to replay all pipelines and promote on demand.
@@ -882,6 +1000,7 @@ int main(int argc, char *argv[])
 			static const ResourceTag playback_order[] = {
 				RESOURCE_GRAPHICS_PIPELINE,
 				RESOURCE_COMPUTE_PIPELINE,
+				RESOURCE_RAYTRACING_PIPELINE,
 			};
 
 			for (auto tag : playback_order)
@@ -892,14 +1011,18 @@ int main(int argc, char *argv[])
 			// Need copies since we might modify the hashmap inside the replay callback.
 			auto replays_graphics = filter_replayer.filter_graphics;
 			auto replays_compute = filter_replayer.filter_compute;
+			auto replays_raytracing = filter_replayer.filter_raytracing;
 			replay_all_hashes(RESOURCE_GRAPHICS_PIPELINE, *resolver, state_replayer,
 			                  filter_replayer, state_json, &replays_graphics);
 			replay_all_hashes(RESOURCE_COMPUTE_PIPELINE, *resolver, state_replayer,
 			                  filter_replayer, state_json, &replays_compute);
+			replay_all_hashes(RESOURCE_RAYTRACING_PIPELINE, *resolver, state_replayer,
+			                  filter_replayer, state_json, &replays_raytracing);
 		}
 
 		filter_graphics = std::move(filter_replayer.filter_graphics);
 		filter_compute = std::move(filter_replayer.filter_compute);
+		filter_raytracing = std::move(filter_replayer.filter_raytracing);
 		filter_modules = std::move(filter_replayer.filter_modules);
 		for (auto hash : filter_replayer.filter_modules_promoted)
 			filter_modules.insert(hash);
@@ -909,6 +1032,7 @@ int main(int argc, char *argv[])
 	DisasmReplayer replayer(device.get_device() ? &device : nullptr);
 	replayer.filter_graphics = std::move(filter_graphics);
 	replayer.filter_compute = std::move(filter_compute);
+	replayer.filter_raytracing = std::move(filter_raytracing);
 	replayer.filter_modules = std::move(filter_modules);
 
 	static const ResourceTag playback_order[] = {
@@ -920,6 +1044,7 @@ int main(int argc, char *argv[])
 		RESOURCE_RENDER_PASS, // Trivial, run in main thread
 		RESOURCE_GRAPHICS_PIPELINE, // Multi-threaded
 		RESOURCE_COMPUTE_PIPELINE, // Multi-threaded
+		RESOURCE_RAYTRACING_PIPELINE, // Multi-threaded
 	};
 
 	static const char *tag_names[] = {
@@ -931,6 +1056,8 @@ int main(int argc, char *argv[])
 		"Render Pass",
 		"Graphics Pipeline",
 		"Compute Pipeline",
+		"Info Links",
+		"Raytracing Pipeline",
 	};
 
 	for (auto &tag : playback_order)
@@ -948,6 +1075,7 @@ int main(int argc, char *argv[])
 			case RESOURCE_SHADER_MODULE: filter = &replayer.filter_modules; break;
 			case RESOURCE_GRAPHICS_PIPELINE: filter = &replayer.filter_graphics; break;
 			case RESOURCE_COMPUTE_PIPELINE: filter = &replayer.filter_compute; break;
+			case RESOURCE_RAYTRACING_PIPELINE: filter = &replayer.filter_raytracing; break;
 			default: break;
 			}
 		}
@@ -1035,6 +1163,35 @@ int main(int argc, char *argv[])
 			{
 				LOGE("Failed to write disassembly to file: %s\n", output.c_str());
 				return EXIT_FAILURE;
+			}
+		}
+
+		size_t raytracing_pipeline_count = replayer.raytracing_infos.size();
+		for (size_t i = 0; i < raytracing_pipeline_count; i++)
+		{
+			auto *info = replayer.raytracing_infos[i];
+			for (uint32_t j = 0; j < info->stageCount; j++)
+			{
+				VkShaderModule module = info->pStages[j].module;
+				unique_shader_modules.insert(module);
+				unsigned index = replayer.module_to_index[module];
+				auto *module_info = replayer.shader_module_infos[index];
+				disassembled = disassemble_spirv(device, replayer.raytracing_pipelines[i], method, info->pStages[j].stage,
+												 module_info, info->pStages[j].pName);
+
+				Hash module_hash = replayer.module_hashes[index];
+
+				string path = output + "/" + uint64_string(module_hash) + "." +
+						info->pStages[j].pName + "." +
+						uint64_string(replayer.raytracing_hashes[i]) +
+						"." + stage_to_string(info->pStages[j].stage);
+
+				LOGI("Dumping disassembly to: %s\n", path.c_str());
+				if (!write_string_to_file(path.c_str(), disassembled.c_str()))
+				{
+					LOGE("Failed to write disassembly to file: %s\n", output.c_str());
+					return EXIT_FAILURE;
+				}
 			}
 		}
 

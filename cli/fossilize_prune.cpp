@@ -41,9 +41,11 @@ static void print_help()
 	     "\t[--filter-application hash]\n"
 	     "\t[--filter-graphics hash]\n"
 	     "\t[--filter-compute hash]\n"
+	     "\t[--filter-raytracing hash]\n"
 	     "\t[--filter-module hash]\n"
 	     "\t[--skip-graphics hash]\n"
 	     "\t[--skip-compute hash]\n"
+	     "\t[--skip-raytracing hash]\n"
 	     "\t[--skip-module hash]\n"
 	     "\t[--skip-application-info-links]\n"
 	     "\t[--whitelist whitelist.foz]\n"
@@ -66,15 +68,20 @@ struct PruneReplayer : StateCreatorInterface
 	unordered_set<Hash> accessed_render_passes;
 	unordered_set<Hash> accessed_graphics_pipelines;
 	unordered_set<Hash> accessed_compute_pipelines;
+	unordered_set<Hash> accessed_raytracing_pipelines;
 	unordered_set<Hash> filter_graphics;
 	unordered_set<Hash> filter_compute;
+	unordered_set<Hash> filter_raytracing;
 	unordered_set<Hash> filter_modules;
 	unordered_set<Hash> banned_graphics;
 	unordered_set<Hash> banned_compute;
+	unordered_set<Hash> banned_raytracing;
 	unordered_set<Hash> banned_modules;
 
 	unordered_map<Hash, const VkDescriptorSetLayoutCreateInfo *> descriptor_sets;
 	unordered_map<Hash, const VkPipelineLayoutCreateInfo *> pipeline_layouts;
+	unordered_map<Hash, const VkRayTracingPipelineCreateInfoKHR *> raytracing_pipelines;
+	unordered_map<Hash, const VkRayTracingPipelineCreateInfoKHR *> library_raytracing_pipelines;
 
 	unordered_set<Hash> filtered_blob_hashes[RESOURCE_COUNT];
 
@@ -202,7 +209,7 @@ struct PruneReplayer : StateCreatorInterface
 
 	bool filter_object(ResourceTag tag, Hash hash) const
 	{
-		bool hash_filtering = !(filter_compute.empty() && filter_graphics.empty());
+		bool hash_filtering = !(filter_compute.empty() && filter_graphics.empty() && filter_raytracing.empty());
 		if (tag == RESOURCE_COMPUTE_PIPELINE)
 		{
 			if (banned_compute.count(hash))
@@ -215,6 +222,13 @@ struct PruneReplayer : StateCreatorInterface
 			if (banned_graphics.count(hash))
 				return false;
 			if (hash_filtering && !filter_graphics.count(hash))
+				return false;
+		}
+		else if (tag == RESOURCE_RAYTRACING_PIPELINE)
+		{
+			if (banned_raytracing.count(hash))
+				return false;
+			if (hash_filtering && !filter_raytracing.count(hash))
 				return false;
 		}
 
@@ -287,9 +301,80 @@ struct PruneReplayer : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_raytracing_pipeline(Hash, const VkRayTracingPipelineCreateInfoKHR *, VkPipeline *) override
+	void access_raytracing_pipeline(Hash hash, const VkRayTracingPipelineCreateInfoKHR *create_info)
 	{
-		return false;
+		if (accessed_raytracing_pipelines.count(hash))
+			return;
+		accessed_raytracing_pipelines.insert(hash);
+
+		access_pipeline_layout((Hash) create_info->layout);
+		for (uint32_t stage = 0; stage < create_info->stageCount; stage++)
+			accessed_shader_modules.insert((Hash) create_info->pStages[stage].module);
+
+		if (create_info->pLibraryInfo)
+		{
+			for (uint32_t i = 0; i < create_info->pLibraryInfo->libraryCount; i++)
+			{
+				// Only need to recurse if a pipeline was only allowed due to having CREATE_LIBRARY_KHR flag.
+				auto lib_itr = library_raytracing_pipelines.find((Hash) create_info->pLibraryInfo->pLibraries[i]);
+				if (lib_itr != library_raytracing_pipelines.end())
+					access_raytracing_pipeline(lib_itr->first, lib_itr->second);
+			}
+		}
+	}
+
+	void access_raytracing_pipelines()
+	{
+		for (auto &pipe : raytracing_pipelines)
+			access_raytracing_pipeline(pipe.first, pipe.second);
+	}
+
+	bool enqueue_create_raytracing_pipeline(Hash hash, const VkRayTracingPipelineCreateInfoKHR *create_info, VkPipeline *pipeline) override
+	{
+		*pipeline = fake_handle<VkPipeline>(hash);
+		bool allow_pipeline = false;
+
+		if (filter_object(RESOURCE_RAYTRACING_PIPELINE, hash))
+		{
+			for (uint32_t i = 0; i < create_info->stageCount; i++)
+			{
+				if (filter_shader_module((Hash) create_info->pStages[i].module))
+				{
+					allow_pipeline = true;
+					break;
+				}
+			}
+
+			// Need to test this as well, if there is at least one banned module used, we don't allow the pipeline.
+			for (uint32_t i = 0; i < create_info->stageCount; i++)
+			{
+				if (banned_modules.count((Hash) create_info->pStages[i].module))
+				{
+					allow_pipeline = false;
+					break;
+				}
+			}
+
+			if (create_info->pLibraryInfo)
+			{
+				for (uint32_t i = 0; i < create_info->pLibraryInfo->libraryCount; i++)
+				{
+					if (banned_raytracing.count((Hash) create_info->pLibraryInfo->pLibraries[i]))
+					{
+						allow_pipeline = false;
+						break;
+					}
+				}
+			}
+		}
+
+		// Need to defer this since we need to access pipeline libraries.
+		if (allow_pipeline)
+			raytracing_pipelines[hash] = create_info;
+		else if ((create_info->flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0)
+			library_raytracing_pipelines[hash] = create_info;
+
+		return true;
 	}
 };
 
@@ -339,10 +424,12 @@ int main(int argc, char *argv[])
 
 	unordered_set<Hash> filter_graphics;
 	unordered_set<Hash> filter_compute;
+	unordered_set<Hash> filter_raytracing;
 	unordered_set<Hash> filter_modules;
 
 	unordered_set<Hash> banned_graphics;
 	unordered_set<Hash> banned_compute;
+	unordered_set<Hash> banned_raytracing;
 	unordered_set<Hash> banned_modules;
 
 	cbs.add("--help", [](CLIParser &parser) { print_help(); parser.end(); });
@@ -358,6 +445,9 @@ int main(int argc, char *argv[])
 	cbs.add("--filter-compute", [&](CLIParser &parser) {
 		filter_compute.insert(strtoull(parser.next_string(), nullptr, 16));
 	});
+	cbs.add("--filter-raytracing", [&](CLIParser &parser) {
+		filter_raytracing.insert(strtoull(parser.next_string(), nullptr, 16));
+	});
 	cbs.add("--filter-module", [&](CLIParser &parser) {
 		filter_modules.insert(strtoull(parser.next_string(), nullptr, 16));
 	});
@@ -366,6 +456,9 @@ int main(int argc, char *argv[])
 	});
 	cbs.add("--skip-compute", [&](CLIParser &parser) {
 		banned_compute.insert(strtoull(parser.next_string(), nullptr, 16));
+	});
+	cbs.add("--skip-raytracing", [&](CLIParser &parser) {
+		banned_raytracing.insert(strtoull(parser.next_string(), nullptr, 16));
 	});
 	cbs.add("--skip-module", [&](CLIParser &parser) {
 		banned_modules.insert(strtoull(parser.next_string(), nullptr, 16));
@@ -442,9 +535,11 @@ int main(int argc, char *argv[])
 
 	prune_replayer.filter_graphics = move(filter_graphics);
 	prune_replayer.filter_compute = move(filter_compute);
+	prune_replayer.filter_raytracing = move(filter_raytracing);
 	prune_replayer.filter_modules = move(filter_modules);
 	prune_replayer.banned_graphics = move(banned_graphics);
 	prune_replayer.banned_compute = move(banned_compute);
+	prune_replayer.banned_raytracing = move(banned_raytracing);
 	prune_replayer.banned_modules = move(banned_modules);
 	prune_replayer.skip_application_info_links = skip_application_info_links;
 
@@ -458,6 +553,7 @@ int main(int argc, char *argv[])
 		RESOURCE_RENDER_PASS,
 		RESOURCE_GRAPHICS_PIPELINE,
 		RESOURCE_COMPUTE_PIPELINE,
+		RESOURCE_RAYTRACING_PIPELINE,
 	};
 
 	unsigned per_tag_read[RESOURCE_COUNT] = {};
@@ -473,6 +569,7 @@ int main(int argc, char *argv[])
 		"Graphics Pipeline",
 		"Compute Pipeline",
 		"Application Blob Link",
+		"Raytracing Pipeline",
 	};
 
 	vector<uint8_t> state_json;
@@ -539,6 +636,9 @@ int main(int argc, char *argv[])
 				}
 			}
 		}
+
+		if (tag == RESOURCE_RAYTRACING_PIPELINE)
+			prune_replayer.access_raytracing_pipelines();
 	}
 
 	if (invert_module_pruning)
@@ -552,6 +652,7 @@ int main(int argc, char *argv[])
 		prune_replayer.accessed_pipeline_layouts.clear();
 		prune_replayer.accessed_graphics_pipelines.clear();
 		prune_replayer.accessed_compute_pipelines.clear();
+		prune_replayer.accessed_raytracing_pipelines.clear();
 
 		size_t hash_count = 0;
 		if (!input_db->get_hash_list_for_resource_tag(RESOURCE_SHADER_MODULE, &hash_count, nullptr))
@@ -636,6 +737,14 @@ int main(int argc, char *argv[])
 	                         per_tag_written))
 	{
 		LOGE("Failed to copy COMPUTE_PIPELINEs.\n");
+		return EXIT_FAILURE;
+	}
+
+	if (!copy_accessed_types(*input_db, *output_db, state_json,
+							 prune_replayer.accessed_raytracing_pipelines, RESOURCE_RAYTRACING_PIPELINE,
+							 per_tag_written))
+	{
+		LOGE("Failed to copy RAYTRACING_PIPELINEs.\n");
 		return EXIT_FAILURE;
 	}
 
