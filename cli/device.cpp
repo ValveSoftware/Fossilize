@@ -46,11 +46,26 @@ static bool find_extension(const vector<VkExtensionProperties> &exts, const char
 	return itr != end(exts);
 }
 
+static bool filter_instance_extension(const char *ext, uint32_t api_version)
+{
+	if (api_version >= VK_API_VERSION_1_1)
+		return true;
+
+	static const char *vulkan_11_only_extensions[] = {
+		VK_KHR_SURFACE_PROTECTED_CAPABILITIES_EXTENSION_NAME,
+	};
+
+	for (auto *candidate : vulkan_11_only_extensions)
+		if (strcmp(candidate, ext) == 0)
+			return false;
+
+	return true;
+}
+
 static bool filter_extension(const char *ext, bool want_amd_shader_info,
                              const vector<VkExtensionProperties> &all_exts, uint32_t api_version)
 {
 	static const char *vulkan_11_only_extensions[] = {
-		VK_KHR_SURFACE_PROTECTED_CAPABILITIES_EXTENSION_NAME,
 		VK_KHR_SHADER_SUBGROUP_EXTENDED_TYPES_EXTENSION_NAME,
 		VK_KHR_SPIRV_1_4_EXTENSION_NAME,
 		VK_KHR_SHARED_PRESENTABLE_IMAGE_EXTENSION_NAME,
@@ -158,10 +173,6 @@ bool VulkanDevice::init_device(const Options &opts)
 	if (ext_count && vkEnumerateInstanceExtensionProperties(nullptr, &ext_count, exts.data()) != VK_SUCCESS)
 		return false;
 
-	vector<const char *> active_exts;
-	for (auto &ext : exts)
-		active_exts.push_back(ext.extensionName);
-
 	vector<const char *> active_layers;
 	if (opts.enable_validation)
 	{
@@ -189,8 +200,6 @@ bool VulkanDevice::init_device(const Options &opts)
 	app.pApplicationName = "Fossilize Replayer";
 	app.pEngineName = "Fossilize";
 
-	instance_info.enabledExtensionCount = uint32_t(active_exts.size());
-	instance_info.ppEnabledExtensionNames = active_exts.empty() ? nullptr : active_exts.data();
 	instance_info.enabledLayerCount = uint32_t(active_layers.size());
 	instance_info.ppEnabledLayerNames = active_layers.empty() ? nullptr : active_layers.data();
 	instance_info.pApplicationInfo = opts.application_info ? opts.application_info : &app;
@@ -199,6 +208,14 @@ bool VulkanDevice::init_device(const Options &opts)
 		LOGI("Enabling instance layer: %s\n", instance_info.ppEnabledLayerNames[i]);
 	for (uint32_t i = 0; i < instance_info.enabledExtensionCount; i++)
 		LOGI("Enabling instance extension: %s\n", instance_info.ppEnabledExtensionNames[i]);
+
+	vector<const char *> active_exts;
+	for (auto &ext : exts)
+		if (filter_instance_extension(ext.extensionName, instance_info.pApplicationInfo->apiVersion))
+			active_exts.push_back(ext.extensionName);
+
+	instance_info.enabledExtensionCount = uint32_t(active_exts.size());
+	instance_info.ppEnabledExtensionNames = active_exts.empty() ? nullptr : active_exts.data();
 
 	if (vkCreateInstance(&instance_info, nullptr, &instance) != VK_SUCCESS)
 	{
