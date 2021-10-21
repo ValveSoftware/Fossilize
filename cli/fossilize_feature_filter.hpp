@@ -71,7 +71,8 @@ struct VulkanFeatures
 	VkPhysicalDeviceMutableDescriptorTypeFeaturesVALVE mutable_descriptor_type_valve;
 };
 
-void *build_pnext_chain(VulkanFeatures &features);
+void *build_pnext_chain(VulkanFeatures &features, uint32_t api_version,
+                        const char **enabled_extensions, uint32_t num_extensions);
 void filter_feature_enablement(VulkanFeatures &features);
 
 struct VulkanProperties
@@ -89,7 +90,8 @@ struct VulkanProperties
 	VkPhysicalDeviceAccelerationStructurePropertiesKHR acceleration_structure;
 };
 
-void *build_pnext_chain(VulkanProperties &properties);
+void *build_pnext_chain(VulkanProperties &properties, uint32_t api_version,
+                        const char **enabled_extensions, uint32_t num_extensions);
 
 class DeviceQueryInterface
 {
