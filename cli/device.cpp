@@ -46,18 +46,50 @@ static bool find_extension(const vector<VkExtensionProperties> &exts, const char
 	return itr != end(exts);
 }
 
+static bool filter_instance_extension(const char *ext, uint32_t api_version)
+{
+	if (api_version >= VK_API_VERSION_1_1)
+		return true;
+
+	static const char *vulkan_11_only_extensions[] = {
+		VK_KHR_SURFACE_PROTECTED_CAPABILITIES_EXTENSION_NAME,
+	};
+
+	for (auto *candidate : vulkan_11_only_extensions)
+		if (strcmp(candidate, ext) == 0)
+			return false;
+
+	return true;
+}
+
 static bool filter_extension(const char *ext, bool want_amd_shader_info,
                              const vector<VkExtensionProperties> &all_exts, uint32_t api_version)
 {
-	bool ext_is_vulkan_11_only =
-			strcmp(ext, VK_KHR_SURFACE_PROTECTED_CAPABILITIES_EXTENSION_NAME) == 0 ||
-			strcmp(ext, VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME) == 0 ||
-			strcmp(ext, VK_NV_SHADER_SM_BUILTINS_EXTENSION_NAME) == 0 ||
-			strcmp(ext, VK_NV_SHADER_SUBGROUP_PARTITIONED_EXTENSION_NAME) == 0 ||
-			strcmp(ext, VK_KHR_SHADER_SUBGROUP_EXTENDED_TYPES_EXTENSION_NAME) == 0 ||
-			strcmp(ext, VK_KHR_SPIRV_1_4_EXTENSION_NAME) == 0 ||
-			strcmp(ext, VK_KHR_SHARED_PRESENTABLE_IMAGE_EXTENSION_NAME) == 0 ||
-			strcmp(ext, VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME) == 0;
+	static const char *vulkan_11_only_extensions[] = {
+		VK_KHR_SHADER_SUBGROUP_EXTENDED_TYPES_EXTENSION_NAME,
+		VK_KHR_SPIRV_1_4_EXTENSION_NAME,
+		VK_KHR_SHARED_PRESENTABLE_IMAGE_EXTENSION_NAME,
+		VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME,
+		VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
+		VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
+		VK_KHR_RAY_QUERY_EXTENSION_NAME,
+		"VK_KHR_maintenance4",
+		"VK_KHR_shader_subgroup_uniform_control_flow",
+		VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME,
+		VK_NV_SHADER_SM_BUILTINS_EXTENSION_NAME,
+		VK_NV_SHADER_SUBGROUP_PARTITIONED_EXTENSION_NAME,
+		VK_NV_DEVICE_GENERATED_COMMANDS_EXTENSION_NAME,
+	};
+
+	bool ext_is_vulkan_11_only = false;
+	for (auto *candidate : vulkan_11_only_extensions)
+	{
+		if (strcmp(candidate, ext) == 0)
+		{
+			ext_is_vulkan_11_only = true;
+			break;
+		}
+	}
 
 	if (strcmp(ext, VK_AMD_NEGATIVE_VIEWPORT_HEIGHT_EXTENSION_NAME) == 0)
 	{
@@ -141,10 +173,6 @@ bool VulkanDevice::init_device(const Options &opts)
 	if (ext_count && vkEnumerateInstanceExtensionProperties(nullptr, &ext_count, exts.data()) != VK_SUCCESS)
 		return false;
 
-	vector<const char *> active_exts;
-	for (auto &ext : exts)
-		active_exts.push_back(ext.extensionName);
-
 	vector<const char *> active_layers;
 	if (opts.enable_validation)
 	{
@@ -172,8 +200,6 @@ bool VulkanDevice::init_device(const Options &opts)
 	app.pApplicationName = "Fossilize Replayer";
 	app.pEngineName = "Fossilize";
 
-	instance_info.enabledExtensionCount = uint32_t(active_exts.size());
-	instance_info.ppEnabledExtensionNames = active_exts.empty() ? nullptr : active_exts.data();
 	instance_info.enabledLayerCount = uint32_t(active_layers.size());
 	instance_info.ppEnabledLayerNames = active_layers.empty() ? nullptr : active_layers.data();
 	instance_info.pApplicationInfo = opts.application_info ? opts.application_info : &app;
@@ -182,6 +208,14 @@ bool VulkanDevice::init_device(const Options &opts)
 		LOGI("Enabling instance layer: %s\n", instance_info.ppEnabledLayerNames[i]);
 	for (uint32_t i = 0; i < instance_info.enabledExtensionCount; i++)
 		LOGI("Enabling instance extension: %s\n", instance_info.ppEnabledExtensionNames[i]);
+
+	vector<const char *> active_exts;
+	for (auto &ext : exts)
+		if (filter_instance_extension(ext.extensionName, instance_info.pApplicationInfo->apiVersion))
+			active_exts.push_back(ext.extensionName);
+
+	instance_info.enabledExtensionCount = uint32_t(active_exts.size());
+	instance_info.ppEnabledExtensionNames = active_exts.empty() ? nullptr : active_exts.data();
 
 	if (vkCreateInstance(&instance_info, nullptr, &instance) != VK_SUCCESS)
 	{
@@ -261,6 +295,19 @@ bool VulkanDevice::init_device(const Options &opts)
 	}
 
 	api_version = target_api_version;
+
+	vector<const char *> active_device_extensions;
+	uint32_t device_ext_count = 0;
+	if (vkEnumerateDeviceExtensionProperties(gpu, nullptr, &device_ext_count, nullptr) != VK_SUCCESS)
+		return false;
+	vector<VkExtensionProperties> device_ext_props(device_ext_count);
+	if (device_ext_count && vkEnumerateDeviceExtensionProperties(gpu, nullptr, &device_ext_count, device_ext_props.data()) != VK_SUCCESS)
+		return false;
+
+	for (auto &ext : device_ext_props)
+		if (filter_extension(ext.extensionName, opts.want_amd_shader_info, device_ext_props, api_version))
+			active_device_extensions.push_back(ext.extensionName);
+
 	bool has_device_features2 = find_extension(exts, VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
 
 	// FIXME: There are arbitrary features we can request here from physical_device_features2.
@@ -272,7 +319,9 @@ bool VulkanDevice::init_device(const Options &opts)
 	gpu_features2.pNext = &stats_feature;
 	if (has_device_features2)
 	{
-		stats_feature.pNext = build_pnext_chain(features);
+		stats_feature.pNext = build_pnext_chain(features, api_version,
+		                                        active_device_extensions.data(),
+		                                        uint32_t(active_device_extensions.size()));
 		vkGetPhysicalDeviceFeatures2KHR(gpu, &gpu_features2);
 		filter_feature_enablement(features);
 
@@ -288,7 +337,9 @@ bool VulkanDevice::init_device(const Options &opts)
 	VkPhysicalDeviceProperties2 gpu_props2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
 	if (has_device_features2)
 	{
-		gpu_props2.pNext = build_pnext_chain(props);
+		gpu_props2.pNext = build_pnext_chain(props, api_version,
+		                                     active_device_extensions.data(),
+		                                     uint32_t(active_device_extensions.size()));
 		vkGetPhysicalDeviceProperties2KHR(gpu, &gpu_props2);
 	}
 	else
@@ -323,7 +374,6 @@ bool VulkanDevice::init_device(const Options &opts)
 	}
 
 	vector<const char *> active_device_layers;
-	vector<const char *> active_device_extensions;
 	if (opts.enable_validation)
 	{
 		uint32_t device_layer_count = 0;
@@ -350,19 +400,6 @@ bool VulkanDevice::init_device(const Options &opts)
 			LOGE("Cannot find VK_LAYER_KHRONOS_validation layer.\n");
 			return false;
 		}
-	}
-
-	uint32_t device_ext_count = 0;
-	if (vkEnumerateDeviceExtensionProperties(gpu, nullptr, &device_ext_count, nullptr) != VK_SUCCESS)
-		return false;
-	vector<VkExtensionProperties> device_ext_props(device_ext_count);
-	if (device_ext_count && vkEnumerateDeviceExtensionProperties(gpu, nullptr, &device_ext_count, device_ext_props.data()) != VK_SUCCESS)
-		return false;
-
-	for (auto &ext : device_ext_props)
-	{
-		if (filter_extension(ext.extensionName, opts.want_amd_shader_info, device_ext_props, api_version))
-			active_device_extensions.push_back(ext.extensionName);
 	}
 
 	supports_pipeline_feedback = find_if(begin(active_device_extensions), end(active_device_extensions), [](const char *ext) {

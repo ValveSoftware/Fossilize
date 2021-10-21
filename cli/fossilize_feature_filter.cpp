@@ -31,37 +31,48 @@
 
 namespace Fossilize
 {
-void *build_pnext_chain(VulkanFeatures &features)
+void *build_pnext_chain(VulkanFeatures &features, uint32_t api_version,
+                        const char **enabled_extensions, uint32_t extension_count)
 {
 	features = {};
 	void *pNext = nullptr;
 	void **ppNext = nullptr;
 
-#define CHAIN(struct_type, member) \
-	member.sType = struct_type; \
-	if (!pNext) pNext = &member; \
-	if (ppNext) *ppNext = &member; \
-	ppNext = &member.pNext;
+	std::unordered_set<std::string> enabled_extension_set;
+	for (uint32_t i = 0; i < extension_count; i++)
+		enabled_extension_set.insert(enabled_extensions[i]);
 
-#define F(struct_type, member) \
-	CHAIN(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_FEATURES, features.member)
+#define CHAIN(struct_type, member, min_api_version, required_extension) \
+	do { \
+		if (enabled_extension_set.count(required_extension) != 0 && api_version >= min_api_version) { \
+			member.sType = struct_type; \
+			if (!pNext) pNext = &member; \
+			if (ppNext) *ppNext = &member; \
+			ppNext = &member.pNext; \
+		} \
+	} while (0)
+
+#define F(struct_type, member, minimum_api_version, required_extension) \
+	CHAIN(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_FEATURES, features.member, \
+	VK_API_VERSION_##minimum_api_version, VK_##required_extension##_EXTENSION_NAME)
 #define FE(struct_type, member, ext) \
-	CHAIN(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_FEATURES_##ext, features.member)
+	CHAIN(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_FEATURES_##ext, features.member, \
+	VK_API_VERSION_1_0, VK_##ext##_##struct_type##_EXTENSION_NAME)
 
-	F(16BIT_STORAGE, storage_16bit);
-	F(MULTIVIEW, multiview);
-	F(VARIABLE_POINTERS, variable_pointers);
-	F(SAMPLER_YCBCR_CONVERSION, ycbcr_conversion);
-	F(SHADER_DRAW_PARAMETERS, draw_parameters);
-	F(8BIT_STORAGE, storage_8bit);
-	F(SHADER_ATOMIC_INT64, atomic_int64);
-	F(SHADER_FLOAT16_INT8, float16_int8);
-	F(DESCRIPTOR_INDEXING, descriptor_indexing);
-	F(VULKAN_MEMORY_MODEL, memory_model);
-	F(UNIFORM_BUFFER_STANDARD_LAYOUT, ubo_standard_layout);
-	F(SHADER_SUBGROUP_EXTENDED_TYPES, subgroup_extended_types);
-	F(SEPARATE_DEPTH_STENCIL_LAYOUTS, separate_ds_layout);
-	F(BUFFER_DEVICE_ADDRESS, buffer_device_address);
+	F(16BIT_STORAGE, storage_16bit, 1_0, KHR_16BIT_STORAGE);
+	F(MULTIVIEW, multiview, 1_0, KHR_MULTIVIEW);
+	F(VARIABLE_POINTERS, variable_pointers, 1_0, KHR_VARIABLE_POINTERS);
+	F(SAMPLER_YCBCR_CONVERSION, ycbcr_conversion, 1_0, KHR_SAMPLER_YCBCR_CONVERSION);
+	F(SHADER_DRAW_PARAMETERS, draw_parameters, 1_1, KHR_SHADER_DRAW_PARAMETERS);
+	F(8BIT_STORAGE, storage_8bit, 1_0, KHR_8BIT_STORAGE);
+	F(SHADER_ATOMIC_INT64, atomic_int64, 1_0, KHR_SHADER_ATOMIC_INT64);
+	F(SHADER_FLOAT16_INT8, float16_int8, 1_0, KHR_SHADER_FLOAT16_INT8);
+	F(DESCRIPTOR_INDEXING, descriptor_indexing, 1_0, EXT_DESCRIPTOR_INDEXING);
+	F(VULKAN_MEMORY_MODEL, memory_model, 1_0, KHR_VULKAN_MEMORY_MODEL);
+	F(UNIFORM_BUFFER_STANDARD_LAYOUT, ubo_standard_layout, 1_0, KHR_UNIFORM_BUFFER_STANDARD_LAYOUT);
+	F(SHADER_SUBGROUP_EXTENDED_TYPES, subgroup_extended_types, 1_1, KHR_SHADER_SUBGROUP_EXTENDED_TYPES);
+	F(SEPARATE_DEPTH_STENCIL_LAYOUTS, separate_ds_layout, 1_0, KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS);
+	F(BUFFER_DEVICE_ADDRESS, buffer_device_address, 1_0, KHR_BUFFER_DEVICE_ADDRESS);
 	FE(SHADER_CLOCK, shader_clock, KHR);
 	FE(FRAGMENT_SHADING_RATE, fragment_shading_rate, KHR);
 	FE(RAY_TRACING_PIPELINE, ray_tracing_pipeline, KHR);
@@ -104,31 +115,46 @@ void filter_feature_enablement(VulkanFeatures &features)
 	{
 		features.shading_rate_nv.shadingRateImage = VK_FALSE;
 		features.shading_rate_nv.shadingRateCoarseSampleOrder = VK_FALSE;
+		features.fragment_density.fragmentDensityMap = VK_FALSE;
 	}
 }
 
-void *build_pnext_chain(VulkanProperties &props)
+void *build_pnext_chain(VulkanProperties &props, uint32_t api_version,
+                        const char **enabled_extensions, uint32_t extension_count)
 {
 	props = {};
 	void *pNext = nullptr;
 	void **ppNext = nullptr;
 
-#define CHAIN(struct_type, member) \
-	member.sType = struct_type; \
-	if (!pNext) pNext = &member; \
-	if (ppNext) *ppNext = &member; \
-	ppNext = &member.pNext;
+	std::unordered_set<std::string> enabled_extension_set;
+	for (uint32_t i = 0; i < extension_count; i++)
+		enabled_extension_set.insert(enabled_extensions[i]);
 
-#define P(struct_type, member) \
-	CHAIN(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_PROPERTIES, props.member)
+#define CHAIN(struct_type, member, min_api_version, required_extension) \
+	do { \
+		if ((required_extension == nullptr || enabled_extension_set.count(required_extension) != 0) && api_version >= min_api_version) { \
+			member.sType = struct_type; \
+			if (!pNext) pNext = &member; \
+			if (ppNext) *ppNext = &member; \
+			ppNext = &member.pNext; \
+		} \
+	} while (0)
+
+#define P(struct_type, member, minimum_api_version, required_extension) \
+	CHAIN(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_PROPERTIES, props.member, \
+	VK_API_VERSION_##minimum_api_version, VK_##required_extension##_EXTENSION_NAME)
+#define P_CORE(struct_type, member, minimum_api_version) \
+	CHAIN(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_PROPERTIES, props.member, \
+	VK_API_VERSION_##minimum_api_version, nullptr)
 #define PE(struct_type, member, ext) \
-	CHAIN(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_PROPERTIES_##ext, props.member)
+	CHAIN(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_PROPERTIES_##ext, props.member, \
+	VK_API_VERSION_1_0, VK_##ext##_##struct_type##_EXTENSION_NAME)
 
-	P(DESCRIPTOR_INDEXING, descriptor_indexing);
-	P(SUBGROUP, subgroup);
-	P(FLOAT_CONTROLS, float_control);
-	P(DEPTH_STENCIL_RESOLVE, ds_resolve);
-	P(MULTIVIEW, multiview);
+	P(DESCRIPTOR_INDEXING, descriptor_indexing, 1_0, EXT_DESCRIPTOR_INDEXING);
+	P_CORE(SUBGROUP, subgroup, 1_1);
+	P(FLOAT_CONTROLS, float_control, 1_0, KHR_SHADER_FLOAT_CONTROLS);
+	P(DEPTH_STENCIL_RESOLVE, ds_resolve, 1_0, KHR_DEPTH_STENCIL_RESOLVE);
+	P(MULTIVIEW, multiview, 1_0, KHR_MULTIVIEW);
 	PE(FRAGMENT_SHADING_RATE, fragment_shading_rate, KHR);
 	PE(RAY_TRACING_PIPELINE, ray_tracing_pipeline, KHR);
 	PE(ACCELERATION_STRUCTURE, acceleration_structure, KHR);
