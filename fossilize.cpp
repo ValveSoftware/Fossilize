@@ -57,6 +57,7 @@ using namespace std;
 
 namespace Fossilize
 {
+static const void *pnext_chain_skip_ignored_entries(const void *pNext);
 
 template <typename T>
 struct HashedInfo
@@ -429,7 +430,7 @@ static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const voi
 
 static bool validate_pnext_chain(const void *pNext, const VkStructureType *expected, uint32_t count)
 {
-	while (pNext != nullptr)
+	while ((pNext = pnext_chain_skip_ignored_entries(pNext)) != nullptr)
 	{
 		auto *pin = static_cast<const VkBaseInStructure *>(pNext);
 		auto sType = pin->sType;
@@ -706,7 +707,7 @@ static void hash_pnext_struct(const StateRecorder *,
 
 static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const void *pNext)
 {
-	while (pNext != nullptr)
+	while ((pNext = pnext_chain_skip_ignored_entries(pNext)) != nullptr)
 	{
 		auto *pin = static_cast<const VkBaseInStructure *>(pNext);
 		h.s32(pin->sType);
@@ -3817,7 +3818,7 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 	VkBaseInStructure new_pnext = {};
 	const VkBaseInStructure **ppNext = &new_pnext.pNext;
 
-	while (pNext != nullptr)
+	while ((pNext = pnext_chain_skip_ignored_entries(pNext)) != nullptr)
 	{
 		auto *pin = static_cast<const VkBaseInStructure *>(pNext);
 
@@ -4175,11 +4176,6 @@ bool StateRecorder::record_graphics_pipeline(VkPipeline pipeline, const VkGraphi
                                              Hash custom_hash)
 {
 	{
-		if (create_info.pNext)
-		{
-			log_error_pnext_chain("pNext in VkGraphicsPipelineCreateInfo not supported.", create_info.pNext);
-			return false;
-		}
 		std::lock_guard<std::mutex> lock(impl->record_lock);
 
 		VkGraphicsPipelineCreateInfo *new_info = nullptr;
@@ -4202,11 +4198,6 @@ bool StateRecorder::record_compute_pipeline(VkPipeline pipeline, const VkCompute
                                             Hash custom_hash)
 {
 	{
-		if (create_info.pNext)
-		{
-			log_error_pnext_chain("pNext in VkComputePipelineCreateInfo not supported.", create_info.pNext);
-			return false;
-		}
 		std::lock_guard<std::mutex> lock(impl->record_lock);
 
 		VkComputePipelineCreateInfo *new_info = nullptr;
@@ -4230,11 +4221,6 @@ bool StateRecorder::record_raytracing_pipeline(
 		Hash custom_hash)
 {
 	{
-		if (create_info.pNext)
-		{
-			log_error_pnext_chain("pNext in VkRayTracingPipelineCreateInfo not supported.", create_info.pNext);
-			return false;
-		}
 		std::lock_guard<std::mutex> lock(impl->record_lock);
 
 		VkRayTracingPipelineCreateInfoKHR *new_info = nullptr;
@@ -5925,7 +5911,7 @@ static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *o
 {
 	Value nexts(kArrayType);
 
-	while (pNext != nullptr)
+	while ((pNext = pnext_chain_skip_ignored_entries(pNext)) != nullptr)
 	{
 		auto *pin = static_cast<const VkBaseInStructure *>(pNext);
 		Value next;
@@ -7273,6 +7259,34 @@ StateRecorder::StateRecorder()
 StateRecorder::~StateRecorder()
 {
 	delete impl;
+}
+
+static const void *pnext_chain_skip_ignored_entries(const void *pNext)
+{
+	while (pNext)
+	{
+		auto *base = static_cast<const VkBaseInStructure *>(pNext);
+		bool ignored;
+
+		switch (base->sType)
+		{
+		case VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO_EXT:
+			// We need to ignore any pNext struct which represents output information from a pipeline object.
+			ignored = true;
+			break;
+
+		default:
+			ignored = false;
+			break;
+		}
+
+		if (ignored)
+			pNext = base->pNext;
+		else
+			break;
+	}
+
+	return pNext;
 }
 
 #ifndef FOSSILIZE_API_DEFAULT_LOG_LEVEL

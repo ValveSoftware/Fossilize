@@ -181,7 +181,7 @@ bool ApplicationInfoFilter::Impl::needs_buckets(const VkApplicationInfo *info)
 template <typename T>
 static inline const T *find_pnext(VkStructureType type, const void *pNext)
 {
-	while (pNext)
+	while (pNext != nullptr)
 	{
 		auto *sin = static_cast<const VkBaseInStructure *>(pNext);
 		if (sin->sType == type)
