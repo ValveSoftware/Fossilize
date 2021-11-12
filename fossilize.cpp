@@ -845,6 +845,26 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 	bool dynamic_blend_constants = false;
 	bool dynamic_scissor = false;
 	bool dynamic_viewport = false;
+	bool dynamic_scissor_count = false;
+	bool dynamic_viewport_count = false;
+	bool dynamic_cull_mode = false;
+	bool dynamic_front_face = false;
+	// Primitive topology isn't fully dynamic, so we need to hash it.
+	bool dynamic_depth_test_enable = false;
+	bool dynamic_depth_write_enable = false;
+	bool dynamic_depth_compare_op = false;
+	bool dynamic_depth_bounds_test_enable = false;
+	bool dynamic_stencil_test_enable = false;
+	bool dynamic_stencil_op = false;
+	bool dynamic_vertex_input = false;
+	bool dynamic_vertex_input_binding_stride = false;
+	bool dynamic_patch_control_points = false;
+	bool dynamic_rasterizer_discard_enable = false;
+	bool dynamic_primitive_restart_enable = false;
+	bool dynamic_logic_op = false;
+	bool dynamic_color_write_enable = false;
+	bool dynamic_depth_bias_enable = false;
+
 	if (create_info.pDynamicState)
 	{
 		auto &state = *create_info.pDynamicState;
@@ -873,14 +893,68 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 			case VK_DYNAMIC_STATE_BLEND_CONSTANTS:
 				dynamic_blend_constants = true;
 				break;
+			case VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT_EXT:
+				dynamic_scissor_count = true;
+				// fallthrough
 			case VK_DYNAMIC_STATE_SCISSOR:
 				dynamic_scissor = true;
 				break;
+			case VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT_EXT:
+				dynamic_viewport_count = true;
+				// fallthrough
 			case VK_DYNAMIC_STATE_VIEWPORT:
 				dynamic_viewport = true;
 				break;
 			case VK_DYNAMIC_STATE_LINE_WIDTH:
 				dynamic_line_width = true;
+				break;
+			case VK_DYNAMIC_STATE_CULL_MODE_EXT:
+				dynamic_cull_mode = true;
+				break;
+			case VK_DYNAMIC_STATE_FRONT_FACE_EXT:
+				dynamic_front_face = true;
+				break;
+			case VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE_EXT:
+				dynamic_depth_test_enable = true;
+				break;
+			case VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE_EXT:
+				dynamic_depth_write_enable = true;
+				break;
+			case VK_DYNAMIC_STATE_DEPTH_COMPARE_OP_EXT:
+				dynamic_depth_compare_op = true;
+				break;
+			case VK_DYNAMIC_STATE_DEPTH_BOUNDS_TEST_ENABLE_EXT:
+				dynamic_depth_bounds_test_enable = true;
+				break;
+			case VK_DYNAMIC_STATE_STENCIL_TEST_ENABLE_EXT:
+				dynamic_stencil_test_enable = true;
+				break;
+			case VK_DYNAMIC_STATE_STENCIL_OP_EXT:
+				dynamic_stencil_op = true;
+				break;
+			case VK_DYNAMIC_STATE_VERTEX_INPUT_EXT:
+				dynamic_vertex_input = true;
+				break;
+			case VK_DYNAMIC_STATE_VERTEX_INPUT_BINDING_STRIDE_EXT:
+				dynamic_vertex_input_binding_stride = true;
+				break;
+			case VK_DYNAMIC_STATE_PATCH_CONTROL_POINTS_EXT:
+				dynamic_patch_control_points = true;
+				break;
+			case VK_DYNAMIC_STATE_RASTERIZER_DISCARD_ENABLE_EXT:
+				dynamic_rasterizer_discard_enable = true;
+				break;
+			case VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE_EXT:
+				dynamic_depth_bias_enable = true;
+				break;
+			case VK_DYNAMIC_STATE_LOGIC_OP_EXT:
+				dynamic_logic_op = true;
+				break;
+			case VK_DYNAMIC_STATE_COLOR_WRITE_ENABLE_EXT:
+				dynamic_color_write_enable = true;
+				break;
+			case VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE_EXT:
+				dynamic_primitive_restart_enable = true;
 				break;
 			default:
 				break;
@@ -897,27 +971,27 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 	{
 		auto &ds = *create_info.pDepthStencilState;
 		h.u32(ds.flags);
-		h.u32(ds.depthBoundsTestEnable);
-		h.u32(ds.depthCompareOp);
-		h.u32(ds.depthTestEnable);
-		h.u32(ds.depthWriteEnable);
-		h.u32(ds.front.compareOp);
-		h.u32(ds.front.depthFailOp);
-		h.u32(ds.front.failOp);
-		h.u32(ds.front.passOp);
-		h.u32(ds.back.compareOp);
-		h.u32(ds.back.depthFailOp);
-		h.u32(ds.back.failOp);
-		h.u32(ds.back.passOp);
-		h.u32(ds.stencilTestEnable);
+		h.u32(dynamic_depth_bounds_test_enable ? 0 : ds.depthBoundsTestEnable);
+		h.u32(dynamic_depth_compare_op ? 0 : ds.depthCompareOp);
+		h.u32(dynamic_depth_test_enable ? 0 : ds.depthTestEnable);
+		h.u32(dynamic_depth_write_enable ? 0 : ds.depthWriteEnable);
+		h.u32(dynamic_stencil_op ? 0 : ds.front.compareOp);
+		h.u32(dynamic_stencil_op ? 0 : ds.front.depthFailOp);
+		h.u32(dynamic_stencil_op ? 0 : ds.front.failOp);
+		h.u32(dynamic_stencil_op ? 0 : ds.front.passOp);
+		h.u32(dynamic_stencil_op ? 0 : ds.back.compareOp);
+		h.u32(dynamic_stencil_op ? 0 : ds.back.depthFailOp);
+		h.u32(dynamic_stencil_op ? 0 : ds.back.failOp);
+		h.u32(dynamic_stencil_op ? 0 : ds.back.passOp);
+		h.u32(dynamic_stencil_test_enable ? 0 : ds.stencilTestEnable);
 
-		if (!dynamic_depth_bounds && ds.depthBoundsTestEnable)
+		if (!dynamic_depth_bounds && (ds.depthBoundsTestEnable || dynamic_depth_bounds_test_enable))
 		{
 			h.f32(ds.minDepthBounds);
 			h.f32(ds.maxDepthBounds);
 		}
 
-		if (ds.stencilTestEnable)
+		if (ds.stencilTestEnable || dynamic_stencil_test_enable)
 		{
 			if (!dynamic_stencil_compare)
 			{
@@ -948,7 +1022,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 	{
 		auto &ia = *create_info.pInputAssemblyState;
 		h.u32(ia.flags);
-		h.u32(ia.primitiveRestartEnable);
+		h.u32(dynamic_primitive_restart_enable ? 0 : ia.primitiveRestartEnable);
 		h.u32(ia.topology);
 
 		if (!hash_pnext_chain(&recorder, h, ia.pNext))
@@ -961,14 +1035,14 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 	{
 		auto &rs = *create_info.pRasterizationState;
 		h.u32(rs.flags);
-		h.u32(rs.cullMode);
+		h.u32(dynamic_cull_mode ? 0 : rs.cullMode);
 		h.u32(rs.depthClampEnable);
-		h.u32(rs.frontFace);
-		h.u32(rs.rasterizerDiscardEnable);
+		h.u32(dynamic_front_face ? 0 : rs.frontFace);
+		h.u32(dynamic_rasterizer_discard_enable ? 0 : rs.rasterizerDiscardEnable);
 		h.u32(rs.polygonMode);
-		h.u32(rs.depthBiasEnable);
+		h.u32(dynamic_depth_bias_enable ? 0 : rs.depthBiasEnable);
 
-		if (rs.depthBiasEnable && !dynamic_depth_bias)
+		if ((rs.depthBiasEnable || dynamic_depth_bias_enable) && !dynamic_depth_bias)
 		{
 			h.f32(rs.depthBiasClamp);
 			h.f32(rs.depthBiasSlopeFactor);
@@ -1010,8 +1084,9 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 	{
 		auto &vp = *create_info.pViewportState;
 		h.u32(vp.flags);
-		h.u32(vp.scissorCount);
-		h.u32(vp.viewportCount);
+		h.u32(dynamic_scissor_count ? 0 : vp.scissorCount);
+		h.u32(dynamic_viewport_count ? 0 : vp.viewportCount);
+
 		if (!dynamic_scissor)
 		{
 			for (uint32_t i = 0; i < vp.scissorCount; i++)
@@ -1042,7 +1117,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 	else
 		h.u32(0);
 
-	if (create_info.pVertexInputState)
+	if (!dynamic_vertex_input && create_info.pVertexInputState)
 	{
 		auto &vi = *create_info.pVertexInputState;
 		h.u32(vi.flags);
@@ -1061,7 +1136,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 		{
 			h.u32(vi.pVertexBindingDescriptions[i].binding);
 			h.u32(vi.pVertexBindingDescriptions[i].inputRate);
-			h.u32(vi.pVertexBindingDescriptions[i].stride);
+			h.u32(dynamic_vertex_input_binding_stride ? 0 : vi.pVertexBindingDescriptions[i].stride);
 		}
 
 		if (!hash_pnext_chain(&recorder, h, vi.pNext))
@@ -1076,7 +1151,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 		h.u32(b.flags);
 		h.u32(b.attachmentCount);
 		h.u32(b.logicOpEnable);
-		h.u32(b.logicOp);
+		h.u32(dynamic_logic_op ? 0 : b.logicOp);
 
 		bool need_blend_constants = false;
 
@@ -1085,7 +1160,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 			h.u32(b.pAttachments[i].blendEnable);
 			if (b.pAttachments[i].blendEnable)
 			{
-				h.u32(b.pAttachments[i].colorWriteMask);
+				h.u32(dynamic_color_write_enable ? 0 : b.pAttachments[i].colorWriteMask);
 				h.u32(b.pAttachments[i].alphaBlendOp);
 				h.u32(b.pAttachments[i].colorBlendOp);
 				h.u32(b.pAttachments[i].dstAlphaBlendFactor);
@@ -1123,7 +1198,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 	{
 		auto &tess = *create_info.pTessellationState;
 		h.u32(tess.flags);
-		h.u32(tess.patchControlPoints);
+		h.u32(dynamic_patch_control_points ? 0 : tess.patchControlPoints);
 
 		if (!hash_pnext_chain(&recorder, h, tess.pNext))
 			return false;
