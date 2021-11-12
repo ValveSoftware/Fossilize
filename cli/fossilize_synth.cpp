@@ -879,7 +879,7 @@ int main(int argc, char *argv[])
 
 	spvc_context context;
 	if (spvc_context_create(&context) != SPVC_SUCCESS)
-		return VK_NULL_HANDLE;
+		return EXIT_FAILURE;
 
 	struct ContextDeleter { void operator()(spvc_context ctx) { spvc_context_destroy(ctx); }};
 	std::unique_ptr<spvc_context_s, ContextDeleter> holder(context);

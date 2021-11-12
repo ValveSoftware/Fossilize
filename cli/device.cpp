@@ -428,7 +428,7 @@ bool VulkanDevice::init_device(const Options &opts)
 		for (uint32_t i = 0; i < device_info.enabledExtensionCount; i++)
 			LOGI("Enabling device extension: %s\n", device_info.ppEnabledExtensionNames[i]);
 
-	if (vkCreateDevice(gpu, &device_info, nullptr, &device) != VK_NULL_HANDLE)
+	if (vkCreateDevice(gpu, &device_info, nullptr, &device) != VK_SUCCESS)
 	{
 		LOGE("Failed to create device.\n");
 		return false;
