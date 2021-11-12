@@ -591,6 +591,270 @@ static void record_compute_pipelines(StateRecorder &recorder)
 		abort();
 }
 
+template <typename T>
+static void set_invalid_pointer(T *&ptr)
+{
+	ptr = reinterpret_cast<T *>(uintptr_t(64));
+}
+
+static void record_graphics_pipelines_robustness(StateRecorder &recorder)
+{
+	// Check that state is correctly ignored depending on other state.
+	VkGraphicsPipelineCreateInfo pipe = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+	pipe.layout = fake_handle<VkPipelineLayout>(10002);
+	pipe.subpass = 0;
+	pipe.renderPass = fake_handle<VkRenderPass>(90);
+	pipe.stageCount = 2;
+
+	{
+		VkRenderPassCreateInfo rp_info = { VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
+		VkSubpassDescription subpasses[32] = {};
+		// Exercise the fallback path for meta storage.
+		rp_info.subpassCount = 32;
+		rp_info.pSubpasses = subpasses;
+
+		VkAttachmentReference blank = { VK_ATTACHMENT_UNUSED, VK_IMAGE_LAYOUT_UNDEFINED };
+		VkAttachmentReference att0 = { 0, VK_IMAGE_LAYOUT_GENERAL };
+		for (uint32_t i = 0; i < 32; i++)
+		{
+			subpasses[i].colorAttachmentCount = i & 1 ? 0 : 1;
+			subpasses[i].pDepthStencilAttachment = i & 2 ? &blank : &att0;
+			subpasses[i].pColorAttachments = &att0;
+		}
+
+		if (!recorder.record_render_pass(fake_handle<VkRenderPass>(90), rp_info))
+			abort();
+	}
+
+	VkPipelineShaderStageCreateInfo stages[2] = {};
+	stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+	stages[0].pName = "vert";
+	stages[0].module = fake_handle<VkShaderModule>(5000);
+	stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	stages[1].pName = "frag";
+	stages[1].module = fake_handle<VkShaderModule>(5001);
+	pipe.pStages = stages;
+
+	VkPipelineVertexInputStateCreateInfo vi;
+	VkPipelineMultisampleStateCreateInfo ms;
+	VkPipelineDynamicStateCreateInfo dyn;
+	VkPipelineViewportStateCreateInfo vp;
+	VkPipelineColorBlendStateCreateInfo blend;
+	VkPipelineTessellationStateCreateInfo tess;
+	VkPipelineDepthStencilStateCreateInfo ds;
+	VkPipelineRasterizationStateCreateInfo rs;
+	VkPipelineInputAssemblyStateCreateInfo ia;
+
+	uint64_t counter = 1000000;
+	Hash hash[5];
+
+	const auto reset_state = [&]() {
+		stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+		stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+		pipe.pViewportState = nullptr;
+		pipe.pMultisampleState = nullptr;
+		pipe.pColorBlendState = nullptr;
+		pipe.pDepthStencilState = nullptr;
+		pipe.pInputAssemblyState = nullptr;
+		pipe.pVertexInputState = nullptr;
+		pipe.pTessellationState = nullptr;
+		pipe.subpass = 0;
+		vi = { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+		ms = { VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
+		dyn = { VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
+		vp = { VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
+		blend = { VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
+		tess = { VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO };
+		ds = { VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
+		rs = { VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
+		ia = { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
+	};
+
+	const auto hash_and_record = [&](unsigned index) {
+		if (!Hashing::compute_hash_graphics_pipeline(recorder, pipe, &hash[index]))
+			abort();
+		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(counter), pipe, nullptr, 0))
+			abort();
+		counter++;
+	};
+
+	// First, verify that rasterization-disable ignores relevant state and yields same hash.
+	{
+		reset_state();
+		rs.rasterizerDiscardEnable = VK_TRUE;
+		pipe.pRasterizationState = &rs;
+		hash_and_record(0);
+		set_invalid_pointer(pipe.pViewportState);
+		set_invalid_pointer(pipe.pColorBlendState);
+		set_invalid_pointer(pipe.pDepthStencilState);
+		set_invalid_pointer(pipe.pMultisampleState);
+		hash_and_record(1);
+
+		if (hash[0] != hash[1])
+			abort();
+	}
+
+	// Without the discard, verify the parameters are not ignored and yield different hashes.
+	{
+		reset_state();
+		rs.rasterizerDiscardEnable = VK_FALSE;
+
+		hash_and_record(0);
+		pipe.pViewportState = &vp;
+		hash_and_record(1);
+		pipe.pMultisampleState = &ms;
+		hash_and_record(2);
+
+		if (hash[0] == hash[1] || hash[1] == hash[2])
+			abort();
+	}
+
+	// Another way to test discard enable. If rasterizer discard is dynamic, ignore rasterizerDiscardEnable.
+	{
+		reset_state();
+		rs.rasterizerDiscardEnable = VK_TRUE;
+		const VkDynamicState state = VK_DYNAMIC_STATE_RASTERIZER_DISCARD_ENABLE_EXT;
+		dyn.pDynamicStates = &state;
+		dyn.dynamicStateCount = 1;
+		pipe.pDynamicState = &dyn;
+
+		hash_and_record(0);
+		pipe.pViewportState = &vp;
+		hash_and_record(1);
+		pipe.pMultisampleState = &ms;
+		hash_and_record(2);
+
+		if (hash[0] == hash[1] || hash[1] == hash[2])
+			abort();
+	}
+
+	// Without a shader stage doing tessellation, verify the parameters are ignored.
+	{
+		reset_state();
+		hash_and_record(0);
+		set_invalid_pointer(pipe.pTessellationState);
+		hash_and_record(1);
+		if (hash[0] != hash[1])
+			abort();
+	}
+
+	// If we have a shader doing tessellation, verify the tess parameter is used.
+	{
+		reset_state();
+		stages[0].stage = VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT;
+		stages[1].stage = VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
+		hash_and_record(0);
+		pipe.pTessellationState = &tess;
+		hash_and_record(1);
+		if (hash[0] == hash[1])
+			abort();
+	}
+
+	// If we have a mesh shader stage, verify vertex input and input state is ignored.
+	{
+		reset_state();
+		stages[0].stage = VK_SHADER_STAGE_MESH_BIT_NV;
+		stages[1].stage = VK_SHADER_STAGE_TASK_BIT_NV;
+		hash_and_record(0);
+		set_invalid_pointer(pipe.pVertexInputState);
+		set_invalid_pointer(pipe.pInputAssemblyState);
+		hash_and_record(1);
+		if (hash[0] != hash[1])
+			abort();
+	}
+
+	// If we have VERTEX_INPUT_EXT dynamic state, verify that pVertexInputState is ignored.
+	{
+		reset_state();
+		const VkDynamicState state = VK_DYNAMIC_STATE_VERTEX_INPUT_EXT;
+		dyn.pDynamicStates = &state;
+		dyn.dynamicStateCount = 1;
+		pipe.pDynamicState = &dyn;
+
+		hash_and_record(0);
+		set_invalid_pointer(pipe.pVertexInputState);
+		hash_and_record(1);
+		if (hash[0] != hash[1])
+			abort();
+	}
+
+	// If we set VERTEX_INPUT_DYNAMIC_STRIDE state, verify that stride is ignored.
+	{
+		reset_state();
+		const VkDynamicState state = VK_DYNAMIC_STATE_VERTEX_INPUT_BINDING_STRIDE_EXT;
+		dyn.pDynamicStates = &state;
+		dyn.dynamicStateCount = 1;
+		pipe.pDynamicState = &dyn;
+
+		hash_and_record(0);
+		pipe.pVertexInputState = &vi;
+
+		VkVertexInputBindingDescription binding = {};
+		vi.vertexBindingDescriptionCount = 1;
+		vi.pVertexBindingDescriptions = &binding;
+		hash_and_record(1);
+		binding.stride = 4;
+		hash_and_record(2);
+		if (hash[0] == hash[1])
+			abort();
+		if (hash[1] != hash[2])
+			abort();
+	}
+
+	// If color and depth exists in subpass, verify that pColor and pDepth both contribute.
+	{
+		reset_state();
+		hash_and_record(0);
+		pipe.pColorBlendState = &blend;
+		hash_and_record(1);
+		pipe.pDepthStencilState = &ds;
+		hash_and_record(2);
+		if (hash[0] == hash[1] || hash[1] == hash[2])
+			abort();
+	}
+
+	// If only depth exists in subpass, verify that pDepth contributes and pColor is ignored.
+	{
+		reset_state();
+		pipe.subpass = 9;
+		hash_and_record(0);
+		pipe.pColorBlendState = &blend; // TODO: Cannot handle invalid pointer here yet in copy_pipeline.
+		hash_and_record(1);
+		pipe.pDepthStencilState = &ds;
+		hash_and_record(2);
+		if (hash[0] != hash[1] || hash[1] == hash[2])
+			abort();
+	}
+
+	// If only color exists in subpass, verify that pColor contributes and pDepth is ignored.
+	{
+		reset_state();
+		pipe.subpass = 18;
+		hash_and_record(0);
+		pipe.pColorBlendState = &blend;
+		hash_and_record(1);
+		pipe.pDepthStencilState = &ds; // TODO: Cannot handle invalid pointer here yet in copy_pipeline.
+		hash_and_record(2);
+		if (hash[0] == hash[1] || hash[1] != hash[2])
+			abort();
+	}
+
+	// If neither exists, verify that neither contribute.
+	{
+		reset_state();
+		pipe.subpass = 31;
+		hash_and_record(0);
+		// TODO: Cannot handle invalid pointer here yet in copy_pipeline.
+		pipe.pColorBlendState = &blend;
+		pipe.pDepthStencilState = &ds;
+		hash_and_record(1);
+		if (hash[0] != hash[1])
+			abort();
+	}
+}
+
 static void record_graphics_pipelines(StateRecorder &recorder)
 {
 	VkSpecializationInfo spec = {};
@@ -2279,6 +2543,7 @@ int main()
 		record_compute_pipelines(recorder);
 		record_graphics_pipelines(recorder);
 		record_raytracing_pipelines(recorder);
+		record_graphics_pipelines_robustness(recorder);
 
 		uint8_t *serialized;
 		size_t serialized_size;
