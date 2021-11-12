@@ -234,6 +234,15 @@ public:
 	bool get_hash_for_render_pass(VkRenderPass render_pass, Hash *hash) const FOSSILIZE_WARN_UNUSED;
 	bool get_hash_for_sampler(VkSampler sampler, Hash *hash) const FOSSILIZE_WARN_UNUSED;
 
+	struct SubpassMeta
+	{
+		bool uses_color;
+		bool uses_depth_stencil;
+	};
+	bool get_subpass_meta_for_render_pass_hash(Hash render_pass_hash,
+	                                           uint32_t subpass,
+	                                           SubpassMeta *meta) const FOSSILIZE_WARN_UNUSED;
+
 	// If database is non-null, serialize cannot not be called later, as the implementation will not retain
 	// memory for the create info structs, but rather rely on the database interface to make objects persist.
 	// The database interface will be fed with all information on the fly.

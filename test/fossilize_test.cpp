@@ -513,7 +513,7 @@ static void record_render_passes(StateRecorder &recorder)
 
 	pass.attachmentCount = 2;
 	pass.pAttachments = att;
-	pass.subpassCount = 1;
+	pass.subpassCount = 2;
 	pass.pSubpasses = subpasses;
 	pass.dependencyCount = 0;
 	pass.pDependencies = deps;
