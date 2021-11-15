@@ -603,8 +603,11 @@ static void record_graphics_pipelines_robustness(StateRecorder &recorder)
 	VkGraphicsPipelineCreateInfo pipe = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
 	pipe.layout = fake_handle<VkPipelineLayout>(10002);
 	pipe.subpass = 0;
-	pipe.renderPass = fake_handle<VkRenderPass>(90);
 	pipe.stageCount = 2;
+
+	VkPipelineRenderingCreateInfoKHR rendering_create_info = { VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR };
+	const VkFormat color_format = VK_FORMAT_R8G8B8A8_UNORM;
+	const VkFormat depth_format = VK_FORMAT_D32_SFLOAT;
 
 	{
 		VkRenderPassCreateInfo rp_info = { VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
@@ -664,6 +667,7 @@ static void record_graphics_pipelines_robustness(StateRecorder &recorder)
 		pipe.pVertexInputState = nullptr;
 		pipe.pTessellationState = nullptr;
 		pipe.subpass = 0;
+		pipe.pNext = nullptr;
 		vi = { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
 		ms = { VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
 		dyn = { VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
@@ -673,6 +677,7 @@ static void record_graphics_pipelines_robustness(StateRecorder &recorder)
 		ds = { VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
 		rs = { VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
 		ia = { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
+		pipe.renderPass = fake_handle<VkRenderPass>(90);
 	};
 
 	const auto reset_state_set_all = [&]() {
@@ -831,6 +836,23 @@ static void record_graphics_pipelines_robustness(StateRecorder &recorder)
 		hash_and_record(2);
 		if (hash[0] == hash[1] || hash[1] == hash[2])
 			abort();
+
+		// Test same thing, but with dynamic rendering.
+		reset_state();
+		pipe.renderPass = VK_NULL_HANDLE;
+		pipe.pNext = &rendering_create_info;
+		rendering_create_info = { VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR };
+		rendering_create_info.colorAttachmentCount = 1;
+		rendering_create_info.pColorAttachmentFormats = &color_format;
+		rendering_create_info.stencilAttachmentFormat = depth_format;
+		rendering_create_info.viewMask = 3;
+		hash_and_record(0);
+		pipe.pColorBlendState = &blend;
+		hash_and_record(1);
+		pipe.pDepthStencilState = &ds;
+		hash_and_record(2);
+		if (hash[0] == hash[1] || hash[1] == hash[2])
+			abort();
 	}
 
 	// If only depth exists in subpass, verify that pDepth contributes and pColor is ignored.
@@ -839,6 +861,21 @@ static void record_graphics_pipelines_robustness(StateRecorder &recorder)
 		pipe.subpass = 9;
 		hash_and_record(0);
 		pipe.pColorBlendState = &blend; // TODO: Cannot handle invalid pointer here yet in copy_pipeline.
+		hash_and_record(1);
+		pipe.pDepthStencilState = &ds;
+		hash_and_record(2);
+		if (hash[0] != hash[1] || hash[1] == hash[2])
+			abort();
+
+		// Test same thing, but with dynamic rendering
+		reset_state();
+		pipe.renderPass = VK_NULL_HANDLE;
+		pipe.pNext = &rendering_create_info;
+		rendering_create_info = { VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR };
+		rendering_create_info.depthAttachmentFormat = depth_format;
+		rendering_create_info.viewMask = 3;
+		hash_and_record(0);
+		pipe.pColorBlendState = &blend;
 		hash_and_record(1);
 		pipe.pDepthStencilState = &ds;
 		hash_and_record(2);
@@ -857,6 +894,22 @@ static void record_graphics_pipelines_robustness(StateRecorder &recorder)
 		hash_and_record(2);
 		if (hash[0] == hash[1] || hash[1] != hash[2])
 			abort();
+
+		// Test same thing, but with dynamic rendering ...
+		reset_state();
+		pipe.renderPass = VK_NULL_HANDLE;
+		pipe.pNext = &rendering_create_info;
+		rendering_create_info = { VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR };
+		rendering_create_info.colorAttachmentCount = 1;
+		rendering_create_info.pColorAttachmentFormats = &color_format;
+		rendering_create_info.viewMask = 3;
+		hash_and_record(0);
+		pipe.pColorBlendState = &blend;
+		hash_and_record(1);
+		pipe.pDepthStencilState = &ds;
+		hash_and_record(2);
+		if (hash[0] == hash[1] || hash[1] != hash[2])
+			abort();
 	}
 
 	// If neither exists, verify that neither contribute.
@@ -869,6 +922,31 @@ static void record_graphics_pipelines_robustness(StateRecorder &recorder)
 		pipe.pDepthStencilState = &ds;
 		hash_and_record(1);
 		if (hash[0] != hash[1])
+			abort();
+
+		// Test same thing, but with dynamic rendering ...
+		reset_state();
+		pipe.renderPass = VK_NULL_HANDLE;
+		pipe.pNext = &rendering_create_info;
+		rendering_create_info = { VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR };
+		rendering_create_info.viewMask = 3;
+		hash_and_record(0);
+		pipe.pColorBlendState = &blend;
+		hash_and_record(1);
+		pipe.pDepthStencilState = &ds;
+		hash_and_record(2);
+		if (hash[0] != hash[1] || hash[1] != hash[2])
+			abort();
+
+		// With neither dynamic rendering, nor render pass, ignore as well.
+		reset_state();
+		pipe.renderPass = VK_NULL_HANDLE;
+		hash_and_record(0);
+		pipe.pColorBlendState = &blend;
+		hash_and_record(1);
+		pipe.pDepthStencilState = &ds;
+		hash_and_record(2);
+		if (hash[0] != hash[1] || hash[1] != hash[2])
 			abort();
 	}
 
