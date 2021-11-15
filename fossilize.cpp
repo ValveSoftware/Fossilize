@@ -2363,6 +2363,10 @@ bool StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, D
 		if (!parse_specialization_info(stage["specializationInfo"], &info.stage.pSpecializationInfo))
 			return false;
 
+	if (obj.HasMember("pNext"))
+		if (!parse_pnext_chain(obj["pNext"], &info.pNext))
+			return false;
+
 	if (!iface.enqueue_create_compute_pipeline(hash, &info, &replayed_compute_pipelines[hash]))
 		return false;
 
@@ -2963,6 +2967,10 @@ bool StateReplayer::Impl::parse_raytracing_pipeline(StateCreatorInterface &iface
 	if (!parse_pipeline_layout_handle(obj["layout"], &info.layout))
 		return false;
 
+	if (obj.HasMember("pNext"))
+		if (!parse_pnext_chain(obj["pNext"], &info.pNext))
+			return false;
+
 	if (!iface.enqueue_create_raytracing_pipeline(hash, &info, &replayed_raytracing_pipelines[hash]))
 		return false;
 
@@ -3050,6 +3058,10 @@ bool StateReplayer::Impl::parse_graphics_pipeline(StateCreatorInterface &iface, 
 
 	if (obj.HasMember("vertexInputState"))
 		if (!parse_vertex_input_state(obj["vertexInputState"], &info.pVertexInputState))
+			return false;
+
+	if (obj.HasMember("pNext"))
+		if (!parse_pnext_chain(obj["pNext"], &info.pNext))
 			return false;
 
 	if (!iface.enqueue_create_graphics_pipeline(hash, &info, &replayed_graphics_pipelines[hash]))
@@ -4656,6 +4668,9 @@ bool StateRecorder::Impl::copy_compute_pipeline(const VkComputePipelineCreateInf
 	if (!copy_pnext_chain(info->stage.pNext, alloc, &info->stage.pNext))
 		return false;
 
+	if (!copy_pnext_chain(info->pNext, alloc, &info->pNext))
+		return false;
+
 	*out_create_info = info;
 	return true;
 }
@@ -4697,6 +4712,9 @@ bool StateRecorder::Impl::copy_raytracing_pipeline(const VkRayTracingPipelineCre
 		group.pNext = pNext;
 		group.pShaderGroupCaptureReplayHandle = nullptr;
 	}
+
+	if (!copy_pnext_chain(info->pNext, alloc, &info->pNext))
+		return false;
 
 	*out_info = info;
 	return true;
@@ -4761,6 +4779,9 @@ bool StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateI
 		if (ms.pSampleMask)
 			ms.pSampleMask = copy(ms.pSampleMask, (ms.rasterizationSamples + 31) / 32, alloc);
 	}
+
+	if (!copy_pnext_chain(info->pNext, alloc, &info->pNext))
+		return false;
 
 	*out_create_info = info;
 	return true;
@@ -6102,6 +6123,9 @@ static bool json_value(const VkComputePipelineCreateInfo& pipe, Allocator& alloc
 		return false;
 	p.AddMember("stage", stage, alloc);
 
+	if (!pnext_chain_add_json_value(p, pipe, alloc))
+		return false;
+
 	*out_value = p;
 	return true;
 }
@@ -6520,6 +6544,9 @@ static bool json_value(const VkRayTracingPipelineCreateInfoKHR &pipe, Allocator 
 	}
 	p.AddMember("groups", groups, alloc);
 
+	if (!pnext_chain_add_json_value(p, pipe, alloc))
+		return false;
+
 	*out_value = p;
 	return true;
 }
@@ -6743,6 +6770,9 @@ static bool json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& allo
 	if (!json_value(pipe.pStages, pipe.stageCount, alloc, &stages))
 		return false;
 	p.AddMember("stages", stages, alloc);
+
+	if (!pnext_chain_add_json_value(p, pipe, alloc))
+		return false;
 
 	*out_value = p;
 	return true;
