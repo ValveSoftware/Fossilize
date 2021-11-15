@@ -59,45 +59,7 @@ void *build_pnext_chain(VulkanFeatures &features, uint32_t api_version,
 	CHAIN(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_FEATURES_##ext, features.member, \
 	VK_API_VERSION_1_0, VK_##ext##_##struct_type##_EXTENSION_NAME)
 
-	F(16BIT_STORAGE, storage_16bit, 1_0, KHR_16BIT_STORAGE);
-	F(MULTIVIEW, multiview, 1_0, KHR_MULTIVIEW);
-	F(VARIABLE_POINTERS, variable_pointers, 1_0, KHR_VARIABLE_POINTERS);
-	F(SAMPLER_YCBCR_CONVERSION, ycbcr_conversion, 1_0, KHR_SAMPLER_YCBCR_CONVERSION);
-	F(SHADER_DRAW_PARAMETERS, draw_parameters, 1_1, KHR_SHADER_DRAW_PARAMETERS);
-	F(8BIT_STORAGE, storage_8bit, 1_0, KHR_8BIT_STORAGE);
-	F(SHADER_ATOMIC_INT64, atomic_int64, 1_0, KHR_SHADER_ATOMIC_INT64);
-	F(SHADER_FLOAT16_INT8, float16_int8, 1_0, KHR_SHADER_FLOAT16_INT8);
-	F(DESCRIPTOR_INDEXING, descriptor_indexing, 1_0, EXT_DESCRIPTOR_INDEXING);
-	F(VULKAN_MEMORY_MODEL, memory_model, 1_0, KHR_VULKAN_MEMORY_MODEL);
-	F(UNIFORM_BUFFER_STANDARD_LAYOUT, ubo_standard_layout, 1_0, KHR_UNIFORM_BUFFER_STANDARD_LAYOUT);
-	F(SHADER_SUBGROUP_EXTENDED_TYPES, subgroup_extended_types, 1_1, KHR_SHADER_SUBGROUP_EXTENDED_TYPES);
-	F(SEPARATE_DEPTH_STENCIL_LAYOUTS, separate_ds_layout, 1_0, KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS);
-	F(BUFFER_DEVICE_ADDRESS, buffer_device_address, 1_0, KHR_BUFFER_DEVICE_ADDRESS);
-	FE(SHADER_CLOCK, shader_clock, KHR);
-	FE(FRAGMENT_SHADING_RATE, fragment_shading_rate, KHR);
-	FE(RAY_TRACING_PIPELINE, ray_tracing_pipeline, KHR);
-	FE(ACCELERATION_STRUCTURE, acceleration_structure, KHR);
-	FE(RAY_QUERY, ray_query, KHR);
-	FE(TRANSFORM_FEEDBACK, transform_feedback, EXT);
-	FE(DEPTH_CLIP_ENABLE, depth_clip, EXT);
-	FE(INLINE_UNIFORM_BLOCK, inline_uniform_block, EXT);
-	FE(BLEND_OPERATION_ADVANCED, blend_operation_advanced, EXT);
-	FE(VERTEX_ATTRIBUTE_DIVISOR, attribute_divisor, EXT);
-	FE(SHADER_DEMOTE_TO_HELPER_INVOCATION, demote_to_helper, EXT);
-	FE(FRAGMENT_SHADER_INTERLOCK, shader_interlock, EXT);
-	FE(FRAGMENT_DENSITY_MAP, fragment_density, EXT);
-	FE(BUFFER_DEVICE_ADDRESS, buffer_device_address_ext, EXT);
-	FE(LINE_RASTERIZATION, line_rasterization, EXT);
-	FE(SUBGROUP_SIZE_CONTROL, subgroup_size_control, EXT);
-	FE(EXTENDED_DYNAMIC_STATE, extended_dynamic_state, EXT);
-	FE(COMPUTE_SHADER_DERIVATIVES, compute_shader_derivatives, NV);
-	FE(FRAGMENT_SHADER_BARYCENTRIC, barycentric_nv, NV);
-	FE(SHADER_IMAGE_FOOTPRINT, image_footprint_nv, NV);
-	FE(SHADING_RATE_IMAGE, shading_rate_nv, NV);
-	FE(COOPERATIVE_MATRIX, cooperative_matrix_nv, NV);
-	FE(SHADER_SM_BUILTINS, sm_builtins_nv, NV);
-	FE(SHADER_INTEGER_FUNCTIONS_2, integer_functions2_intel, INTEL);
-	FE(MUTABLE_DESCRIPTOR_TYPE, mutable_descriptor_type_valve, VALVE);
+#include "fossilize_feature_filter_features.inc"
 
 #undef CHAIN
 #undef F
@@ -150,20 +112,11 @@ void *build_pnext_chain(VulkanProperties &props, uint32_t api_version,
 	CHAIN(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_PROPERTIES_##ext, props.member, \
 	VK_API_VERSION_1_0, VK_##ext##_##struct_type##_EXTENSION_NAME)
 
-	P(DESCRIPTOR_INDEXING, descriptor_indexing, 1_0, EXT_DESCRIPTOR_INDEXING);
-	P_CORE(SUBGROUP, subgroup, 1_1);
-	P(FLOAT_CONTROLS, float_control, 1_0, KHR_SHADER_FLOAT_CONTROLS);
-	P(DEPTH_STENCIL_RESOLVE, ds_resolve, 1_0, KHR_DEPTH_STENCIL_RESOLVE);
-	P(MULTIVIEW, multiview, 1_0, KHR_MULTIVIEW);
-	PE(FRAGMENT_SHADING_RATE, fragment_shading_rate, KHR);
-	PE(RAY_TRACING_PIPELINE, ray_tracing_pipeline, KHR);
-	PE(ACCELERATION_STRUCTURE, acceleration_structure, KHR);
-	PE(SUBGROUP_SIZE_CONTROL, subgroup_size_control, EXT);
-	PE(INLINE_UNIFORM_BLOCK, inline_uniform_block, EXT);
-	PE(VERTEX_ATTRIBUTE_DIVISOR, attribute_divisor, EXT);
+#include "fossilize_feature_filter_properties.inc"
 
 #undef CHAIN
 #undef P
+#undef P_CORE
 #undef PE
 
 	return pNext;
@@ -237,7 +190,7 @@ void FeatureFilter::Impl::init_features(const void *pNext)
 	{
 		auto *base = static_cast<const VkBaseInStructure *>(pNext);
 
-#define F(struct_type, member) case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_FEATURES: \
+#define F(struct_type, member, ...) case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_FEATURES: \
 		memcpy(&features.member, base, sizeof(features.member)); \
 		features.member.pNext = nullptr; \
 		break
@@ -249,45 +202,7 @@ void FeatureFilter::Impl::init_features(const void *pNext)
 
 		switch (base->sType)
 		{
-		F(16BIT_STORAGE, storage_16bit);
-		F(MULTIVIEW, multiview);
-		F(VARIABLE_POINTERS, variable_pointers);
-		F(SAMPLER_YCBCR_CONVERSION, ycbcr_conversion);
-		F(SHADER_DRAW_PARAMETERS, draw_parameters);
-		F(8BIT_STORAGE, storage_8bit);
-		F(SHADER_ATOMIC_INT64, atomic_int64);
-		F(SHADER_FLOAT16_INT8, float16_int8);
-		F(DESCRIPTOR_INDEXING, descriptor_indexing);
-		F(VULKAN_MEMORY_MODEL, memory_model);
-		F(UNIFORM_BUFFER_STANDARD_LAYOUT, ubo_standard_layout);
-		F(SHADER_SUBGROUP_EXTENDED_TYPES, subgroup_extended_types);
-		F(SEPARATE_DEPTH_STENCIL_LAYOUTS, separate_ds_layout);
-		F(BUFFER_DEVICE_ADDRESS, buffer_device_address);
-		FE(SHADER_CLOCK, shader_clock, KHR);
-		FE(FRAGMENT_SHADING_RATE, fragment_shading_rate, KHR);
-		FE(RAY_TRACING_PIPELINE, ray_tracing_pipeline, KHR);
-		FE(ACCELERATION_STRUCTURE, acceleration_structure, KHR);
-		FE(RAY_QUERY, ray_query, KHR);
-		FE(TRANSFORM_FEEDBACK, transform_feedback, EXT);
-		FE(DEPTH_CLIP_ENABLE, depth_clip, EXT);
-		FE(INLINE_UNIFORM_BLOCK, inline_uniform_block, EXT);
-		FE(BLEND_OPERATION_ADVANCED, blend_operation_advanced, EXT);
-		FE(VERTEX_ATTRIBUTE_DIVISOR, attribute_divisor, EXT);
-		FE(SHADER_DEMOTE_TO_HELPER_INVOCATION, demote_to_helper, EXT);
-		FE(FRAGMENT_SHADER_INTERLOCK, shader_interlock, EXT);
-		FE(FRAGMENT_DENSITY_MAP, fragment_density, EXT);
-		FE(BUFFER_DEVICE_ADDRESS, buffer_device_address_ext, EXT);
-		FE(LINE_RASTERIZATION, line_rasterization, EXT);
-		FE(SUBGROUP_SIZE_CONTROL, subgroup_size_control, EXT);
-		FE(EXTENDED_DYNAMIC_STATE, extended_dynamic_state, EXT);
-		FE(COMPUTE_SHADER_DERIVATIVES, compute_shader_derivatives, NV);
-		FE(FRAGMENT_SHADER_BARYCENTRIC, barycentric_nv, NV);
-		FE(SHADER_IMAGE_FOOTPRINT, image_footprint_nv, NV);
-		FE(SHADING_RATE_IMAGE, shading_rate_nv, NV);
-		FE(COOPERATIVE_MATRIX, cooperative_matrix_nv, NV);
-		FE(SHADER_SM_BUILTINS, sm_builtins_nv, NV);
-		FE(SHADER_INTEGER_FUNCTIONS_2, integer_functions2_intel, INTEL);
-		FE(MUTABLE_DESCRIPTOR_TYPE, mutable_descriptor_type_valve, VALVE);
+#include "fossilize_feature_filter_features.inc"
 		default:
 			break;
 		}
@@ -305,10 +220,12 @@ void FeatureFilter::Impl::init_properties(const void *pNext)
 	{
 		auto *base = static_cast<const VkBaseInStructure *>(pNext);
 
-#define P(struct_type, member) case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_PROPERTIES: \
+#define P(struct_type, member, ...) case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_PROPERTIES: \
 		memcpy(&props.member, base, sizeof(props.member)); \
 		props.member.pNext = nullptr; \
 		break
+
+#define P_CORE(struct_type, member, ...) P(struct_type, member, __VA_ARGS__)
 
 #define PE(struct_type, member, ext) case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_PROPERTIES_##ext: \
 		memcpy(&props.member, base, sizeof(props.member)); \
@@ -317,17 +234,7 @@ void FeatureFilter::Impl::init_properties(const void *pNext)
 
 		switch (base->sType)
 		{
-		P(DESCRIPTOR_INDEXING, descriptor_indexing);
-		P(SUBGROUP, subgroup);
-		P(FLOAT_CONTROLS, float_control);
-		P(DEPTH_STENCIL_RESOLVE, ds_resolve);
-		P(MULTIVIEW, multiview);
-		PE(FRAGMENT_SHADING_RATE, fragment_shading_rate, KHR);
-		PE(RAY_TRACING_PIPELINE, ray_tracing_pipeline, KHR);
-		PE(ACCELERATION_STRUCTURE, acceleration_structure, KHR);
-		PE(SUBGROUP_SIZE_CONTROL, subgroup_size_control, EXT);
-		PE(INLINE_UNIFORM_BLOCK, inline_uniform_block, EXT);
-		PE(VERTEX_ATTRIBUTE_DIVISOR, attribute_divisor, EXT);
+#include "fossilize_feature_filter_properties.inc"
 		default:
 			break;
 		}
@@ -682,6 +589,50 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 			break;
 		}
 
+		case VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR:
+		{
+			if (!enabled_extensions.count(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME) ||
+			    features.dynamic_rendering.dynamicRendering == VK_FALSE)
+			{
+				return false;
+			}
+
+			auto *info = static_cast<const VkPipelineRenderingCreateInfoKHR *>(pNext);
+
+			for (uint32_t i = 0; i < info->colorAttachmentCount; i++)
+			{
+				if (info->pColorAttachmentFormats[i] != VK_FORMAT_UNDEFINED &&
+				    !format_is_supported(info->pColorAttachmentFormats[i], VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT))
+				{
+					return false;
+				}
+			}
+
+			if (info->depthAttachmentFormat != VK_FORMAT_UNDEFINED &&
+			    !format_is_supported(info->depthAttachmentFormat, VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT))
+			{
+				return false;
+			}
+
+			if (info->stencilAttachmentFormat != VK_FORMAT_UNDEFINED &&
+			    !format_is_supported(info->stencilAttachmentFormat, VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT))
+			{
+				return false;
+			}
+
+			if (info->depthAttachmentFormat != VK_FORMAT_UNDEFINED &&
+			    info->stencilAttachmentFormat != VK_FORMAT_UNDEFINED &&
+			    info->depthAttachmentFormat != info->stencilAttachmentFormat)
+			{
+				return false;
+			}
+
+			if (info->viewMask && !multiview_mask_is_supported(info->viewMask))
+				return false;
+
+			break;
+		}
+
 		default:
 			LOGE("Unrecognized pNext sType: %u. Treating as unsupported.\n", unsigned(base->sType));
 			return false;
@@ -1002,7 +953,29 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 		return features2.features.shaderInt64 == VK_TRUE;
 	case spv::CapabilityInt64Atomics:
 		return features.atomic_int64.shaderBufferInt64Atomics == VK_TRUE ||
-		       features.atomic_int64.shaderSharedInt64Atomics == VK_TRUE;
+		       features.atomic_int64.shaderSharedInt64Atomics == VK_TRUE ||
+		       features.shader_image_atomic_int64.shaderImageInt64Atomics == VK_TRUE;
+	case spv::CapabilityAtomicFloat16AddEXT:
+		return features.shader_atomic_float2.shaderBufferFloat16AtomicAdd == VK_TRUE ||
+		       features.shader_atomic_float2.shaderSharedFloat16AtomicAdd == VK_TRUE;
+	case spv::CapabilityAtomicFloat32AddEXT:
+		return features.shader_atomic_float.shaderBufferFloat32AtomicAdd == VK_TRUE ||
+		       features.shader_atomic_float.shaderSharedFloat32AtomicAdd == VK_TRUE ||
+		       features.shader_atomic_float.shaderImageFloat32AtomicAdd == VK_TRUE;
+	case spv::CapabilityAtomicFloat64AddEXT:
+		return features.shader_atomic_float.shaderBufferFloat64AtomicAdd == VK_TRUE ||
+		       features.shader_atomic_float.shaderSharedFloat64AtomicAdd == VK_TRUE;
+	case spv::CapabilityAtomicFloat16MinMaxEXT:
+		return features.shader_atomic_float2.shaderBufferFloat16AtomicMinMax == VK_TRUE ||
+		       features.shader_atomic_float2.shaderSharedFloat16AtomicMinMax == VK_TRUE;
+	case spv::CapabilityAtomicFloat32MinMaxEXT:
+		return features.shader_atomic_float2.shaderBufferFloat32AtomicMinMax == VK_TRUE ||
+		       features.shader_atomic_float2.shaderSharedFloat32AtomicMinMax == VK_TRUE;
+	case spv::CapabilityAtomicFloat64MinMaxEXT:
+		return features.shader_atomic_float2.shaderBufferFloat64AtomicMinMax == VK_TRUE ||
+		       features.shader_atomic_float2.shaderSharedFloat64AtomicMinMax == VK_TRUE;
+	case spv::CapabilityInt64ImageEXT:
+		return features.shader_image_atomic_int64.shaderImageInt64Atomics == VK_TRUE;
 	case spv::CapabilityGroups:
 		return enabled_extensions.count(VK_AMD_SHADER_BALLOT_EXTENSION_NAME);
 	case spv::CapabilityInt16:
@@ -1041,9 +1014,11 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 	case spv::CapabilityInterpolationFunction:
 		return features2.features.sampleRateShading == VK_TRUE;
 	case spv::CapabilityStorageImageReadWithoutFormat:
-		return features2.features.shaderStorageImageReadWithoutFormat == VK_TRUE;
+		return features2.features.shaderStorageImageReadWithoutFormat == VK_TRUE ||
+		       enabled_extensions.count(VK_KHR_FORMAT_FEATURE_FLAGS_2_EXTENSION_NAME) != 0;
 	case spv::CapabilityStorageImageWriteWithoutFormat:
-		return features2.features.shaderStorageImageWriteWithoutFormat == VK_TRUE;
+		return features2.features.shaderStorageImageWriteWithoutFormat == VK_TRUE ||
+		       enabled_extensions.count(VK_KHR_FORMAT_FEATURE_FLAGS_2_EXTENSION_NAME) != 0;
 	case spv::CapabilityMultiViewport:
 		return features2.features.multiViewport == VK_TRUE;
 	case spv::CapabilityDrawParameters:
@@ -1228,6 +1203,17 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 	case spv::CapabilityRayTraversalPrimitiveCullingKHR:
 		return features.ray_tracing_pipeline.rayTraversalPrimitiveCulling == VK_TRUE ||
 		       features.ray_query.rayQuery == VK_TRUE;
+	case spv::CapabilityWorkgroupMemoryExplicitLayoutKHR:
+		return features.workgroup_memory_explicit_layout.workgroupMemoryExplicitLayout == VK_TRUE;
+	case spv::CapabilityWorkgroupMemoryExplicitLayout8BitAccessKHR:
+		return features.workgroup_memory_explicit_layout.workgroupMemoryExplicitLayout8BitAccess == VK_TRUE;
+	case spv::CapabilityWorkgroupMemoryExplicitLayout16BitAccessKHR:
+		return features.workgroup_memory_explicit_layout.workgroupMemoryExplicitLayout16BitAccess == VK_TRUE;
+	case spv::CapabilityDotProductKHR:
+	case spv::CapabilityDotProductInputAllKHR:
+	case spv::CapabilityDotProductInput4x8BitKHR:
+	case spv::CapabilityDotProductInput4x8BitPackedKHR:
+		return features.shader_integer_dot_product.shaderIntegerDotProduct == VK_TRUE;
 
 	default:
 		LOGE("Unrecognized SPIR-V capability %u, treating as unsupported.\n", unsigned(cap));
@@ -1440,6 +1426,10 @@ bool FeatureFilter::Impl::image_layout_is_supported(VkImageLayout layout) const
 	case VK_IMAGE_LAYOUT_FRAGMENT_SHADING_RATE_ATTACHMENT_OPTIMAL_KHR:
 		return enabled_extensions.count(VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME) != 0 &&
 		       features.fragment_shading_rate.attachmentFragmentShadingRate == VK_TRUE;
+
+	case VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL_KHR:
+	case VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL_KHR:
+		return features.synchronization2.synchronization2 == VK_TRUE;
 
 	default:
 		return false;
@@ -1689,6 +1679,9 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 	if (info->pRasterizationState && !pnext_chain_is_supported(info->pRasterizationState->pNext))
 		return false;
 
+	if (info->renderPass == VK_NULL_HANDLE && features.dynamic_rendering.dynamicRendering == VK_FALSE)
+		return false;
+
 	if (info->pVertexInputState)
 	{
 		for (uint32_t i = 0; i < info->pVertexInputState->vertexAttributeDescriptionCount; i++)
@@ -1721,6 +1714,43 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 				if (!enabled_extensions.count(VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME))
 					return false;
 				if (!features.extended_dynamic_state.extendedDynamicState)
+					return false;
+				break;
+
+			case VK_DYNAMIC_STATE_PATCH_CONTROL_POINTS_EXT:
+				if (!enabled_extensions.count(VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME))
+					return false;
+				if (!features.extended_dynamic_state2.extendedDynamicState2PatchControlPoints)
+					return false;
+				break;
+
+			case VK_DYNAMIC_STATE_LOGIC_OP_EXT:
+				if (!enabled_extensions.count(VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME))
+					return false;
+				if (!features.extended_dynamic_state2.extendedDynamicState2LogicOp)
+					return false;
+				break;
+
+			case VK_DYNAMIC_STATE_RASTERIZER_DISCARD_ENABLE_EXT:
+			case VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE_EXT:
+			case VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE_EXT:
+				if (!enabled_extensions.count(VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME))
+					return false;
+				if (!features.extended_dynamic_state2.extendedDynamicState2)
+					return false;
+				break;
+
+			case VK_DYNAMIC_STATE_COLOR_WRITE_ENABLE_EXT:
+				if (!enabled_extensions.count(VK_EXT_COLOR_WRITE_ENABLE_EXTENSION_NAME))
+					return false;
+				if (!features.color_write_enable.colorWriteEnable)
+					return false;
+				break;
+
+			case VK_DYNAMIC_STATE_VERTEX_INPUT_EXT:
+				if (!enabled_extensions.count(VK_EXT_VERTEX_INPUT_DYNAMIC_STATE_EXTENSION_NAME))
+					return false;
+				if (!features.vertex_input_dynamic_state.vertexInputDynamicState)
 					return false;
 				break;
 
