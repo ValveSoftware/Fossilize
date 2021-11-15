@@ -204,6 +204,18 @@ struct StateRecorder::Impl
 	std::unordered_map<VkRenderPass, Hash> render_pass_to_hash;
 	std::unordered_map<VkSampler, Hash> sampler_to_hash;
 
+	struct SubpassMetaStorage
+	{
+		// Holds 16 subpasses' worth of state. Hits ~100% of the time.
+		uint32_t embedded;
+		uint32_t subpass_count;
+		// Spillage
+		std::vector<uint32_t> fallback;
+	};
+	std::unordered_map<Hash, SubpassMetaStorage> render_pass_hash_to_subpass_meta;
+	template <typename CreateInfo>
+	static SubpassMetaStorage analyze_subpass_meta_storage(const CreateInfo &render_pass_create_info);
+
 	VkApplicationInfo *application_info = nullptr;
 	VkPhysicalDeviceFeatures2 *physical_device_features = nullptr;
 	StateRecorderApplicationFeatureHash application_feature_hash = {};
@@ -289,6 +301,10 @@ struct StateRecorder::Impl
 	bool remap_render_pass_ci(VkRenderPassCreateInfo *create_info) FOSSILIZE_WARN_UNUSED;
 	template <typename CreateInfo>
 	bool remap_shader_module_handles(CreateInfo *info) FOSSILIZE_WARN_UNUSED;
+
+	bool get_subpass_meta_for_render_pass_hash(Hash render_pass_hash,
+	                                           uint32_t subpass,
+	                                           SubpassMeta *meta) const FOSSILIZE_WARN_UNUSED;
 
 	bool serialize_application_info(std::vector<uint8_t> &blob) const FOSSILIZE_WARN_UNUSED;
 	bool serialize_application_blob_link(Hash hash, ResourceTag tag, std::vector<uint8_t> &blob) const FOSSILIZE_WARN_UNUSED;
@@ -809,6 +825,189 @@ static bool compute_hash_stage(const StateRecorder &recorder, Hasher &h, const V
 	return true;
 }
 
+struct GlobalStateInfo
+{
+	bool input_assembly;
+	bool tessellation_state;
+	bool viewport_state;
+	bool multisample_state;
+	bool depth_stencil_state;
+	bool color_blend_state;
+	bool vertex_input;
+};
+
+struct DynamicStateInfo
+{
+	bool stencil_compare;
+	bool stencil_reference;
+	bool stencil_write_mask;
+	bool depth_bounds;
+	bool depth_bias;
+	bool line_width;
+	bool blend_constants;
+	bool scissor;
+	bool viewport;
+	bool scissor_count;
+	bool viewport_count;
+	bool cull_mode;
+	bool front_face;
+	// Primitive topology isn't fully dynamic, so we need to hash it.
+	bool depth_test_enable;
+	bool depth_write_enable;
+	bool depth_compare_op;
+	bool depth_bounds_test_enable;
+	bool stencil_test_enable;
+	bool stencil_op;
+	bool vertex_input;
+	bool vertex_input_binding_stride;
+	bool patch_control_points;
+	bool rasterizer_discard_enable;
+	bool primitive_restart_enable;
+	bool logic_op;
+	bool color_write_enable;
+	bool depth_bias_enable;
+};
+
+static GlobalStateInfo parse_global_state_info(const VkGraphicsPipelineCreateInfo &create_info,
+                                               const DynamicStateInfo &dynamic_info,
+                                               const StateRecorder::SubpassMeta &meta)
+{
+	GlobalStateInfo info = {};
+
+	bool rasterizer_discard = !dynamic_info.rasterizer_discard_enable &&
+	                          create_info.pRasterizationState &&
+	                          create_info.pRasterizationState->rasterizerDiscardEnable == VK_TRUE;
+
+	if (!rasterizer_discard)
+	{
+		info.viewport_state = create_info.pViewportState != nullptr;
+		info.multisample_state = create_info.pMultisampleState != nullptr;
+		info.color_blend_state = create_info.pColorBlendState != nullptr && meta.uses_color;
+		info.depth_stencil_state = create_info.pDepthStencilState != nullptr && meta.uses_depth_stencil;
+	}
+
+	info.input_assembly = create_info.pInputAssemblyState != nullptr;
+	info.vertex_input = create_info.pVertexInputState != nullptr && !dynamic_info.vertex_input;
+
+	for (uint32_t i = 0; i < create_info.stageCount; i++)
+	{
+		switch (create_info.pStages[i].stage)
+		{
+		case VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT:
+		case VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT:
+			info.tessellation_state = create_info.pTessellationState != nullptr;
+			break;
+
+		case VK_SHADER_STAGE_MESH_BIT_NV:
+		case VK_SHADER_STAGE_TASK_BIT_NV:
+			info.input_assembly = false;
+			info.vertex_input = false;
+			break;
+
+		default:
+			break;
+		}
+	}
+
+	return info;
+}
+
+static DynamicStateInfo parse_dynamic_state_info(const VkPipelineDynamicStateCreateInfo &dynamic_info)
+{
+	DynamicStateInfo info = {};
+	for (uint32_t i = 0; i < dynamic_info.dynamicStateCount; i++)
+	{
+		switch (dynamic_info.pDynamicStates[i])
+		{
+		case VK_DYNAMIC_STATE_DEPTH_BIAS:
+			info.depth_bias = true;
+			break;
+		case VK_DYNAMIC_STATE_DEPTH_BOUNDS:
+			info.depth_bounds = true;
+			break;
+		case VK_DYNAMIC_STATE_STENCIL_WRITE_MASK:
+			info.stencil_write_mask = true;
+			break;
+		case VK_DYNAMIC_STATE_STENCIL_REFERENCE:
+			info.stencil_reference = true;
+			break;
+		case VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK:
+			info.stencil_compare = true;
+			break;
+		case VK_DYNAMIC_STATE_BLEND_CONSTANTS:
+			info.blend_constants = true;
+			break;
+		case VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT_EXT:
+			info.scissor_count = true;
+			// fallthrough
+		case VK_DYNAMIC_STATE_SCISSOR:
+			info.scissor = true;
+			break;
+		case VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT_EXT:
+			info.viewport_count = true;
+			// fallthrough
+		case VK_DYNAMIC_STATE_VIEWPORT:
+			info.viewport = true;
+			break;
+		case VK_DYNAMIC_STATE_LINE_WIDTH:
+			info.line_width = true;
+			break;
+		case VK_DYNAMIC_STATE_CULL_MODE_EXT:
+			info.cull_mode = true;
+			break;
+		case VK_DYNAMIC_STATE_FRONT_FACE_EXT:
+			info.front_face = true;
+			break;
+		case VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE_EXT:
+			info.depth_test_enable = true;
+			break;
+		case VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE_EXT:
+			info.depth_write_enable = true;
+			break;
+		case VK_DYNAMIC_STATE_DEPTH_COMPARE_OP_EXT:
+			info.depth_compare_op = true;
+			break;
+		case VK_DYNAMIC_STATE_DEPTH_BOUNDS_TEST_ENABLE_EXT:
+			info.depth_bounds_test_enable = true;
+			break;
+		case VK_DYNAMIC_STATE_STENCIL_TEST_ENABLE_EXT:
+			info.stencil_test_enable = true;
+			break;
+		case VK_DYNAMIC_STATE_STENCIL_OP_EXT:
+			info.stencil_op = true;
+			break;
+		case VK_DYNAMIC_STATE_VERTEX_INPUT_EXT:
+			info.vertex_input = true;
+			break;
+		case VK_DYNAMIC_STATE_VERTEX_INPUT_BINDING_STRIDE_EXT:
+			info.vertex_input_binding_stride = true;
+			break;
+		case VK_DYNAMIC_STATE_PATCH_CONTROL_POINTS_EXT:
+			info.patch_control_points = true;
+			break;
+		case VK_DYNAMIC_STATE_RASTERIZER_DISCARD_ENABLE_EXT:
+			info.rasterizer_discard_enable = true;
+			break;
+		case VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE_EXT:
+			info.depth_bias_enable = true;
+			break;
+		case VK_DYNAMIC_STATE_LOGIC_OP_EXT:
+			info.logic_op = true;
+			break;
+		case VK_DYNAMIC_STATE_COLOR_WRITE_ENABLE_EXT:
+			info.color_write_enable = true;
+			break;
+		case VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE_EXT:
+			info.primitive_restart_enable = true;
+			break;
+		default:
+			break;
+		}
+	}
+
+	return info;
+}
+
 bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraphicsPipelineCreateInfo &create_info, Hash *out_hash)
 {
 	Hasher h;
@@ -833,105 +1032,72 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 		return false;
 	h.u64(hash);
 
+	StateRecorder::SubpassMeta meta = {};
+	if (!recorder.get_subpass_meta_for_render_pass_hash(hash, create_info.subpass, &meta))
+		return false;
+
 	h.u32(create_info.subpass);
 	h.u32(create_info.stageCount);
 
-	bool dynamic_stencil_compare = false;
-	bool dynamic_stencil_reference = false;
-	bool dynamic_stencil_write_mask = false;
-	bool dynamic_depth_bounds = false;
-	bool dynamic_depth_bias = false;
-	bool dynamic_line_width = false;
-	bool dynamic_blend_constants = false;
-	bool dynamic_scissor = false;
-	bool dynamic_viewport = false;
+	DynamicStateInfo dynamic_info = {};
+	if (create_info.pDynamicState)
+		dynamic_info = parse_dynamic_state_info(*create_info.pDynamicState);
+
+
+	GlobalStateInfo global_info = parse_global_state_info(create_info, dynamic_info, meta);
+
 	if (create_info.pDynamicState)
 	{
 		auto &state = *create_info.pDynamicState;
 		h.u32(state.dynamicStateCount);
 		h.u32(state.flags);
 		for (uint32_t i = 0; i < state.dynamicStateCount; i++)
-		{
 			h.u32(state.pDynamicStates[i]);
-			switch (state.pDynamicStates[i])
-			{
-			case VK_DYNAMIC_STATE_DEPTH_BIAS:
-				dynamic_depth_bias = true;
-				break;
-			case VK_DYNAMIC_STATE_DEPTH_BOUNDS:
-				dynamic_depth_bounds = true;
-				break;
-			case VK_DYNAMIC_STATE_STENCIL_WRITE_MASK:
-				dynamic_stencil_write_mask = true;
-				break;
-			case VK_DYNAMIC_STATE_STENCIL_REFERENCE:
-				dynamic_stencil_reference = true;
-				break;
-			case VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK:
-				dynamic_stencil_compare = true;
-				break;
-			case VK_DYNAMIC_STATE_BLEND_CONSTANTS:
-				dynamic_blend_constants = true;
-				break;
-			case VK_DYNAMIC_STATE_SCISSOR:
-				dynamic_scissor = true;
-				break;
-			case VK_DYNAMIC_STATE_VIEWPORT:
-				dynamic_viewport = true;
-				break;
-			case VK_DYNAMIC_STATE_LINE_WIDTH:
-				dynamic_line_width = true;
-				break;
-			default:
-				break;
-			}
-		}
-
 		if (!hash_pnext_chain(&recorder, h, state.pNext))
 			return false;
 	}
 	else
 		h.u32(0);
 
-	if (create_info.pDepthStencilState)
+	if (global_info.depth_stencil_state)
 	{
 		auto &ds = *create_info.pDepthStencilState;
 		h.u32(ds.flags);
-		h.u32(ds.depthBoundsTestEnable);
-		h.u32(ds.depthCompareOp);
-		h.u32(ds.depthTestEnable);
-		h.u32(ds.depthWriteEnable);
-		h.u32(ds.front.compareOp);
-		h.u32(ds.front.depthFailOp);
-		h.u32(ds.front.failOp);
-		h.u32(ds.front.passOp);
-		h.u32(ds.back.compareOp);
-		h.u32(ds.back.depthFailOp);
-		h.u32(ds.back.failOp);
-		h.u32(ds.back.passOp);
-		h.u32(ds.stencilTestEnable);
+		h.u32(dynamic_info.depth_bounds_test_enable ? 0 : ds.depthBoundsTestEnable);
+		h.u32(dynamic_info.depth_compare_op ? 0 : ds.depthCompareOp);
+		h.u32(dynamic_info.depth_test_enable ? 0 : ds.depthTestEnable);
+		h.u32(dynamic_info.depth_write_enable ? 0 : ds.depthWriteEnable);
+		h.u32(dynamic_info.stencil_op ? 0 : ds.front.compareOp);
+		h.u32(dynamic_info.stencil_op ? 0 : ds.front.depthFailOp);
+		h.u32(dynamic_info.stencil_op ? 0 : ds.front.failOp);
+		h.u32(dynamic_info.stencil_op ? 0 : ds.front.passOp);
+		h.u32(dynamic_info.stencil_op ? 0 : ds.back.compareOp);
+		h.u32(dynamic_info.stencil_op ? 0 : ds.back.depthFailOp);
+		h.u32(dynamic_info.stencil_op ? 0 : ds.back.failOp);
+		h.u32(dynamic_info.stencil_op ? 0 : ds.back.passOp);
+		h.u32(dynamic_info.stencil_test_enable ? 0 : ds.stencilTestEnable);
 
-		if (!dynamic_depth_bounds && ds.depthBoundsTestEnable)
+		if (!dynamic_info.depth_bounds && (ds.depthBoundsTestEnable || dynamic_info.depth_bounds_test_enable))
 		{
 			h.f32(ds.minDepthBounds);
 			h.f32(ds.maxDepthBounds);
 		}
 
-		if (ds.stencilTestEnable)
+		if (ds.stencilTestEnable || dynamic_info.stencil_test_enable)
 		{
-			if (!dynamic_stencil_compare)
+			if (!dynamic_info.stencil_compare)
 			{
 				h.u32(ds.front.compareMask);
 				h.u32(ds.back.compareMask);
 			}
 
-			if (!dynamic_stencil_reference)
+			if (!dynamic_info.stencil_reference)
 			{
 				h.u32(ds.front.reference);
 				h.u32(ds.back.reference);
 			}
 
-			if (!dynamic_stencil_write_mask)
+			if (!dynamic_info.stencil_write_mask)
 			{
 				h.u32(ds.front.writeMask);
 				h.u32(ds.back.writeMask);
@@ -944,11 +1110,11 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 	else
 		h.u32(0);
 
-	if (create_info.pInputAssemblyState)
+	if (global_info.input_assembly)
 	{
 		auto &ia = *create_info.pInputAssemblyState;
 		h.u32(ia.flags);
-		h.u32(ia.primitiveRestartEnable);
+		h.u32(dynamic_info.primitive_restart_enable ? 0 : ia.primitiveRestartEnable);
 		h.u32(ia.topology);
 
 		if (!hash_pnext_chain(&recorder, h, ia.pNext))
@@ -961,21 +1127,21 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 	{
 		auto &rs = *create_info.pRasterizationState;
 		h.u32(rs.flags);
-		h.u32(rs.cullMode);
+		h.u32(dynamic_info.cull_mode ? 0 : rs.cullMode);
 		h.u32(rs.depthClampEnable);
-		h.u32(rs.frontFace);
-		h.u32(rs.rasterizerDiscardEnable);
+		h.u32(dynamic_info.front_face ? 0 : rs.frontFace);
+		h.u32(dynamic_info.rasterizer_discard_enable ? 0 : rs.rasterizerDiscardEnable);
 		h.u32(rs.polygonMode);
-		h.u32(rs.depthBiasEnable);
+		h.u32(dynamic_info.depth_bias_enable ? 0 : rs.depthBiasEnable);
 
-		if (rs.depthBiasEnable && !dynamic_depth_bias)
+		if ((rs.depthBiasEnable || dynamic_info.depth_bias_enable) && !dynamic_info.depth_bias)
 		{
 			h.f32(rs.depthBiasClamp);
 			h.f32(rs.depthBiasSlopeFactor);
 			h.f32(rs.depthBiasConstantFactor);
 		}
 
-		if (!dynamic_line_width)
+		if (!dynamic_info.line_width)
 			h.f32(rs.lineWidth);
 
 		if (!hash_pnext_chain(&recorder, h, rs.pNext))
@@ -984,7 +1150,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 	else
 		h.u32(0);
 
-	if (create_info.pMultisampleState)
+	if (global_info.multisample_state)
 	{
 		auto &ms = *create_info.pMultisampleState;
 		h.u32(ms.flags);
@@ -1006,13 +1172,14 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 			return false;
 	}
 
-	if (create_info.pViewportState)
+	if (global_info.viewport_state)
 	{
 		auto &vp = *create_info.pViewportState;
 		h.u32(vp.flags);
-		h.u32(vp.scissorCount);
-		h.u32(vp.viewportCount);
-		if (!dynamic_scissor)
+		h.u32(dynamic_info.scissor_count ? 0 : vp.scissorCount);
+		h.u32(dynamic_info.viewport_count ? 0 : vp.viewportCount);
+
+		if (!dynamic_info.scissor)
 		{
 			for (uint32_t i = 0; i < vp.scissorCount; i++)
 			{
@@ -1023,7 +1190,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 			}
 		}
 
-		if (!dynamic_viewport)
+		if (!dynamic_info.viewport)
 		{
 			for (uint32_t i = 0; i < vp.viewportCount; i++)
 			{
@@ -1042,7 +1209,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 	else
 		h.u32(0);
 
-	if (create_info.pVertexInputState)
+	if (global_info.vertex_input)
 	{
 		auto &vi = *create_info.pVertexInputState;
 		h.u32(vi.flags);
@@ -1061,7 +1228,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 		{
 			h.u32(vi.pVertexBindingDescriptions[i].binding);
 			h.u32(vi.pVertexBindingDescriptions[i].inputRate);
-			h.u32(vi.pVertexBindingDescriptions[i].stride);
+			h.u32(dynamic_info.vertex_input_binding_stride ? 0 : vi.pVertexBindingDescriptions[i].stride);
 		}
 
 		if (!hash_pnext_chain(&recorder, h, vi.pNext))
@@ -1070,13 +1237,13 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 	else
 		h.u32(0);
 
-	if (create_info.pColorBlendState)
+	if (global_info.color_blend_state)
 	{
 		auto &b = *create_info.pColorBlendState;
 		h.u32(b.flags);
 		h.u32(b.attachmentCount);
 		h.u32(b.logicOpEnable);
-		h.u32(b.logicOp);
+		h.u32(dynamic_info.logic_op || !b.logicOpEnable ? 0 : b.logicOp);
 
 		bool need_blend_constants = false;
 
@@ -1109,7 +1276,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 				h.u32(0);
 		}
 
-		if (need_blend_constants && !dynamic_blend_constants)
+		if (need_blend_constants && !dynamic_info.blend_constants)
 			for (auto &blend_const : b.blendConstants)
 				h.f32(blend_const);
 
@@ -1119,11 +1286,11 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 	else
 		h.u32(0);
 
-	if (create_info.pTessellationState)
+	if (global_info.tessellation_state)
 	{
 		auto &tess = *create_info.pTessellationState;
 		h.u32(tess.flags);
-		h.u32(tess.patchControlPoints);
+		h.u32(dynamic_info.patch_control_points ? 0 : tess.patchControlPoints);
 
 		if (!hash_pnext_chain(&recorder, h, tess.pNext))
 			return false;
@@ -4437,6 +4604,12 @@ bool StateRecorder::get_hash_for_render_pass(VkRenderPass render_pass, Hash *has
 	}
 }
 
+bool StateRecorder::get_subpass_meta_for_render_pass_hash(Hash render_pass_hash, uint32_t subpass,
+                                                          SubpassMeta *meta) const
+{
+	return impl->get_subpass_meta_for_render_pass_hash(render_pass_hash, subpass, meta);
+}
+
 bool StateRecorder::Impl::copy_shader_module(const VkShaderModuleCreateInfo *create_info, ScratchAllocator &alloc,
                                              VkShaderModuleCreateInfo **out_create_info)
 {
@@ -4711,6 +4884,35 @@ bool StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateI
                                                  VkGraphicsPipelineCreateInfo **out_create_info)
 {
 	auto *info = copy(create_info, 1, alloc);
+
+	// At the time of copy we don't really know the subpass meta state since the render pass is still being
+	// parsed in a thread.
+	// Assume that the subpass uses color or depth when copying.
+	// This could in theory break if app passes pointer to invalid data while taking advantage of this
+	// rule, but it has never happened so far ...
+	const SubpassMeta subpass_meta = { true, true };
+
+	Hashing::DynamicStateInfo dynamic_info = {};
+	if (create_info->pDynamicState)
+		dynamic_info = Hashing::parse_dynamic_state_info(*create_info->pDynamicState);
+	Hashing::GlobalStateInfo global_info = Hashing::parse_global_state_info(*create_info, dynamic_info, subpass_meta);
+
+	// Remove pointers which a driver must ignore depending on other state.
+	if (!global_info.input_assembly)
+		info->pInputAssemblyState = nullptr;
+	if (!global_info.vertex_input)
+		info->pVertexInputState = nullptr;
+	if (!global_info.depth_stencil_state)
+		info->pDepthStencilState = nullptr;
+	if (!global_info.color_blend_state)
+		info->pColorBlendState = nullptr;
+	if (!global_info.tessellation_state)
+		info->pTessellationState = nullptr;
+	if (!global_info.viewport_state)
+		info->pViewportState = nullptr;
+	if (!global_info.multisample_state)
+		info->pMultisampleState = nullptr;
+
 	info->flags = normalize_pipeline_creation_flags(info->flags);
 
 	if (!update_derived_pipeline(info, base_pipelines, base_pipeline_count))
@@ -5095,6 +5297,51 @@ bool StateRecorder::Impl::remap_render_pass_ci(VkRenderPassCreateInfo *)
 	return true;
 }
 
+bool StateRecorder::Impl::get_subpass_meta_for_render_pass_hash(Hash render_pass_hash, uint32_t subpass,
+                                                                SubpassMeta *meta) const
+{
+	auto itr = render_pass_hash_to_subpass_meta.find(render_pass_hash);
+	if (itr != render_pass_hash_to_subpass_meta.end() && subpass < itr->second.subpass_count)
+	{
+		uint32_t mask;
+		if (subpass < 16)
+			mask = itr->second.embedded >> (2 * subpass);
+		else
+			mask = itr->second.fallback[(subpass - 16) / 16] >> (2 * (subpass & 15));
+		meta->uses_color = (mask & 1) != 0;
+		meta->uses_depth_stencil = (mask & 2) != 0;
+		return true;
+	}
+	else
+		return false;
+}
+
+template <typename CreateInfo>
+StateRecorder::Impl::SubpassMetaStorage StateRecorder::Impl::analyze_subpass_meta_storage(const CreateInfo &info)
+{
+	SubpassMetaStorage storage = {};
+
+	storage.subpass_count = info.subpassCount;
+	if (info.subpassCount > 16)
+		storage.fallback.resize(((info.subpassCount - 16) + 15) / 16);
+
+	for (uint32_t i = 0; i < info.subpassCount; i++)
+	{
+		bool uses_color = info.pSubpasses[i].colorAttachmentCount > 0;
+		bool uses_depth_stencil =
+				info.pSubpasses[i].pDepthStencilAttachment != nullptr &&
+				info.pSubpasses[i].pDepthStencilAttachment->attachment != VK_ATTACHMENT_UNUSED;
+
+		uint32_t &mask = i < 16 ? storage.embedded : storage.fallback[(i - 16) / 16];
+		if (uses_color)
+			mask |= 1u << (2 * (i & 15) + 0);
+		if (uses_depth_stencil)
+			mask |= 1u << (2 * (i & 15) + 1);
+	}
+
+	return storage;
+}
+
 void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 {
 	PayloadWriteFlags payload_flags = 0;
@@ -5236,10 +5483,17 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 		{
 			VkRenderPassCreateInfo *create_info = nullptr;
 			VkRenderPassCreateInfo2 *create_info2 = nullptr;
+			SubpassMetaStorage subpass_meta;
 			if (record_type == VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2)
+			{
 				create_info2 = reinterpret_cast<VkRenderPassCreateInfo2 *>(record_item.create_info);
+				subpass_meta = analyze_subpass_meta_storage(*create_info2);
+			}
 			else
+			{
 				create_info = reinterpret_cast<VkRenderPassCreateInfo *>(record_item.create_info);
+				subpass_meta = analyze_subpass_meta_storage(*create_info);
+			}
 
 			auto hash = record_item.custom_hash;
 			if (hash == 0)
@@ -5251,6 +5505,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 			}
 
 			render_pass_to_hash[api_object_cast<VkRenderPass>(record_item.handle)] = hash;
+			render_pass_hash_to_subpass_meta[hash] = std::move(subpass_meta);
 
 			if (database_iface)
 			{
@@ -6538,7 +6793,9 @@ static bool json_value(const VkRayTracingPipelineCreateInfoKHR &pipe, Allocator 
 }
 
 template <typename Allocator>
-static bool json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& alloc, Value *out_value)
+static bool json_value(const VkGraphicsPipelineCreateInfo &pipe,
+                       const StateRecorder::SubpassMeta &subpass_meta,
+                       Allocator &alloc, Value *out_value)
 {
 	Value p(kObjectType);
 	p.AddMember("flags", pipe.flags, alloc);
@@ -6548,7 +6805,12 @@ static bool json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& allo
 	p.AddMember("renderPass", uint64_string(api_object_cast<uint64_t>(pipe.renderPass), alloc), alloc);
 	p.AddMember("subpass", pipe.subpass, alloc);
 
-	if (pipe.pTessellationState)
+	Hashing::DynamicStateInfo dynamic_info = {};
+	if (pipe.pDynamicState)
+		dynamic_info = Hashing::parse_dynamic_state_info(*pipe.pDynamicState);
+	Hashing::GlobalStateInfo global_info = Hashing::parse_global_state_info(pipe, dynamic_info, subpass_meta);
+
+	if (global_info.tessellation_state)
 	{
 		Value tess(kObjectType);
 		tess.AddMember("flags", pipe.pTessellationState->flags, alloc);
@@ -6566,7 +6828,7 @@ static bool json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& allo
 		p.AddMember("dynamicState", dyn, alloc);
 	}
 
-	if (pipe.pMultisampleState)
+	if (global_info.multisample_state)
 	{
 		Value ms(kObjectType);
 		ms.AddMember("flags", pipe.pMultisampleState->flags, alloc);
@@ -6588,7 +6850,7 @@ static bool json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& allo
 		p.AddMember("multisampleState", ms, alloc);
 	}
 
-	if (pipe.pVertexInputState)
+	if (global_info.vertex_input)
 	{
 		Value vi(kObjectType);
 
@@ -6642,7 +6904,7 @@ static bool json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& allo
 		p.AddMember("rasterizationState", rs, alloc);
 	}
 
-	if (pipe.pInputAssemblyState)
+	if (global_info.input_assembly)
 	{
 		Value ia(kObjectType);
 		ia.AddMember("flags", pipe.pInputAssemblyState->flags, alloc);
@@ -6651,7 +6913,7 @@ static bool json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& allo
 		p.AddMember("inputAssemblyState", ia, alloc);
 	}
 
-	if (pipe.pColorBlendState)
+	if (global_info.color_blend_state)
 	{
 		Value cb(kObjectType);
 		cb.AddMember("flags", pipe.pColorBlendState->flags, alloc);
@@ -6682,7 +6944,7 @@ static bool json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& allo
 		p.AddMember("colorBlendState", cb, alloc);
 	}
 
-	if (pipe.pViewportState)
+	if (global_info.viewport_state)
 	{
 		Value vp(kObjectType);
 		vp.AddMember("flags", pipe.pViewportState->flags, alloc);
@@ -6722,7 +6984,7 @@ static bool json_value(const VkGraphicsPipelineCreateInfo& pipe, Allocator& allo
 		p.AddMember("viewportState", vp, alloc);
 	}
 
-	if (pipe.pDepthStencilState)
+	if (global_info.depth_stencil_state)
 	{
 		Value ds(kObjectType);
 		ds.AddMember("flags", pipe.pDepthStencilState->flags, alloc);
@@ -6994,7 +7256,12 @@ bool StateRecorder::Impl::serialize_graphics_pipeline(Hash hash, const VkGraphic
 	auto &alloc = doc.GetAllocator();
 
 	Value value;
-	if (!json_value(create_info, alloc, &value))
+
+	StateRecorder::SubpassMeta meta = {};
+	if (!get_subpass_meta_for_render_pass_hash(api_object_cast<Hash>(create_info.renderPass), create_info.subpass, &meta))
+		return false;
+
+	if (!json_value(create_info, meta, alloc, &value))
 		return false;
 
 	Value serialized_graphics_pipelines(kObjectType);
@@ -7197,7 +7464,11 @@ bool StateRecorder::serialize(uint8_t **serialized_data, size_t *serialized_size
 	Value graphics_pipelines(kObjectType);
 	for (auto &pipe : impl->graphics_pipelines)
 	{
-		if (!json_value(*pipe.second, alloc, &value))
+		SubpassMeta subpass_meta = {};
+		if (!impl->get_subpass_meta_for_render_pass_hash(api_object_cast<Hash>(pipe.second->renderPass),
+		                                                 pipe.second->subpass, &subpass_meta))
+			return false;
+		if (!json_value(*pipe.second, subpass_meta, alloc, &value))
 			return false;
 		graphics_pipelines.AddMember(uint64_string(pipe.first, alloc), value, alloc);
 	}
