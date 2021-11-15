@@ -637,6 +637,7 @@ static void record_graphics_pipelines_robustness(StateRecorder &recorder)
 	stages[1].module = fake_handle<VkShaderModule>(5001);
 	pipe.pStages = stages;
 
+	VkPipelineColorBlendAttachmentState blend_attachment;
 	VkPipelineVertexInputStateCreateInfo vi;
 	VkPipelineMultisampleStateCreateInfo ms;
 	VkPipelineDynamicStateCreateInfo dyn;
@@ -646,6 +647,8 @@ static void record_graphics_pipelines_robustness(StateRecorder &recorder)
 	VkPipelineDepthStencilStateCreateInfo ds;
 	VkPipelineRasterizationStateCreateInfo rs;
 	VkPipelineInputAssemblyStateCreateInfo ia;
+	VkViewport viewports[2] = {};
+	VkRect2D scissors[2] = {};
 
 	uint64_t counter = 1000000;
 	Hash hash[5];
@@ -670,6 +673,21 @@ static void record_graphics_pipelines_robustness(StateRecorder &recorder)
 		ds = { VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
 		rs = { VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
 		ia = { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
+	};
+
+	const auto reset_state_set_all = [&]() {
+		reset_state();
+		pipe.pVertexInputState = &vi;
+		pipe.pViewportState = &vp;
+		pipe.pMultisampleState = &ms;
+		pipe.pDepthStencilState = &ds;
+		pipe.pColorBlendState = &blend;
+		pipe.pTessellationState = &tess;
+		pipe.pInputAssemblyState = &ia;
+		vp.pViewports = viewports;
+		vp.pScissors = scissors;
+		vp.viewportCount = 1;
+		vp.scissorCount = 1;
 	};
 
 	const auto hash_and_record = [&](unsigned index) {
@@ -851,6 +869,139 @@ static void record_graphics_pipelines_robustness(StateRecorder &recorder)
 		pipe.pDepthStencilState = &ds;
 		hash_and_record(1);
 		if (hash[0] != hash[1])
+			abort();
+	}
+
+	struct HashInvarianceTest
+	{
+		VkDynamicState state;
+		uint32_t *state_word_u32;
+		float *state_word_f32;
+		std::function<void ()> init_state_static;
+		std::function<void ()> init_state_dynamic;
+		bool invariant_in_static_case;
+		bool variant_in_dynamic_case;
+	};
+	std::vector<HashInvarianceTest> hash_invariance_tests;
+
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_VIEWPORT, nullptr, &viewports[0].x });
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_SCISSOR, &scissors[0].extent.width, nullptr });
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT_EXT, &vp.viewportCount, &viewports[0].x });
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT_EXT, &vp.scissorCount, nullptr });
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_LINE_WIDTH, nullptr, &rs.lineWidth });
+
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_DEPTH_BIAS, nullptr, &rs.depthBiasConstantFactor, {}, {}, true });
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_DEPTH_BIAS, nullptr, &rs.depthBiasConstantFactor,
+	                                  [&]() { rs.depthBiasEnable = VK_TRUE; }});
+
+	const auto set_blend_factor_invariant = [&]() {
+		blend.attachmentCount = 1;
+		blend.pAttachments = &blend_attachment;
+		blend_attachment = {};
+		blend_attachment.srcColorBlendFactor = VK_BLEND_FACTOR_CONSTANT_COLOR;
+	};
+	const auto set_blend_factor = [&]() {
+		set_blend_factor_invariant();
+		blend_attachment.blendEnable = VK_TRUE;
+	};
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_BLEND_CONSTANTS, nullptr, &blend.blendConstants[0],
+									  set_blend_factor_invariant, set_blend_factor_invariant, true });
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_BLEND_CONSTANTS, nullptr, &blend.blendConstants[0],
+									  set_blend_factor, set_blend_factor });
+
+	const auto set_depth_bounds_test = [&]() { ds.depthBoundsTestEnable = VK_TRUE; };
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_DEPTH_BOUNDS, nullptr, &ds.minDepthBounds, {}, {}, true });
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_DEPTH_BOUNDS, nullptr, &ds.minDepthBounds, set_depth_bounds_test, set_depth_bounds_test });
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_DEPTH_BOUNDS, nullptr, &ds.maxDepthBounds, set_depth_bounds_test, set_depth_bounds_test });
+
+	const auto set_stencil_test = [&]() { ds.stencilTestEnable = VK_TRUE; };
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK, &ds.front.compareMask, nullptr, {}, {}, true });
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK, &ds.back.compareMask, nullptr, {}, {}, true });
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK, &ds.front.compareMask, nullptr, set_stencil_test, set_stencil_test });
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK, &ds.back.compareMask, nullptr, set_stencil_test, set_stencil_test });
+
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_STENCIL_WRITE_MASK, &ds.front.writeMask, nullptr, {}, {}, true });
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_STENCIL_WRITE_MASK, &ds.back.writeMask, nullptr, {}, {}, true });
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_STENCIL_WRITE_MASK, &ds.front.writeMask, nullptr, set_stencil_test, set_stencil_test });
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_STENCIL_WRITE_MASK, &ds.back.writeMask, nullptr, set_stencil_test, set_stencil_test });
+
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_STENCIL_REFERENCE, &ds.front.reference, nullptr, {}, {}, true });
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_STENCIL_REFERENCE, &ds.back.reference, nullptr, {}, {}, true });
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_STENCIL_REFERENCE, &ds.front.reference, nullptr, set_stencil_test, set_stencil_test });
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_STENCIL_REFERENCE, &ds.back.reference, nullptr, set_stencil_test, set_stencil_test });
+
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_STENCIL_OP_EXT, reinterpret_cast<uint32_t *>(&ds.front.failOp), nullptr, set_stencil_test, set_stencil_test });
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_STENCIL_OP_EXT, reinterpret_cast<uint32_t *>(&ds.front.passOp), nullptr, set_stencil_test, set_stencil_test });
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_STENCIL_OP_EXT, reinterpret_cast<uint32_t *>(&ds.front.depthFailOp), nullptr, set_stencil_test, set_stencil_test });
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_STENCIL_OP_EXT, reinterpret_cast<uint32_t *>(&ds.back.failOp), nullptr, set_stencil_test, set_stencil_test });
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_STENCIL_OP_EXT, reinterpret_cast<uint32_t *>(&ds.back.passOp), nullptr, set_stencil_test, set_stencil_test });
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_STENCIL_OP_EXT, reinterpret_cast<uint32_t *>(&ds.back.depthFailOp), nullptr, set_stencil_test, set_stencil_test });
+
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_STENCIL_TEST_ENABLE_EXT, &ds.stencilTestEnable, nullptr });
+	// Verify that using dynamic stencil test without dynamic stencil ops makes it variant.
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_STENCIL_TEST_ENABLE_EXT, reinterpret_cast<uint32_t *>(&ds.front.passOp), nullptr,
+	                                  set_stencil_test, {}, false, true });
+
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_CULL_MODE_EXT, &rs.cullMode, nullptr });
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_FRONT_FACE_EXT, reinterpret_cast<uint32_t *>(&rs.frontFace), nullptr });
+	// Primitive topology still needs to consider the class, so make the hash variant even with dynamic state set.
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_PRIMITIVE_TOPOLOGY_EXT, reinterpret_cast<uint32_t *>(&ia.topology), nullptr, {}, {}, false, true });
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE_EXT, &ds.depthTestEnable, nullptr });
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE_EXT, &ds.depthWriteEnable, nullptr });
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_DEPTH_COMPARE_OP_EXT, reinterpret_cast<uint32_t *>(&ds.depthCompareOp), nullptr });
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_DEPTH_BOUNDS_TEST_ENABLE_EXT, &ds.depthBoundsTestEnable, nullptr });
+
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE_EXT, &rs.depthBiasEnable, nullptr });
+	// Verify that we pick up bias constants even if depthBiasEnable isn't set and depth bias itself isn't dynamic.
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE_EXT, nullptr, &rs.depthBiasConstantFactor,
+	                                  [&]() { rs.depthBiasEnable = VK_TRUE; },
+	                                  {}, false, true });
+
+	const auto set_tess_shaders = [&]() {
+		stages[0].stage = VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT;
+		stages[1].stage = VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
+	};
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_PATCH_CONTROL_POINTS_EXT, &tess.patchControlPoints, nullptr,
+									  {}, {}, true, false });
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_PATCH_CONTROL_POINTS_EXT, &tess.patchControlPoints, nullptr,
+	                                  set_tess_shaders, set_tess_shaders });
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_RASTERIZER_DISCARD_ENABLE_EXT, &rs.rasterizerDiscardEnable });
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE_EXT, &ia.primitiveRestartEnable });
+
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_LOGIC_OP_EXT, reinterpret_cast<uint32_t *>(&blend.logicOp), nullptr,
+	                                  {}, {}, true });
+
+	for (auto &test : hash_invariance_tests)
+	{
+		// First, verify that changing the state without dynamic state changes the hash.
+		reset_state_set_all();
+		if (test.init_state_static)
+			test.init_state_static();
+
+		hash_and_record(0);
+		if (test.state_word_u32)
+			*test.state_word_u32 += 1;
+		if (test.state_word_f32)
+			*test.state_word_f32 += 1.0f;
+		hash_and_record(1);
+
+		if ((hash[0] == hash[1]) != test.invariant_in_static_case)
+			abort();
+
+		// Set the dynamic state. Changing the state value should *not* modify hash now.
+		reset_state_set_all();
+		if (test.init_state_dynamic)
+			test.init_state_dynamic();
+
+		dyn.pDynamicStates = &test.state;
+		dyn.dynamicStateCount = 1;
+		hash_and_record(0);
+		if (test.state_word_u32)
+			*test.state_word_u32 += 1;
+		if (test.state_word_f32)
+			*test.state_word_f32 += 1.0f;
+		hash_and_record(1);
+		if ((hash[0] != hash[1]) != test.variant_in_dynamic_case)
 			abort();
 	}
 }
