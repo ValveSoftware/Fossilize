@@ -589,6 +589,50 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 			break;
 		}
 
+		case VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR:
+		{
+			if (!enabled_extensions.count(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME) ||
+			    features.dynamic_rendering.dynamicRendering == VK_FALSE)
+			{
+				return false;
+			}
+
+			auto *info = static_cast<const VkPipelineRenderingCreateInfoKHR *>(pNext);
+
+			for (uint32_t i = 0; i < info->colorAttachmentCount; i++)
+			{
+				if (info->pColorAttachmentFormats[i] != VK_FORMAT_UNDEFINED &&
+				    !format_is_supported(info->pColorAttachmentFormats[i], VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT))
+				{
+					return false;
+				}
+			}
+
+			if (info->depthAttachmentFormat != VK_FORMAT_UNDEFINED &&
+			    !format_is_supported(info->depthAttachmentFormat, VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT))
+			{
+				return false;
+			}
+
+			if (info->stencilAttachmentFormat != VK_FORMAT_UNDEFINED &&
+			    !format_is_supported(info->stencilAttachmentFormat, VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT))
+			{
+				return false;
+			}
+
+			if (info->depthAttachmentFormat != VK_FORMAT_UNDEFINED &&
+			    info->stencilAttachmentFormat != VK_FORMAT_UNDEFINED &&
+			    info->depthAttachmentFormat != info->stencilAttachmentFormat)
+			{
+				return false;
+			}
+
+			if (info->viewMask && !multiview_mask_is_supported(info->viewMask))
+				return false;
+
+			break;
+		}
+
 		default:
 			LOGE("Unrecognized pNext sType: %u. Treating as unsupported.\n", unsigned(base->sType));
 			return false;
@@ -1633,6 +1677,9 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 	if (info->pViewportState && !pnext_chain_is_supported(info->pViewportState->pNext))
 		return false;
 	if (info->pRasterizationState && !pnext_chain_is_supported(info->pRasterizationState->pNext))
+		return false;
+
+	if (info->renderPass == VK_NULL_HANDLE && features.dynamic_rendering.dynamicRendering == VK_FALSE)
 		return false;
 
 	if (info->pVertexInputState)
