@@ -60,6 +60,19 @@ namespace Fossilize
 static const void *pnext_chain_skip_ignored_entries(const void *pNext);
 
 template <typename T>
+static const T *find_pnext(VkStructureType sType, const void *pNext)
+{
+	while (pNext)
+	{
+		auto *base_in = static_cast<const VkBaseInStructure *>(pNext);
+		if (base_in->sType == sType)
+			return static_cast<const T *>(pNext);
+		pNext = base_in->pNext;
+	}
+	return nullptr;
+}
+
+template <typename T>
 struct HashedInfo
 {
 	Hash hash;
@@ -305,6 +318,9 @@ struct StateRecorder::Impl
 	bool get_subpass_meta_for_render_pass_hash(Hash render_pass_hash,
 	                                           uint32_t subpass,
 	                                           SubpassMeta *meta) const FOSSILIZE_WARN_UNUSED;
+	bool get_subpass_meta_for_pipeline(const VkGraphicsPipelineCreateInfo &create_info,
+	                                   Hash render_pass_hash,
+	                                   SubpassMeta *meta) const FOSSILIZE_WARN_UNUSED;
 
 	bool serialize_application_info(std::vector<uint8_t> &blob) const FOSSILIZE_WARN_UNUSED;
 	bool serialize_application_blob_link(Hash hash, ResourceTag tag, std::vector<uint8_t> &blob) const FOSSILIZE_WARN_UNUSED;
@@ -1033,7 +1049,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 	h.u64(hash);
 
 	StateRecorder::SubpassMeta meta = {};
-	if (!recorder.get_subpass_meta_for_render_pass_hash(hash, create_info.subpass, &meta))
+	if (!recorder.get_subpass_meta_for_pipeline(create_info, hash, &meta))
 		return false;
 
 	h.u32(create_info.subpass);
@@ -4604,10 +4620,11 @@ bool StateRecorder::get_hash_for_render_pass(VkRenderPass render_pass, Hash *has
 	}
 }
 
-bool StateRecorder::get_subpass_meta_for_render_pass_hash(Hash render_pass_hash, uint32_t subpass,
-                                                          SubpassMeta *meta) const
+bool StateRecorder::get_subpass_meta_for_pipeline(const VkGraphicsPipelineCreateInfo &create_info,
+                                                  Hash render_pass_hash,
+                                                  SubpassMeta *meta) const
 {
-	return impl->get_subpass_meta_for_render_pass_hash(render_pass_hash, subpass, meta);
+	return impl->get_subpass_meta_for_pipeline(create_info, render_pass_hash, meta);
 }
 
 bool StateRecorder::Impl::copy_shader_module(const VkShaderModuleCreateInfo *create_info, ScratchAllocator &alloc,
@@ -5340,6 +5357,32 @@ StateRecorder::Impl::SubpassMetaStorage StateRecorder::Impl::analyze_subpass_met
 	}
 
 	return storage;
+}
+
+bool StateRecorder::Impl::get_subpass_meta_for_pipeline(const VkGraphicsPipelineCreateInfo &create_info,
+                                                        Hash render_pass_hash,
+                                                        SubpassMeta *meta) const
+{
+	// If a render pass is present, use that.
+	if (render_pass_hash)
+	{
+		return get_subpass_meta_for_render_pass_hash(render_pass_hash, create_info.subpass, meta);
+	}
+	else if (auto *rendering_create_info = find_pnext<VkPipelineRenderingCreateInfoKHR>(
+			VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR, create_info.pNext))
+	{
+		meta->uses_color = rendering_create_info->colorAttachmentCount > 0;
+		meta->uses_depth_stencil = rendering_create_info->depthAttachmentFormat != VK_FORMAT_UNDEFINED ||
+		                           rendering_create_info->stencilAttachmentFormat != VK_FORMAT_UNDEFINED;
+	}
+	else
+	{
+		// If the pNext is not present, colorCount = 0, depth = UNDEFINED.
+		meta->uses_color = false;
+		meta->uses_depth_stencil = false;
+	}
+
+	return true;
 }
 
 void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
@@ -7258,7 +7301,7 @@ bool StateRecorder::Impl::serialize_graphics_pipeline(Hash hash, const VkGraphic
 	Value value;
 
 	StateRecorder::SubpassMeta meta = {};
-	if (!get_subpass_meta_for_render_pass_hash(api_object_cast<Hash>(create_info.renderPass), create_info.subpass, &meta))
+	if (!get_subpass_meta_for_pipeline(create_info, api_object_cast<Hash>(create_info.renderPass), &meta))
 		return false;
 
 	if (!json_value(create_info, meta, alloc, &value))
@@ -7465,8 +7508,8 @@ bool StateRecorder::serialize(uint8_t **serialized_data, size_t *serialized_size
 	for (auto &pipe : impl->graphics_pipelines)
 	{
 		SubpassMeta subpass_meta = {};
-		if (!impl->get_subpass_meta_for_render_pass_hash(api_object_cast<Hash>(pipe.second->renderPass),
-		                                                 pipe.second->subpass, &subpass_meta))
+		if (!impl->get_subpass_meta_for_pipeline(*pipe.second, api_object_cast<Hash>(pipe.second->renderPass),
+		                                         &subpass_meta))
 			return false;
 		if (!json_value(*pipe.second, subpass_meta, alloc, &value))
 			return false;

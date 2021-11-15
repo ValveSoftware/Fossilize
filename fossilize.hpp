@@ -239,9 +239,9 @@ public:
 		bool uses_color;
 		bool uses_depth_stencil;
 	};
-	bool get_subpass_meta_for_render_pass_hash(Hash render_pass_hash,
-	                                           uint32_t subpass,
-	                                           SubpassMeta *meta) const FOSSILIZE_WARN_UNUSED;
+	bool get_subpass_meta_for_pipeline(const VkGraphicsPipelineCreateInfo &create_info,
+	                                   Hash render_pass_hash,
+	                                   SubpassMeta *meta) const FOSSILIZE_WARN_UNUSED;
 
 	// If database is non-null, serialize cannot not be called later, as the implementation will not retain
 	// memory for the create info structs, but rather rely on the database interface to make objects persist.
