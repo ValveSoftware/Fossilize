@@ -1383,6 +1383,10 @@ bool FeatureFilter::Impl::image_layout_is_supported(VkImageLayout layout) const
 		return enabled_extensions.count(VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME) != 0 &&
 		       features.fragment_shading_rate.attachmentFragmentShadingRate == VK_TRUE;
 
+	case VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL_KHR:
+	case VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL_KHR:
+		return features.synchronization2.synchronization2 == VK_TRUE;
+
 	default:
 		return false;
 	}
