@@ -909,7 +909,29 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 		return features2.features.shaderInt64 == VK_TRUE;
 	case spv::CapabilityInt64Atomics:
 		return features.atomic_int64.shaderBufferInt64Atomics == VK_TRUE ||
-		       features.atomic_int64.shaderSharedInt64Atomics == VK_TRUE;
+		       features.atomic_int64.shaderSharedInt64Atomics == VK_TRUE ||
+		       features.shader_image_atomic_int64.shaderImageInt64Atomics == VK_TRUE;
+	case spv::CapabilityAtomicFloat16AddEXT:
+		return features.shader_atomic_float2.shaderBufferFloat16AtomicAdd == VK_TRUE ||
+		       features.shader_atomic_float2.shaderSharedFloat16AtomicAdd == VK_TRUE;
+	case spv::CapabilityAtomicFloat32AddEXT:
+		return features.shader_atomic_float.shaderBufferFloat32AtomicAdd == VK_TRUE ||
+		       features.shader_atomic_float.shaderSharedFloat32AtomicAdd == VK_TRUE ||
+		       features.shader_atomic_float.shaderImageFloat32AtomicAdd == VK_TRUE;
+	case spv::CapabilityAtomicFloat64AddEXT:
+		return features.shader_atomic_float.shaderBufferFloat64AtomicAdd == VK_TRUE ||
+		       features.shader_atomic_float.shaderSharedFloat64AtomicAdd == VK_TRUE;
+	case spv::CapabilityAtomicFloat16MinMaxEXT:
+		return features.shader_atomic_float2.shaderBufferFloat16AtomicMinMax == VK_TRUE ||
+		       features.shader_atomic_float2.shaderSharedFloat16AtomicMinMax == VK_TRUE;
+	case spv::CapabilityAtomicFloat32MinMaxEXT:
+		return features.shader_atomic_float2.shaderBufferFloat32AtomicMinMax == VK_TRUE ||
+		       features.shader_atomic_float2.shaderSharedFloat32AtomicMinMax == VK_TRUE;
+	case spv::CapabilityAtomicFloat64MinMaxEXT:
+		return features.shader_atomic_float2.shaderBufferFloat64AtomicMinMax == VK_TRUE ||
+		       features.shader_atomic_float2.shaderSharedFloat64AtomicMinMax == VK_TRUE;
+	case spv::CapabilityInt64ImageEXT:
+		return features.shader_image_atomic_int64.shaderImageInt64Atomics == VK_TRUE;
 	case spv::CapabilityGroups:
 		return enabled_extensions.count(VK_AMD_SHADER_BALLOT_EXTENSION_NAME);
 	case spv::CapabilityInt16:
@@ -948,9 +970,11 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 	case spv::CapabilityInterpolationFunction:
 		return features2.features.sampleRateShading == VK_TRUE;
 	case spv::CapabilityStorageImageReadWithoutFormat:
-		return features2.features.shaderStorageImageReadWithoutFormat == VK_TRUE;
+		return features2.features.shaderStorageImageReadWithoutFormat == VK_TRUE ||
+		       enabled_extensions.count(VK_KHR_FORMAT_FEATURE_FLAGS_2_EXTENSION_NAME) != 0;
 	case spv::CapabilityStorageImageWriteWithoutFormat:
-		return features2.features.shaderStorageImageWriteWithoutFormat == VK_TRUE;
+		return features2.features.shaderStorageImageWriteWithoutFormat == VK_TRUE ||
+		       enabled_extensions.count(VK_KHR_FORMAT_FEATURE_FLAGS_2_EXTENSION_NAME) != 0;
 	case spv::CapabilityMultiViewport:
 		return features2.features.multiViewport == VK_TRUE;
 	case spv::CapabilityDrawParameters:
@@ -1135,6 +1159,17 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 	case spv::CapabilityRayTraversalPrimitiveCullingKHR:
 		return features.ray_tracing_pipeline.rayTraversalPrimitiveCulling == VK_TRUE ||
 		       features.ray_query.rayQuery == VK_TRUE;
+	case spv::CapabilityWorkgroupMemoryExplicitLayoutKHR:
+		return features.workgroup_memory_explicit_layout.workgroupMemoryExplicitLayout == VK_TRUE;
+	case spv::CapabilityWorkgroupMemoryExplicitLayout8BitAccessKHR:
+		return features.workgroup_memory_explicit_layout.workgroupMemoryExplicitLayout8BitAccess == VK_TRUE;
+	case spv::CapabilityWorkgroupMemoryExplicitLayout16BitAccessKHR:
+		return features.workgroup_memory_explicit_layout.workgroupMemoryExplicitLayout16BitAccess == VK_TRUE;
+	case spv::CapabilityDotProductKHR:
+	case spv::CapabilityDotProductInputAllKHR:
+	case spv::CapabilityDotProductInput4x8BitKHR:
+	case spv::CapabilityDotProductInput4x8BitPackedKHR:
+		return features.shader_integer_dot_product.shaderIntegerDotProduct == VK_TRUE;
 
 	default:
 		LOGE("Unrecognized SPIR-V capability %u, treating as unsupported.\n", unsigned(cap));
