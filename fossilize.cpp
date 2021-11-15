@@ -171,6 +171,7 @@ struct StateReplayer::Impl
 	bool parse_attachment_reference_stencil_layout(const Value &state, VkAttachmentReferenceStencilLayout **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_subpass_description_depth_stencil_resolve(const Value &state, VkSubpassDescriptionDepthStencilResolve **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_fragment_shading_rate_attachment_info(const Value &state, VkFragmentShadingRateAttachmentInfoKHR **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_pipeline_rendering_info(const Value &state, VkPipelineRenderingCreateInfoKHR **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_uints(const Value &attachments, const uint32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	bool parse_sints(const Value &attachments, const int32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	const char *duplicate_string(const char *str, size_t len);
@@ -293,6 +294,8 @@ struct StateRecorder::Impl
 	void *copy_pnext_struct(const VkSubpassDescriptionDepthStencilResolve *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkFragmentShadingRateAttachmentInfoKHR *create_info,
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkPipelineRenderingCreateInfoKHR *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 
 	bool remap_sampler_handle(VkSampler sampler, VkSampler *out_sampler) const FOSSILIZE_WARN_UNUSED;
@@ -737,6 +740,18 @@ static void hash_pnext_struct(const StateRecorder *,
 	h.u32(info.stencilLayout);
 }
 
+static void hash_pnext_struct(const StateRecorder *,
+                              Hasher &h,
+                              const VkPipelineRenderingCreateInfoKHR &info)
+{
+	h.u32(info.colorAttachmentCount);
+	h.u32(info.viewMask);
+	for (uint32_t i = 0; i < info.colorAttachmentCount; i++)
+		h.u32(info.pColorAttachmentFormats[i]);
+	h.u32(info.depthAttachmentFormat);
+	h.u32(info.stencilAttachmentFormat);
+}
+
 static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const void *pNext)
 {
 	while ((pNext = pnext_chain_skip_ignored_entries(pNext)) != nullptr)
@@ -806,6 +821,10 @@ static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const voi
 
 		case VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_STENCIL_LAYOUT_KHR:
 			hash_pnext_struct(recorder, h, *static_cast<const VkAttachmentReferenceStencilLayoutKHR *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR:
+			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineRenderingCreateInfoKHR *>(pNext));
 			break;
 
 		default:
@@ -3449,6 +3468,28 @@ bool StateReplayer::Impl::parse_fragment_shading_rate_attachment_info(const Valu
 	return true;
 }
 
+bool StateReplayer::Impl::parse_pipeline_rendering_info(const Value &state,
+                                                        VkPipelineRenderingCreateInfoKHR **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkPipelineRenderingCreateInfoKHR>();
+	*out_info = info;
+
+	info->depthAttachmentFormat = static_cast<VkFormat>(state["depthAttachmentFormat"].GetUint());
+	info->stencilAttachmentFormat = static_cast<VkFormat>(state["stencilAttachmentFormat"].GetUint());
+	info->viewMask = state["viewMask"].GetUint();
+
+	if (state.HasMember("colorAttachmentFormats"))
+	{
+		auto &atts = state["colorAttachmentFormats"];
+		info->colorAttachmentCount = atts.Size();
+		static_assert(sizeof(VkFormat) == sizeof(uint32_t), "Enum size is not 32-bit.");
+		if (!parse_uints(atts, reinterpret_cast<const uint32_t **>(&info->pColorAttachmentFormats)))
+			return false;
+	}
+
+	return true;
+}
+
 bool StateReplayer::Impl::parse_mutable_descriptor_type(const Value &state,
                                                         VkMutableDescriptorTypeCreateInfoVALVE **out_info)
 {
@@ -3660,6 +3701,15 @@ bool StateReplayer::Impl::parse_pnext_chain(const Value &pnext, const void **out
 			if (!parse_fragment_shading_rate_attachment_info(next, &rate))
 				return false;
 			new_struct = reinterpret_cast<VkBaseInStructure *>(rate);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR:
+		{
+			VkPipelineRenderingCreateInfoKHR *rendering = nullptr;
+			if (!parse_pipeline_rendering_info(next, &rendering))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(rendering);
 			break;
 		}
 
@@ -3987,6 +4037,14 @@ void *StateRecorder::Impl::copy_pnext_struct(const VkFragmentShadingRateAttachme
 	return resolve;
 }
 
+void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineRenderingCreateInfoKHR *create_info,
+                                             ScratchAllocator &alloc)
+{
+	auto *rendering = copy(create_info, 1, alloc);
+	rendering->pColorAttachmentFormats = copy(rendering->pColorAttachmentFormats, rendering->colorAttachmentCount, alloc);
+	return rendering;
+}
+
 template <typename T>
 bool StateRecorder::Impl::copy_pnext_chains(const T *ts, uint32_t count, ScratchAllocator &alloc)
 {
@@ -4115,6 +4173,13 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 			if (!rate)
 				return false;
 			*ppNext = rate;
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR:
+		{
+			auto *ci = static_cast<const VkPipelineRenderingCreateInfoKHR *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
 			break;
 		}
 
@@ -4607,6 +4672,13 @@ bool StateRecorder::get_hash_for_descriptor_set_layout(VkDescriptorSetLayout lay
 
 bool StateRecorder::get_hash_for_render_pass(VkRenderPass render_pass, Hash *hash) const
 {
+	if (render_pass == VK_NULL_HANDLE)
+	{
+		// Dynamic rendering.
+		*hash = 0;
+		return true;
+	}
+
 	auto itr = impl->render_pass_to_hash.find(render_pass);
 	if (itr == end(impl->render_pass_to_hash))
 	{
@@ -5136,6 +5208,13 @@ bool StateRecorder::Impl::remap_shader_module_handle(VkShaderModule module, VkSh
 
 bool StateRecorder::Impl::remap_render_pass_handle(VkRenderPass render_pass, VkRenderPass *out_render_pass) const
 {
+	if (render_pass == VK_NULL_HANDLE)
+	{
+		// Dynamic rendering.
+		*out_render_pass = VK_NULL_HANDLE;
+		return true;
+	}
+
 	auto itr = render_pass_to_hash.find(render_pass);
 	if (itr == end(render_pass_to_hash))
 	{
@@ -6200,6 +6279,27 @@ static bool json_value(const VkAttachmentReferenceStencilLayout &create_info, Al
 }
 
 template <typename Allocator>
+static bool json_value(const VkPipelineRenderingCreateInfoKHR &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("depthAttachmentFormat", uint32_t(create_info.depthAttachmentFormat), alloc);
+	value.AddMember("stencilAttachmentFormat", uint32_t(create_info.stencilAttachmentFormat), alloc);
+	value.AddMember("viewMask", create_info.viewMask, alloc);
+
+	if (create_info.colorAttachmentCount)
+	{
+		Value colors(kArrayType);
+		for (uint32_t i = 0; i < create_info.colorAttachmentCount; i++)
+			colors.PushBack(uint32_t(create_info.pColorAttachmentFormats[i]), alloc);
+		value.AddMember("colorAttachmentFormats", colors, alloc);
+	}
+
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
 static bool json_value(const VkSubpassDescriptionDepthStencilResolve &create_info, Allocator &alloc, Value *out_value);
 template <typename Allocator>
 static bool json_value(const VkFragmentShadingRateAttachmentInfoKHR &create_info, Allocator &alloc, Value *out_value);
@@ -6287,6 +6387,11 @@ static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *o
 
 		case VK_STRUCTURE_TYPE_FRAGMENT_SHADING_RATE_ATTACHMENT_INFO_KHR:
 			if (!json_value(*static_cast<const VkFragmentShadingRateAttachmentInfoKHR *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR:
+			if (!json_value(*static_cast<const VkPipelineRenderingCreateInfoKHR *>(pNext), alloc, &next))
 				return false;
 			break;
 
