@@ -1243,7 +1243,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 		h.u32(b.flags);
 		h.u32(b.attachmentCount);
 		h.u32(b.logicOpEnable);
-		h.u32(dynamic_info.logic_op ? 0 : b.logicOp);
+		h.u32(dynamic_info.logic_op || !b.logicOpEnable ? 0 : b.logicOp);
 
 		bool need_blend_constants = false;
 
@@ -1252,7 +1252,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 			h.u32(b.pAttachments[i].blendEnable);
 			if (b.pAttachments[i].blendEnable)
 			{
-				h.u32(dynamic_info.color_write_enable ? 0 : b.pAttachments[i].colorWriteMask);
+				h.u32(b.pAttachments[i].colorWriteMask);
 				h.u32(b.pAttachments[i].alphaBlendOp);
 				h.u32(b.pAttachments[i].colorBlendOp);
 				h.u32(b.pAttachments[i].dstAlphaBlendFactor);
