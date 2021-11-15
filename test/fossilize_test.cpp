@@ -574,6 +574,21 @@ static void record_compute_pipelines(StateRecorder &recorder)
 	pipe.stage.pSpecializationInfo = nullptr;
 	if (!recorder.record_compute_pipeline(fake_handle<VkPipeline>(80001), pipe, nullptr, 0))
 		abort();
+
+	VkPipelineCreationFeedbackCreateInfoEXT feedback = { VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO_EXT };
+
+	Hash hash[2];
+	if (!Hashing::compute_hash_compute_pipeline(recorder, pipe, &hash[0]))
+		abort();
+	pipe.pNext = &feedback;
+	if (!Hashing::compute_hash_compute_pipeline(recorder, pipe, &hash[1]))
+		abort();
+
+	if (hash[0] != hash[1])
+		abort();
+
+	if (!recorder.record_compute_pipeline(fake_handle<VkPipeline>(80002), pipe, nullptr, 0))
+		abort();
 }
 
 static void record_graphics_pipelines(StateRecorder &recorder)
@@ -792,6 +807,21 @@ static void record_graphics_pipelines(StateRecorder &recorder)
 	pipe.basePipelineIndex = 200;
 	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100001), pipe, nullptr, 0))
 		abort();
+
+	VkPipelineCreationFeedbackCreateInfoEXT feedback = { VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO_EXT };
+
+	Hash hash[2];
+	if (!Hashing::compute_hash_graphics_pipeline(recorder, pipe, &hash[0]))
+		abort();
+	pipe.pNext = &feedback;
+	if (!Hashing::compute_hash_graphics_pipeline(recorder, pipe, &hash[1]))
+		abort();
+
+	if (hash[0] != hash[1])
+		abort();
+
+	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100002), pipe, nullptr, 0))
+		abort();
 }
 
 static void record_raytracing_pipelines(StateRecorder &recorder)
@@ -865,6 +895,21 @@ static void record_raytracing_pipelines(StateRecorder &recorder)
 	lib.pLibraries = lib_pipelines;
 	pipe.pLibraryInfo = &lib;
 	if (!recorder.record_raytracing_pipeline(fake_handle<VkPipeline>(43), pipe, nullptr, 0))
+		abort();
+
+	VkPipelineCreationFeedbackCreateInfoEXT feedback = { VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO_EXT };
+
+	Hash hash[2];
+	if (!Hashing::compute_hash_raytracing_pipeline(recorder, pipe, &hash[0]))
+		abort();
+	pipe.pNext = &feedback;
+	if (!Hashing::compute_hash_raytracing_pipeline(recorder, pipe, &hash[1]))
+		abort();
+
+	if (hash[0] != hash[1])
+		abort();
+
+	if (!recorder.record_raytracing_pipeline(fake_handle<VkPipeline>(44), pipe, nullptr, 0))
 		abort();
 }
 
