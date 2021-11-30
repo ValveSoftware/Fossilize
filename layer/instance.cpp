@@ -153,6 +153,10 @@ static std::string getSystemProperty(const char *key)
 #define FOSSILIZE_DUMP_PATH_READ_ONLY_ENV "FOSSILIZE_DUMP_PATH_READ_ONLY"
 #endif
 
+#ifndef FOSSILIZE_DUMP_SYNC_ENV
+#define FOSSILIZE_DUMP_SYNC_ENV "FOSSILIZE_DUMP_SYNC"
+#endif
+
 #ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
 static thread_local const VkComputePipelineCreateInfo *tls_compute_create_info = nullptr;
 static thread_local const VkGraphicsPipelineCreateInfo *tls_graphics_create_info = nullptr;
@@ -227,42 +231,59 @@ static void installSegfaultHandler()
 		LOGE_LEVEL("Failed to install SIGABRT handler!\n");
 }
 #endif
+#endif
 
 void Instance::braceForGraphicsPipelineCrash(StateRecorder *recorder,
                                              const VkGraphicsPipelineCreateInfo *info)
 {
+#ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
 	tls_recorder = recorder;
 	tls_graphics_create_info = info;
 	tls_compute_create_info = nullptr;
 	tls_raytracing_create_info = nullptr;
+#else
+	(void)recorder;
+	(void)info;
+#endif
 }
 
 void Instance::braceForComputePipelineCrash(StateRecorder *recorder,
                                             const VkComputePipelineCreateInfo *info)
 {
+#ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
 	tls_recorder = recorder;
 	tls_compute_create_info = info;
 	tls_graphics_create_info = nullptr;
 	tls_raytracing_create_info = nullptr;
+#else
+	(void)recorder;
+	(void)info;
+#endif
 }
 
 void Instance::braceForRayTracingPipelineCrash(StateRecorder *recorder,
                                                const VkRayTracingPipelineCreateInfoKHR *info)
 {
+#ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
 	tls_recorder = recorder;
 	tls_compute_create_info = nullptr;
 	tls_graphics_create_info = nullptr;
 	tls_raytracing_create_info = info;
+#else
+	(void)recorder;
+	(void)info;
+#endif
 }
 
 void Instance::completedPipelineCompilation()
 {
+#ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
 	tls_recorder = nullptr;
 	tls_graphics_create_info = nullptr;
 	tls_compute_create_info = nullptr;
 	tls_raytracing_create_info = nullptr;
-}
 #endif
+}
 
 Instance::Instance()
 {
@@ -282,6 +303,12 @@ Instance::Instance()
 		enableCrashHandler = true;
 	}
 #endif
+#endif
+
+#ifndef ANDROID
+	const char *sync = getenv(FOSSILIZE_DUMP_SYNC_ENV);
+	if (sync && strtoul(sync, nullptr, 0) != 0)
+		synchronized = true;
 #endif
 }
 
@@ -364,7 +391,11 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDevicePropert
 	if (features)
 		if (!recorder->record_physical_device_features(*features))
 			LOGE_LEVEL("Failed to record physical device features.\n");
-	recorder->init_recording_thread(entry.interface.get());
+
+	if (synchronized)
+		recorder->init_recording_synchronized(entry.interface.get());
+	else
+		recorder->init_recording_thread(entry.interface.get());
 
 	return recorder;
 }

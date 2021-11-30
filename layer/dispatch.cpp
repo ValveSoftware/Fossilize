@@ -171,7 +171,6 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelinesNormal(Device *laye
 	return res;
 }
 
-#ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
 static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelinesParanoid(Device *layer,
                                                                       VkDevice device, VkPipelineCache pipelineCache,
                                                                       uint32_t createInfoCount,
@@ -190,6 +189,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelinesParanoid(Device *la
 			info.basePipelineHandle = pPipelines[info.basePipelineIndex];
 			info.basePipelineIndex = -1;
 		}
+
+		bool eager = layer->getInstance()->capturesEagerly();
+		if (eager && !layer->getRecorder().record_graphics_pipeline(VK_NULL_HANDLE, info, nullptr, 0))
+			LOGW_LEVEL("Failed to capture eagerly.\n");
 
 		// Have to create all pipelines here, in case the application makes use of basePipelineIndex.
 		// Write arguments in TLS in-case we crash here.
@@ -213,7 +216,6 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelinesParanoid(Device *la
 
 	return VK_SUCCESS;
 }
-#endif
 
 static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
                                                               uint32_t createInfoCount,
@@ -223,14 +225,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(VkDevice device, V
 {
 	auto *layer = get_device_layer(device);
 
-#ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
-	if (layer->getInstance()->capturesCrashes())
+	if (layer->getInstance()->capturesParanoid())
 		return CreateGraphicsPipelinesParanoid(layer, device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
 	else
 		return CreateGraphicsPipelinesNormal(layer, device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
-#else
-	return CreateGraphicsPipelinesNormal(layer, device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
-#endif
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelinesNormal(Device *layer,
@@ -254,7 +252,6 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelinesNormal(Device *layer
 	return res;
 }
 
-#ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
 static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelinesParanoid(Device *layer,
                                                                      VkDevice device, VkPipelineCache pipelineCache,
                                                                      uint32_t createInfoCount,
@@ -273,6 +270,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelinesParanoid(Device *lay
 			info.basePipelineHandle = pPipelines[info.basePipelineIndex];
 			info.basePipelineIndex = -1;
 		}
+
+		bool eager = layer->getInstance()->capturesEagerly();
+		if (eager && !layer->getRecorder().record_compute_pipeline(VK_NULL_HANDLE, info, nullptr, 0))
+			LOGW_LEVEL("Failed to capture eagerly.\n");
 
 		// Have to create all pipelines here, in case the application makes use of basePipelineIndex.
 		// Write arguments in TLS in-case we crash here.
@@ -296,7 +297,6 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelinesParanoid(Device *lay
 
 	return VK_SUCCESS;
 }
-#endif
 
 static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelines(VkDevice device, VkPipelineCache pipelineCache,
                                                              uint32_t createInfoCount,
@@ -306,14 +306,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelines(VkDevice device, Vk
 {
 	auto *layer = get_device_layer(device);
 
-#ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
-	if (layer->getInstance()->capturesCrashes())
+	if (layer->getInstance()->capturesParanoid())
 		return CreateComputePipelinesParanoid(layer, device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
 	else
 		return CreateComputePipelinesNormal(layer, device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
-#else
-	return CreateComputePipelinesNormal(layer, device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
-#endif
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesNormal(Device *layer,
@@ -341,7 +337,6 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesNormal(Device *la
 	return res;
 }
 
-#ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
 static VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesParanoid(Device *layer,
                                                                         VkDevice device, VkDeferredOperationKHR deferredOperation,
                                                                         VkPipelineCache pipelineCache,
@@ -361,6 +356,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesParanoid(Device *
 			info.basePipelineHandle = pPipelines[info.basePipelineIndex];
 			info.basePipelineIndex = -1;
 		}
+
+		bool eager = layer->getInstance()->capturesEagerly();
+		if (eager && !layer->getRecorder().record_raytracing_pipeline(VK_NULL_HANDLE, info, nullptr, 0))
+			LOGW_LEVEL("Failed to capture eagerly.\n");
 
 		// Have to create all pipelines here, in case the application makes use of basePipelineIndex.
 		// Write arguments in TLS in-case we crash here.
@@ -385,7 +384,6 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesParanoid(Device *
 
 	return VK_SUCCESS;
 }
-#endif
 
 static VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(
 		VkDevice device, VkDeferredOperationKHR deferredOperation,
@@ -396,8 +394,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(
 {
 	auto *layer = get_device_layer(device);
 
-#ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
-	if (layer->getInstance()->capturesCrashes())
+	if (layer->getInstance()->capturesParanoid())
 	{
 		return CreateRayTracingPipelinesParanoid(layer, device, deferredOperation, pipelineCache,
 		                                         createInfoCount, pCreateInfos, pAllocator, pPipelines);
@@ -407,10 +404,6 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(
 		return CreateRayTracingPipelinesNormal(layer, device, deferredOperation, pipelineCache,
 		                                       createInfoCount, pCreateInfos, pAllocator, pPipelines);
 	}
-#else
-	return CreateRayTracingPipelinesNormal(layer, device, deferredOperation, pipelineCache,
-										   createInfoCount, pCreateInfos, pAllocator, pPipelines);
-#endif
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineLayout(VkDevice device,

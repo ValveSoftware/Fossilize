@@ -59,17 +59,20 @@ public:
 	                                         const VkApplicationInfo *appInfo,
 	                                         const VkPhysicalDeviceFeatures2 *features);
 
-#ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
-	bool capturesCrashes() const
+	bool capturesParanoid() const
 	{
-		return enableCrashHandler;
+		return enableCrashHandler || synchronized;
+	}
+
+	bool capturesEagerly() const
+	{
+		return synchronized;
 	}
 
 	static void braceForGraphicsPipelineCrash(StateRecorder *recorder, const VkGraphicsPipelineCreateInfo *info);
 	static void braceForComputePipelineCrash(StateRecorder *recorder, const VkComputePipelineCreateInfo *info);
 	static void braceForRayTracingPipelineCrash(StateRecorder *recorder, const VkRayTracingPipelineCreateInfoKHR *info);
 	static void completedPipelineCompilation();
-#endif
 
 private:
 	ScratchAllocator alloc;
@@ -78,8 +81,7 @@ private:
 	VkLayerInstanceDispatchTable *pTable = nullptr;
 	PFN_vkGetInstanceProcAddr gpa = nullptr;
 	ApplicationInfoFilter *infoFilter = nullptr;
-#ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
 	bool enableCrashHandler = false;
-#endif
+	bool synchronized = false;
 };
 }
