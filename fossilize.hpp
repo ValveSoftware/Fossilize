@@ -243,7 +243,7 @@ public:
 	                                   Hash render_pass_hash,
 	                                   SubpassMeta *meta) const FOSSILIZE_WARN_UNUSED;
 
-	// If database is non-null, serialize cannot not be called later, as the implementation will not retain
+	// If database is non-null, serialize cannot be called later, as the implementation will not retain
 	// memory for the create info structs, but rather rely on the database interface to make objects persist.
 	// The database interface will be fed with all information on the fly.
 	//
@@ -254,6 +254,10 @@ public:
 	// prepare() will be called asynchronously on the DatabaseInterface to hide the cost of up-front file I/O.
 	// Do not attempt to call prepare() on the calling thread!
 	void init_recording_thread(DatabaseInterface *iface);
+
+	// Uses a recording database, but this is used for debugging scenarios when sigsegv capture does not work robustly.
+	// Every call will record directly and flush any writes to disk before returning.
+	void init_recording_synchronized(DatabaseInterface *iface);
 
 	// Serializes and allocates data for it. This can only be used if a database interface was not used.
 	// The result is a monolithic JSON document which contains all recorded state.

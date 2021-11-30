@@ -204,6 +204,12 @@ If an access violation is triggered, the serialization thread is flushed.
 A message box will appear on Windows, notifying user about this,
 and immediately terminates the process after.
 
+#### `export FOSSILIZE_DUMP_SYNC=1`
+
+Similar to use case for `FOSSILIZE_DUMP_SIGSEGV=1`, but used when `SIGSEGV` dumping does not work correctly, e.g.
+when application relies on using these signal handlers internally. In this mode, all recording is done fully synchronized
+before calling into drivers, which is robust, but likely very slow.
+
 #### `export FOSSILIZE_DUMP_PATH=/my/custom/path`
 
 Custom file path for capturing state. The actual path which is written to disk will be `$FOSSILIZE_DUMP_PATH.$hash.$index.foz`.

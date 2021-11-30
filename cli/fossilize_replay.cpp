@@ -488,6 +488,7 @@ struct ThreadedReplayer : StateCreatorInterface
 			auto &d = per_thread_data[i + 1];
 			d.current_graphics_index = opts.start_graphics_index;
 			d.current_compute_index = opts.start_compute_index;
+			d.current_raytracing_index = opts.start_raytracing_index;
 		}
 
 		// Create a thread pool with the # of specified worker threads (defaults to thread::hardware_concurrency()).
