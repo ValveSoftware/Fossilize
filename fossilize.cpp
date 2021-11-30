@@ -199,6 +199,7 @@ struct StateRecorder::Impl
 	ScratchAllocator temp_allocator;
 	DatabaseInterface *database_iface = nullptr;
 	ApplicationInfoFilter *application_info_filter = nullptr;
+	bool need_prepare = false;
 
 	std::unordered_map<Hash, VkDescriptorSetLayoutCreateInfo *> descriptor_sets;
 	std::unordered_map<Hash, VkPipelineLayoutCreateInfo *> pipeline_layouts;
@@ -340,6 +341,7 @@ struct StateRecorder::Impl
 	bool serialize_raytracing_pipeline(Hash hash, const VkRayTracingPipelineCreateInfoKHR &create_info, std::vector<uint8_t> &blob) const FOSSILIZE_WARN_UNUSED;
 
 	std::mutex record_lock;
+	std::mutex synchronized_record_lock;
 	std::condition_variable record_cv;
 	std::queue<WorkItem> record_queue;
 	std::thread worker_thread;
@@ -348,6 +350,7 @@ struct StateRecorder::Impl
 	bool checksum = false;
 
 	void record_task(StateRecorder *recorder, bool looping);
+	void pump_synchronized_recording(StateRecorder *recorder);
 
 	template <typename T>
 	T *copy(const T *src, size_t count, ScratchAllocator &alloc);
@@ -4347,6 +4350,16 @@ bool StateRecorder::record_physical_device_features(const VkPhysicalDeviceFeatur
 	return record_physical_device_features(features);
 }
 
+void StateRecorder::Impl::pump_synchronized_recording(StateRecorder *recorder)
+{
+	// Thread is not running, drain the queue ourselves.
+	if (!worker_thread.joinable())
+	{
+		std::lock_guard<std::mutex> lock(synchronized_record_lock);
+		record_task(recorder, false);
+	}
+}
+
 bool StateRecorder::record_sampler(VkSampler sampler, const VkSamplerCreateInfo &create_info, Hash custom_hash)
 {
 	{
@@ -4365,10 +4378,7 @@ bool StateRecorder::record_sampler(VkSampler sampler, const VkSamplerCreateInfo 
 		impl->record_cv.notify_one();
 	}
 
-	// Thread is not running, drain the queue ourselves.
-	if (!impl->worker_thread.joinable())
-		impl->record_task(this, false);
-
+	impl->pump_synchronized_recording(this);
 	return true;
 }
 
@@ -4386,10 +4396,7 @@ bool StateRecorder::record_descriptor_set_layout(VkDescriptorSetLayout set_layou
 		impl->record_cv.notify_one();
 	}
 
-	// Thread is not running, drain the queue ourselves.
-	if (!impl->worker_thread.joinable())
-		impl->record_task(this, false);
-
+	impl->pump_synchronized_recording(this);
 	return true;
 }
 
@@ -4412,10 +4419,7 @@ bool StateRecorder::record_pipeline_layout(VkPipelineLayout pipeline_layout, con
 		impl->record_cv.notify_one();
 	}
 
-	// Thread is not running, drain the queue ourselves.
-	if (!impl->worker_thread.joinable())
-		impl->record_task(this, false);
-
+	impl->pump_synchronized_recording(this);
 	return true;
 }
 
@@ -4434,10 +4438,7 @@ bool StateRecorder::record_graphics_pipeline(VkPipeline pipeline, const VkGraphi
 		impl->record_cv.notify_one();
 	}
 
-	// Thread is not running, drain the queue ourselves.
-	if (!impl->worker_thread.joinable())
-		impl->record_task(this, false);
-
+	impl->pump_synchronized_recording(this);
 	return true;
 }
 
@@ -4456,10 +4457,7 @@ bool StateRecorder::record_compute_pipeline(VkPipeline pipeline, const VkCompute
 		impl->record_cv.notify_one();
 	}
 
-	// Thread is not running, drain the queue ourselves.
-	if (!impl->worker_thread.joinable())
-		impl->record_task(this, false);
-
+	impl->pump_synchronized_recording(this);
 	return true;
 }
 
@@ -4482,10 +4480,7 @@ bool StateRecorder::record_raytracing_pipeline(
 		impl->record_cv.notify_one();
 	}
 
-	// Thread is not running, drain the queue ourselves.
-	if (!impl->worker_thread.joinable())
-		impl->record_task(this, false);
-
+	impl->pump_synchronized_recording(this);
 	return true;
 }
 
@@ -4503,10 +4498,7 @@ bool StateRecorder::record_render_pass(VkRenderPass render_pass, const VkRenderP
 		impl->record_cv.notify_one();
 	}
 
-	// Thread is not running, drain the queue ourselves.
-	if (!impl->worker_thread.joinable())
-		impl->record_task(this, false);
-
+	impl->pump_synchronized_recording(this);
 	return true;
 }
 
@@ -4524,10 +4516,7 @@ bool StateRecorder::record_render_pass2(VkRenderPass render_pass, const VkRender
 		impl->record_cv.notify_one();
 	}
 
-	// Thread is not running, drain the queue ourselves.
-	if (!impl->worker_thread.joinable())
-		impl->record_task(this, false);
-
+	impl->pump_synchronized_recording(this);
 	return true;
 }
 
@@ -4550,10 +4539,7 @@ bool StateRecorder::record_shader_module(VkShaderModule module, const VkShaderMo
 		impl->record_cv.notify_one();
 	}
 
-	// Thread is not running, drain the queue ourselves.
-	if (!impl->worker_thread.joinable())
-		impl->record_task(this, false);
-
+	impl->pump_synchronized_recording(this);
 	return true;
 }
 
@@ -5475,9 +5461,8 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 	bool write_database_entries = true;
 
 	// Start by preparing in the thread since we need to parse an archive potentially, and that might block a little bit.
-	if (database_iface)
+	if (need_prepare && database_iface)
 	{
-		assert(looping);
 		if (!database_iface->prepare())
 		{
 			LOGE_LEVEL("Failed to prepare database, will not dump data to database.\n");
@@ -5493,9 +5478,8 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 	vector<uint8_t> blob;
 	blob.reserve(64 * 1024);
 
-	if (database_iface && write_database_entries)
+	if (database_iface && write_database_entries && need_prepare)
 	{
-		assert(looping);
 		Hasher h;
 		Hashing::hash_application_feature_info(h, application_feature_hash);
 		if (serialize_application_info(blob))
@@ -5504,6 +5488,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 			LOGE_LEVEL("Failed to serialize application info.\n");
 	}
 
+	need_prepare = false;
 	bool need_flush = false;
 
 	for (;;)
@@ -5948,13 +5933,20 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 		}
 	}
 
-	if (database_iface)
-		database_iface->flush();
+	if (looping)
+	{
+		if (database_iface)
+			database_iface->flush();
 
-	// We no longer need a reference to this.
-	// This should allow us to call init_recording_thread again if we want,
-	// or emit some final single threaded recording tasks.
-	database_iface = nullptr;
+		// We no longer need a reference to this.
+		// This should allow us to call init_recording_thread again if we want,
+		// or emit some final single threaded recording tasks.
+		database_iface = nullptr;
+	}
+	else if (database_iface)
+	{
+		database_iface->flush();
+	}
 }
 
 static char base64(uint32_t v)
@@ -7654,6 +7646,7 @@ void StateRecorder::free_serialized(uint8_t *serialized)
 void StateRecorder::init_recording_thread(DatabaseInterface *iface)
 {
 	impl->database_iface = iface;
+	impl->need_prepare = true;
 
 	auto level = get_thread_log_level();
 	auto cb = Internal::get_thread_log_callback();
@@ -7663,6 +7656,12 @@ void StateRecorder::init_recording_thread(DatabaseInterface *iface)
 		set_thread_log_callback(cb, userdata);
 		impl->record_task(this, true);
 	});
+}
+
+void StateRecorder::init_recording_synchronized(DatabaseInterface *iface)
+{
+	impl->database_iface = iface;
+	impl->need_prepare = true;
 }
 
 void StateRecorder::tear_down_recording_thread()
