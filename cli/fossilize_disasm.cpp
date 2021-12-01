@@ -771,15 +771,18 @@ static string disassemble_spirv_isa(const VulkanDevice &device, VkPipeline pipel
 				result += static_cast<const char *>(rep.pData);
 				result += "\n\n";
 			}
+
 			free(rep.pData);
 		}
+
 		for (auto &stat : statistics)
 		{
 			result += stat.name;
 			result += " (";
 			result += stat.description;
 			result += "): ";
-			switch (stat.format) {
+			switch (stat.format)
+			{
 			case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_BOOL32_KHR:
 				result += to_string(stat.value.b32);
 				break;
@@ -797,6 +800,7 @@ static string disassemble_spirv_isa(const VulkanDevice &device, VkPipeline pipel
 			}
 			result += "\n";
 		}
+
 		return result;
 	}
 	else if (device.has_amd_shader_info())
