@@ -360,7 +360,8 @@ struct DisasmReplayer : StateCreatorInterface
 		if (device)
 		{
 			if (device->has_pipeline_stats())
-				const_cast<VkComputePipelineCreateInfo *>(create_info)->flags |= VK_PIPELINE_CREATE_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR;
+				const_cast<VkComputePipelineCreateInfo *>(create_info)->flags |=
+						VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR | VK_PIPELINE_CREATE_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR;
 
 			LOGI("Creating compute pipeline %0" PRIX64 "\n", hash);
 			if (vkCreateComputePipelines(device->get_device(), pipeline_cache, 1, create_info, nullptr, pipeline) !=
@@ -391,7 +392,8 @@ struct DisasmReplayer : StateCreatorInterface
 		if (device)
 		{
 			if (device->has_pipeline_stats())
-				const_cast<VkGraphicsPipelineCreateInfo *>(create_info)->flags |= VK_PIPELINE_CREATE_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR;
+				const_cast<VkGraphicsPipelineCreateInfo *>(create_info)->flags |=
+						VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR | VK_PIPELINE_CREATE_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR;
 
 			LOGI("Creating graphics pipeline %0" PRIX64 "\n", hash);
 			if (vkCreateGraphicsPipelines(device->get_device(), pipeline_cache, 1, create_info, nullptr, pipeline) !=
@@ -424,7 +426,7 @@ struct DisasmReplayer : StateCreatorInterface
 			if (device->has_pipeline_stats())
 			{
 				const_cast<VkRayTracingPipelineCreateInfoKHR *>(create_info)->flags |=
-						VK_PIPELINE_CREATE_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR;
+						VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR | VK_PIPELINE_CREATE_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR;
 			}
 
 			LOGI("Creating raytracing pipeline %0" PRIX64 "\n", hash);
@@ -719,21 +721,42 @@ static string disassemble_spirv_isa(const VulkanDevice &device, VkPipeline pipel
 		executable.pipeline = pipeline;
 		executable.executableIndex = index;
 
-		if (vkGetPipelineExecutableInternalRepresentationsKHR(device.get_device(), &executable, &count, nullptr) != VK_SUCCESS)
-			return "";
+		vector<VkPipelineExecutableInternalRepresentationKHR> representations;
+		if (vkGetPipelineExecutableInternalRepresentationsKHR(device.get_device(), &executable, &count, nullptr) == VK_SUCCESS)
+		{
+			representations.resize(count);
+			for (auto &rep : representations)
+				rep.sType = VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_INTERNAL_REPRESENTATION_KHR;
 
-		vector<VkPipelineExecutableInternalRepresentationKHR> representations(count);
-		for (auto &rep : representations)
-			rep.sType = VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_INTERNAL_REPRESENTATION_KHR;
+			bool success = vkGetPipelineExecutableInternalRepresentationsKHR(device.get_device(), &executable, &count, representations.data()) == VK_SUCCESS;
+			if (success)
+			{
+				for (auto &rep : representations)
+					rep.pData = malloc(rep.dataSize);
 
-		if (vkGetPipelineExecutableInternalRepresentationsKHR(device.get_device(), &executable, &count, representations.data()) != VK_SUCCESS)
-			return "";
+				success = vkGetPipelineExecutableInternalRepresentationsKHR(device.get_device(), &executable, &count, representations.data()) == VK_SUCCESS;
+				if (!success)
+				{
+					for (auto &rep : representations)
+						free(rep.pData);
+				}
+			}
 
-		for (auto &rep : representations)
-			rep.pData = malloc(rep.dataSize);
+			if (!success)
+				representations.clear();
+		}
 
-		if (vkGetPipelineExecutableInternalRepresentationsKHR(device.get_device(), &executable, &count, representations.data()) != VK_SUCCESS)
-			return "";
+		vector<VkPipelineExecutableStatisticKHR> statistics;
+		if (vkGetPipelineExecutableStatisticsKHR(device.get_device(), &executable, &count, nullptr) == VK_SUCCESS)
+		{
+			statistics.resize(count);
+			for (auto &stat : statistics)
+				stat.sType = VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_INTERNAL_REPRESENTATION_KHR;
+
+			const bool success = vkGetPipelineExecutableStatisticsKHR(device.get_device(), &executable, &count, statistics.data()) == VK_SUCCESS;
+			if (!success)
+				statistics.clear();
+		}
 
 		string result;
 		for (auto &rep : representations)
@@ -749,6 +772,30 @@ static string disassemble_spirv_isa(const VulkanDevice &device, VkPipeline pipel
 				result += "\n\n";
 			}
 			free(rep.pData);
+		}
+		for (auto &stat : statistics)
+		{
+			result += stat.name;
+			result += " (";
+			result += stat.description;
+			result += "): ";
+			switch (stat.format) {
+			case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_BOOL32_KHR:
+				result += to_string(stat.value.b32);
+				break;
+			case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_INT64_KHR:
+				result += to_string(stat.value.i64);
+				break;
+			case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_UINT64_KHR:
+				result += to_string(stat.value.u64);
+				break;
+			case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_FLOAT64_KHR:
+				result += to_string(stat.value.f64);
+				break;
+			default:
+				result += "[Unknown VkPipelineExecutableStatisticFormatKHR]";
+			}
+			result += "\n";
 		}
 		return result;
 	}
