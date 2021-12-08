@@ -159,7 +159,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelinesNormal(Device *laye
 {
 	// Have to create all pipelines here, in case the application makes use of basePipelineIndex.
 	auto res = layer->getTable()->CreateGraphicsPipelines(device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
-	if (res < 0)
+	if ((res < 0) || (res == VK_PIPELINE_COMPILE_REQUIRED_EXT))
 		return res;
 
 	for (uint32_t i = 0; i < createInfoCount; i++)
@@ -206,7 +206,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelinesParanoid(Device *la
 			LOGW_LEVEL("Failed to record graphics pipeline, usually caused by unsupported pNext.\n");
 
 		// FIXME: Unsure how to deal with divergent success codes.
-		if (res < 0)
+		if ((res < 0) || (res == VK_PIPELINE_COMPILE_REQUIRED_EXT))
 		{
 			for (uint32_t j = 0; j < i; j++)
 				layer->getTable()->DestroyPipeline(device, pPipelines[j], pAllocator);
@@ -240,7 +240,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelinesNormal(Device *layer
 {
 	// Have to create all pipelines here, in case the application makes use of basePipelineIndex.
 	auto res = layer->getTable()->CreateComputePipelines(device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
-	if (res < 0)
+	if ((res < 0) || (res == VK_PIPELINE_COMPILE_REQUIRED_EXT))
 		return res;
 
 	for (uint32_t i = 0; i < createInfoCount; i++)
@@ -287,7 +287,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelinesParanoid(Device *lay
 			LOGW_LEVEL("Failed to record compute pipeline, usually caused by unsupported pNext.\n");
 
 		// FIXME: Unsure how to deal with divergent success codes.
-		if (res < 0)
+		if ((res < 0) || (res == VK_PIPELINE_COMPILE_REQUIRED_EXT))
 		{
 			for (uint32_t j = 0; j < i; j++)
 				layer->getTable()->DestroyPipeline(device, pPipelines[j], pAllocator);
@@ -325,7 +325,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesNormal(Device *la
 			device, deferredOperation, pipelineCache,
 			createInfoCount, pCreateInfos, pAllocator, pPipelines);
 
-	if (res < 0)
+	if ((res < 0) || (res == VK_PIPELINE_COMPILE_REQUIRED_EXT))
 		return res;
 
 	for (uint32_t i = 0; i < createInfoCount; i++)
@@ -374,7 +374,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesParanoid(Device *
 			LOGW_LEVEL("Failed to record compute pipeline, usually caused by unsupported pNext.\n");
 
 		// FIXME: Unsure how to deal with divergent success codes.
-		if (res < 0)
+		if ((res < 0) || (res == VK_PIPELINE_COMPILE_REQUIRED_EXT))
 		{
 			for (uint32_t j = 0; j < i; j++)
 				layer->getTable()->DestroyPipeline(device, pPipelines[j], pAllocator);
