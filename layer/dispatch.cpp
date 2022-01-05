@@ -159,7 +159,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelinesNormal(Device *laye
 {
 	// Have to create all pipelines here, in case the application makes use of basePipelineIndex.
 	auto res = layer->getTable()->CreateGraphicsPipelines(device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
-	if ((res < 0) || (res == VK_PIPELINE_COMPILE_REQUIRED_EXT))
+
+	// If pipeline compile fails due to pipeline cache control we get a null handle for pipeline, so we need to
+	// treat it as a failure.
+	if (res != VK_SUCCESS)
 		return res;
 
 	for (uint32_t i = 0; i < createInfoCount; i++)
@@ -168,7 +171,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelinesNormal(Device *laye
 			LOGW_LEVEL("Recording graphics pipeline failed, usually caused by unsupported pNext.\n");
 	}
 
-	return res;
+	return VK_SUCCESS;
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelinesParanoid(Device *layer,
@@ -178,6 +181,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelinesParanoid(Device *la
                                                                       const VkAllocationCallbacks *pAllocator,
                                                                       VkPipeline *pPipelines)
 {
+	VkResult final_res = VK_SUCCESS;
+
+	// If we return early due to pipeline compile required exit, a NULL handle needs to signal no pipeline.
+	for (uint32_t i = 0; i < createInfoCount; i++)
+		pPipelines[i] = VK_NULL_HANDLE;
+
 	for (uint32_t i = 0; i < createInfoCount; i++)
 	{
 		// Fixup base pipeline index since we unroll the Create call.
@@ -205,16 +214,23 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelinesParanoid(Device *la
 		if (!layer->getRecorder().record_graphics_pipeline(res == VK_SUCCESS ? pPipelines[i] : VK_NULL_HANDLE, info, nullptr, 0))
 			LOGW_LEVEL("Failed to record graphics pipeline, usually caused by unsupported pNext.\n");
 
-		// FIXME: Unsure how to deal with divergent success codes.
-		if ((res < 0) || (res == VK_PIPELINE_COMPILE_REQUIRED_EXT))
+		if (res == VK_PIPELINE_COMPILE_REQUIRED_EXT)
+			final_res = res;
+
+		if (res < 0)
 		{
 			for (uint32_t j = 0; j < i; j++)
 				layer->getTable()->DestroyPipeline(device, pPipelines[j], pAllocator);
 			return res;
 		}
+		else if (res == VK_PIPELINE_COMPILE_REQUIRED_EXT &&
+		         (info.flags & VK_PIPELINE_CREATE_EARLY_RETURN_ON_FAILURE_BIT_EXT) != 0)
+		{
+			break;
+		}
 	}
 
-	return VK_SUCCESS;
+	return final_res;
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache,
@@ -240,7 +256,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelinesNormal(Device *layer
 {
 	// Have to create all pipelines here, in case the application makes use of basePipelineIndex.
 	auto res = layer->getTable()->CreateComputePipelines(device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
-	if ((res < 0) || (res == VK_PIPELINE_COMPILE_REQUIRED_EXT))
+
+	// If pipeline compile fails due to pipeline cache control we get a null handle for pipeline, so we need to
+	// treat it as a failure.
+	if (res != VK_SUCCESS)
 		return res;
 
 	for (uint32_t i = 0; i < createInfoCount; i++)
@@ -249,7 +268,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelinesNormal(Device *layer
 			LOGW_LEVEL("Failed to record compute pipeline, usually caused by unsupported pNext.\n");
 	}
 
-	return res;
+	return VK_SUCCESS;
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelinesParanoid(Device *layer,
@@ -259,6 +278,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelinesParanoid(Device *lay
                                                                      const VkAllocationCallbacks *pAllocator,
                                                                      VkPipeline *pPipelines)
 {
+	VkResult final_res = VK_SUCCESS;
+
+	// If we return early due to pipeline compile required exit, a NULL handle needs to signal no pipeline.
+	for (uint32_t i = 0; i < createInfoCount; i++)
+		pPipelines[i] = VK_NULL_HANDLE;
+
 	for (uint32_t i = 0; i < createInfoCount; i++)
 	{
 		// Fixup base pipeline index since we unroll the Create call.
@@ -286,16 +311,23 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelinesParanoid(Device *lay
 		if (!layer->getRecorder().record_compute_pipeline(res == VK_SUCCESS ? pPipelines[i] : VK_NULL_HANDLE, info, nullptr, 0))
 			LOGW_LEVEL("Failed to record compute pipeline, usually caused by unsupported pNext.\n");
 
-		// FIXME: Unsure how to deal with divergent success codes.
-		if ((res < 0) || (res == VK_PIPELINE_COMPILE_REQUIRED_EXT))
+		if (res == VK_PIPELINE_COMPILE_REQUIRED_EXT)
+			final_res = res;
+
+		if (res < 0)
 		{
 			for (uint32_t j = 0; j < i; j++)
 				layer->getTable()->DestroyPipeline(device, pPipelines[j], pAllocator);
 			return res;
 		}
+		else if (res == VK_PIPELINE_COMPILE_REQUIRED_EXT &&
+		         (info.flags & VK_PIPELINE_CREATE_EARLY_RETURN_ON_FAILURE_BIT_EXT) != 0)
+		{
+			break;
+		}
 	}
 
-	return VK_SUCCESS;
+	return final_res;
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelines(VkDevice device, VkPipelineCache pipelineCache,
@@ -325,7 +357,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesNormal(Device *la
 			device, deferredOperation, pipelineCache,
 			createInfoCount, pCreateInfos, pAllocator, pPipelines);
 
-	if ((res < 0) || (res == VK_PIPELINE_COMPILE_REQUIRED_EXT))
+	// If pipeline compile fails due to pipeline cache control we get a null handle for pipeline, so we need to
+	// treat it as a failure.
+	if (res != VK_SUCCESS)
 		return res;
 
 	for (uint32_t i = 0; i < createInfoCount; i++)
@@ -334,7 +368,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesNormal(Device *la
 			LOGW_LEVEL("Failed to record compute pipeline, usually caused by unsupported pNext.\n");
 	}
 
-	return res;
+	return VK_SUCCESS;
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesParanoid(Device *layer,
@@ -345,6 +379,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesParanoid(Device *
                                                                         const VkAllocationCallbacks *pAllocator,
                                                                         VkPipeline *pPipelines)
 {
+	VkResult final_res = VK_SUCCESS;
+
+	// If we return early due to pipeline compile required exit, a NULL handle needs to signal no pipeline.
+	for (uint32_t i = 0; i < createInfoCount; i++)
+		pPipelines[i] = VK_NULL_HANDLE;
+
 	for (uint32_t i = 0; i < createInfoCount; i++)
 	{
 		// Fixup base pipeline index since we unroll the Create call.
@@ -373,16 +413,23 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesParanoid(Device *
 		if (!layer->getRecorder().record_raytracing_pipeline(res == VK_SUCCESS ? pPipelines[i] : VK_NULL_HANDLE, info, nullptr, 0))
 			LOGW_LEVEL("Failed to record compute pipeline, usually caused by unsupported pNext.\n");
 
-		// FIXME: Unsure how to deal with divergent success codes.
-		if ((res < 0) || (res == VK_PIPELINE_COMPILE_REQUIRED_EXT))
+		if (res == VK_PIPELINE_COMPILE_REQUIRED_EXT)
+			final_res = res;
+
+		if (res < 0)
 		{
 			for (uint32_t j = 0; j < i; j++)
 				layer->getTable()->DestroyPipeline(device, pPipelines[j], pAllocator);
 			return res;
 		}
+		else if (res == VK_PIPELINE_COMPILE_REQUIRED_EXT &&
+		         (info.flags & VK_PIPELINE_CREATE_EARLY_RETURN_ON_FAILURE_BIT_EXT) != 0)
+		{
+			break;
+		}
 	}
 
-	return VK_SUCCESS;
+	return final_res;
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesKHR(
