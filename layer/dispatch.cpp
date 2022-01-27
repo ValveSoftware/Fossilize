@@ -104,6 +104,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(VkPhysicalDevice gpu, const V
 		pdf2 = &physicalDeviceFeatures2;
 		if (pCreateInfo->pEnabledFeatures)
 			physicalDeviceFeatures2.features = *pCreateInfo->pEnabledFeatures;
+
+		// When DeviceCreateInfo::pNext is found, chain it to serialize
+		// other physical device features 2 struct.
+		physicalDeviceFeatures2.pNext = (void *)pCreateInfo->pNext;
 	}
 
 	{
