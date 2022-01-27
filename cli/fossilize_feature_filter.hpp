@@ -79,6 +79,7 @@ struct VulkanFeatures
 	VkPhysicalDeviceShaderSMBuiltinsFeaturesNV sm_builtins_nv;
 	VkPhysicalDeviceShaderIntegerFunctions2FeaturesINTEL integer_functions2_intel;
 	VkPhysicalDeviceMutableDescriptorTypeFeaturesVALVE mutable_descriptor_type_valve;
+	VkPhysicalDeviceRobustness2FeaturesEXT robustness2;
 };
 
 void *build_pnext_chain(VulkanFeatures &features, uint32_t api_version,

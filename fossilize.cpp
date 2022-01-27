@@ -59,6 +59,8 @@ namespace Fossilize
 {
 static const void *pnext_chain_skip_ignored_entries(const void *pNext);
 
+static const void *pnext_chain_pdf2_skip_ignored_entries(const void *pNext);
+
 template <typename T>
 static const T *find_pnext(VkStructureType sType, const void *pNext)
 {
@@ -172,6 +174,10 @@ struct StateReplayer::Impl
 	bool parse_subpass_description_depth_stencil_resolve(const Value &state, VkSubpassDescriptionDepthStencilResolve **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_fragment_shading_rate_attachment_info(const Value &state, VkFragmentShadingRateAttachmentInfoKHR **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_pipeline_rendering_info(const Value &state, VkPipelineRenderingCreateInfoKHR **out_info) FOSSILIZE_WARN_UNUSED;
+
+	bool parse_pnext_chain_pdf2(const Value &pnext, void **out_pnext) FOSSILIZE_WARN_UNUSED;
+	bool parse_robustness2_features(const Value &state, VkPhysicalDeviceRobustness2FeaturesEXT **out_features) FOSSILIZE_WARN_UNUSED;
+
 	bool parse_uints(const Value &attachments, const uint32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	bool parse_sints(const Value &attachments, const int32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	const char *duplicate_string(const char *str, size_t len);
@@ -298,6 +304,8 @@ struct StateRecorder::Impl
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPipelineRenderingCreateInfoKHR *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkPhysicalDeviceRobustness2FeaturesEXT *create_info,
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 
 	bool remap_sampler_handle(VkSampler sampler, VkSampler *out_sampler) const FOSSILIZE_WARN_UNUSED;
 	bool remap_descriptor_set_layout_handle(VkDescriptorSetLayout layout, VkDescriptorSetLayout *out_layout) const FOSSILIZE_WARN_UNUSED;
@@ -357,6 +365,8 @@ struct StateRecorder::Impl
 	bool copy_pnext_chain(const void *pNext, ScratchAllocator &alloc, const void **out_pnext) FOSSILIZE_WARN_UNUSED;
 	template <typename T>
 	bool copy_pnext_chains(const T *ts, uint32_t count, ScratchAllocator &alloc);
+
+	bool copy_pnext_chain_pdf2(const void *pNext, ScratchAllocator &alloc, void **out_pnext) FOSSILIZE_WARN_UNUSED;
 };
 
 // reinterpret_cast does not work reliably on MSVC 2013 for Vulkan objects.
@@ -389,10 +399,45 @@ static Hash compute_hash_application_info(const VkApplicationInfo &info)
 	return h.get();
 }
 
+static void hash_pnext_struct(const StateRecorder *,
+			      Hasher &h,
+			      const VkPhysicalDeviceRobustness2FeaturesEXT &info)
+{
+	h.u32(info.robustBufferAccess2);
+	h.u32(info.robustImageAccess2);
+	h.u32(info.nullDescriptor);
+}
+
+static bool hash_pnext_chain_pdf2(const StateRecorder *recorder, Hasher &h, const void *pNext)
+{
+	while ((pNext = pnext_chain_pdf2_skip_ignored_entries(pNext)) != nullptr)
+	{
+		auto *pin = static_cast<const VkBaseInStructure *>(pNext);
+		h.s32(pin->sType);
+
+		switch (pin->sType)
+		{
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT:
+			hash_pnext_struct(recorder, h, *static_cast<const VkPhysicalDeviceRobustness2FeaturesEXT *>(pNext));
+			break;
+
+		default:
+			log_error_pnext_chain("Unsupported pNext found, cannot hash.", pNext);
+			return false;
+		}
+
+		pNext = pin->pNext;
+	}
+
+	return true;
+}
+
 static Hash compute_hash_physical_device_features(const VkPhysicalDeviceFeatures2 &pdf)
 {
 	Hasher h;
 	h.u32(pdf.features.robustBufferAccess);
+
+	hash_pnext_chain_pdf2(nullptr, h, pdf.pNext);
 	return h.get();
 }
 
@@ -2013,6 +2058,10 @@ bool StateReplayer::Impl::parse_application_info(StateCreatorInterface &iface, c
 		auto *pdf = allocator.allocate_cleared<VkPhysicalDeviceFeatures2>();
 		pdf->sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
 		pdf->features.robustBufferAccess = pdf_info["robustBufferAccess"].GetUint();
+
+		if (pdf_info.HasMember("pNext"))
+			if (!parse_pnext_chain_pdf2(pdf_info["pNext"], &pdf->pNext))
+				return false;
 
 		auto hash =
 				Hashing::compute_combined_application_feature_hash(
@@ -3740,6 +3789,65 @@ bool StateReplayer::Impl::parse_pnext_chain(const Value &pnext, const void **out
 	return true;
 }
 
+bool StateReplayer::Impl::parse_robustness2_features(const Value &state,
+                                                     VkPhysicalDeviceRobustness2FeaturesEXT **out_features)
+{
+	auto *features = allocator.allocate_cleared<VkPhysicalDeviceRobustness2FeaturesEXT>();
+	*out_features = features;
+
+	features->robustBufferAccess2 = state["robustBufferAccess2"].GetUint();
+	features->robustImageAccess2 = state["robustImageAccess2"].GetUint();
+	features->nullDescriptor = state["nullDescriptor"].GetUint();
+
+	return true;
+}
+
+bool StateReplayer::Impl::parse_pnext_chain_pdf2(const Value &pnext, void **outpNext)
+{
+	VkBaseInStructure *ret = nullptr;
+	VkBaseInStructure *chain = nullptr;
+
+	for (auto itr = pnext.Begin(); itr != pnext.End(); ++itr)
+	{
+		auto &next = *itr;
+		auto sType = static_cast<VkStructureType>(next["sType"].GetInt());
+		VkBaseInStructure *new_struct = nullptr;
+
+		switch (sType)
+		{
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT:
+		{
+			VkPhysicalDeviceRobustness2FeaturesEXT *robustness2 = nullptr;
+			if (!parse_robustness2_features(next, &robustness2))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(robustness2);
+			break;
+		}
+
+		default:
+			LOGE_LEVEL("Failed to parse pNext chain for sType: %d\n", int(sType));
+			return false;
+		}
+
+		new_struct->sType = sType;
+		new_struct->pNext = nullptr;
+
+		if (!chain)
+		{
+			chain = new_struct;
+			ret = chain;
+		}
+		else
+		{
+			chain->pNext = new_struct;
+			chain = new_struct;
+		}
+	}
+
+	*outpNext = ret;
+	return true;
+}
+
 StateReplayer::StateReplayer()
 {
 	impl = new Impl;
@@ -4708,13 +4816,53 @@ bool StateRecorder::Impl::copy_sampler(const VkSamplerCreateInfo *create_info, S
 	return true;
 }
 
+void *StateRecorder::Impl::copy_pnext_struct(
+		const VkPhysicalDeviceRobustness2FeaturesEXT *create_info,
+		ScratchAllocator &alloc)
+{
+	return copy(create_info, 1, alloc);
+}
+
+bool StateRecorder::Impl::copy_pnext_chain_pdf2(const void *pNext, ScratchAllocator &alloc, void **out_pnext)
+{
+	VkBaseInStructure new_pnext = {};
+	const VkBaseInStructure **ppNext = &new_pnext.pNext;
+
+	while ((pNext = pnext_chain_pdf2_skip_ignored_entries(pNext)) != nullptr)
+	{
+		auto *pin = static_cast<const VkBaseInStructure *>(pNext);
+
+		switch (pin->sType)
+		{
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT:
+		{
+			auto *ci = static_cast<const VkPhysicalDeviceRobustness2FeaturesEXT *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			break;
+		}
+
+		default:
+			LOGE_LEVEL("Cannot copy unknown pNext sType: %d.\n", int(pin->sType));
+			return false;
+		}
+
+		pNext = pin->pNext;
+		ppNext = const_cast<const VkBaseInStructure **>(&(*ppNext)->pNext);
+		*ppNext = nullptr;
+	}
+
+	*out_pnext = (void *)new_pnext.pNext;
+	return true;
+}
+
 bool StateRecorder::Impl::copy_physical_device_features(const VkPhysicalDeviceFeatures2 *pdf,
                                                         ScratchAllocator &alloc,
                                                         VkPhysicalDeviceFeatures2 **out_pdf)
 {
-	// Ignore pNext. We don't need to serialize it.
 	auto *features = copy(pdf, 1, alloc);
-	features->pNext = nullptr;
+
+	if (!copy_pnext_chain_pdf2(features->pNext, alloc, &features->pNext))
+		return false;
 
 	*out_pdf = features;
 	return true;
@@ -7178,12 +7326,68 @@ static void serialize_application_info_inline(Value &value, const VkApplicationI
 	value.AddMember("apiVersion", info.apiVersion, alloc);
 }
 
+template <typename Allocator>
+static bool json_value(const VkPhysicalDeviceRobustness2FeaturesEXT &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("robustBufferAccess2", uint32_t(create_info.robustBufferAccess2), alloc);
+	value.AddMember("robustImageAccess2", uint32_t(create_info.robustImageAccess2), alloc);
+	value.AddMember("nullDescriptor", uint32_t(create_info.nullDescriptor), alloc);
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
+static bool pnext_chain_pdf2_json_value(const void *pNext, Allocator &alloc, Value *out_value)
+{
+	Value nexts(kArrayType);
+
+	while ((pNext = pnext_chain_pdf2_skip_ignored_entries(pNext)) != nullptr)
+	{
+		auto *pin = static_cast<const VkBaseInStructure *>(pNext);
+		Value next;
+		switch (pin->sType)
+		{
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT:
+			if (!json_value(*static_cast<const VkPhysicalDeviceRobustness2FeaturesEXT *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		default:
+			log_error_pnext_chain("Unsupported pNext found, cannot hash sType.", pNext);
+			return false;
+		}
+
+		nexts.PushBack(next, alloc);
+		pNext = pin->pNext;
+	}
+
+	*out_value = nexts;
+	return true;
+}
+
+template <typename T, typename Allocator>
+static bool pnext_chain_pdf2_add_json_value(Value &base, const T &t, Allocator &alloc)
+{
+	if (t.pNext)
+	{
+		Value nexts;
+		if (!pnext_chain_pdf2_json_value(t.pNext, alloc, &nexts))
+			return false;
+		base.AddMember("pNext", nexts, alloc);
+	}
+	return true;
+}
+
 template <typename AllocType>
 static void serialize_physical_device_features_inline(Value &value, const VkPhysicalDeviceFeatures2 &features, AllocType &alloc)
 {
 	// TODO: For now, we only care about this feature, which can definitely affect compilation.
 	// Deal with other device features if proven to be required.
 	value.AddMember("robustBufferAccess", features.features.robustBufferAccess, alloc);
+
+	pnext_chain_pdf2_add_json_value(value, features, alloc);
 }
 
 bool StateRecorder::Impl::serialize_application_info(vector<uint8_t> &blob) const
@@ -7705,6 +7909,33 @@ static const void *pnext_chain_skip_ignored_entries(const void *pNext)
 	}
 
 	return pNext;
+}
+
+static const void *pnext_chain_pdf2_skip_ignored_entries(const void *pNext)
+{
+       while (pNext)
+       {
+               auto *base = static_cast<const VkBaseInStructure *>(pNext);
+               bool ignored;
+
+               switch (base->sType)
+               {
+               case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT:
+                       ignored = false;
+                       break;
+
+               default:
+                       ignored = true;
+                       break;
+               }
+
+               if (ignored)
+                       pNext = base->pNext;
+               else
+                       break;
+       }
+
+       return pNext;
 }
 
 #ifndef FOSSILIZE_API_DEFAULT_LOG_LEVEL

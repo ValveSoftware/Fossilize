@@ -69,3 +69,4 @@ FE(COOPERATIVE_MATRIX, cooperative_matrix_nv, NV);
 FE(SHADER_SM_BUILTINS, sm_builtins_nv, NV);
 FE(SHADER_INTEGER_FUNCTIONS_2, integer_functions2_intel, INTEL);
 FE(MUTABLE_DESCRIPTOR_TYPE, mutable_descriptor_type_valve, VALVE);
+FE(ROBUSTNESS_2, robustness2, EXT);

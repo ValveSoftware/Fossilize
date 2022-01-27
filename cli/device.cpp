@@ -30,6 +30,21 @@ using namespace std;
 
 namespace Fossilize
 {
+template <typename T>
+static inline const T *find_pnext(VkStructureType type, const void *pNext)
+{
+	while (pNext != nullptr)
+	{
+		auto *sin = static_cast<const VkBaseInStructure *>(pNext);
+		if (sin->sType == type)
+			return static_cast<const T*>(pNext);
+
+		pNext = sin->pNext;
+	}
+
+	return nullptr;
+}
+
 static bool find_layer(const vector<VkLayerProperties> &layers, const char *layer)
 {
 	auto itr = find_if(begin(layers), end(layers), [&](const VkLayerProperties &prop) -> bool {
@@ -351,6 +366,19 @@ bool VulkanDevice::init_device(const Options &opts)
 		gpu_features->robustBufferAccess = VK_TRUE;
 	else
 		gpu_features->robustBufferAccess = VK_FALSE;
+
+	auto *robustness2 = find_pnext<VkPhysicalDeviceRobustness2FeaturesEXT>(
+				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT,
+				opts.features);
+	if (robustness2) {
+		features.robustness2.robustBufferAccess2 = robustness2->robustBufferAccess2;
+		features.robustness2.robustImageAccess2 = robustness2->robustImageAccess2;
+		features.robustness2.nullDescriptor = robustness2->nullDescriptor;
+	} else {
+		features.robustness2.robustBufferAccess2 = VK_FALSE;
+		features.robustness2.robustImageAccess2 = VK_FALSE;
+		features.robustness2.nullDescriptor = VK_FALSE;
+	}
 
 	// Just pick one graphics queue.
 	// FIXME: Does shader compilation depend on which queues we have enabled?
