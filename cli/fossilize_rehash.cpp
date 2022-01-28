@@ -64,7 +64,7 @@ struct RehashReplayer : StateCreatorInterface
 				if (!recorder->record_application_info(*info))
 					LOGE("Failed to record application info.\n");
 			if (features)
-				if (!recorder->record_physical_device_features(*features))
+				if (!recorder->record_physical_device_features(features))
 					LOGE("Failed to record physical device features.\n");
 			has_set_application_info = true;
 		}

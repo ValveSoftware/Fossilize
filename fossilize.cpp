@@ -260,7 +260,7 @@ struct StateRecorder::Impl
 	bool copy_render_pass2(const VkRenderPassCreateInfo2 *create_info, ScratchAllocator &alloc,
 	                       VkRenderPassCreateInfo2 **out_info) FOSSILIZE_WARN_UNUSED;
 	bool copy_application_info(const VkApplicationInfo *app_info, ScratchAllocator &alloc, VkApplicationInfo **out_info) FOSSILIZE_WARN_UNUSED;
-	bool copy_physical_device_features(const VkPhysicalDeviceFeatures2 *pdf, ScratchAllocator &alloc, VkPhysicalDeviceFeatures2 **out_features) FOSSILIZE_WARN_UNUSED;
+	bool copy_physical_device_features(const void *device_pnext, ScratchAllocator &alloc, VkPhysicalDeviceFeatures2 **out_features) FOSSILIZE_WARN_UNUSED;
 
 	bool copy_specialization_info(const VkSpecializationInfo *info, ScratchAllocator &alloc, const VkSpecializationInfo **out_info) FOSSILIZE_WARN_UNUSED;
 
@@ -400,8 +400,8 @@ static Hash compute_hash_application_info(const VkApplicationInfo &info)
 }
 
 static void hash_pnext_struct(const StateRecorder *,
-			      Hasher &h,
-			      const VkPhysicalDeviceRobustness2FeaturesEXT &info)
+                              Hasher &h,
+                              const VkPhysicalDeviceRobustness2FeaturesEXT &info)
 {
 	h.u32(info.robustBufferAccess2);
 	h.u32(info.robustImageAccess2);
@@ -432,23 +432,28 @@ static bool hash_pnext_chain_pdf2(const StateRecorder *recorder, Hasher &h, cons
 	return true;
 }
 
-static Hash compute_hash_physical_device_features(const VkPhysicalDeviceFeatures2 &pdf)
+static Hash compute_hash_physical_device_features(const void *device_pnext)
 {
 	Hasher h;
-	h.u32(pdf.features.robustBufferAccess);
 
-	hash_pnext_chain_pdf2(nullptr, h, pdf.pNext);
+	// For hash invariance, make sure we hash PDF2 first, since when we serialize and unserialize,
+	// PDF2 will always come first in the chain.
+	auto *pdf2 = find_pnext<VkPhysicalDeviceFeatures2>(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, device_pnext);
+	if (pdf2)
+		h.u32(pdf2->features.robustBufferAccess);
+
+	hash_pnext_chain_pdf2(nullptr, h, device_pnext);
 	return h.get();
 }
 
 StateRecorderApplicationFeatureHash compute_application_feature_hash(const VkApplicationInfo *info,
-                                                                     const VkPhysicalDeviceFeatures2 *features)
+                                                                     const void *device_pnext)
 {
 	StateRecorderApplicationFeatureHash hash = {};
 	if (info)
 		hash.application_info_hash = compute_hash_application_info(*info);
-	if (features)
-		hash.physical_device_features_hash = compute_hash_physical_device_features(*features);
+	if (device_pnext)
+		hash.physical_device_features_hash = compute_hash_physical_device_features(device_pnext);
 	return hash;
 }
 
@@ -4431,13 +4436,14 @@ bool StateRecorder::record_application_info(const VkApplicationInfo &info)
 	return true;
 }
 
-bool StateRecorder::record_physical_device_features(const VkPhysicalDeviceFeatures2 &device_features)
+bool StateRecorder::record_physical_device_features(const void *device_pnext)
 {
 	// We just ignore pNext, but it's okay to keep it. We will not need to serialize it for now.
 	std::lock_guard<std::mutex> lock(impl->record_lock);
-	if (!impl->copy_physical_device_features(&device_features, impl->allocator, &impl->physical_device_features))
+	if (!impl->copy_physical_device_features(device_pnext, impl->allocator, &impl->physical_device_features))
 		return false;
-	impl->application_feature_hash.physical_device_features_hash = Hashing::compute_hash_physical_device_features(*impl->physical_device_features);
+	impl->application_feature_hash.physical_device_features_hash =
+			Hashing::compute_hash_physical_device_features(impl->physical_device_features);
 	return true;
 }
 
@@ -4455,7 +4461,7 @@ bool StateRecorder::record_physical_device_features(const VkPhysicalDeviceFeatur
 {
 	VkPhysicalDeviceFeatures2 features = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
 	features.features = device_features;
-	return record_physical_device_features(features);
+	return record_physical_device_features(&features);
 }
 
 void StateRecorder::Impl::pump_synchronized_recording(StateRecorder *recorder)
@@ -4855,13 +4861,23 @@ bool StateRecorder::Impl::copy_pnext_chain_pdf2(const void *pNext, ScratchAlloca
 	return true;
 }
 
-bool StateRecorder::Impl::copy_physical_device_features(const VkPhysicalDeviceFeatures2 *pdf,
+bool StateRecorder::Impl::copy_physical_device_features(const void *device_pnext,
                                                         ScratchAllocator &alloc,
                                                         VkPhysicalDeviceFeatures2 **out_pdf)
 {
-	auto *features = copy(pdf, 1, alloc);
+	// Reorder so that PDF2 comes first in the chain.
+	// Caller guarantees that PDF2 is part of the device_pnext.
+	// If original application did not have PDF2, just synthesize one based on pEnabledFeatures instead.
+	const auto *pdf = find_pnext<VkPhysicalDeviceFeatures2>(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+	                                                        device_pnext);
 
-	if (!copy_pnext_chain_pdf2(features->pNext, alloc, &features->pNext))
+	if (!pdf)
+		return false;
+
+	auto *features = copy(pdf, 1, alloc);
+	features->pNext = nullptr;
+
+	if (!copy_pnext_chain_pdf2(device_pnext, alloc, &features->pNext))
 		return false;
 
 	*out_pdf = features;
@@ -7381,13 +7397,12 @@ static bool pnext_chain_pdf2_add_json_value(Value &base, const T &t, Allocator &
 }
 
 template <typename AllocType>
-static void serialize_physical_device_features_inline(Value &value, const VkPhysicalDeviceFeatures2 &features, AllocType &alloc)
+static bool serialize_physical_device_features_inline(Value &value, const VkPhysicalDeviceFeatures2 &features, AllocType &alloc)
 {
-	// TODO: For now, we only care about this feature, which can definitely affect compilation.
-	// Deal with other device features if proven to be required.
 	value.AddMember("robustBufferAccess", features.features.robustBufferAccess, alloc);
-
-	pnext_chain_pdf2_add_json_value(value, features, alloc);
+	if (!pnext_chain_pdf2_add_json_value(value, features, alloc))
+		return false;
+	return true;
 }
 
 bool StateRecorder::Impl::serialize_application_info(vector<uint8_t> &blob) const
@@ -7401,7 +7416,8 @@ bool StateRecorder::Impl::serialize_application_info(vector<uint8_t> &blob) cons
 	if (application_info)
 		serialize_application_info_inline(app_info, *application_info, alloc);
 	if (physical_device_features)
-		serialize_physical_device_features_inline(pdf_info, *physical_device_features, alloc);
+		if (!serialize_physical_device_features_inline(pdf_info, *physical_device_features, alloc))
+			return false;
 
 	doc.AddMember("version", FOSSILIZE_FORMAT_VERSION, alloc);
 	doc.AddMember("applicationInfo", app_info, alloc);
@@ -7730,7 +7746,8 @@ bool StateRecorder::serialize(uint8_t **serialized_data, size_t *serialized_size
 	if (impl->application_info)
 		serialize_application_info_inline(app_info, *impl->application_info, alloc);
 	if (impl->physical_device_features)
-		serialize_physical_device_features_inline(pdf_info, *impl->physical_device_features, alloc);
+		if (!serialize_physical_device_features_inline(pdf_info, *impl->physical_device_features, alloc))
+			return false;
 
 	doc.AddMember("applicationInfo", app_info, alloc);
 	doc.AddMember("physicalDeviceFeatures", pdf_info, alloc);

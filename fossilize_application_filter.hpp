@@ -56,7 +56,7 @@ public:
 	bool needs_buckets(const VkApplicationInfo *info);
 	Hash get_bucket_hash(const VkPhysicalDeviceProperties2 *props,
 	                     const VkApplicationInfo *info,
-	                     const VkPhysicalDeviceFeatures2 *features2);
+	                     const void *device_pnext);
 
 private:
 	struct Impl;

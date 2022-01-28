@@ -61,7 +61,7 @@ struct ReplayInterface : StateCreatorInterface
 			if (!recorder.record_application_info(*info))
 				abort();
 		if (features)
-			if (!recorder.record_physical_device_features(*features))
+			if (!recorder.record_physical_device_features(features))
 				abort();
 	}
 
@@ -2760,7 +2760,7 @@ int main()
 			abort();
 
 		VkPhysicalDeviceFeatures2 features = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
-		if (!recorder.record_physical_device_features(features))
+		if (!recorder.record_physical_device_features(&features))
 			abort();
 
 		record_samplers(recorder);

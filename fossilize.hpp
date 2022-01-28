@@ -99,8 +99,9 @@ public:
 	// app can be nullptr, in which case no pApplicationInfo was used (allowed in Vulkan 1.0).
 	// The pointer provided in app is persistent as long as StateReplayer lives.
 	// A physical device features 2 structure is also passed in, as it could affect compilation.
-	// For now, only robustBufferAccess is used. physical_device_features can also be nullptr, in
-	// which case the relevant feature robustBufferAccess is assumed to be turned off.
+	// For now, only robustBufferAccess and some other feature bits in pNext is used.
+	// physical_device_features can also be nullptr, in
+	// which case the relevant feature robustBufferAccess and features are assumed to be turned off.
 	virtual void set_application_info(Hash /*application_feature_hash*/, const VkApplicationInfo * /*app*/, const VkPhysicalDeviceFeatures2 * /*physical_device_features*/) {}
 
 	// Called at the beginning of the state replayer to mark which application/feature hash
@@ -194,9 +195,10 @@ public:
 	// These are never recorded in a thread, so it's safe to query the application/feature hash right after calling these methods.
 	bool record_application_info(const VkApplicationInfo &info) FOSSILIZE_WARN_UNUSED;
 
-	// TODO: create_device which can capture which features/exts are used to create the device.
-	// This can be relevant when using more exotic features.
-	bool record_physical_device_features(const VkPhysicalDeviceFeatures2 &device_features) FOSSILIZE_WARN_UNUSED;
+	// device_pnext must contain a PDF2 struct in the pNext chain.
+	// This function takes const void* since PDF2 might not be chained as the first struct in VkDeviceCreateInfo::pNext.
+	// A reorder occurs as part of the copy operation which normalizes the pNext chain.
+	bool record_physical_device_features(const void *device_pnext) FOSSILIZE_WARN_UNUSED;
 	bool record_physical_device_features(const VkPhysicalDeviceFeatures &device_features) FOSSILIZE_WARN_UNUSED;
 	void set_application_info_filter(ApplicationInfoFilter *filter);
 
@@ -284,7 +286,7 @@ namespace Hashing
 // Computes a base hash which can be used to compute some other hashes without having to create a full StateRecorder.
 // application_info and/or physical_device_features can be nullptr.
 StateRecorderApplicationFeatureHash compute_application_feature_hash(const VkApplicationInfo *application_info,
-                                                                     const VkPhysicalDeviceFeatures2 *physical_device_features);
+                                                                     const void *device_pnext);
 
 Hash compute_combined_application_feature_hash(const StateRecorderApplicationFeatureHash &base_hash);
 

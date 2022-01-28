@@ -99,6 +99,8 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(VkPhysicalDevice gpu, const V
 	// Build a physical device features 2 struct if we cannot find it in pCreateInfo.
 	auto *pdf2 = static_cast<const VkPhysicalDeviceFeatures2 *>(findpNext(pCreateInfo, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2));
 	VkPhysicalDeviceFeatures2 physicalDeviceFeatures2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+	const void *device_pnext;
+
 	if (!pdf2)
 	{
 		pdf2 = &physicalDeviceFeatures2;
@@ -107,13 +109,16 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(VkPhysicalDevice gpu, const V
 
 		// When DeviceCreateInfo::pNext is found, chain it to serialize
 		// other physical device features 2 struct.
-		physicalDeviceFeatures2.pNext = (void *)pCreateInfo->pNext;
+		device_pnext = &physicalDeviceFeatures2;
+		physicalDeviceFeatures2.pNext = const_cast<void *>(pCreateInfo->pNext);
 	}
+	else
+		device_pnext = pCreateInfo->pNext;
 
 	{
 		lock_guard<mutex> holder{globalLock};
 		auto *device = createLayerData(getDispatchKey(*pDevice), deviceData);
-		device->init(gpu, *pDevice, layer, *pdf2, initDeviceTable(*pDevice, fpGetDeviceProcAddr, deviceDispatch));
+		device->init(gpu, *pDevice, layer, device_pnext, initDeviceTable(*pDevice, fpGetDeviceProcAddr, deviceDispatch));
 	}
 
 	return VK_SUCCESS;
