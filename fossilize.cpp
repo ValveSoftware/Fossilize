@@ -474,6 +474,8 @@ static Hash compute_hash_physical_device_features(const void *device_pnext)
 	auto *pdf2 = find_pnext<VkPhysicalDeviceFeatures2>(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, device_pnext);
 	if (pdf2)
 		h.u32(pdf2->features.robustBufferAccess);
+	else
+		h.u32(0);
 
 	hash_pnext_chain_pdf2(nullptr, h, device_pnext);
 	return h.get();
