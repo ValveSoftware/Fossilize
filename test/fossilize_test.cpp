@@ -55,13 +55,15 @@ struct ReplayInterface : StateCreatorInterface
 
 	void set_application_info(Hash hash, const VkApplicationInfo *info, const VkPhysicalDeviceFeatures2 *features) override
 	{
-		feature_hash = hash;
+		feature_hash = Hashing::compute_combined_application_feature_hash(Hashing::compute_application_feature_hash(info, features));
+		if (feature_hash != hash)
+			abort();
 
 		if (info)
 			if (!recorder.record_application_info(*info))
 				abort();
 		if (features)
-			if (!recorder.record_physical_device_features(*features))
+			if (!recorder.record_physical_device_features(features))
 				abort();
 	}
 
@@ -2723,6 +2725,112 @@ static bool test_logging()
 	return true;
 }
 
+static bool test_pdf_recording(const void *device_pnext, Hash &hash)
+{
+	hash = 0;
+	StateRecorder recorder;
+	VkApplicationInfo app_info = { VK_STRUCTURE_TYPE_APPLICATION_INFO };
+	app_info.apiVersion = VK_API_VERSION_1_1;
+	if (!recorder.record_application_info(app_info))
+		return false;
+	if (!recorder.record_physical_device_features(device_pnext))
+		return false;
+
+	hash = recorder.get_application_feature_hash().physical_device_features_hash;
+
+	uint8_t *serialized;
+	size_t serialized_size;
+	if (!recorder.serialize(&serialized, &serialized_size))
+		return false;
+
+	StateReplayer replayer;
+	ReplayInterface iface;
+
+	std::string serialized_str(serialized, serialized + serialized_size);
+	LOGI("Serialized:\n%s\n", serialized_str.c_str());
+
+	if (!replayer.parse(iface, nullptr, serialized, serialized_size))
+		return false;
+
+	StateRecorder::free_serialized(serialized);
+	return true;
+}
+
+static bool test_pdf_recording()
+{
+	Hash h;
+	// Expect to fail here.
+	if (test_pdf_recording(nullptr, h))
+		return false;
+
+	VkPhysicalDeviceFeatures2 pdf2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+	VkPhysicalDeviceDepthClipEnableFeaturesEXT dummy = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLIP_ENABLE_FEATURES_EXT };
+	VkPhysicalDeviceRobustness2FeaturesEXT robustness2 = {
+			VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT, nullptr, 1, 2, 3 };
+	VkPhysicalDeviceImageRobustnessFeaturesEXT image_robustness = {
+			VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_ROBUSTNESS_FEATURES_EXT, nullptr, 4 };
+	VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV shading_rate_enums = {
+			VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_ENUMS_FEATURES_NV, nullptr, 5, 6, 7 };
+
+	// Expect to fail here.
+	if (test_pdf_recording(&dummy, h))
+		return false;
+
+	// Expect to fail here.
+	if (test_pdf_recording(&robustness2, h))
+		return false;
+
+	{
+		// Hash for all of these need to be invariant.
+		// dummy is ignored.
+		Hash h0, h1, h2;
+
+		if (!test_pdf_recording(&pdf2, h0))
+			return false;
+		pdf2.pNext = &dummy;
+		if (!test_pdf_recording(&pdf2, h1))
+			return false;
+		dummy.pNext = &pdf2;
+		pdf2.pNext = nullptr;
+		if (!test_pdf_recording(&pdf2, h2))
+			return false;
+
+		if (h0 != h1 || h1 != h2)
+			return false;
+	}
+
+	{
+		Hash h0, h1, h2, h3;
+		pdf2.pNext = nullptr;
+		if (!test_pdf_recording(&pdf2, h0))
+			return false;
+		pdf2.pNext = &robustness2;
+		if (!test_pdf_recording(&pdf2, h1))
+			return false;
+		robustness2.pNext = &image_robustness;
+		if (!test_pdf_recording(&pdf2, h2))
+			return false;
+		image_robustness.pNext = &shading_rate_enums;
+		if (!test_pdf_recording(&pdf2, h3))
+			return false;
+
+		// Make sure all of these are serialized.
+		if (h0 == h1 || h1 == h2 || h2 == h3)
+			return false;
+
+		// If we move PDF2 last, hash should still be invariant.
+		shading_rate_enums.pNext = &pdf2;
+		pdf2.pNext = nullptr;
+		if (!test_pdf_recording(&robustness2, h0))
+			return false;
+
+		if (h0 != h3)
+			return false;
+	}
+
+	return true;
+}
+
 int main()
 {
 	if (!test_concurrent_database_extra_paths())
@@ -2746,6 +2854,9 @@ int main()
 	if (!test_logging())
 		return EXIT_FAILURE;
 
+	if (!test_pdf_recording())
+		return EXIT_FAILURE;
+
 	std::vector<uint8_t> res;
 	{
 		StateRecorder recorder;
@@ -2760,7 +2871,7 @@ int main()
 			abort();
 
 		VkPhysicalDeviceFeatures2 features = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
-		if (!recorder.record_physical_device_features(features))
+		if (!recorder.record_physical_device_features(&features))
 			abort();
 
 		record_samplers(recorder);

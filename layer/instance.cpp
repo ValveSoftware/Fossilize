@@ -314,9 +314,9 @@ Instance::Instance()
 
 StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDeviceProperties2 *props,
                                                    const VkApplicationInfo *appInfo,
-                                                   const VkPhysicalDeviceFeatures2 *features)
+                                                   const void *device_pnext)
 {
-	auto appInfoFeatureHash = Hashing::compute_application_feature_hash(appInfo, features);
+	auto appInfoFeatureHash = Hashing::compute_application_feature_hash(appInfo, device_pnext);
 	auto hash = Hashing::compute_combined_application_feature_hash(appInfoFeatureHash);
 
 	std::lock_guard<std::mutex> lock(recorderLock);
@@ -368,7 +368,7 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDevicePropert
 	if (needs_bucket)
 	{
 		char bucketPath[17];
-		Hash bucketHash = infoFilter->get_bucket_hash(props, appInfo, features);
+		Hash bucketHash = infoFilter->get_bucket_hash(props, appInfo, device_pnext);
 		sprintf(bucketPath, "%016" PRIx64, bucketHash);
 
 		// For convenience. Makes filenames similar in top-level directory and bucket directories.
@@ -388,8 +388,8 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDevicePropert
 	if (appInfo)
 		if (!recorder->record_application_info(*appInfo))
 			LOGE_LEVEL("Failed to record application info.\n");
-	if (features)
-		if (!recorder->record_physical_device_features(*features))
+	if (device_pnext)
+		if (!recorder->record_physical_device_features(device_pnext))
 			LOGE_LEVEL("Failed to record physical device features.\n");
 
 	if (synchronized)

@@ -79,11 +79,17 @@ struct VulkanFeatures
 	VkPhysicalDeviceShaderSMBuiltinsFeaturesNV sm_builtins_nv;
 	VkPhysicalDeviceShaderIntegerFunctions2FeaturesINTEL integer_functions2_intel;
 	VkPhysicalDeviceMutableDescriptorTypeFeaturesVALVE mutable_descriptor_type_valve;
+	VkPhysicalDeviceRobustness2FeaturesEXT robustness2;
+	VkPhysicalDeviceImageRobustnessFeaturesEXT image_robustness;
+	VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV fragment_shading_rate_enums;
 };
 
 void *build_pnext_chain(VulkanFeatures &features, uint32_t api_version,
                         const char **enabled_extensions, uint32_t num_extensions);
-void filter_feature_enablement(VulkanFeatures &features);
+void filter_feature_enablement(
+		VkPhysicalDeviceFeatures2 &pdf2,
+		VulkanFeatures &features,
+		const VkPhysicalDeviceFeatures2 *target_features);
 
 struct VulkanProperties
 {

@@ -122,7 +122,7 @@ struct ApplicationInfoFilter::Impl
 	bool needs_buckets(const VkApplicationInfo *info);
 	Hash get_bucket_hash(const VkPhysicalDeviceProperties2 *props,
 	                     const VkApplicationInfo *info,
-	                     const VkPhysicalDeviceFeatures2 *features2);
+	                     const void *device_pnext);
 
 	const char *(*getenv_wrapper)(const char *, void *) = nullptr;
 	void *getenv_userdata = nullptr;
@@ -196,7 +196,7 @@ static inline const T *find_pnext(VkStructureType type, const void *pNext)
 static void hash_variant(Hasher &h, VariantDependency dep,
                          const VkPhysicalDeviceProperties2 *props,
                          const VkApplicationInfo *info,
-                         const VkPhysicalDeviceFeatures2 *features2)
+                         const void *device_pnext)
 {
 	const VkApplicationInfo default_app_info = { VK_STRUCTURE_TYPE_APPLICATION_INFO };
 	if (!info)
@@ -212,7 +212,7 @@ static void hash_variant(Hasher &h, VariantDependency dep,
 	{
 		auto *mut = find_pnext<VkPhysicalDeviceMutableDescriptorTypeFeaturesVALVE>(
 				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MUTABLE_DESCRIPTOR_TYPE_FEATURES_VALVE,
-				features2 ? features2->pNext : nullptr);
+				device_pnext);
 		h.u32(uint32_t(mut && mut->mutableDescriptorType));
 		break;
 	}
@@ -221,10 +221,10 @@ static void hash_variant(Hasher &h, VariantDependency dep,
 	{
 		auto *bda = find_pnext<VkPhysicalDeviceBufferDeviceAddressFeatures>(
 				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES,
-				features2 ? features2->pNext : nullptr);
+				device_pnext);
 		auto *features12 = find_pnext<VkPhysicalDeviceVulkan12Features>(
 				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
-				features2 ? features2->pNext : nullptr);
+				device_pnext);
 
 		bool enabled = (bda && bda->bufferDeviceAddress) ||
 		               (features12 && features12->bufferDeviceAddress);
@@ -236,10 +236,10 @@ static void hash_variant(Hasher &h, VariantDependency dep,
 	{
 		auto *indexing = find_pnext<VkPhysicalDeviceDescriptorIndexingFeatures>(
 				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES,
-				features2 ? features2->pNext : nullptr);
+				device_pnext);
 		auto *features12 = find_pnext<VkPhysicalDeviceVulkan12Features>(
 				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
-				features2 ? features2->pNext : nullptr);
+				device_pnext);
 		bool enabled = (indexing && indexing->descriptorBindingUniformBufferUpdateAfterBind) ||
 		               (features12 && features12->descriptorBindingUniformBufferUpdateAfterBind);
 		h.u32(uint32_t(enabled));
@@ -293,7 +293,7 @@ static void hash_variant(Hasher &h, VariantDependency dep,
 
 Hash ApplicationInfoFilter::Impl::get_bucket_hash(const VkPhysicalDeviceProperties2 *props,
                                                   const VkApplicationInfo *info,
-                                                  const VkPhysicalDeviceFeatures2 *features2)
+                                                  const void *device_pnext)
 {
 	if (task.valid())
 		task.wait();
@@ -311,7 +311,7 @@ Hash ApplicationInfoFilter::Impl::get_bucket_hash(const VkPhysicalDeviceProperti
 		{
 			use_default_variant = false;
 			for (auto &dep : itr->second.variant_dependencies)
-				hash_variant(h, dep, props, info, features2);
+				hash_variant(h, dep, props, info, device_pnext);
 		}
 	}
 
@@ -323,13 +323,13 @@ Hash ApplicationInfoFilter::Impl::get_bucket_hash(const VkPhysicalDeviceProperti
 		{
 			use_default_variant = false;
 			for (auto &dep : itr->second.variant_dependencies)
-				hash_variant(h, dep, props, info, features2);
+				hash_variant(h, dep, props, info, device_pnext);
 		}
 	}
 
 	if (use_default_variant)
 		for (auto &dep : default_variant_dependencies)
-			hash_variant(h, dep, props, info, features2);
+			hash_variant(h, dep, props, info, device_pnext);
 
 	return h.get();
 }
@@ -720,9 +720,9 @@ bool ApplicationInfoFilter::needs_buckets(const VkApplicationInfo *info)
 
 Hash ApplicationInfoFilter::get_bucket_hash(const VkPhysicalDeviceProperties2 *props,
                                             const VkApplicationInfo *info,
-                                            const VkPhysicalDeviceFeatures2 *features2)
+                                            const void *device_pnext)
 {
-	return impl->get_bucket_hash(props, info, features2);
+	return impl->get_bucket_hash(props, info, device_pnext);
 }
 
 bool ApplicationInfoFilter::check_success()

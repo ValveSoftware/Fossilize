@@ -29,6 +29,9 @@ option(FOSSILIZE_TEST_RUNTIME_LAYER "Tests runtime layer" OFF)
 
 if (FOSSILIZE_TEST_RUNTIME_LAYER)
     add_executable(layer-test layer_test.cpp)
+    if (NOT WIN32)
+        target_link_libraries(layer-test PRIVATE -pthread)
+    endif()
     target_link_libraries(layer-test PRIVATE vulkan)
     add_test(NAME layer-test COMMAND layer-test)
     set_property(TEST layer-test APPEND PROPERTY

@@ -57,7 +57,7 @@ public:
 
 	StateRecorder *getStateRecorderForDevice(const VkPhysicalDeviceProperties2 *props,
 	                                         const VkApplicationInfo *appInfo,
-	                                         const VkPhysicalDeviceFeatures2 *features);
+	                                         const void *device_pnext);
 
 	bool capturesParanoid() const
 	{

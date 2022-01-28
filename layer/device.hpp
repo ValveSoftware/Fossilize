@@ -33,7 +33,7 @@ class Device
 public:
 	void init(VkPhysicalDevice gpu, VkDevice device,
 	          Instance *pInstance,
-	          const VkPhysicalDeviceFeatures2 &features,
+	          const void *device_pnext, // Guaranteed to contain PDF2
 	          VkLayerDispatchTable *pTable);
 
 	VkLayerDispatchTable *getTable()
