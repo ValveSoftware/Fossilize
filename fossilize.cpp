@@ -2134,7 +2134,7 @@ bool StateReplayer::Impl::parse_samplers(StateCreatorInterface &iface, const Val
 	auto *infos = allocator.allocate_n_cleared<VkSamplerCreateInfo>(samplers.MemberCount());
 
 	unsigned index = 0;
-	for (auto itr = samplers.MemberBegin(); itr != samplers.MemberEnd(); ++itr)
+	for (auto itr = samplers.MemberBegin(); itr != samplers.MemberEnd(); ++itr, index++)
 	{
 		Hash hash = string_to_uint64(itr->name.GetString());
 		if (replayed_samplers.count(hash))
