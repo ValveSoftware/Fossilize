@@ -181,6 +181,7 @@ struct StateReplayer::Impl
 	bool parse_fragment_shading_rate_enums_features(const Value &state, VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV **out_features) FOSSILIZE_WARN_UNUSED;
 
 	bool parse_color_write(const Value &state, VkPipelineColorWriteCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_provoking_vertex(const Value &state, VkPipelineRasterizationProvokingVertexStateCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_uints(const Value &attachments, const uint32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	bool parse_sints(const Value &attachments, const int32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	const char *duplicate_string(const char *str, size_t len);
@@ -314,6 +315,8 @@ struct StateRecorder::Impl
 	void *copy_pnext_struct(const VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPipelineColorWriteCreateInfoEXT *create_info,
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkPipelineRasterizationProvokingVertexStateCreateInfoEXT *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 
 	bool remap_sampler_handle(VkSampler sampler, VkSampler *out_sampler) const FOSSILIZE_WARN_UNUSED;
@@ -852,6 +855,13 @@ static void hash_pnext_struct(const StateRecorder *,
 		h.u32(info.pColorWriteEnables[i]);
 }
 
+static void hash_pnext_struct(const StateRecorder *,
+                              Hasher &h,
+                              const VkPipelineRasterizationProvokingVertexStateCreateInfoEXT &info)
+{
+	h.u32(info.provokingVertexMode);
+}
+
 static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const void *pNext)
 {
 	while ((pNext = pnext_chain_skip_ignored_entries(pNext)) != nullptr)
@@ -929,6 +939,10 @@ static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const voi
 
 		case VK_STRUCTURE_TYPE_PIPELINE_COLOR_WRITE_CREATE_INFO_EXT:
 			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineColorWriteCreateInfoEXT *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_PROVOKING_VERTEX_STATE_CREATE_INFO_EXT:
+			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineRasterizationProvokingVertexStateCreateInfoEXT *>(pNext));
 			break;
 
 		default:
@@ -3615,6 +3629,16 @@ bool StateReplayer::Impl::parse_color_write(const Value &state,
 	return true;
 }
 
+bool StateReplayer::Impl::parse_provoking_vertex(const Value &state,
+						 VkPipelineRasterizationProvokingVertexStateCreateInfoEXT **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkPipelineRasterizationProvokingVertexStateCreateInfoEXT>();
+	*out_info = info;
+
+	info->provokingVertexMode = static_cast<VkProvokingVertexModeEXT>(state["provokingVertexMode"].GetUint());
+	return true;
+}
+
 bool StateReplayer::Impl::parse_mutable_descriptor_type(const Value &state,
                                                         VkMutableDescriptorTypeCreateInfoVALVE **out_info)
 {
@@ -3844,6 +3868,15 @@ bool StateReplayer::Impl::parse_pnext_chain(const Value &pnext, const void **out
 			if (!parse_color_write(next, &color_write))
 				return false;
 			new_struct = reinterpret_cast<VkBaseInStructure *>(color_write);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_PROVOKING_VERTEX_STATE_CREATE_INFO_EXT:
+		{
+			VkPipelineRasterizationProvokingVertexStateCreateInfoEXT *provoking_vertex = nullptr;
+			if (!parse_provoking_vertex(next, &provoking_vertex))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(provoking_vertex);
 			break;
 		}
 
@@ -4287,6 +4320,13 @@ void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineColorWriteCreateInf
 	return color_write;
 }
 
+void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineRasterizationProvokingVertexStateCreateInfoEXT *create_info,
+                                             ScratchAllocator &alloc)
+{
+	auto *provoking_vertex = copy(create_info, 1, alloc);
+	return provoking_vertex;
+}
+
 template <typename T>
 bool StateRecorder::Impl::copy_pnext_chains(const T *ts, uint32_t count, ScratchAllocator &alloc)
 {
@@ -4428,6 +4468,13 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 		case VK_STRUCTURE_TYPE_PIPELINE_COLOR_WRITE_CREATE_INFO_EXT:
 		{
 			auto *ci = static_cast<const VkPipelineColorWriteCreateInfoEXT *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_PROVOKING_VERTEX_STATE_CREATE_INFO_EXT:
+		{
+			auto *ci = static_cast<const VkPipelineRasterizationProvokingVertexStateCreateInfoEXT *>(pNext);
 			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
 			break;
 		}
@@ -6636,6 +6683,17 @@ static bool json_value(const VkPipelineColorWriteCreateInfoEXT &create_info, All
 }
 
 template <typename Allocator>
+static bool json_value(const VkPipelineRasterizationProvokingVertexStateCreateInfoEXT &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("provokingVertexMode", create_info.provokingVertexMode, alloc);
+
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
 static bool json_value(const VkSubpassDescriptionDepthStencilResolve &create_info, Allocator &alloc, Value *out_value);
 template <typename Allocator>
 static bool json_value(const VkFragmentShadingRateAttachmentInfoKHR &create_info, Allocator &alloc, Value *out_value);
@@ -6733,6 +6791,11 @@ static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *o
 
 		case VK_STRUCTURE_TYPE_PIPELINE_COLOR_WRITE_CREATE_INFO_EXT:
 			if (!json_value(*static_cast<const VkPipelineColorWriteCreateInfoEXT *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_PROVOKING_VERTEX_STATE_CREATE_INFO_EXT:
+			if (!json_value(*static_cast<const VkPipelineRasterizationProvokingVertexStateCreateInfoEXT *>(pNext), alloc, &next))
 				return false;
 			break;
 

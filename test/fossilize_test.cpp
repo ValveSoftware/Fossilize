@@ -1291,6 +1291,11 @@ static void record_graphics_pipelines(StateRecorder &recorder)
 	color_write.pColorWriteEnables = color_write_enables;
 	advanced.pNext = &color_write;
 
+	VkPipelineRasterizationProvokingVertexStateCreateInfoEXT provoking_vertex =
+			{ VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_PROVOKING_VERTEX_STATE_CREATE_INFO_EXT };
+	provoking_vertex.provokingVertexMode = VK_PROVOKING_VERTEX_MODE_FIRST_VERTEX_EXT;
+	line_state.pNext = &provoking_vertex;
+
 	pipe.pVertexInputState = &vi;
 	pipe.pMultisampleState = &ms;
 	pipe.pDynamicState = &dyn;
