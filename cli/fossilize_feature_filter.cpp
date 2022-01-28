@@ -642,6 +642,20 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 			break;
 		}
 
+		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_PROVOKING_VERTEX_STATE_CREATE_INFO_EXT:
+		{
+			if (!enabled_extensions.count(VK_EXT_PROVOKING_VERTEX_EXTENSION_NAME))
+				return false;
+
+			auto *info = static_cast<const VkPipelineRasterizationProvokingVertexStateCreateInfoEXT *>(pNext);
+
+			if (info->provokingVertexMode == VK_PROVOKING_VERTEX_MODE_LAST_VERTEX_EXT &&
+			    !features.provoking_vertex.provokingVertexLast)
+				return false;
+
+			break;
+		}
+
 		default:
 			LOGE("Unrecognized pNext sType: %u. Treating as unsupported.\n", unsigned(base->sType));
 			return false;
