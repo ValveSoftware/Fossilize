@@ -1283,6 +1283,14 @@ static void record_graphics_pipelines(StateRecorder &recorder)
 	ia.topology = VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
 	ia.primitiveRestartEnable = VK_TRUE;
 
+	VkPipelineColorWriteCreateInfoEXT color_write =
+			{ VK_STRUCTURE_TYPE_PIPELINE_COLOR_WRITE_CREATE_INFO_EXT };
+	VkBool32 color_write_enables[1] = { };
+	color_write_enables[0] = VK_TRUE;
+	color_write.attachmentCount = 1;
+	color_write.pColorWriteEnables = color_write_enables;
+	advanced.pNext = &color_write;
+
 	pipe.pVertexInputState = &vi;
 	pipe.pMultisampleState = &ms;
 	pipe.pDynamicState = &dyn;
