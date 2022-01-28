@@ -750,6 +750,20 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 			break;
 		}
 
+		case VK_STRUCTURE_TYPE_SAMPLER_CUSTOM_BORDER_COLOR_CREATE_INFO_EXT:
+		{
+			if (!enabled_extensions.count(VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME))
+				return false;
+
+			auto *info = static_cast<const VkSamplerCustomBorderColorCreateInfoEXT *>(pNext);
+
+			if (info->format == VK_FORMAT_UNDEFINED &&
+			    !features.custom_border_color.customBorderColorWithoutFormat)
+				return false;
+
+			break;
+		}
+
 		default:
 			LOGE("Unrecognized pNext sType: %u. Treating as unsupported.\n", unsigned(base->sType));
 			return false;

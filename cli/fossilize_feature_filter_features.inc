@@ -62,6 +62,7 @@ FE(SHADER_IMAGE_ATOMIC_INT64, shader_image_atomic_int64, EXT);
 FE(SHADER_ATOMIC_FLOAT, shader_atomic_float, EXT);
 FE(SHADER_ATOMIC_FLOAT_2, shader_atomic_float2, EXT);
 FE(PROVOKING_VERTEX, provoking_vertex, EXT);
+FE(CUSTOM_BORDER_COLOR, custom_border_color, EXT);
 FE(COMPUTE_SHADER_DERIVATIVES, compute_shader_derivatives, NV);
 FE(FRAGMENT_SHADER_BARYCENTRIC, barycentric_nv, NV);
 FE(SHADER_IMAGE_FOOTPRINT, image_footprint_nv, NV);

@@ -216,6 +216,18 @@ static void record_samplers(StateRecorder &recorder)
 	{
 		LOGE("=== Tripped intentional error for testing ===\n");
 	}
+
+	VkSamplerCustomBorderColorCreateInfoEXT custom_border_color =
+			{ VK_STRUCTURE_TYPE_SAMPLER_CUSTOM_BORDER_COLOR_CREATE_INFO_EXT };
+	custom_border_color.customBorderColor.uint32[0] = 0;
+	custom_border_color.customBorderColor.uint32[1] = 0;
+	custom_border_color.customBorderColor.uint32[2] = 0;
+	custom_border_color.customBorderColor.uint32[3] = 0;
+	custom_border_color.format = VK_FORMAT_R8G8B8A8_UNORM;
+	sampler.pNext = &custom_border_color;
+
+	if (!recorder.record_sampler(fake_handle<VkSampler>(103), sampler))
+		abort();
 }
 
 static void record_set_layouts(StateRecorder &recorder)
