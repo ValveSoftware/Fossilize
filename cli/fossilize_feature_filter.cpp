@@ -68,7 +68,24 @@ void *build_pnext_chain(VulkanFeatures &features, uint32_t api_version,
 	return pNext;
 }
 
-void filter_feature_enablement(VulkanFeatures &features)
+template <typename T>
+static inline const T *find_pnext(VkStructureType type, const void *pNext)
+{
+	while (pNext != nullptr)
+	{
+		auto *sin = static_cast<const VkBaseInStructure *>(pNext);
+		if (sin->sType == type)
+			return static_cast<const T*>(pNext);
+
+		pNext = sin->pNext;
+	}
+
+	return nullptr;
+}
+
+void filter_feature_enablement(VkPhysicalDeviceFeatures2 &pdf,
+                               VulkanFeatures &features,
+                               const VkPhysicalDeviceFeatures2 *target_features)
 {
 	// These feature bits conflict according to validation layers.
 	if (features.fragment_shading_rate.pipelineFragmentShadingRate == VK_TRUE ||
@@ -78,6 +95,83 @@ void filter_feature_enablement(VulkanFeatures &features)
 		features.shading_rate_nv.shadingRateImage = VK_FALSE;
 		features.shading_rate_nv.shadingRateCoarseSampleOrder = VK_FALSE;
 		features.fragment_density.fragmentDensityMap = VK_FALSE;
+	}
+
+	// Only enable robustness if requested since it affects compilation on most implementations.
+	if (target_features)
+	{
+		pdf.features.robustBufferAccess =
+				pdf.features.robustBufferAccess && target_features->features.robustBufferAccess;
+
+		const auto *robustness2 = find_pnext<VkPhysicalDeviceRobustness2FeaturesEXT>(
+				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT,
+				target_features->pNext);
+
+		if (robustness2)
+		{
+			features.robustness2.robustBufferAccess2 =
+					features.robustness2.robustBufferAccess2 && robustness2->robustBufferAccess2;
+			features.robustness2.robustImageAccess2 =
+					features.robustness2.robustImageAccess2 && robustness2->robustImageAccess2;
+			features.robustness2.nullDescriptor =
+					features.robustness2.nullDescriptor && robustness2->nullDescriptor;
+		}
+		else
+		{
+			features.robustness2.robustBufferAccess2 = VK_FALSE;
+			features.robustness2.robustImageAccess2 = VK_FALSE;
+			features.robustness2.nullDescriptor = VK_FALSE;
+		}
+
+		const auto *image_robustness = find_pnext<VkPhysicalDeviceImageRobustnessFeaturesEXT>(
+				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_ROBUSTNESS_FEATURES_EXT,
+				target_features->pNext);
+
+		if (image_robustness)
+		{
+			features.image_robustness.robustImageAccess =
+					features.image_robustness.robustImageAccess && image_robustness->robustImageAccess;
+		}
+		else
+		{
+			features.image_robustness.robustImageAccess = VK_FALSE;
+		}
+
+		const auto *fragment_shading_rate_enums = find_pnext<VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV>(
+				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_ENUMS_FEATURES_NV,
+				target_features->pNext);
+
+		if (fragment_shading_rate_enums)
+		{
+			features.fragment_shading_rate_enums.fragmentShadingRateEnums =
+					features.fragment_shading_rate_enums.fragmentShadingRateEnums &&
+					fragment_shading_rate_enums->fragmentShadingRateEnums;
+
+			features.fragment_shading_rate_enums.noInvocationFragmentShadingRates =
+					features.fragment_shading_rate_enums.noInvocationFragmentShadingRates &&
+					fragment_shading_rate_enums->noInvocationFragmentShadingRates;
+
+			features.fragment_shading_rate_enums.supersampleFragmentShadingRates =
+					features.fragment_shading_rate_enums.supersampleFragmentShadingRates &&
+					fragment_shading_rate_enums->supersampleFragmentShadingRates;
+		}
+		else
+		{
+			features.fragment_shading_rate_enums.fragmentShadingRateEnums = VK_FALSE;
+			features.fragment_shading_rate_enums.noInvocationFragmentShadingRates = VK_FALSE;
+			features.fragment_shading_rate_enums.supersampleFragmentShadingRates = VK_FALSE;
+		}
+	}
+	else
+	{
+		pdf.features.robustBufferAccess = VK_FALSE;
+		features.robustness2.nullDescriptor = VK_FALSE;
+		features.robustness2.robustBufferAccess2 = VK_FALSE;
+		features.robustness2.robustImageAccess2 = VK_FALSE;
+		features.image_robustness.robustImageAccess = VK_FALSE;
+		features.fragment_shading_rate_enums.fragmentShadingRateEnums = VK_FALSE;
+		features.fragment_shading_rate_enums.noInvocationFragmentShadingRates = VK_FALSE;
+		features.fragment_shading_rate_enums.supersampleFragmentShadingRates = VK_FALSE;
 	}
 }
 
@@ -650,19 +744,6 @@ bool FeatureFilter::Impl::sampler_is_supported(const VkSamplerCreateInfo *info) 
 	if (null_device)
 		return true;
 	return pnext_chain_is_supported(info->pNext);
-}
-
-template <typename T>
-static const T *find_pnext(VkStructureType sType, const void *pNext)
-{
-	while (pNext)
-	{
-		auto *base_in = static_cast<const VkBaseInStructure *>(pNext);
-		if (base_in->sType == sType)
-			return static_cast<const T *>(pNext);
-		pNext = base_in->pNext;
-	}
-	return nullptr;
 }
 
 bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorSetLayoutCreateInfo *info) const

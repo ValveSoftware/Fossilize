@@ -30,21 +30,6 @@ using namespace std;
 
 namespace Fossilize
 {
-template <typename T>
-static inline const T *find_pnext(VkStructureType type, const void *pNext)
-{
-	while (pNext != nullptr)
-	{
-		auto *sin = static_cast<const VkBaseInStructure *>(pNext);
-		if (sin->sType == type)
-			return static_cast<const T*>(pNext);
-
-		pNext = sin->pNext;
-	}
-
-	return nullptr;
-}
-
 static bool find_layer(const vector<VkLayerProperties> &layers, const char *layer)
 {
 	auto itr = find_if(begin(layers), end(layers), [&](const VkLayerProperties &prop) -> bool {
@@ -325,9 +310,7 @@ bool VulkanDevice::init_device(const Options &opts)
 
 	bool has_device_features2 = find_extension(exts, VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
 
-	// FIXME: There are arbitrary features we can request here from physical_device_features2.
 	VkPhysicalDeviceFeatures2 gpu_features2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
-	VkPhysicalDeviceFeatures *gpu_features = &gpu_features2.features;
 	VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR stats_feature = {
 		VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR
 	};
@@ -338,7 +321,6 @@ bool VulkanDevice::init_device(const Options &opts)
 		                                        active_device_extensions.data(),
 		                                        uint32_t(active_device_extensions.size()));
 		vkGetPhysicalDeviceFeatures2KHR(gpu, &gpu_features2);
-		filter_feature_enablement(features);
 
 		pipeline_stats = stats_feature.pipelineExecutableInfo;
 		if (pipeline_stats && opts.want_pipeline_stats)
@@ -347,7 +329,7 @@ bool VulkanDevice::init_device(const Options &opts)
 			stats_feature.pipelineExecutableInfo = VK_FALSE;
 	}
 	else
-		vkGetPhysicalDeviceFeatures(gpu, gpu_features);
+		vkGetPhysicalDeviceFeatures(gpu, &gpu_features2.features);
 
 	VkPhysicalDeviceProperties2 gpu_props2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
 	if (has_device_features2)
@@ -360,25 +342,7 @@ bool VulkanDevice::init_device(const Options &opts)
 	else
 		vkGetPhysicalDeviceProperties(gpu, &gpu_props2.properties);
 
-	// FIXME: Have some way to enable the right features that a repro-capture may want to use.
-	// FIXME: It is unlikely any feature other than robust access has any real impact on code-gen, but who knows.
-	if (gpu_features->robustBufferAccess && opts.features && opts.features->features.robustBufferAccess)
-		gpu_features->robustBufferAccess = VK_TRUE;
-	else
-		gpu_features->robustBufferAccess = VK_FALSE;
-
-	auto *robustness2 = find_pnext<VkPhysicalDeviceRobustness2FeaturesEXT>(
-				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT,
-				opts.features);
-	if (robustness2) {
-		features.robustness2.robustBufferAccess2 = robustness2->robustBufferAccess2;
-		features.robustness2.robustImageAccess2 = robustness2->robustImageAccess2;
-		features.robustness2.nullDescriptor = robustness2->nullDescriptor;
-	} else {
-		features.robustness2.robustBufferAccess2 = VK_FALSE;
-		features.robustness2.robustImageAccess2 = VK_FALSE;
-		features.robustness2.nullDescriptor = VK_FALSE;
-	}
+	filter_feature_enablement(gpu_features2, features, opts.features);
 
 	// Just pick one graphics queue.
 	// FIXME: Does shader compilation depend on which queues we have enabled?
@@ -440,7 +404,7 @@ bool VulkanDevice::init_device(const Options &opts)
 
 	VkDeviceCreateInfo device_info = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
 	device_info.pNext = has_device_features2 ? &gpu_features2 : nullptr;
-	device_info.pEnabledFeatures = has_device_features2 ? nullptr : gpu_features;
+	device_info.pEnabledFeatures = has_device_features2 ? nullptr : &gpu_features2.features;
 	device_info.pQueueCreateInfos = &queue_info;
 	device_info.queueCreateInfoCount = 1;
 	device_info.enabledLayerCount = uint32_t(active_device_layers.size());
