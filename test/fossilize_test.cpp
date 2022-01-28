@@ -2738,8 +2738,7 @@ static bool test_logging()
 		if (recorder.record_sampler(immutable, create_info, 100))
 			return false;
 
-		unsigned expected_warn = i < 2 ? 1 : 0;
-		if (userdata.warn_count != expected_warn || userdata.err_count != 0 || userdata.info_count != 0)
+		if (userdata.warn_count != 0 || userdata.err_count != 1 || userdata.info_count != 0)
 			return false;
 
 		// Should succeed, but will fail later when trying to resolve sampler.
@@ -2749,8 +2748,8 @@ static bool test_logging()
 		recorder.tear_down_recording_thread();
 		LOGI("=======================\n");
 
-		expected_warn = i < 2 ? 2 : 0;
-		if (userdata.warn_count != expected_warn || userdata.err_count != 0 || userdata.info_count != 0)
+		unsigned expected_warn = i < 2 ? 1 : 0;
+		if (userdata.warn_count != expected_warn || userdata.err_count != 1 || userdata.info_count != 0)
 			return false;
 	}
 	remove(".__test_archive.foz");

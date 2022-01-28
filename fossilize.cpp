@@ -4766,17 +4766,6 @@ void StateRecorder::Impl::pump_synchronized_recording(StateRecorder *recorder)
 bool StateRecorder::record_sampler(VkSampler sampler, const VkSamplerCreateInfo &create_info, Hash custom_hash)
 {
 	{
-		// Only custom border color and reduction mode are supported for now.
-		auto *custom_border_color = find_pnext<VkSamplerCustomBorderColorCreateInfoEXT>(
-			VK_STRUCTURE_TYPE_SAMPLER_CUSTOM_BORDER_COLOR_CREATE_INFO_EXT, create_info.pNext);
-		auto *reduction_mode = find_pnext<VkSamplerReductionModeCreateInfo>(
-			VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO, create_info.pNext);
-
-		if (create_info.pNext && !custom_border_color && !reduction_mode)
-		{
-			log_error_pnext_chain("pNext in VkSamplerCreateInfo not supported.", create_info.pNext);
-			return false;
-		}
 		std::lock_guard<std::mutex> lock(impl->record_lock);
 
 		VkSamplerCreateInfo *new_info = nullptr;
