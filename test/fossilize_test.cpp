@@ -560,6 +560,18 @@ static void record_render_passes(StateRecorder &recorder)
 	pass.pNext = &blank_multiview;
 	if (!recorder.record_render_pass(fake_handle<VkRenderPass>(30001), pass))
 		abort();
+
+	VkRenderPassInputAttachmentAspectCreateInfo input_att_aspect = { VK_STRUCTURE_TYPE_RENDER_PASS_INPUT_ATTACHMENT_ASPECT_CREATE_INFO };
+	VkInputAttachmentAspectReference aspects[1] = { };
+	aspects[0].subpass = 0;
+	aspects[0].inputAttachmentIndex = 0;
+	aspects[0].aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	input_att_aspect.aspectReferenceCount = 1;
+	input_att_aspect.pAspectReferences = aspects;
+	blank_multiview.pNext = &input_att_aspect;
+
+	if (!recorder.record_render_pass(fake_handle<VkRenderPass>(30002), pass))
+		abort();
 }
 
 static void record_compute_pipelines(StateRecorder &recorder)
