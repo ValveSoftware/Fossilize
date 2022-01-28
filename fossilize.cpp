@@ -172,6 +172,7 @@ struct StateReplayer::Impl
 	bool parse_subpass_description_depth_stencil_resolve(const Value &state, VkSubpassDescriptionDepthStencilResolve **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_fragment_shading_rate_attachment_info(const Value &state, VkFragmentShadingRateAttachmentInfoKHR **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_pipeline_rendering_info(const Value &state, VkPipelineRenderingCreateInfoKHR **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_color_write(const Value &state, VkPipelineColorWriteCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_uints(const Value &attachments, const uint32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	bool parse_sints(const Value &attachments, const int32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	const char *duplicate_string(const char *str, size_t len);
@@ -297,6 +298,8 @@ struct StateRecorder::Impl
 	void *copy_pnext_struct(const VkFragmentShadingRateAttachmentInfoKHR *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPipelineRenderingCreateInfoKHR *create_info,
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkPipelineColorWriteCreateInfoEXT *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 
 	bool remap_sampler_handle(VkSampler sampler, VkSampler *out_sampler) const FOSSILIZE_WARN_UNUSED;
@@ -755,6 +758,15 @@ static void hash_pnext_struct(const StateRecorder *,
 	h.u32(info.stencilAttachmentFormat);
 }
 
+static void hash_pnext_struct(const StateRecorder *,
+                              Hasher &h,
+                              const VkPipelineColorWriteCreateInfoEXT &info)
+{
+	h.u32(info.attachmentCount);
+	for (uint32_t i = 0; i < info.attachmentCount; i++)
+		h.u32(info.pColorWriteEnables[i]);
+}
+
 static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const void *pNext)
 {
 	while ((pNext = pnext_chain_skip_ignored_entries(pNext)) != nullptr)
@@ -828,6 +840,10 @@ static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const voi
 
 		case VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR:
 			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineRenderingCreateInfoKHR *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_COLOR_WRITE_CREATE_INFO_EXT:
+			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineColorWriteCreateInfoEXT *>(pNext));
 			break;
 
 		default:
@@ -3493,6 +3509,23 @@ bool StateReplayer::Impl::parse_pipeline_rendering_info(const Value &state,
 	return true;
 }
 
+bool StateReplayer::Impl::parse_color_write(const Value &state,
+					    VkPipelineColorWriteCreateInfoEXT **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkPipelineColorWriteCreateInfoEXT>();
+	*out_info = info;
+
+	if (state.HasMember("colorWriteEnables"))
+	{
+		auto &enables = state["colorWriteEnables"];
+		info->attachmentCount = enables.Size();
+		if (!parse_uints(enables, reinterpret_cast<const VkBool32 **>(&info->pColorWriteEnables)))
+			return false;
+	}
+
+	return true;
+}
+
 bool StateReplayer::Impl::parse_mutable_descriptor_type(const Value &state,
                                                         VkMutableDescriptorTypeCreateInfoVALVE **out_info)
 {
@@ -3713,6 +3746,15 @@ bool StateReplayer::Impl::parse_pnext_chain(const Value &pnext, const void **out
 			if (!parse_pipeline_rendering_info(next, &rendering))
 				return false;
 			new_struct = reinterpret_cast<VkBaseInStructure *>(rendering);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_COLOR_WRITE_CREATE_INFO_EXT:
+		{
+			VkPipelineColorWriteCreateInfoEXT *color_write = nullptr;
+			if (!parse_color_write(next, &color_write))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(color_write);
 			break;
 		}
 
@@ -4048,6 +4090,14 @@ void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineRenderingCreateInfo
 	return rendering;
 }
 
+void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineColorWriteCreateInfoEXT *create_info,
+                                             ScratchAllocator &alloc)
+{
+	auto *color_write = copy(create_info, 1, alloc);
+	color_write->pColorWriteEnables = copy(color_write->pColorWriteEnables, color_write->attachmentCount, alloc);
+	return color_write;
+}
+
 template <typename T>
 bool StateRecorder::Impl::copy_pnext_chains(const T *ts, uint32_t count, ScratchAllocator &alloc)
 {
@@ -4182,6 +4232,13 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 		case VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR:
 		{
 			auto *ci = static_cast<const VkPipelineRenderingCreateInfoKHR *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_COLOR_WRITE_CREATE_INFO_EXT:
+		{
+			auto *ci = static_cast<const VkPipelineColorWriteCreateInfoEXT *>(pNext);
 			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
 			break;
 		}
@@ -6292,6 +6349,24 @@ static bool json_value(const VkPipelineRenderingCreateInfoKHR &create_info, Allo
 }
 
 template <typename Allocator>
+static bool json_value(const VkPipelineColorWriteCreateInfoEXT &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+
+	if (create_info.attachmentCount)
+	{
+		Value enables(kArrayType);
+		for (uint32_t i = 0; i < create_info.attachmentCount; i++)
+			enables.PushBack(uint32_t(create_info.pColorWriteEnables[i]), alloc);
+		value.AddMember("colorWriteEnables", enables, alloc);
+	}
+
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
 static bool json_value(const VkSubpassDescriptionDepthStencilResolve &create_info, Allocator &alloc, Value *out_value);
 template <typename Allocator>
 static bool json_value(const VkFragmentShadingRateAttachmentInfoKHR &create_info, Allocator &alloc, Value *out_value);
@@ -6384,6 +6459,11 @@ static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *o
 
 		case VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR:
 			if (!json_value(*static_cast<const VkPipelineRenderingCreateInfoKHR *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_COLOR_WRITE_CREATE_INFO_EXT:
+			if (!json_value(*static_cast<const VkPipelineColorWriteCreateInfoEXT *>(pNext), alloc, &next))
 				return false;
 			break;
 
