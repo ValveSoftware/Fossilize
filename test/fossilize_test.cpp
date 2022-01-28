@@ -216,6 +216,26 @@ static void record_samplers(StateRecorder &recorder)
 	{
 		LOGE("=== Tripped intentional error for testing ===\n");
 	}
+
+	VkSamplerCustomBorderColorCreateInfoEXT custom_border_color =
+			{ VK_STRUCTURE_TYPE_SAMPLER_CUSTOM_BORDER_COLOR_CREATE_INFO_EXT };
+	custom_border_color.customBorderColor.uint32[0] = 0;
+	custom_border_color.customBorderColor.uint32[1] = 0;
+	custom_border_color.customBorderColor.uint32[2] = 0;
+	custom_border_color.customBorderColor.uint32[3] = 0;
+	custom_border_color.format = VK_FORMAT_R8G8B8A8_UNORM;
+	sampler.pNext = &custom_border_color;
+
+	if (!recorder.record_sampler(fake_handle<VkSampler>(103), sampler))
+		abort();
+
+	VkSamplerReductionModeCreateInfo reduction_mode =
+			{ VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO };
+	reduction_mode.reductionMode = VK_SAMPLER_REDUCTION_MODE_MIN;
+	sampler.pNext = &reduction_mode;
+
+	if (!recorder.record_sampler(fake_handle<VkSampler>(104), sampler))
+		abort();
 }
 
 static void record_set_layouts(StateRecorder &recorder)
@@ -1282,6 +1302,19 @@ static void record_graphics_pipelines(StateRecorder &recorder)
 
 	ia.topology = VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
 	ia.primitiveRestartEnable = VK_TRUE;
+
+	VkPipelineColorWriteCreateInfoEXT color_write =
+			{ VK_STRUCTURE_TYPE_PIPELINE_COLOR_WRITE_CREATE_INFO_EXT };
+	VkBool32 color_write_enables[1] = { };
+	color_write_enables[0] = VK_TRUE;
+	color_write.attachmentCount = 1;
+	color_write.pColorWriteEnables = color_write_enables;
+	advanced.pNext = &color_write;
+
+	VkPipelineRasterizationProvokingVertexStateCreateInfoEXT provoking_vertex =
+			{ VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_PROVOKING_VERTEX_STATE_CREATE_INFO_EXT };
+	provoking_vertex.provokingVertexMode = VK_PROVOKING_VERTEX_MODE_FIRST_VERTEX_EXT;
+	line_state.pNext = &provoking_vertex;
 
 	pipe.pVertexInputState = &vi;
 	pipe.pMultisampleState = &ms;

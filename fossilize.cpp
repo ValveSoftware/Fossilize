@@ -180,6 +180,10 @@ struct StateReplayer::Impl
 	bool parse_image_robustness_features(const Value &state, VkPhysicalDeviceImageRobustnessFeaturesEXT **out_features) FOSSILIZE_WARN_UNUSED;
 	bool parse_fragment_shading_rate_enums_features(const Value &state, VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV **out_features) FOSSILIZE_WARN_UNUSED;
 
+	bool parse_color_write(const Value &state, VkPipelineColorWriteCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_provoking_vertex(const Value &state, VkPipelineRasterizationProvokingVertexStateCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_sampler_custom_border_color(const Value &state, VkSamplerCustomBorderColorCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_sampler_reduction_mode(const Value &state, VkSamplerReductionModeCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_uints(const Value &attachments, const uint32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	bool parse_sints(const Value &attachments, const int32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	const char *duplicate_string(const char *str, size_t len);
@@ -311,6 +315,14 @@ struct StateRecorder::Impl
 	void *copy_pnext_struct(const VkPhysicalDeviceImageRobustnessFeaturesEXT *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV *create_info,
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkPipelineColorWriteCreateInfoEXT *create_info,
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkPipelineRasterizationProvokingVertexStateCreateInfoEXT *create_info,
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkSamplerCustomBorderColorCreateInfoEXT *create_info,
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkSamplerReductionModeCreateInfo *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 
 	bool remap_sampler_handle(VkSampler sampler, VkSampler *out_sampler) const FOSSILIZE_WARN_UNUSED;
@@ -524,6 +536,8 @@ static Hash compute_hash_application_info_link(Hash app_hash, ResourceTag tag, H
 	return h.get();
 }
 
+static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const void *pNext) FOSSILIZE_WARN_UNUSED;
+
 bool compute_hash_sampler(const VkSamplerCreateInfo &sampler, Hash *out_hash)
 {
 	Hasher h;
@@ -545,11 +559,12 @@ bool compute_hash_sampler(const VkSamplerCreateInfo &sampler, Hash *out_hash)
 	h.u32(sampler.borderColor);
 	h.u32(sampler.unnormalizedCoordinates);
 
+	if (!hash_pnext_chain(nullptr, h, sampler.pNext))
+		return false;
+
 	*out_hash = h.get();
 	return true;
 }
-
-static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const void *pNext) FOSSILIZE_WARN_UNUSED;
 
 static bool validate_pnext_chain(const void *pNext, const VkStructureType *expected, uint32_t count)
 {
@@ -840,6 +855,40 @@ static void hash_pnext_struct(const StateRecorder *,
 	h.u32(info.stencilAttachmentFormat);
 }
 
+static void hash_pnext_struct(const StateRecorder *,
+                              Hasher &h,
+                              const VkPipelineColorWriteCreateInfoEXT &info)
+{
+	h.u32(info.attachmentCount);
+	for (uint32_t i = 0; i < info.attachmentCount; i++)
+		h.u32(info.pColorWriteEnables[i]);
+}
+
+static void hash_pnext_struct(const StateRecorder *,
+                              Hasher &h,
+                              const VkPipelineRasterizationProvokingVertexStateCreateInfoEXT &info)
+{
+	h.u32(info.provokingVertexMode);
+}
+
+static void hash_pnext_struct(const StateRecorder *,
+                              Hasher &h,
+                              const VkSamplerCustomBorderColorCreateInfoEXT &info)
+{
+	h.u32(info.customBorderColor.uint32[0]);
+	h.u32(info.customBorderColor.uint32[1]);
+	h.u32(info.customBorderColor.uint32[2]);
+	h.u32(info.customBorderColor.uint32[3]);
+	h.u32(info.format);
+}
+
+static void hash_pnext_struct(const StateRecorder *,
+                              Hasher &h,
+                              const VkSamplerReductionModeCreateInfo &info)
+{
+	h.u32(info.reductionMode);
+}
+
 static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const void *pNext)
 {
 	while ((pNext = pnext_chain_skip_ignored_entries(pNext)) != nullptr)
@@ -913,6 +962,22 @@ static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const voi
 
 		case VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR:
 			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineRenderingCreateInfoKHR *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_COLOR_WRITE_CREATE_INFO_EXT:
+			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineColorWriteCreateInfoEXT *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_PROVOKING_VERTEX_STATE_CREATE_INFO_EXT:
+			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineRasterizationProvokingVertexStateCreateInfoEXT *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_SAMPLER_CUSTOM_BORDER_COLOR_CREATE_INFO_EXT:
+			hash_pnext_struct(recorder, h, *static_cast<const VkSamplerCustomBorderColorCreateInfoEXT *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO:
+			hash_pnext_struct(recorder, h, *static_cast<const VkSamplerReductionModeCreateInfo *>(pNext));
 			break;
 
 		default:
@@ -2159,6 +2224,10 @@ bool StateReplayer::Impl::parse_samplers(StateCreatorInterface &iface, const Val
 		info.minLod = obj["minLod"].GetFloat();
 		info.mipLodBias = obj["mipLodBias"].GetFloat();
 		info.unnormalizedCoordinates = obj["unnormalizedCoordinates"].GetUint();
+
+		if (obj.HasMember("pNext"))
+			if (!parse_pnext_chain(obj["pNext"], &info.pNext))
+				return false;
 
 		if (!iface.enqueue_create_sampler(hash, &info, &replayed_samplers[hash]))
 			return false;
@@ -3582,6 +3651,57 @@ bool StateReplayer::Impl::parse_pipeline_rendering_info(const Value &state,
 	return true;
 }
 
+bool StateReplayer::Impl::parse_color_write(const Value &state,
+					    VkPipelineColorWriteCreateInfoEXT **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkPipelineColorWriteCreateInfoEXT>();
+	*out_info = info;
+
+	if (state.HasMember("colorWriteEnables"))
+	{
+		auto &enables = state["colorWriteEnables"];
+		info->attachmentCount = enables.Size();
+		if (!parse_uints(enables, reinterpret_cast<const VkBool32 **>(&info->pColorWriteEnables)))
+			return false;
+	}
+
+	return true;
+}
+
+bool StateReplayer::Impl::parse_provoking_vertex(const Value &state,
+						 VkPipelineRasterizationProvokingVertexStateCreateInfoEXT **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkPipelineRasterizationProvokingVertexStateCreateInfoEXT>();
+	*out_info = info;
+
+	info->provokingVertexMode = static_cast<VkProvokingVertexModeEXT>(state["provokingVertexMode"].GetUint());
+	return true;
+}
+
+bool StateReplayer::Impl::parse_sampler_custom_border_color(const Value &state,
+							    VkSamplerCustomBorderColorCreateInfoEXT **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkSamplerCustomBorderColorCreateInfoEXT>();
+	*out_info = info;
+
+	for (uint32_t i = 0; i < 4; i++)
+		info->customBorderColor.uint32[i] = state["customBorderColor"][i].GetUint();
+	info->format = static_cast<VkFormat>(state["format"].GetUint());
+
+	return true;
+}
+
+bool StateReplayer::Impl::parse_sampler_reduction_mode(const Value &state,
+						       VkSamplerReductionModeCreateInfo **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkSamplerReductionModeCreateInfo>();
+	*out_info = info;
+
+	info->reductionMode = static_cast<VkSamplerReductionMode>(state["reductionMode"].GetUint());
+
+	return true;
+}
+
 bool StateReplayer::Impl::parse_mutable_descriptor_type(const Value &state,
                                                         VkMutableDescriptorTypeCreateInfoVALVE **out_info)
 {
@@ -3802,6 +3922,42 @@ bool StateReplayer::Impl::parse_pnext_chain(const Value &pnext, const void **out
 			if (!parse_pipeline_rendering_info(next, &rendering))
 				return false;
 			new_struct = reinterpret_cast<VkBaseInStructure *>(rendering);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_COLOR_WRITE_CREATE_INFO_EXT:
+		{
+			VkPipelineColorWriteCreateInfoEXT *color_write = nullptr;
+			if (!parse_color_write(next, &color_write))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(color_write);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_PROVOKING_VERTEX_STATE_CREATE_INFO_EXT:
+		{
+			VkPipelineRasterizationProvokingVertexStateCreateInfoEXT *provoking_vertex = nullptr;
+			if (!parse_provoking_vertex(next, &provoking_vertex))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(provoking_vertex);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_SAMPLER_CUSTOM_BORDER_COLOR_CREATE_INFO_EXT:
+		{
+			VkSamplerCustomBorderColorCreateInfoEXT *custom_border_color = nullptr;
+			if (!parse_sampler_custom_border_color(next, &custom_border_color))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(custom_border_color);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO:
+		{
+			VkSamplerReductionModeCreateInfo *reduction_mode = nullptr;
+			if (!parse_sampler_reduction_mode(next, &reduction_mode))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(reduction_mode);
 			break;
 		}
 
@@ -4237,6 +4393,35 @@ void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineRenderingCreateInfo
 	return rendering;
 }
 
+void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineColorWriteCreateInfoEXT *create_info,
+                                             ScratchAllocator &alloc)
+{
+	auto *color_write = copy(create_info, 1, alloc);
+	color_write->pColorWriteEnables = copy(color_write->pColorWriteEnables, color_write->attachmentCount, alloc);
+	return color_write;
+}
+
+void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineRasterizationProvokingVertexStateCreateInfoEXT *create_info,
+                                             ScratchAllocator &alloc)
+{
+	auto *provoking_vertex = copy(create_info, 1, alloc);
+	return provoking_vertex;
+}
+
+void *StateRecorder::Impl::copy_pnext_struct(const VkSamplerCustomBorderColorCreateInfoEXT *create_info,
+                                             ScratchAllocator &alloc)
+{
+	auto *custom_border_color = copy(create_info, 1, alloc);
+	return custom_border_color;
+}
+
+void *StateRecorder::Impl::copy_pnext_struct(const VkSamplerReductionModeCreateInfo *create_info,
+                                             ScratchAllocator &alloc)
+{
+	auto *reduction_mode = copy(create_info, 1, alloc);
+	return reduction_mode;
+}
+
 template <typename T>
 bool StateRecorder::Impl::copy_pnext_chains(const T *ts, uint32_t count, ScratchAllocator &alloc)
 {
@@ -4371,6 +4556,34 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 		case VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR:
 		{
 			auto *ci = static_cast<const VkPipelineRenderingCreateInfoKHR *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_COLOR_WRITE_CREATE_INFO_EXT:
+		{
+			auto *ci = static_cast<const VkPipelineColorWriteCreateInfoEXT *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_PROVOKING_VERTEX_STATE_CREATE_INFO_EXT:
+		{
+			auto *ci = static_cast<const VkPipelineRasterizationProvokingVertexStateCreateInfoEXT *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_SAMPLER_CUSTOM_BORDER_COLOR_CREATE_INFO_EXT:
+		{
+			auto *ci = static_cast<const VkSamplerCustomBorderColorCreateInfoEXT *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO:
+		{
+			auto *ci = static_cast<const VkSamplerReductionModeCreateInfo *>(pNext);
 			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
 			break;
 		}
@@ -4553,7 +4766,13 @@ void StateRecorder::Impl::pump_synchronized_recording(StateRecorder *recorder)
 bool StateRecorder::record_sampler(VkSampler sampler, const VkSamplerCreateInfo &create_info, Hash custom_hash)
 {
 	{
-		if (create_info.pNext)
+		// Only custom border color and reduction mode are supported for now.
+		auto *custom_border_color = find_pnext<VkSamplerCustomBorderColorCreateInfoEXT>(
+			VK_STRUCTURE_TYPE_SAMPLER_CUSTOM_BORDER_COLOR_CREATE_INFO_EXT, create_info.pNext);
+		auto *reduction_mode = find_pnext<VkSamplerReductionModeCreateInfo>(
+			VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO, create_info.pNext);
+
+		if (create_info.pNext && !custom_border_color && !reduction_mode)
 		{
 			log_error_pnext_chain("pNext in VkSamplerCreateInfo not supported.", create_info.pNext);
 			return false;
@@ -4891,10 +5110,12 @@ bool StateRecorder::Impl::copy_shader_module(const VkShaderModuleCreateInfo *cre
 bool StateRecorder::Impl::copy_sampler(const VkSamplerCreateInfo *create_info, ScratchAllocator &alloc,
                                        VkSamplerCreateInfo **out_create_info)
 {
-	if (create_info->pNext)
+	auto *info = copy(create_info, 1, alloc);
+
+	if (!copy_pnext_chain(info->pNext, alloc, &info->pNext))
 		return false;
 
-	*out_create_info = copy(create_info, 1, alloc);
+	*out_create_info = info;
 	return true;
 }
 
@@ -6269,6 +6490,9 @@ static std::string encode_base64(const void *data_, size_t size)
 	return ret;
 }
 
+template <typename T, typename Allocator>
+static bool pnext_chain_add_json_value(Value &base, const T &t, Allocator &alloc);
+
 template <typename Allocator>
 static bool json_value(const VkSamplerCreateInfo& sampler, Allocator& alloc, Value *out_value)
 {
@@ -6289,6 +6513,9 @@ static bool json_value(const VkSamplerCreateInfo& sampler, Allocator& alloc, Val
 	s.AddMember("mipLodBias", sampler.mipLodBias, alloc);
 	s.AddMember("minLod", sampler.minLod, alloc);
 	s.AddMember("maxLod", sampler.maxLod, alloc);
+
+	if (!pnext_chain_add_json_value(s, sampler, alloc))
+		return false;
 
 	*out_value = s;
 	return true;
@@ -6560,6 +6787,63 @@ static bool json_value(const VkPipelineRenderingCreateInfoKHR &create_info, Allo
 }
 
 template <typename Allocator>
+static bool json_value(const VkPipelineColorWriteCreateInfoEXT &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+
+	// TODO: Should consider to ignore pColorWriteEnables if dynamic state.
+	if (create_info.attachmentCount)
+	{
+		Value enables(kArrayType);
+		for (uint32_t i = 0; i < create_info.attachmentCount; i++)
+			enables.PushBack(uint32_t(create_info.pColorWriteEnables[i]), alloc);
+		value.AddMember("colorWriteEnables", enables, alloc);
+	}
+
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
+static bool json_value(const VkPipelineRasterizationProvokingVertexStateCreateInfoEXT &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("provokingVertexMode", create_info.provokingVertexMode, alloc);
+
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
+static bool json_value(const VkSamplerCustomBorderColorCreateInfoEXT &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+
+	Value customBorderColor(kArrayType);
+	for (uint32_t i = 0; i < 4; i++)
+		customBorderColor.PushBack(create_info.customBorderColor.uint32[i], alloc);
+	value.AddMember("customBorderColor", customBorderColor, alloc);
+	value.AddMember("format", create_info.format, alloc);
+
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
+static bool json_value(const VkSamplerReductionModeCreateInfo &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("reductionMode", create_info.reductionMode, alloc);
+
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
 static bool json_value(const VkSubpassDescriptionDepthStencilResolve &create_info, Allocator &alloc, Value *out_value);
 template <typename Allocator>
 static bool json_value(const VkFragmentShadingRateAttachmentInfoKHR &create_info, Allocator &alloc, Value *out_value);
@@ -6652,6 +6936,26 @@ static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *o
 
 		case VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR:
 			if (!json_value(*static_cast<const VkPipelineRenderingCreateInfoKHR *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_COLOR_WRITE_CREATE_INFO_EXT:
+			if (!json_value(*static_cast<const VkPipelineColorWriteCreateInfoEXT *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_PROVOKING_VERTEX_STATE_CREATE_INFO_EXT:
+			if (!json_value(*static_cast<const VkPipelineRasterizationProvokingVertexStateCreateInfoEXT *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_SAMPLER_CUSTOM_BORDER_COLOR_CREATE_INFO_EXT:
+			if (!json_value(*static_cast<const VkSamplerCustomBorderColorCreateInfoEXT *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO:
+			if (!json_value(*static_cast<const VkSamplerReductionModeCreateInfo *>(pNext), alloc, &next))
 				return false;
 			break;
 
