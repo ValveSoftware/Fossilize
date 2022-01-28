@@ -228,6 +228,14 @@ static void record_samplers(StateRecorder &recorder)
 
 	if (!recorder.record_sampler(fake_handle<VkSampler>(103), sampler))
 		abort();
+
+	VkSamplerReductionModeCreateInfo reduction_mode =
+			{ VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO };
+	reduction_mode.reductionMode = VK_SAMPLER_REDUCTION_MODE_MIN;
+	sampler.pNext = &reduction_mode;
+
+	if (!recorder.record_sampler(fake_handle<VkSampler>(104), sampler))
+		abort();
 }
 
 static void record_set_layouts(StateRecorder &recorder)
