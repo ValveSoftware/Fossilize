@@ -476,6 +476,18 @@ static void record_render_passes2(StateRecorder &recorder)
 
 	if (!recorder.record_render_pass2(fake_handle<VkRenderPass>(40000), pass))
 		abort();
+
+	VkMemoryBarrier2KHR memory_barrier2 =
+			{ VK_STRUCTURE_TYPE_MEMORY_BARRIER_2_KHR };
+	memory_barrier2.pNext = nullptr;
+	memory_barrier2.srcStageMask = 10;
+	memory_barrier2.srcAccessMask = 34;
+	memory_barrier2.dstStageMask = 199;
+	memory_barrier2.dstAccessMask = 49;
+	deps[0].pNext = &memory_barrier2;
+
+	if (!recorder.record_render_pass2(fake_handle<VkRenderPass>(40001), pass))
+		abort();
 }
 
 static void record_render_passes(StateRecorder &recorder)
@@ -1389,6 +1401,22 @@ static void record_graphics_pipelines(StateRecorder &recorder)
 		abort();
 
 	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100002), pipe, nullptr, 0))
+		abort();
+
+	VkPipelineDiscardRectangleStateCreateInfoEXT discard_rectangle =
+			{ VK_STRUCTURE_TYPE_PIPELINE_DISCARD_RECTANGLE_STATE_CREATE_INFO_EXT };
+	VkRect2D discard_rectangles[1] = {};
+	discard_rectangles[0].offset.x = 0;
+	discard_rectangles[0].offset.y = 0;
+	discard_rectangles[0].extent.width = 32;
+	discard_rectangles[0].extent.height = 32;
+	discard_rectangle.flags = 0;
+	discard_rectangle.discardRectangleMode = VK_DISCARD_RECTANGLE_MODE_EXCLUSIVE_EXT;
+	discard_rectangle.discardRectangleCount = 1;
+	discard_rectangle.pDiscardRectangles = discard_rectangles;
+	pipe.pNext = &discard_rectangle;
+
+	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100003), pipe, nullptr, 0))
 		abort();
 }
 

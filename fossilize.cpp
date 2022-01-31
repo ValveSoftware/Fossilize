@@ -130,6 +130,7 @@ struct DynamicStateInfo
 	bool logic_op;
 	bool color_write_enable;
 	bool depth_bias_enable;
+	bool discard_rectangle;
 };
 
 struct StateReplayer::Impl
@@ -228,6 +229,8 @@ struct StateReplayer::Impl
 	bool parse_sampler_custom_border_color(const Value &state, VkSamplerCustomBorderColorCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_sampler_reduction_mode(const Value &state, VkSamplerReductionModeCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_input_attachment_aspect(const Value &state, VkRenderPassInputAttachmentAspectCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_discard_rectangles(const Value &state, VkPipelineDiscardRectangleStateCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_memory_barrier2(const Value &state, VkMemoryBarrier2KHR **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_uints(const Value &attachments, const uint32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	bool parse_sints(const Value &attachments, const int32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	const char *duplicate_string(const char *str, size_t len);
@@ -373,6 +376,11 @@ struct StateRecorder::Impl
 	void *copy_pnext_struct(const VkSamplerReductionModeCreateInfo *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkRenderPassInputAttachmentAspectCreateInfo *create_info,
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkPipelineDiscardRectangleStateCreateInfoEXT *create_info,
+	                        ScratchAllocator &alloc,
+	                        const DynamicStateInfo *dynamic_state_info) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkMemoryBarrier2KHR *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 
 	bool remap_sampler_handle(VkSampler sampler, VkSampler *out_sampler) const FOSSILIZE_WARN_UNUSED;
@@ -957,6 +965,36 @@ static void hash_pnext_struct(const StateRecorder *,
 	}
 }
 
+static void hash_pnext_struct(const StateRecorder *,
+                              Hasher &h,
+                              const VkPipelineDiscardRectangleStateCreateInfoEXT &info,
+                              const DynamicStateInfo *dynamic_state_info)
+{
+	h.u32(info.flags);
+	h.u32(info.discardRectangleMode);
+	h.u32(info.discardRectangleCount);
+	if (dynamic_state_info && !dynamic_state_info->discard_rectangle)
+	{
+		for (uint32_t i = 0; i < info.discardRectangleCount; i++)
+		{
+			h.s32(info.pDiscardRectangles[i].offset.x);
+			h.s32(info.pDiscardRectangles[i].offset.y);
+			h.u32(info.pDiscardRectangles[i].extent.width);
+			h.u32(info.pDiscardRectangles[i].extent.height);
+		}
+	}
+}
+
+static void hash_pnext_struct(const StateRecorder *,
+                              Hasher &h,
+                              const VkMemoryBarrier2KHR &info)
+{
+	h.u32(info.srcStageMask);
+	h.u32(info.srcAccessMask);
+	h.u32(info.dstStageMask);
+	h.u32(info.dstAccessMask);
+}
+
 static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const void *pNext,
                              const DynamicStateInfo *dynamic_state_info)
 {
@@ -1051,6 +1089,14 @@ static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const voi
 
 		case VK_STRUCTURE_TYPE_RENDER_PASS_INPUT_ATTACHMENT_ASPECT_CREATE_INFO:
 			hash_pnext_struct(recorder, h, *static_cast<const VkRenderPassInputAttachmentAspectCreateInfo *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_DISCARD_RECTANGLE_STATE_CREATE_INFO_EXT:
+			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineDiscardRectangleStateCreateInfoEXT *>(pNext), dynamic_state_info);
+			break;
+
+		case VK_STRUCTURE_TYPE_MEMORY_BARRIER_2_KHR:
+			hash_pnext_struct(recorder, h, *static_cast<const VkMemoryBarrier2KHR *>(pNext));
 			break;
 
 		default:
@@ -1217,6 +1263,9 @@ static DynamicStateInfo parse_dynamic_state_info(const VkPipelineDynamicStateCre
 			break;
 		case VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE_EXT:
 			info.primitive_restart_enable = true;
+			break;
+		case VK_DYNAMIC_STATE_DISCARD_RECTANGLE_EXT:
+			info.discard_rectangle = true;
 			break;
 		default:
 			break;
@@ -1522,6 +1571,9 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 			return false;
 	}
 
+	if (!hash_pnext_chain(&recorder, h, create_info.pNext, &dynamic_info))
+		return false;
+
 	*out_hash = h.get();
 	return true;
 }
@@ -1564,6 +1616,9 @@ bool compute_hash_compute_pipeline(const StateRecorder &recorder, const VkComput
 		h.u32(0);
 
 	if (!hash_pnext_chain(&recorder, h, create_info.stage.pNext, nullptr))
+		return false;
+
+	if (!hash_pnext_chain(&recorder, h, create_info.pNext, nullptr))
 		return false;
 
 	*out_hash = h.get();
@@ -3758,6 +3813,40 @@ bool StateReplayer::Impl::parse_input_attachment_aspect(const Value &state,
 	return true;
 }
 
+bool StateReplayer::Impl::parse_discard_rectangles(const Value &state,
+						   VkPipelineDiscardRectangleStateCreateInfoEXT **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkPipelineDiscardRectangleStateCreateInfoEXT>();
+	*out_info = info;
+
+	info->flags = static_cast<VkPipelineDiscardRectangleStateCreateFlagsEXT>(state["flags"].GetUint());
+	info->discardRectangleMode = static_cast<VkDiscardRectangleModeEXT>(state["discardRectangleMode"].GetUint());
+	info->discardRectangleCount = state["discardRectangleCount"].GetUint();
+
+	// Could be null for dynamic state.
+	if (state.HasMember("discardRectangles"))
+	{
+		if (!parse_scissors(state["discardRectangles"], &info->pDiscardRectangles))
+			return false;
+	}
+
+	return true;
+}
+
+bool StateReplayer::Impl::parse_memory_barrier2(const Value &state,
+						VkMemoryBarrier2KHR **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkMemoryBarrier2KHR>();
+	*out_info = info;
+
+	info->srcStageMask = static_cast<VkPipelineStageFlags2KHR>(state["srcStageMask"].GetUint());
+	info->srcAccessMask = static_cast<VkAccessFlags2KHR>(state["srcAccessMask"].GetUint());
+	info->dstStageMask = static_cast<VkPipelineStageFlags2KHR>(state["dstStageMask"].GetUint());
+	info->dstAccessMask = static_cast<VkAccessFlags2KHR>(state["dstAccessMask"].GetUint());
+
+	return true;
+}
+
 bool StateReplayer::Impl::parse_mutable_descriptor_type(const Value &state,
                                                         VkMutableDescriptorTypeCreateInfoVALVE **out_info)
 {
@@ -4023,6 +4112,24 @@ bool StateReplayer::Impl::parse_pnext_chain(const Value &pnext, const void **out
 			if (!parse_input_attachment_aspect(next, &input_att))
 				return false;
 			new_struct = reinterpret_cast<VkBaseInStructure *>(input_att);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_DISCARD_RECTANGLE_STATE_CREATE_INFO_EXT:
+		{
+			VkPipelineDiscardRectangleStateCreateInfoEXT *discard_rectangles = nullptr;
+			if (!parse_discard_rectangles(next, &discard_rectangles))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(discard_rectangles);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_MEMORY_BARRIER_2_KHR:
+		{
+			VkMemoryBarrier2KHR *memory_barrier2 = nullptr;
+			if (!parse_memory_barrier2(next, &memory_barrier2))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(memory_barrier2);
 			break;
 		}
 
@@ -4499,6 +4606,25 @@ void *StateRecorder::Impl::copy_pnext_struct(const VkRenderPassInputAttachmentAs
 	return input_att;
 }
 
+void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineDiscardRectangleStateCreateInfoEXT *create_info,
+                                             ScratchAllocator &alloc,
+					     const DynamicStateInfo *dynamic_state_info)
+{
+	auto *discard_rectangles = copy(create_info, 1, alloc);
+	if (dynamic_state_info && !dynamic_state_info->discard_rectangle)
+		discard_rectangles->pDiscardRectangles = copy(discard_rectangles->pDiscardRectangles, discard_rectangles->discardRectangleCount, alloc);
+	else
+		discard_rectangles->pDiscardRectangles = nullptr;
+	return discard_rectangles;
+}
+
+void *StateRecorder::Impl::copy_pnext_struct(const VkMemoryBarrier2KHR *create_info,
+                                             ScratchAllocator &alloc)
+{
+	auto *memory_barrier2 = copy(create_info, 1, alloc);
+	return memory_barrier2;
+}
+
 template <typename T>
 bool StateRecorder::Impl::copy_pnext_chains(const T *ts, uint32_t count, ScratchAllocator &alloc,
                                             const DynamicStateInfo *dynamic_state_info)
@@ -4670,6 +4796,20 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 		case VK_STRUCTURE_TYPE_RENDER_PASS_INPUT_ATTACHMENT_ASPECT_CREATE_INFO:
 		{
 			auto *ci = static_cast<const VkRenderPassInputAttachmentAspectCreateInfo *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_DISCARD_RECTANGLE_STATE_CREATE_INFO_EXT:
+		{
+			auto *ci = static_cast<const VkPipelineDiscardRectangleStateCreateInfoEXT *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc, dynamic_state_info));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_MEMORY_BARRIER_2_KHR:
+		{
+			auto *ci = static_cast<const VkMemoryBarrier2KHR *>(pNext);
 			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
 			break;
 		}
@@ -6948,6 +7088,49 @@ static bool json_value(const VkRenderPassInputAttachmentAspectCreateInfo &create
 }
 
 template <typename Allocator>
+static bool json_value(const VkPipelineDiscardRectangleStateCreateInfoEXT &create_info, Allocator &alloc, Value *out_value,
+                       const DynamicStateInfo *dynamic_state_info)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("flags", create_info.flags, alloc);
+	value.AddMember("discardRectangleMode", create_info.discardRectangleMode, alloc);
+	value.AddMember("discardRectangleCount", create_info.discardRectangleCount, alloc);
+
+	if (dynamic_state_info && !dynamic_state_info->discard_rectangle)
+	{
+		Value discardRectangles(kArrayType);
+		for (uint32_t i = 0; i < create_info.discardRectangleCount; i++)
+		{
+			Value discardRectangle(kObjectType);
+			discardRectangle.AddMember("x", create_info.pDiscardRectangles[i].offset.x, alloc);
+			discardRectangle.AddMember("y", create_info.pDiscardRectangles[i].offset.y, alloc);
+			discardRectangle.AddMember("width", create_info.pDiscardRectangles[i].extent.width, alloc);
+			discardRectangle.AddMember("height", create_info.pDiscardRectangles[i].extent.height, alloc);
+			discardRectangles.PushBack(discardRectangle, alloc);
+		}
+		value.AddMember("discardRectangles", discardRectangles, alloc);
+	}
+
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
+static bool json_value(const VkMemoryBarrier2KHR &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("srcStageMask", create_info.srcStageMask, alloc);
+	value.AddMember("srcAccessMask", create_info.srcAccessMask, alloc);
+	value.AddMember("dstStageMask", create_info.dstStageMask, alloc);
+	value.AddMember("dstAccessMask", create_info.dstAccessMask, alloc);
+
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
 static bool json_value(const VkSubpassDescriptionDepthStencilResolve &create_info, Allocator &alloc, Value *out_value);
 template <typename Allocator>
 static bool json_value(const VkFragmentShadingRateAttachmentInfoKHR &create_info, Allocator &alloc, Value *out_value);
@@ -7066,6 +7249,16 @@ static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *o
 
 		case VK_STRUCTURE_TYPE_RENDER_PASS_INPUT_ATTACHMENT_ASPECT_CREATE_INFO:
 			if (!json_value(*static_cast<const VkRenderPassInputAttachmentAspectCreateInfo *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_DISCARD_RECTANGLE_STATE_CREATE_INFO_EXT:
+			if (!json_value(*static_cast<const VkPipelineDiscardRectangleStateCreateInfoEXT *>(pNext), alloc, &next, dynamic_state_info))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_MEMORY_BARRIER_2_KHR:
+			if (!json_value(*static_cast<const VkMemoryBarrier2KHR *>(pNext), alloc, &next))
 				return false;
 			break;
 
