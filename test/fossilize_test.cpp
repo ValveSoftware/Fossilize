@@ -476,6 +476,18 @@ static void record_render_passes2(StateRecorder &recorder)
 
 	if (!recorder.record_render_pass2(fake_handle<VkRenderPass>(40000), pass))
 		abort();
+
+	VkMemoryBarrier2KHR memory_barrier2 =
+			{ VK_STRUCTURE_TYPE_MEMORY_BARRIER_2_KHR };
+	memory_barrier2.pNext = nullptr;
+	memory_barrier2.srcStageMask = 10;
+	memory_barrier2.srcAccessMask = 34;
+	memory_barrier2.dstStageMask = 199;
+	memory_barrier2.dstAccessMask = 49;
+	deps[0].pNext = &memory_barrier2;
+
+	if (!recorder.record_render_pass2(fake_handle<VkRenderPass>(40001), pass))
+		abort();
 }
 
 static void record_render_passes(StateRecorder &recorder)
