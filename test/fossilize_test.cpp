@@ -1390,6 +1390,22 @@ static void record_graphics_pipelines(StateRecorder &recorder)
 
 	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100002), pipe, nullptr, 0))
 		abort();
+
+	VkPipelineDiscardRectangleStateCreateInfoEXT discard_rectangle =
+			{ VK_STRUCTURE_TYPE_PIPELINE_DISCARD_RECTANGLE_STATE_CREATE_INFO_EXT };
+	VkRect2D discard_rectangles[1] = {};
+	discard_rectangles[0].offset.x = 0;
+	discard_rectangles[0].offset.y = 0;
+	discard_rectangles[0].extent.width = 32;
+	discard_rectangles[0].extent.height = 32;
+	discard_rectangle.flags = 0;
+	discard_rectangle.discardRectangleMode = VK_DISCARD_RECTANGLE_MODE_EXCLUSIVE_EXT;
+	discard_rectangle.discardRectangleCount = 1;
+	discard_rectangle.pDiscardRectangles = discard_rectangles;
+	pipe.pNext = &discard_rectangle;
+
+	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100003), pipe, nullptr, 0))
+		abort();
 }
 
 static void record_raytracing_pipelines(StateRecorder &recorder)
