@@ -1418,6 +1418,17 @@ static void record_graphics_pipelines(StateRecorder &recorder)
 
 	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100003), pipe, nullptr, 0))
 		abort();
+
+	VkPipelineFragmentShadingRateStateCreateInfoKHR fragment_shading_rate =
+			{ VK_STRUCTURE_TYPE_PIPELINE_FRAGMENT_SHADING_RATE_STATE_CREATE_INFO_KHR };
+	fragment_shading_rate.fragmentSize.width = 2;
+	fragment_shading_rate.fragmentSize.height = 2;
+	fragment_shading_rate.combinerOps[0] = VK_FRAGMENT_SHADING_RATE_COMBINER_OP_REPLACE_KHR;
+	fragment_shading_rate.combinerOps[1] = VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR;
+	pipe.pNext = &fragment_shading_rate;
+
+	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100004), pipe, nullptr, 0))
+		abort();
 }
 
 static void record_raytracing_pipelines(StateRecorder &recorder)
