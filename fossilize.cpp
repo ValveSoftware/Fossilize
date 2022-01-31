@@ -1522,6 +1522,9 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 			return false;
 	}
 
+	if (!hash_pnext_chain(&recorder, h, create_info.pNext, &dynamic_info))
+		return false;
+
 	*out_hash = h.get();
 	return true;
 }
@@ -1564,6 +1567,9 @@ bool compute_hash_compute_pipeline(const StateRecorder &recorder, const VkComput
 		h.u32(0);
 
 	if (!hash_pnext_chain(&recorder, h, create_info.stage.pNext, nullptr))
+		return false;
+
+	if (!hash_pnext_chain(&recorder, h, create_info.pNext, nullptr))
 		return false;
 
 	*out_hash = h.get();
