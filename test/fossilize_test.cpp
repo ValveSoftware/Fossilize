@@ -684,8 +684,10 @@ static void record_graphics_pipelines_robustness(StateRecorder &recorder)
 	VkPipelineDepthStencilStateCreateInfo ds;
 	VkPipelineRasterizationStateCreateInfo rs;
 	VkPipelineInputAssemblyStateCreateInfo ia;
+	VkPipelineColorWriteCreateInfoEXT color_write;
 	VkViewport viewports[2] = {};
 	VkRect2D scissors[2] = {};
+	VkBool32 color_write_enable;
 
 	uint64_t counter = 1000000;
 	Hash hash[5];
@@ -711,7 +713,11 @@ static void record_graphics_pipelines_robustness(StateRecorder &recorder)
 		ds = { VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
 		rs = { VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
 		ia = { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
+		color_write = { VK_STRUCTURE_TYPE_PIPELINE_COLOR_WRITE_CREATE_INFO_EXT };
 		pipe.renderPass = fake_handle<VkRenderPass>(90);
+		color_write_enable = VK_FALSE;
+		color_write.pColorWriteEnables = &color_write_enable;
+		color_write.attachmentCount = 1;
 	};
 
 	const auto reset_state_set_all = [&]() {
@@ -984,6 +990,23 @@ static void record_graphics_pipelines_robustness(StateRecorder &recorder)
 			abort();
 	}
 
+	// If dynamic color write is used, verify that pColorWriteEnable is ignored.
+	{
+		reset_state();
+		const VkDynamicState state = VK_DYNAMIC_STATE_COLOR_WRITE_ENABLE_EXT;
+		dyn.pDynamicStates = &state;
+		dyn.dynamicStateCount = 1;
+		pipe.pDynamicState = &dyn;
+		pipe.pColorBlendState = &blend;
+		blend.pNext = &color_write;
+
+		hash_and_record(0);
+		set_invalid_pointer(color_write.pColorWriteEnables);
+		hash_and_record(1);
+		if (hash[0] != hash[1])
+			abort();
+	}
+
 	struct HashInvarianceTest
 	{
 		VkDynamicState state;
@@ -1082,6 +1105,11 @@ static void record_graphics_pipelines_robustness(StateRecorder &recorder)
 
 	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_LOGIC_OP_EXT, reinterpret_cast<uint32_t *>(&blend.logicOp), nullptr,
 	                                  {}, {}, true });
+
+	// Verify that we pick up pColorWriteEnable if present.
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_COLOR_WRITE_ENABLE_EXT, &color_write_enable, nullptr,
+	                                  [&]() { blend.pNext = &color_write; },
+	                                  [&]() { blend.pNext = &color_write; }});
 
 	for (auto &test : hash_invariance_tests)
 	{
