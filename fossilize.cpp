@@ -184,6 +184,7 @@ struct StateReplayer::Impl
 	bool parse_provoking_vertex(const Value &state, VkPipelineRasterizationProvokingVertexStateCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_sampler_custom_border_color(const Value &state, VkSamplerCustomBorderColorCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_sampler_reduction_mode(const Value &state, VkSamplerReductionModeCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_input_attachment_aspect(const Value &state, VkRenderPassInputAttachmentAspectCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_uints(const Value &attachments, const uint32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	bool parse_sints(const Value &attachments, const int32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	const char *duplicate_string(const char *str, size_t len);
@@ -323,6 +324,8 @@ struct StateRecorder::Impl
 	void *copy_pnext_struct(const VkSamplerCustomBorderColorCreateInfoEXT *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkSamplerReductionModeCreateInfo *create_info,
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkRenderPassInputAttachmentAspectCreateInfo *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 
 	bool remap_sampler_handle(VkSampler sampler, VkSampler *out_sampler) const FOSSILIZE_WARN_UNUSED;
@@ -889,6 +892,19 @@ static void hash_pnext_struct(const StateRecorder *,
 	h.u32(info.reductionMode);
 }
 
+static void hash_pnext_struct(const StateRecorder *,
+                              Hasher &h,
+                              const VkRenderPassInputAttachmentAspectCreateInfo &info)
+{
+	h.u32(info.aspectReferenceCount);
+	for (uint32_t i = 0; i < info.aspectReferenceCount; i++)
+	{
+		h.u32(info.pAspectReferences[i].subpass);
+		h.u32(info.pAspectReferences[i].inputAttachmentIndex);
+		h.u32(info.pAspectReferences[i].aspectMask);
+	}
+}
+
 static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const void *pNext)
 {
 	while ((pNext = pnext_chain_skip_ignored_entries(pNext)) != nullptr)
@@ -978,6 +994,10 @@ static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const voi
 
 		case VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO:
 			hash_pnext_struct(recorder, h, *static_cast<const VkSamplerReductionModeCreateInfo *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_RENDER_PASS_INPUT_ATTACHMENT_ASPECT_CREATE_INFO:
+			hash_pnext_struct(recorder, h, *static_cast<const VkRenderPassInputAttachmentAspectCreateInfo *>(pNext));
 			break;
 
 		default:
@@ -3702,6 +3722,30 @@ bool StateReplayer::Impl::parse_sampler_reduction_mode(const Value &state,
 	return true;
 }
 
+bool StateReplayer::Impl::parse_input_attachment_aspect(const Value &state,
+						        VkRenderPassInputAttachmentAspectCreateInfo **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkRenderPassInputAttachmentAspectCreateInfo>();
+	*out_info = info;
+
+	info->aspectReferenceCount = state["aspectReferences"].Size();
+
+	auto *new_aspects = allocator.allocate_n_cleared<VkInputAttachmentAspectReference>(info->aspectReferenceCount);
+	info->pAspectReferences = new_aspects;
+
+	auto &aspects = state["aspectReferences"];
+	for (auto aspect_itr = aspects.Begin(); aspect_itr != aspects.End(); ++aspect_itr, new_aspects++)
+	{
+		auto &aspect = *aspect_itr;
+		new_aspects->subpass = aspect["subpass"].GetUint();
+		new_aspects->inputAttachmentIndex = aspect["inputAttachmentIndex"].GetUint();
+		new_aspects->aspectMask = static_cast<VkImageAspectFlags>(aspect["aspectMask"].GetUint());
+	}
+
+	*out_info = info;
+	return true;
+}
+
 bool StateReplayer::Impl::parse_mutable_descriptor_type(const Value &state,
                                                         VkMutableDescriptorTypeCreateInfoVALVE **out_info)
 {
@@ -3958,6 +4002,15 @@ bool StateReplayer::Impl::parse_pnext_chain(const Value &pnext, const void **out
 			if (!parse_sampler_reduction_mode(next, &reduction_mode))
 				return false;
 			new_struct = reinterpret_cast<VkBaseInStructure *>(reduction_mode);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_RENDER_PASS_INPUT_ATTACHMENT_ASPECT_CREATE_INFO:
+		{
+			VkRenderPassInputAttachmentAspectCreateInfo *input_att = nullptr;
+			if (!parse_input_attachment_aspect(next, &input_att))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(input_att);
 			break;
 		}
 
@@ -4422,6 +4475,14 @@ void *StateRecorder::Impl::copy_pnext_struct(const VkSamplerReductionModeCreateI
 	return reduction_mode;
 }
 
+void *StateRecorder::Impl::copy_pnext_struct(const VkRenderPassInputAttachmentAspectCreateInfo *create_info,
+                                             ScratchAllocator &alloc)
+{
+	auto *input_att = copy(create_info, 1, alloc);
+	input_att->pAspectReferences = copy(input_att->pAspectReferences, input_att->aspectReferenceCount, alloc);
+	return input_att;
+}
+
 template <typename T>
 bool StateRecorder::Impl::copy_pnext_chains(const T *ts, uint32_t count, ScratchAllocator &alloc)
 {
@@ -4584,6 +4645,13 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 		case VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO:
 		{
 			auto *ci = static_cast<const VkSamplerReductionModeCreateInfo *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_RENDER_PASS_INPUT_ATTACHMENT_ASPECT_CREATE_INFO:
+		{
+			auto *ci = static_cast<const VkRenderPassInputAttachmentAspectCreateInfo *>(pNext);
 			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
 			break;
 		}
@@ -6833,6 +6901,27 @@ static bool json_value(const VkSamplerReductionModeCreateInfo &create_info, Allo
 }
 
 template <typename Allocator>
+static bool json_value(const VkRenderPassInputAttachmentAspectCreateInfo &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+
+	Value aspects(kArrayType);
+	for (uint32_t i = 0; i < create_info.aspectReferenceCount; i++)
+	{
+		Value aspect(kObjectType);
+		aspect.AddMember("subpass", create_info.pAspectReferences[i].subpass, alloc);
+		aspect.AddMember("inputAttachmentIndex", create_info.pAspectReferences[i].inputAttachmentIndex, alloc);
+		aspect.AddMember("aspectMask", create_info.pAspectReferences[i].aspectMask, alloc);
+		aspects.PushBack(aspect, alloc);
+	}
+	value.AddMember("aspectReferences", aspects, alloc);
+
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
 static bool json_value(const VkSubpassDescriptionDepthStencilResolve &create_info, Allocator &alloc, Value *out_value);
 template <typename Allocator>
 static bool json_value(const VkFragmentShadingRateAttachmentInfoKHR &create_info, Allocator &alloc, Value *out_value);
@@ -6945,6 +7034,11 @@ static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *o
 
 		case VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO:
 			if (!json_value(*static_cast<const VkSamplerReductionModeCreateInfo *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_RENDER_PASS_INPUT_ATTACHMENT_ASPECT_CREATE_INFO:
+			if (!json_value(*static_cast<const VkRenderPassInputAttachmentAspectCreateInfo *>(pNext), alloc, &next))
 				return false;
 			break;
 
