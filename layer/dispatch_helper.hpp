@@ -59,6 +59,8 @@ struct VkLayerDispatchTable
 	PFN_vkCreateRenderPass CreateRenderPass;
 	PFN_vkCreateRenderPass2 CreateRenderPass2;
 	PFN_vkCreateRenderPass2KHR CreateRenderPass2KHR;
+	PFN_vkCreateSamplerYcbcrConversion CreateSamplerYcbcrConversion;
+	PFN_vkCreateSamplerYcbcrConversionKHR CreateSamplerYcbcrConversionKHR;
 	PFN_vkCreateRayTracingPipelinesKHR CreateRayTracingPipelinesKHR;
 };
 
