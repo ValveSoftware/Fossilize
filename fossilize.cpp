@@ -131,6 +131,7 @@ struct DynamicStateInfo
 	bool color_write_enable;
 	bool depth_bias_enable;
 	bool discard_rectangle;
+	bool fragment_shading_rate;
 };
 
 struct StateReplayer::Impl
@@ -231,6 +232,7 @@ struct StateReplayer::Impl
 	bool parse_input_attachment_aspect(const Value &state, VkRenderPassInputAttachmentAspectCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_discard_rectangles(const Value &state, VkPipelineDiscardRectangleStateCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_memory_barrier2(const Value &state, VkMemoryBarrier2KHR **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_fragment_shading_rate(const Value &state, VkPipelineFragmentShadingRateStateCreateInfoKHR **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_uints(const Value &attachments, const uint32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	bool parse_sints(const Value &attachments, const int32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	const char *duplicate_string(const char *str, size_t len);
@@ -381,6 +383,8 @@ struct StateRecorder::Impl
 	                        ScratchAllocator &alloc,
 	                        const DynamicStateInfo *dynamic_state_info) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkMemoryBarrier2KHR *create_info,
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkPipelineFragmentShadingRateStateCreateInfoKHR *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 
 	bool remap_sampler_handle(VkSampler sampler, VkSampler *out_sampler) const FOSSILIZE_WARN_UNUSED;
@@ -995,6 +999,20 @@ static void hash_pnext_struct(const StateRecorder *,
 	h.u32(info.dstAccessMask);
 }
 
+static void hash_pnext_struct(const StateRecorder *,
+                              Hasher &h,
+                              const VkPipelineFragmentShadingRateStateCreateInfoKHR &info,
+                              const DynamicStateInfo *dynamic_state_info)
+{
+	if (dynamic_state_info && !dynamic_state_info->fragment_shading_rate)
+	{
+		h.u32(info.fragmentSize.width);
+		h.u32(info.fragmentSize.height);
+		h.u32(info.combinerOps[0]);
+		h.u32(info.combinerOps[1]);
+	}
+}
+
 static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const void *pNext,
                              const DynamicStateInfo *dynamic_state_info)
 {
@@ -1097,6 +1115,10 @@ static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const voi
 
 		case VK_STRUCTURE_TYPE_MEMORY_BARRIER_2_KHR:
 			hash_pnext_struct(recorder, h, *static_cast<const VkMemoryBarrier2KHR *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_FRAGMENT_SHADING_RATE_STATE_CREATE_INFO_KHR:
+			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineFragmentShadingRateStateCreateInfoKHR *>(pNext), dynamic_state_info);
 			break;
 
 		default:
@@ -1266,6 +1288,9 @@ static DynamicStateInfo parse_dynamic_state_info(const VkPipelineDynamicStateCre
 			break;
 		case VK_DYNAMIC_STATE_DISCARD_RECTANGLE_EXT:
 			info.discard_rectangle = true;
+			break;
+		case VK_DYNAMIC_STATE_FRAGMENT_SHADING_RATE_KHR:
+			info.fragment_shading_rate = true;
 			break;
 		default:
 			break;
@@ -3847,6 +3872,29 @@ bool StateReplayer::Impl::parse_memory_barrier2(const Value &state,
 	return true;
 }
 
+bool StateReplayer::Impl::parse_fragment_shading_rate(const Value &state,
+                                                      VkPipelineFragmentShadingRateStateCreateInfoKHR **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkPipelineFragmentShadingRateStateCreateInfoKHR>();
+	*out_info = info;
+
+	// Could be null for dynamic state.
+	if (state.HasMember("fragmentSize"))
+	{
+		info->fragmentSize.width = state["fragmentSize"]["width"].GetUint();
+		info->fragmentSize.height = state["fragmentSize"]["height"].GetUint();
+	}
+
+	// Could be null for dynamic state.
+	if (state.HasMember("combinerOps"))
+	{
+		for (uint32_t i = 0; i < 2; i++)
+			info->combinerOps[i] = static_cast<VkFragmentShadingRateCombinerOpKHR>(state["combinerOps"][i].GetUint());
+	}
+
+	return true;
+}
+
 bool StateReplayer::Impl::parse_mutable_descriptor_type(const Value &state,
                                                         VkMutableDescriptorTypeCreateInfoVALVE **out_info)
 {
@@ -4130,6 +4178,15 @@ bool StateReplayer::Impl::parse_pnext_chain(const Value &pnext, const void **out
 			if (!parse_memory_barrier2(next, &memory_barrier2))
 				return false;
 			new_struct = reinterpret_cast<VkBaseInStructure *>(memory_barrier2);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_FRAGMENT_SHADING_RATE_STATE_CREATE_INFO_KHR:
+		{
+			VkPipelineFragmentShadingRateStateCreateInfoKHR *fragment_shading_rate = nullptr;
+			if (!parse_fragment_shading_rate(next, &fragment_shading_rate))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(fragment_shading_rate);
 			break;
 		}
 
@@ -4625,6 +4682,13 @@ void *StateRecorder::Impl::copy_pnext_struct(const VkMemoryBarrier2KHR *create_i
 	return memory_barrier2;
 }
 
+void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineFragmentShadingRateStateCreateInfoKHR *create_info,
+                                             ScratchAllocator &alloc)
+{
+	auto *fragment_shading_rate = copy(create_info, 1, alloc);
+	return fragment_shading_rate;
+}
+
 template <typename T>
 bool StateRecorder::Impl::copy_pnext_chains(const T *ts, uint32_t count, ScratchAllocator &alloc,
                                             const DynamicStateInfo *dynamic_state_info)
@@ -4810,6 +4874,13 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 		case VK_STRUCTURE_TYPE_MEMORY_BARRIER_2_KHR:
 		{
 			auto *ci = static_cast<const VkMemoryBarrier2KHR *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_FRAGMENT_SHADING_RATE_STATE_CREATE_INFO_KHR:
+		{
+			auto *ci = static_cast<const VkPipelineFragmentShadingRateStateCreateInfoKHR *>(pNext);
 			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
 			break;
 		}
@@ -7135,6 +7206,30 @@ static bool json_value(const VkMemoryBarrier2KHR &create_info, Allocator &alloc,
 }
 
 template <typename Allocator>
+static bool json_value(const VkPipelineFragmentShadingRateStateCreateInfoKHR &create_info, Allocator &alloc, Value *out_value,
+                       const DynamicStateInfo *dynamic_state_info)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+
+	if (dynamic_state_info && !dynamic_state_info->fragment_shading_rate)
+	{
+		Value extent(kObjectType);
+		extent.AddMember("width", create_info.fragmentSize.width, alloc);
+		extent.AddMember("height", create_info.fragmentSize.height, alloc);
+		value.AddMember("fragmentSize", extent, alloc);
+
+		Value combinerOps(kArrayType);
+		for (uint32_t i = 0; i < 2; i++)
+			combinerOps.PushBack(create_info.combinerOps[i], alloc);
+		value.AddMember("combinerOps", combinerOps, alloc);
+	}
+
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
 static bool json_value(const VkSubpassDescriptionDepthStencilResolve &create_info, Allocator &alloc, Value *out_value);
 template <typename Allocator>
 static bool json_value(const VkFragmentShadingRateAttachmentInfoKHR &create_info, Allocator &alloc, Value *out_value);
@@ -7263,6 +7358,11 @@ static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *o
 
 		case VK_STRUCTURE_TYPE_MEMORY_BARRIER_2_KHR:
 			if (!json_value(*static_cast<const VkMemoryBarrier2KHR *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_FRAGMENT_SHADING_RATE_STATE_CREATE_INFO_KHR:
+			if (!json_value(*static_cast<const VkPipelineFragmentShadingRateStateCreateInfoKHR *>(pNext), alloc, &next, dynamic_state_info))
 				return false;
 			break;
 
