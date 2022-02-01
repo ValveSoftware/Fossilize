@@ -608,6 +608,42 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRenderPass2KHR(VkDevice device, cons
 	return res;
 }
 
+static VKAPI_ATTR VkResult VKAPI_CALL CreateSamplerYcbcrConversion(
+		VkDevice device, const VkSamplerYcbcrConversionCreateInfo *pCreateInfo,
+		const VkAllocationCallbacks *pCallbacks,
+		VkSamplerYcbcrConversion *pConversion)
+{
+	auto *layer = get_device_layer(device);
+
+	auto res = layer->getTable()->CreateSamplerYcbcrConversion(device, pCreateInfo, pCallbacks, pConversion);
+
+	if (res == VK_SUCCESS)
+	{
+		if (!layer->getRecorder().record_ycbcr_conversion(*pConversion, *pCreateInfo))
+			LOGW_LEVEL("Failed to record YCbCr conversion, usually caused by unsupported pNext.\n");
+	}
+
+	return res;
+}
+
+static VKAPI_ATTR VkResult VKAPI_CALL CreateSamplerYcbcrConversionKHR(
+		VkDevice device, const VkSamplerYcbcrConversionCreateInfo *pCreateInfo,
+		const VkAllocationCallbacks *pCallbacks,
+		VkSamplerYcbcrConversion *pConversion)
+{
+	auto *layer = get_device_layer(device);
+
+	auto res = layer->getTable()->CreateSamplerYcbcrConversionKHR(device, pCreateInfo, pCallbacks, pConversion);
+
+	if (res == VK_SUCCESS)
+	{
+		if (!layer->getRecorder().record_ycbcr_conversion(*pConversion, *pCreateInfo))
+			LOGW_LEVEL("Failed to record YCbCr conversion, usually caused by unsupported pNext.\n");
+	}
+
+	return res;
+}
+
 static PFN_vkVoidFunction interceptCoreDeviceCommand(const char *pName)
 {
 	static const struct
@@ -627,6 +663,8 @@ static PFN_vkVoidFunction interceptCoreDeviceCommand(const char *pName)
 		{ "vkCreateRenderPass", reinterpret_cast<PFN_vkVoidFunction>(CreateRenderPass) },
 		{ "vkCreateRenderPass2", reinterpret_cast<PFN_vkVoidFunction>(CreateRenderPass2) },
 		{ "vkCreateRenderPass2KHR", reinterpret_cast<PFN_vkVoidFunction>(CreateRenderPass2KHR) },
+		{ "vkCreateSamplerYcbcrConversion", reinterpret_cast<PFN_vkVoidFunction>(CreateSamplerYcbcrConversion) },
+		{ "vkCreateSamplerYcbcrConversionKHR", reinterpret_cast<PFN_vkVoidFunction>(CreateSamplerYcbcrConversionKHR) },
 		{ "vkCreateRayTracingPipelinesKHR", reinterpret_cast<PFN_vkVoidFunction>(CreateRayTracingPipelinesKHR) },
 	};
 

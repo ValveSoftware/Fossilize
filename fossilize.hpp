@@ -116,6 +116,10 @@ public:
 	                                          ResourceTag /*blob_tag*/,
 	                                          Hash /*blob_hash*/) {}
 
+	// SAMPLER_YCBCR_CONVERSION_CREATE_INFO is added as a pNext here, instead of YCBCR_CONVERSION_INFO.
+	// Replaying application needs to detect that pNext, create its own YCbCr object and replace the struct
+	// with a YCBCR_CONVERSION_INFO.
+	// See Device::create_sampler_with_ycbcr_remap().
 	virtual bool enqueue_create_sampler(Hash hash, const VkSamplerCreateInfo *create_info, VkSampler *sampler) = 0;
 	virtual bool enqueue_create_descriptor_set_layout(Hash hash, const VkDescriptorSetLayoutCreateInfo *create_info, VkDescriptorSetLayout *layout) = 0;
 	virtual bool enqueue_create_pipeline_layout(Hash hash, const VkPipelineLayoutCreateInfo *create_info, VkPipelineLayout *layout) = 0;
@@ -225,6 +229,12 @@ public:
 	bool record_raytracing_pipeline(VkPipeline pipeline, const VkRayTracingPipelineCreateInfoKHR &create_info,
 	                                const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
 	                                Hash custom_hash = 0) FOSSILIZE_WARN_UNUSED;
+	// YCbCr conversion objects are treated somewhat differently and their create infos
+	// are inlined into a sampler create info.
+	// In a replay scenario, the YCbCr create info is fished out of the pNext chain and replaced
+	// with a Conversion Info.
+	bool record_ycbcr_conversion(VkSamplerYcbcrConversion conv,
+	                             const VkSamplerYcbcrConversionCreateInfo &create_info) FOSSILIZE_WARN_UNUSED;
 
 	// Used by hashing functions in Hashing namespace. Should be considered an implementation detail.
 	bool get_hash_for_descriptor_set_layout(VkDescriptorSetLayout layout, Hash *hash) const FOSSILIZE_WARN_UNUSED;

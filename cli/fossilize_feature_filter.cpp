@@ -794,6 +794,21 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 			break;
 		}
 
+		case VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_INFO:
+		case VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_CREATE_INFO:
+		{
+			// Should also validate formats and all sorts of feature bits, but
+			// consider that TODO for now.
+			// YcbcrConversionCreateInfo is inlined into a VkSamplerCreateInfo when replaying from a Fossilize archive.
+			// Normally, it's not a pNext, but we pretend it is to make capture and replay
+			// a bit more sane.
+			if (!enabled_extensions.count(VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME) ||
+			    !features.ycbcr_conversion.samplerYcbcrConversion)
+				return false;
+
+			break;
+		}
+
 		default:
 			LOGE("Unrecognized pNext sType: %u. Treating as unsupported.\n", unsigned(base->sType));
 			return false;

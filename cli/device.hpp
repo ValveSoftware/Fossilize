@@ -24,6 +24,7 @@
 
 #include "volk.h"
 #include "fossilize_feature_filter.hpp"
+#include <vector>
 
 namespace Fossilize
 {
@@ -95,6 +96,12 @@ public:
 		return gpu_props;
 	}
 
+	// Special helper which deals with SAMPLER_YCBCR_CONVERSION_CREATE_INFO.
+	// Prefer using this instead of vkCreateSampler directly.
+	// The relevant pNext will be mutated into CONVERSION_INFO in-place if it exists.
+	// Should only be called from enqueue_create_sampler().
+	VkResult create_sampler_with_ycbcr_remap(const VkSamplerCreateInfo *create_info, VkSampler *sampler);
+
 private:
 	VkInstance instance = VK_NULL_HANDLE;
 	VkPhysicalDevice gpu = VK_NULL_HANDLE;
@@ -116,6 +123,8 @@ private:
 	VulkanFeatures features = {};
 	VulkanProperties props = {};
 	FeatureFilter feature_filter;
+
+	std::vector<VkSamplerYcbcrConversion> ycbcr_conversions;
 
 	bool format_is_supported(VkFormat format, VkFormatFeatureFlags features) override;
 };

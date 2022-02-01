@@ -178,7 +178,7 @@ struct FilterReplayer : StateCreatorInterface
 
 struct DisasmReplayer : StateCreatorInterface
 {
-	DisasmReplayer(const VulkanDevice *device_)
+	DisasmReplayer(VulkanDevice *device_)
 		: device(device_)
 	{
 		if (device)
@@ -226,7 +226,7 @@ struct DisasmReplayer : StateCreatorInterface
 		if (device)
 		{
 			LOGI("Creating sampler %0" PRIX64 "\n", hash);
-			if (vkCreateSampler(device->get_device(), create_info, nullptr, sampler) != VK_SUCCESS)
+			if (device->create_sampler_with_ycbcr_remap(create_info, sampler) != VK_SUCCESS)
 			{
 				LOGE(" ... Failed!\n");
 				return false;
@@ -473,7 +473,7 @@ struct DisasmReplayer : StateCreatorInterface
 		       !filter_raytracing.empty() || !filter_modules.empty();
 	}
 
-	const VulkanDevice *device;
+	VulkanDevice *device;
 
 	vector<const VkSamplerCreateInfo *> sampler_infos;
 	vector<const VkDescriptorSetLayoutCreateInfo *> set_layout_infos;
