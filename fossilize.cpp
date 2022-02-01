@@ -8039,9 +8039,28 @@ static bool json_value(const VkGraphicsPipelineCreateInfo &pipe,
 		cb.AddMember("flags", pipe.pColorBlendState->flags, alloc);
 		cb.AddMember("logicOp", pipe.pColorBlendState->logicOp, alloc);
 		cb.AddMember("logicOpEnable", pipe.pColorBlendState->logicOpEnable, alloc);
+
+		bool need_blend_constants = false;
+
+		for (uint32_t i = 0; i < pipe.pColorBlendState->attachmentCount; i++)
+		{
+			if (pipe.pColorBlendState->pAttachments[i].blendEnable &&
+			    (pipe.pColorBlendState->pAttachments[i].dstAlphaBlendFactor == VK_BLEND_FACTOR_CONSTANT_ALPHA ||
+			     pipe.pColorBlendState->pAttachments[i].dstAlphaBlendFactor == VK_BLEND_FACTOR_CONSTANT_COLOR ||
+			     pipe.pColorBlendState->pAttachments[i].srcAlphaBlendFactor == VK_BLEND_FACTOR_CONSTANT_ALPHA ||
+			     pipe.pColorBlendState->pAttachments[i].srcAlphaBlendFactor == VK_BLEND_FACTOR_CONSTANT_COLOR ||
+			     pipe.pColorBlendState->pAttachments[i].dstColorBlendFactor == VK_BLEND_FACTOR_CONSTANT_ALPHA ||
+			     pipe.pColorBlendState->pAttachments[i].dstColorBlendFactor == VK_BLEND_FACTOR_CONSTANT_COLOR ||
+			     pipe.pColorBlendState->pAttachments[i].srcColorBlendFactor == VK_BLEND_FACTOR_CONSTANT_ALPHA ||
+			     pipe.pColorBlendState->pAttachments[i].srcColorBlendFactor == VK_BLEND_FACTOR_CONSTANT_COLOR))
+			{
+				need_blend_constants = true;
+			}
+		}
+
 		Value blend_constants(kArrayType);
 		for (auto &c : pipe.pColorBlendState->blendConstants)
-			blend_constants.PushBack(dynamic_info.blend_constants ? 0.0f : c, alloc);
+			blend_constants.PushBack(dynamic_info.blend_constants || !need_blend_constants ? 0.0f : c, alloc);
 		cb.AddMember("blendConstants", blend_constants, alloc);
 		Value attachments(kArrayType);
 		for (uint32_t i = 0; i < pipe.pColorBlendState->attachmentCount; i++)
