@@ -8041,7 +8041,7 @@ static bool json_value(const VkGraphicsPipelineCreateInfo &pipe,
 		cb.AddMember("logicOpEnable", pipe.pColorBlendState->logicOpEnable, alloc);
 		Value blend_constants(kArrayType);
 		for (auto &c : pipe.pColorBlendState->blendConstants)
-			blend_constants.PushBack(c, alloc);
+			blend_constants.PushBack(dynamic_info.blend_constants ? 0.0f : c, alloc);
 		cb.AddMember("blendConstants", blend_constants, alloc);
 		Value attachments(kArrayType);
 		for (uint32_t i = 0; i < pipe.pColorBlendState->attachmentCount; i++)
