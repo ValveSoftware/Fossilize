@@ -552,6 +552,7 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 					case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
 					case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
 					case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+					case VK_DESCRIPTOR_TYPE_SAMPLER:
 						break;
 
 					default:
@@ -830,6 +831,8 @@ bool FeatureFilter::Impl::sampler_is_supported(const VkSamplerCreateInfo *info) 
 
 bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorSetLayoutCreateInfo *info) const
 {
+	bool must_check_set_layout_before_accept = false;
+
 	// This should not get recorded, but if it does ...
 	if ((info->flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_HOST_ONLY_POOL_BIT_VALVE) != 0)
 		return false;
@@ -1000,6 +1003,12 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 					mutable_counts.storage_image = 1;
 					break;
 
+				case VK_DESCRIPTOR_TYPE_SAMPLER:
+					// Sampler is a non-standard type for mutable
+					mutable_counts.sampled_image = 1;
+					must_check_set_layout_before_accept = true;
+					break;
+
 				default:
 					return false;
 				}
@@ -1060,6 +1069,12 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 		if (counts.input_attachment > props2.properties.limits.maxDescriptorSetInputAttachments)
 			return false;
 		if (counts.acceleration_structure > props.acceleration_structure.maxDescriptorSetAccelerationStructures)
+			return false;
+	}
+
+	if (must_check_set_layout_before_accept)
+	{
+		if (query && !query->descriptor_set_layout_is_supported(info))
 			return false;
 	}
 
