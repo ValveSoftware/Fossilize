@@ -127,5 +127,6 @@ private:
 	std::vector<VkSamplerYcbcrConversion> ycbcr_conversions;
 
 	bool format_is_supported(VkFormat format, VkFormatFeatureFlags features) override;
+	bool descriptor_set_layout_is_supported(const VkDescriptorSetLayoutCreateInfo *info) override;
 };
 }

@@ -116,6 +116,7 @@ class DeviceQueryInterface
 public:
 	virtual ~DeviceQueryInterface() = default;
 	virtual bool format_is_supported(VkFormat format, VkFormatFeatureFlags features) = 0;
+	virtual bool descriptor_set_layout_is_supported(const VkDescriptorSetLayoutCreateInfo *info) = 0;
 };
 
 class FeatureFilter

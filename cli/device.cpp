@@ -518,6 +518,17 @@ bool VulkanDevice::format_is_supported(VkFormat format, VkFormatFeatureFlags for
 	return (format_features & supported) == format_features;
 }
 
+bool VulkanDevice::descriptor_set_layout_is_supported(const VkDescriptorSetLayoutCreateInfo *info)
+{
+	if (is_null_device)
+		return true;
+
+	VkDescriptorSetLayoutSupport set_layout_support = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_SUPPORT };
+
+	vkGetDescriptorSetLayoutSupportKHR(device, info, &set_layout_support);
+	return set_layout_support.supported;
+}
+
 template <typename T>
 static T allocate_dummy(size_t size)
 {
