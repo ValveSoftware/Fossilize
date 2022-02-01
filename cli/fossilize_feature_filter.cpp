@@ -608,9 +608,12 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 			if (!attachment_reference2_is_supported(*resolve->pDepthStencilResolveAttachment))
 				return false;
 
-			if ((props.ds_resolve.supportedDepthResolveModes & resolve->depthResolveMode) == 0)
+			if (resolve->depthResolveMode &&
+			    (props.ds_resolve.supportedDepthResolveModes & resolve->depthResolveMode) == 0)
 				return false;
-			if ((props.ds_resolve.supportedStencilResolveModes & resolve->stencilResolveMode) == 0)
+
+			if (resolve->stencilResolveMode &&
+			    (props.ds_resolve.supportedStencilResolveModes & resolve->stencilResolveMode) == 0)
 				return false;
 
 			if (resolve->depthResolveMode != resolve->stencilResolveMode)
