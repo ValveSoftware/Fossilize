@@ -5453,6 +5453,10 @@ bool StateRecorder::Impl::copy_descriptor_set_layout(
 		{
 			b.pImmutableSamplers = copy(b.pImmutableSamplers, b.descriptorCount, alloc);
 		}
+		else
+		{
+			b.pImmutableSamplers = nullptr;
+		}
 	}
 
 	if (!copy_pnext_chain(create_info->pNext, alloc, &info->pNext, nullptr))
