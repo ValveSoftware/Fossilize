@@ -1731,12 +1731,12 @@ struct ThreadedReplayer : StateCreatorInterface
 			return false;
 		}
 
-		// Playback in-order.
-		if (vkCreateSampler(device->get_device(), create_info, nullptr, sampler) != VK_SUCCESS)
+		if (device->create_sampler_with_ycbcr_remap(create_info, sampler) != VK_SUCCESS)
 		{
 			LOGE("Creating sampler %016" PRIx64 " Failed!\n", index);
 			return false;
 		}
+
 		samplers[index] = *sampler;
 		return true;
 	}

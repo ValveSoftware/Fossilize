@@ -482,6 +482,8 @@ bool VulkanDevice::init_device(const Options &opts)
 
 VulkanDevice::~VulkanDevice()
 {
+	for (auto &ycbcr : ycbcr_conversions)
+		vkDestroySamplerYcbcrConversionKHR(device, ycbcr, nullptr);
 	if (!is_null_device && device)
 		vkDestroyDevice(device, nullptr);
 	if (callback)
@@ -535,6 +537,20 @@ create_sampler(VkDevice, const VkSamplerCreateInfo *, const VkAllocationCallback
 static VKAPI_ATTR void VKAPI_CALL destroy_sampler(VkDevice, VkSampler sampler, const VkAllocationCallbacks *)
 {
 	free((void *) sampler);
+}
+
+static VKAPI_ATTR VkResult VKAPI_CALL
+create_sampler_ycbcr_conversion_khr(VkDevice, const VkSamplerYcbcrConversionCreateInfo *,
+                                    const VkAllocationCallbacks *, VkSamplerYcbcrConversion *conv)
+{
+	*conv = allocate_dummy<VkSamplerYcbcrConversion>(64);
+	return VK_SUCCESS;
+}
+
+static VKAPI_ATTR void VKAPI_CALL
+destroy_sampler_ycbcr_conversion_khr(VkDevice, VkSamplerYcbcrConversion conv, const VkAllocationCallbacks *)
+{
+	free((void *)conv);
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL
@@ -662,6 +678,42 @@ get_physical_device_properties(VkPhysicalDevice, VkPhysicalDeviceProperties *pro
 	props->apiVersion = VK_API_VERSION_1_1;
 }
 
+VkResult VulkanDevice::create_sampler_with_ycbcr_remap(const VkSamplerCreateInfo *create_info, VkSampler *sampler)
+{
+	VkSamplerYcbcrConversion conv = VK_NULL_HANDLE;
+	VkResult vr;
+
+	// Kinda hacky. Resolve Ycbcr sampler objects.
+	// Replace the create info inline.
+	const auto *next = static_cast<const VkBaseInStructure *>(create_info->pNext);
+	while (next)
+	{
+		if (next->sType == VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_CREATE_INFO)
+		{
+			auto ycbcr = *reinterpret_cast<const VkSamplerYcbcrConversionCreateInfo *>(next);
+			ycbcr.pNext = nullptr;
+
+			if ((vr = vkCreateSamplerYcbcrConversionKHR(device, &ycbcr, nullptr, &conv)) != VK_SUCCESS)
+				return vr;
+
+			ycbcr_conversions.push_back(conv);
+
+			// Kinda icky, but we know the conversion info is smaller than the create info.
+			// It's also safe to mutate the input structs we get from enqueue_create_sampler().
+			auto *mut_next = const_cast<VkBaseInStructure *>(next);
+			mut_next->sType = VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_INFO;
+			reinterpret_cast<VkSamplerYcbcrConversionInfo *>(mut_next)->conversion = conv;
+		}
+
+		next = static_cast<const VkBaseInStructure *>(next->pNext);
+	}
+
+	if ((vr = vkCreateSampler(device, create_info, nullptr, sampler)) != VK_SUCCESS)
+		return vr;
+
+	return VK_SUCCESS;
+}
+
 void VulkanDevice::init_null_device()
 {
 	LOGI("Creating null device.\n");
@@ -689,6 +741,8 @@ void VulkanDevice::init_null_device()
 	vkGetPipelineCacheData = get_pipeline_cache_data;
 	vkGetPhysicalDeviceProperties = get_physical_device_properties;
 	vkCreateRayTracingPipelinesKHR = create_raytracing_pipelines_khr;
+	vkCreateSamplerYcbcrConversionKHR = create_sampler_ycbcr_conversion_khr;
+	vkDestroySamplerYcbcrConversionKHR = destroy_sampler_ycbcr_conversion_khr;
 	is_null_device = true;
 
 	feature_filter.init_null_device();

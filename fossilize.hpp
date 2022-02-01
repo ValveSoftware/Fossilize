@@ -116,6 +116,10 @@ public:
 	                                          ResourceTag /*blob_tag*/,
 	                                          Hash /*blob_hash*/) {}
 
+	// SAMPLER_YCBCR_CONVERSION_CREATE_INFO is added as a pNext here, instead of YCBCR_CONVERSION_INFO.
+	// Replaying application needs to detect that pNext, create its own YCbCr object and replace the struct
+	// with a YCBCR_CONVERSION_INFO.
+	// See Device::create_sampler_with_ycbcr_remap().
 	virtual bool enqueue_create_sampler(Hash hash, const VkSamplerCreateInfo *create_info, VkSampler *sampler) = 0;
 	virtual bool enqueue_create_descriptor_set_layout(Hash hash, const VkDescriptorSetLayoutCreateInfo *create_info, VkDescriptorSetLayout *layout) = 0;
 	virtual bool enqueue_create_pipeline_layout(Hash hash, const VkPipelineLayoutCreateInfo *create_info, VkPipelineLayout *layout) = 0;
