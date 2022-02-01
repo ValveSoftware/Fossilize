@@ -202,10 +202,8 @@ static void record_samplers(StateRecorder &recorder)
 		abort();
 
 	// Intentionally trip an error.
-	VkSamplerYcbcrConversionCreateInfo ycbcr = {VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_CREATE_INFO};
-	VkSamplerYcbcrConversionCreateInfo reduction = {VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO_EXT};
+	VkSamplerYcbcrConversionInfo ycbcr = { VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_INFO };
 	sampler.pNext = &ycbcr;
-	ycbcr.pNext = &reduction;
 	bool ret = recorder.record_sampler(fake_handle<VkSampler>(102), sampler);
 	if (ret)
 	{
@@ -216,6 +214,25 @@ static void record_samplers(StateRecorder &recorder)
 	{
 		LOGE("=== Tripped intentional error for testing ===\n");
 	}
+
+	VkSamplerYcbcrConversionCreateInfo ycbcr_info = { VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_CREATE_INFO };
+	ycbcr_info.format = VK_FORMAT_R8G8B8A8_UNORM;
+	ycbcr_info.forceExplicitReconstruction = 10;
+	ycbcr_info.chromaFilter = VK_FILTER_LINEAR;
+	ycbcr_info.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+	ycbcr_info.components.g = VK_COMPONENT_SWIZZLE_G;
+	ycbcr_info.components.b = VK_COMPONENT_SWIZZLE_B;
+	ycbcr_info.components.a = VK_COMPONENT_SWIZZLE_A;
+	ycbcr_info.xChromaOffset = VK_CHROMA_LOCATION_MIDPOINT;
+	ycbcr_info.yChromaOffset = VK_CHROMA_LOCATION_COSITED_EVEN;
+	ycbcr_info.ycbcrRange = VK_SAMPLER_YCBCR_RANGE_ITU_NARROW;
+	ycbcr_info.ycbcrModel = VK_SAMPLER_YCBCR_MODEL_CONVERSION_YCBCR_2020;
+	if (!recorder.record_ycbcr_conversion(fake_handle<VkSamplerYcbcrConversion>(10), ycbcr_info))
+		abort();
+
+	ycbcr.conversion = fake_handle<VkSamplerYcbcrConversion>(10);
+	if (!recorder.record_sampler(fake_handle<VkSampler>(102), sampler))
+		abort();
 
 	VkSamplerCustomBorderColorCreateInfoEXT custom_border_color =
 			{ VK_STRUCTURE_TYPE_SAMPLER_CUSTOM_BORDER_COLOR_CREATE_INFO_EXT };
@@ -2761,7 +2778,7 @@ static bool test_export_concurrent_archive(bool with_read_only)
 static bool test_logging()
 {
 	VkSamplerCreateInfo create_info = { VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
-	VkSamplerYcbcrConversionCreateInfo conv_info = { VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_CREATE_INFO };
+	VkSamplerYcbcrConversionInfo conv_info = { VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_INFO };
 	create_info.pNext = &conv_info;
 
 	const auto immutable = fake_handle<VkSampler>(100);
@@ -2817,7 +2834,7 @@ static bool test_logging()
 		if (recorder.record_sampler(immutable, create_info, 100))
 			return false;
 
-		if (userdata.warn_count != 0 || userdata.err_count != 1 || userdata.info_count != 0)
+		if (userdata.warn_count != 0 || userdata.err_count != 0 || userdata.info_count != 0)
 			return false;
 
 		// Should succeed, but will fail later when trying to resolve sampler.
@@ -2828,7 +2845,7 @@ static bool test_logging()
 		LOGI("=======================\n");
 
 		unsigned expected_warn = i < 2 ? 1 : 0;
-		if (userdata.warn_count != expected_warn || userdata.err_count != 1 || userdata.info_count != 0)
+		if (userdata.warn_count != expected_warn || userdata.err_count != 0 || userdata.info_count != 0)
 			return false;
 	}
 	remove(".__test_archive.foz");

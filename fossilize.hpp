@@ -225,6 +225,12 @@ public:
 	bool record_raytracing_pipeline(VkPipeline pipeline, const VkRayTracingPipelineCreateInfoKHR &create_info,
 	                                const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
 	                                Hash custom_hash = 0) FOSSILIZE_WARN_UNUSED;
+	// YCbCr conversion objects are treated somewhat differently and their create infos
+	// are inlined into a sampler create info.
+	// In a replay scenario, the YCbCr create info is fished out of the pNext chain and replaced
+	// with a Conversion Info.
+	bool record_ycbcr_conversion(VkSamplerYcbcrConversion conv,
+	                             const VkSamplerYcbcrConversionCreateInfo &create_info) FOSSILIZE_WARN_UNUSED;
 
 	// Used by hashing functions in Hashing namespace. Should be considered an implementation detail.
 	bool get_hash_for_descriptor_set_layout(VkDescriptorSetLayout layout, Hash *hash) const FOSSILIZE_WARN_UNUSED;

@@ -233,6 +233,8 @@ struct StateReplayer::Impl
 	bool parse_discard_rectangles(const Value &state, VkPipelineDiscardRectangleStateCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_memory_barrier2(const Value &state, VkMemoryBarrier2KHR **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_fragment_shading_rate(const Value &state, VkPipelineFragmentShadingRateStateCreateInfoKHR **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_sampler_ycbcr_conversion(const Value &state,
+	                                    VkSamplerYcbcrConversionCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_uints(const Value &attachments, const uint32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	bool parse_sints(const Value &attachments, const int32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	const char *duplicate_string(const char *str, size_t len);
@@ -258,6 +260,7 @@ struct StateRecorder::Impl
 
 	ScratchAllocator allocator;
 	ScratchAllocator temp_allocator;
+	ScratchAllocator ycbcr_temp_allocator;
 	DatabaseInterface *database_iface = nullptr;
 	ApplicationInfoFilter *application_info_filter = nullptr;
 	bool need_prepare = false;
@@ -270,6 +273,7 @@ struct StateRecorder::Impl
 	std::unordered_map<Hash, VkRayTracingPipelineCreateInfoKHR *> raytracing_pipelines;
 	std::unordered_map<Hash, void *> render_passes;
 	std::unordered_map<Hash, VkSamplerCreateInfo *> samplers;
+	std::unordered_map<VkSamplerYcbcrConversion, const VkSamplerYcbcrConversionCreateInfo *> ycbcr_conversions;
 
 	std::unordered_map<VkDescriptorSetLayout, Hash> descriptor_set_layout_to_hash;
 	std::unordered_map<VkPipelineLayout, Hash> pipeline_layout_to_hash;
@@ -310,6 +314,8 @@ struct StateRecorder::Impl
 	                              VkRayTracingPipelineCreateInfoKHR **out_info) FOSSILIZE_WARN_UNUSED;
 	bool copy_sampler(const VkSamplerCreateInfo *create_info, ScratchAllocator &alloc,
 	                  VkSamplerCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
+	bool copy_ycbcr_conversion(const VkSamplerYcbcrConversionCreateInfo *create_info, ScratchAllocator &alloc,
+	                           VkSamplerYcbcrConversionCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
 	bool copy_render_pass(const VkRenderPassCreateInfo *create_info, ScratchAllocator &alloc,
 	                      VkRenderPassCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
 	bool copy_render_pass2(const VkRenderPassCreateInfo2 *create_info, ScratchAllocator &alloc,
@@ -385,6 +391,8 @@ struct StateRecorder::Impl
 	void *copy_pnext_struct(const VkMemoryBarrier2KHR *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPipelineFragmentShadingRateStateCreateInfoKHR *create_info,
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkSamplerYcbcrConversionCreateInfo *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 
 	bool remap_sampler_handle(VkSampler sampler, VkSampler *out_sampler) const FOSSILIZE_WARN_UNUSED;
@@ -1013,6 +1021,23 @@ static void hash_pnext_struct(const StateRecorder *,
 	}
 }
 
+static void hash_pnext_struct(const StateRecorder *,
+                              Hasher &h,
+                              const VkSamplerYcbcrConversionCreateInfo &info)
+{
+	h.u32(info.format);
+	h.u32(info.ycbcrModel);
+	h.u32(info.ycbcrRange);
+	h.u32(info.components.r);
+	h.u32(info.components.g);
+	h.u32(info.components.b);
+	h.u32(info.components.a);
+	h.u32(info.xChromaOffset);
+	h.u32(info.yChromaOffset);
+	h.u32(info.chromaFilter);
+	h.u32(info.forceExplicitReconstruction);
+}
+
 static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const void *pNext,
                              const DynamicStateInfo *dynamic_state_info)
 {
@@ -1119,6 +1144,10 @@ static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const voi
 
 		case VK_STRUCTURE_TYPE_PIPELINE_FRAGMENT_SHADING_RATE_STATE_CREATE_INFO_KHR:
 			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineFragmentShadingRateStateCreateInfoKHR *>(pNext), dynamic_state_info);
+			break;
+
+		case VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_CREATE_INFO:
+			hash_pnext_struct(recorder, h, *static_cast<const VkSamplerYcbcrConversionCreateInfo *>(pNext));
 			break;
 
 		default:
@@ -3895,6 +3924,27 @@ bool StateReplayer::Impl::parse_fragment_shading_rate(const Value &state,
 	return true;
 }
 
+bool StateReplayer::Impl::parse_sampler_ycbcr_conversion(const Value &state,
+                                                         VkSamplerYcbcrConversionCreateInfo **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkSamplerYcbcrConversionCreateInfo>();
+	*out_info = info;
+
+	info->format = static_cast<VkFormat>(state["format"].GetUint());
+	info->ycbcrModel = static_cast<VkSamplerYcbcrModelConversion>(state["ycbcrModel"].GetUint());
+	info->ycbcrRange = static_cast<VkSamplerYcbcrRange>(state["ycbcrRange"].GetUint());
+	info->components.r = static_cast<VkComponentSwizzle>(state["components"][0].GetUint());
+	info->components.g = static_cast<VkComponentSwizzle>(state["components"][1].GetUint());
+	info->components.b = static_cast<VkComponentSwizzle>(state["components"][2].GetUint());
+	info->components.a = static_cast<VkComponentSwizzle>(state["components"][3].GetUint());
+	info->xChromaOffset = static_cast<VkChromaLocation>(state["xChromaOffset"].GetUint());
+	info->yChromaOffset = static_cast<VkChromaLocation>(state["yChromaOffset"].GetUint());
+	info->chromaFilter = static_cast<VkFilter>(state["chromaFilter"].GetUint());
+	info->forceExplicitReconstruction = state["forceExplicitReconstruction"].GetUint();
+
+	return true;
+}
+
 bool StateReplayer::Impl::parse_mutable_descriptor_type(const Value &state,
                                                         VkMutableDescriptorTypeCreateInfoVALVE **out_info)
 {
@@ -4187,6 +4237,15 @@ bool StateReplayer::Impl::parse_pnext_chain(const Value &pnext, const void **out
 			if (!parse_fragment_shading_rate(next, &fragment_shading_rate))
 				return false;
 			new_struct = reinterpret_cast<VkBaseInStructure *>(fragment_shading_rate);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_CREATE_INFO:
+		{
+			VkSamplerYcbcrConversionCreateInfo *conv = nullptr;
+			if (!parse_sampler_ycbcr_conversion(next, &conv))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(conv);
 			break;
 		}
 
@@ -4689,6 +4748,13 @@ void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineFragmentShadingRate
 	return fragment_shading_rate;
 }
 
+void *StateRecorder::Impl::copy_pnext_struct(const VkSamplerYcbcrConversionCreateInfo *create_info,
+                                             ScratchAllocator &alloc)
+{
+	auto *conv = copy(create_info, 1, alloc);
+	return conv;
+}
+
 template <typename T>
 bool StateRecorder::Impl::copy_pnext_chains(const T *ts, uint32_t count, ScratchAllocator &alloc,
                                             const DynamicStateInfo *dynamic_state_info)
@@ -4885,6 +4951,30 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 			break;
 		}
 
+		case VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_CREATE_INFO:
+		{
+			auto *ci = static_cast<const VkSamplerYcbcrConversionCreateInfo *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_INFO:
+		{
+			// Special case. Instead of serializing the YCbCr object link, serialize the original create info.
+			// Reduces excessive churn for supporting an extremely niche object type.
+			auto *ci = static_cast<const VkSamplerYcbcrConversionInfo *>(pNext);
+			auto ycbcr = ycbcr_conversions.find(ci->conversion);
+			if (ycbcr == ycbcr_conversions.end())
+				return false;
+
+			VkSamplerYcbcrConversionCreateInfo *new_create_info;
+			if (!copy_ycbcr_conversion(ycbcr->second, alloc, &new_create_info))
+				return false;
+
+			*ppNext = reinterpret_cast<VkBaseInStructure *>(new_create_info);
+			break;
+		}
+
 		default:
 			LOGE_LEVEL("Cannot copy unknown pNext sType: %d.\n", int(pin->sType));
 			return false;
@@ -5071,6 +5161,24 @@ bool StateRecorder::record_sampler(VkSampler sampler, const VkSamplerCreateInfo 
 
 		impl->record_queue.push({api_object_cast<uint64_t>(sampler), new_info, custom_hash});
 		impl->record_cv.notify_one();
+	}
+
+	impl->pump_synchronized_recording(this);
+	return true;
+}
+
+bool StateRecorder::record_ycbcr_conversion(VkSamplerYcbcrConversion conv,
+                                            const VkSamplerYcbcrConversionCreateInfo &create_info)
+{
+	{
+		std::lock_guard<std::mutex> lock(impl->record_lock);
+
+		VkSamplerYcbcrConversionCreateInfo *new_info = nullptr;
+		if (!impl->copy_ycbcr_conversion(&create_info, impl->ycbcr_temp_allocator, &new_info))
+			return false;
+
+		// We don't directly serialize these objects. Just remember it for later if a VkSampler is created.
+		impl->ycbcr_conversions[conv] = new_info;
 	}
 
 	impl->pump_synchronized_recording(this);
@@ -5402,6 +5510,19 @@ bool StateRecorder::Impl::copy_sampler(const VkSamplerCreateInfo *create_info, S
 		return false;
 
 	*out_create_info = info;
+	return true;
+}
+
+bool StateRecorder::Impl::copy_ycbcr_conversion(const VkSamplerYcbcrConversionCreateInfo *create_info,
+                                                ScratchAllocator &alloc, VkSamplerYcbcrConversionCreateInfo **out_info)
+{
+	auto *info = copy(create_info, 1, alloc);
+
+	// Don't support pNext in this struct.
+	if (create_info->pNext)
+		return false;
+
+	*out_info = info;
 	return true;
 }
 
@@ -7230,6 +7351,30 @@ static bool json_value(const VkPipelineFragmentShadingRateStateCreateInfoKHR &cr
 }
 
 template <typename Allocator>
+static bool json_value(const VkSamplerYcbcrConversionCreateInfo &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	Value comp(kArrayType);
+
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("format", create_info.format, alloc);
+	value.AddMember("ycbcrModel", create_info.ycbcrModel, alloc);
+	value.AddMember("ycbcrRange", create_info.ycbcrRange, alloc);
+	comp.PushBack(create_info.components.r, alloc);
+	comp.PushBack(create_info.components.g, alloc);
+	comp.PushBack(create_info.components.b, alloc);
+	comp.PushBack(create_info.components.a, alloc);
+	value.AddMember("components", comp, alloc);
+	value.AddMember("xChromaOffset", create_info.xChromaOffset, alloc);
+	value.AddMember("yChromaOffset", create_info.yChromaOffset, alloc);
+	value.AddMember("chromaFilter", create_info.chromaFilter, alloc);
+	value.AddMember("forceExplicitReconstruction", create_info.forceExplicitReconstruction, alloc);
+
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
 static bool json_value(const VkSubpassDescriptionDepthStencilResolve &create_info, Allocator &alloc, Value *out_value);
 template <typename Allocator>
 static bool json_value(const VkFragmentShadingRateAttachmentInfoKHR &create_info, Allocator &alloc, Value *out_value);
@@ -7363,6 +7508,11 @@ static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *o
 
 		case VK_STRUCTURE_TYPE_PIPELINE_FRAGMENT_SHADING_RATE_STATE_CREATE_INFO_KHR:
 			if (!json_value(*static_cast<const VkPipelineFragmentShadingRateStateCreateInfoKHR *>(pNext), alloc, &next, dynamic_state_info))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_CREATE_INFO:
+			if (!json_value(*static_cast<const VkSamplerYcbcrConversionCreateInfo *>(pNext), alloc, &next))
 				return false;
 			break;
 
