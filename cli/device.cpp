@@ -135,6 +135,24 @@ static uint32_t major_minor_version(uint32_t version)
 	return VK_MAKE_VERSION(VK_VERSION_MAJOR(version), VK_VERSION_MINOR(version), 0);
 }
 
+static bool application_info_promote_robustness2(const VkApplicationInfo *app_info)
+{
+	if (!app_info || !app_info->pEngineName)
+		return false;
+
+	static const char *promote_engine_names[] =
+	{
+		"DXVK",
+		"vkd3d",
+	};
+
+	for (const char *name : promote_engine_names)
+		if (strcmp(name, app_info->pEngineName) == 0)
+			return true;
+
+	return false;
+}
+
 bool VulkanDevice::init_device(const Options &opts)
 {
 	if (opts.null_device)
@@ -342,7 +360,31 @@ bool VulkanDevice::init_device(const Options &opts)
 	else
 		vkGetPhysicalDeviceProperties(gpu, &gpu_props2.properties);
 
-	filter_feature_enablement(gpu_features2, features, opts.features);
+	// A fairly ugly, but important workaround.
+	// When replaying dxvk/vkd3d, we expect robustness2, but this was not captured on earlier databases,
+	// which means we get different shader hashes when replaying.
+	// For now, it's pragmatic to just enable robustness2 until old Fossils have been retired.
+	// New fossils will capture robustness2.
+	const auto *requested_pdf2 = opts.features;
+	VkPhysicalDeviceFeatures2 replacement_pdf2;
+	VkPhysicalDeviceRobustness2FeaturesEXT replacement_robustness2;
+
+	if (opts.features && application_info_promote_robustness2(opts.application_info) &&
+	    find_pnext<VkPhysicalDeviceRobustness2FeaturesEXT>(
+			    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT,
+			    opts.features->pNext) == nullptr)
+	{
+		replacement_robustness2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT };
+		replacement_pdf2 = *opts.features;
+		replacement_pdf2.pNext = &replacement_robustness2;
+		replacement_robustness2.pNext = opts.features->pNext;
+		replacement_robustness2.robustBufferAccess2 = opts.features->features.robustBufferAccess;
+		replacement_robustness2.robustImageAccess2 = opts.features->features.robustBufferAccess;
+		replacement_robustness2.nullDescriptor = VK_TRUE;
+		requested_pdf2 = &replacement_pdf2;
+	}
+
+	filter_feature_enablement(gpu_features2, features, requested_pdf2);
 
 	// Just pick one graphics queue.
 	// FIXME: Does shader compilation depend on which queues we have enabled?

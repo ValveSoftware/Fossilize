@@ -68,21 +68,6 @@ void *build_pnext_chain(VulkanFeatures &features, uint32_t api_version,
 	return pNext;
 }
 
-template <typename T>
-static inline const T *find_pnext(VkStructureType type, const void *pNext)
-{
-	while (pNext != nullptr)
-	{
-		auto *sin = static_cast<const VkBaseInStructure *>(pNext);
-		if (sin->sType == type)
-			return static_cast<const T*>(pNext);
-
-		pNext = sin->pNext;
-	}
-
-	return nullptr;
-}
-
 void filter_feature_enablement(VkPhysicalDeviceFeatures2 &pdf,
                                VulkanFeatures &features,
                                const VkPhysicalDeviceFeatures2 *target_features)
