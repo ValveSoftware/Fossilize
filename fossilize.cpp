@@ -1570,9 +1570,9 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 		for (uint32_t i = 0; i < b.attachmentCount; i++)
 		{
 			h.u32(b.pAttachments[i].blendEnable);
+			h.u32(b.pAttachments[i].colorWriteMask);
 			if (b.pAttachments[i].blendEnable)
 			{
-				h.u32(b.pAttachments[i].colorWriteMask);
 				h.u32(b.pAttachments[i].alphaBlendOp);
 				h.u32(b.pAttachments[i].colorBlendOp);
 				h.u32(b.pAttachments[i].dstAlphaBlendFactor);
