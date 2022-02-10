@@ -119,6 +119,9 @@ struct ExportedMetadataHeader
 };
 static_assert(sizeof(ExportedMetadataHeader) % 8 == 0, "Alignment of ExportedMetadataHeader must be 8.");
 
+// Allow termination request if using the interface on a thread
+std::atomic<bool> shutdown_requested;
+
 struct DatabaseInterface::Impl
 {
 	std::unique_ptr<DatabaseInterface> whitelist;
@@ -545,6 +548,9 @@ struct DumbDirectoryDatabase : DatabaseInterface
 
 		while (auto *pEntry = readdir(dp))
 		{
+			if (shutdown_requested.load())
+				return false;
+
 			if (pEntry->d_type != DT_REG)
 				continue;
 
@@ -755,6 +761,9 @@ struct ZipDatabase : DatabaseInterface
 
 			for (unsigned i = 0; i < files; i++)
 			{
+				if (shutdown_requested.load())
+					return false;
+
 				if (mz_zip_reader_is_file_a_directory(&mz, i))
 					continue;
 
@@ -1110,7 +1119,7 @@ struct StreamArchive : DatabaseInterface
 			size_t len = ftell(file);
 			rewind(file);
 
-			if (len != 0)
+			if (len != 0 && !shutdown_requested.load())
 			{
 				uint8_t magic[MagicSize];
 				if (fread(magic, 1, MagicSize, file) != MagicSize)
@@ -1127,6 +1136,9 @@ struct StreamArchive : DatabaseInterface
 
 				while (offset < len)
 				{
+					if (shutdown_requested.load())
+						return false;
+
 					begin_append_offset = offset;
 
 					PayloadHeaderRaw *header_raw = nullptr;
@@ -2219,6 +2231,11 @@ DatabaseInterface *create_concurrent_database_with_encoded_extra_paths(const cha
 		char_paths.push_back(path.c_str());
 
 	return create_concurrent_database(base_path, mode, char_paths.data(), char_paths.size());
+}
+
+void DatabaseInterface::request_shutdown()
+{
+	shutdown_requested.store(true);
 }
 
 bool merge_concurrent_databases(const char *append_archive, const char * const *source_paths, size_t num_source_paths)

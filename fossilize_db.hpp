@@ -195,6 +195,11 @@ public:
 	// See further comments after create_concurrent_database().
 	virtual bool set_bucket_path(const char *bucket_dirname, const char *bucket_basename);
 
+	// Request termination of prepare() which can take a long time for very
+	// large archives.  This is useful if running prepare() on a thread and the need
+	// arises to stop loading the database.
+	static void request_shutdown();
+
 protected:
 	bool test_resource_filter(ResourceTag tag, Hash hash) const;
 	bool add_to_implicit_whitelist(DatabaseInterface &iface);
