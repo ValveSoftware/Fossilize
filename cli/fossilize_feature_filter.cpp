@@ -1771,6 +1771,13 @@ bool FeatureFilter::Impl::subpass_dependency2_is_supported(const VkSubpassDepend
 
 bool FeatureFilter::Impl::subgroup_size_control_is_supported(const VkPipelineShaderStageCreateInfo &stage) const
 {
+	constexpr VkPipelineShaderStageCreateFlags supported_flags =
+			VK_PIPELINE_SHADER_STAGE_CREATE_ALLOW_VARYING_SUBGROUP_SIZE_BIT |
+			VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT;
+
+	if ((stage.flags & ~supported_flags) != 0)
+		return false;
+
 	if ((stage.flags & VK_PIPELINE_SHADER_STAGE_CREATE_ALLOW_VARYING_SUBGROUP_SIZE_BIT_EXT) != 0 &&
 	    features.subgroup_size_control.subgroupSizeControl == VK_FALSE)
 	{
