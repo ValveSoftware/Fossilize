@@ -1115,8 +1115,14 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 
 bool FeatureFilter::Impl::pipeline_layout_is_supported(const VkPipelineLayoutCreateInfo *info) const
 {
+	// Only allow flags we recognize and validate.
+	constexpr VkPipelineLayoutCreateFlags supported_flags = 0;
+	if ((info->flags & ~supported_flags) != 0)
+		return false;
+
 	if (null_device)
 		return true;
+
 	unsigned max_push_constant_size = 0;
 	for (unsigned i = 0; i < info->pushConstantRangeCount; i++)
 	{
