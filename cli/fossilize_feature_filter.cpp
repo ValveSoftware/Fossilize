@@ -839,12 +839,30 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 {
 	bool must_check_set_layout_before_accept = false;
 
-	// This should not get recorded, but if it does ...
-	if ((info->flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_HOST_ONLY_POOL_BIT_VALVE) != 0)
+	// Only allow flags we recognize and validate.
+	constexpr VkDescriptorSetLayoutCreateFlags supported_flags =
+			VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR |
+			VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
+
+	if ((info->flags & ~supported_flags) != 0)
 		return false;
 
 	if (null_device)
 		return true;
+
+	if ((info->flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR) != 0)
+	{
+		if (enabled_extensions.count(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME) == 0)
+			return false;
+	}
+
+	if ((info->flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT) != 0)
+	{
+		// There doesn't seem to be a specific feature bit for this flag, key it on extension being enabled.
+		// For specific descriptor types, we check the individual features.
+		if (enabled_extensions.count(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME) == 0)
+			return false;
+	}
 
 	struct DescriptorCounts
 	{
@@ -859,6 +877,7 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 		uint32_t acceleration_structure;
 	};
 	DescriptorCounts counts = {};
+	uint32_t total_count = 0;
 
 	auto *flags = find_pnext<VkDescriptorSetLayoutBindingFlagsCreateInfo>(
 			VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
@@ -1033,6 +1052,7 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 
 		if (count)
 			*count += info->pBindings[i].descriptorCount;
+		total_count += info->pBindings[i].descriptorCount;
 	}
 
 	if (pool_is_update_after_bind)
@@ -1076,6 +1096,12 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 			return false;
 		if (counts.acceleration_structure > props.acceleration_structure.maxDescriptorSetAccelerationStructures)
 			return false;
+	}
+
+	if ((info->flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR) != 0 &&
+	    total_count > props.push_descriptor.maxPushDescriptors)
+	{
+		return false;
 	}
 
 	if (must_check_set_layout_before_accept)

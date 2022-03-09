@@ -106,6 +106,7 @@ struct VulkanProperties
 	VkPhysicalDeviceMultiviewProperties multiview;
 	VkPhysicalDeviceRayTracingPipelinePropertiesKHR ray_tracing_pipeline;
 	VkPhysicalDeviceAccelerationStructurePropertiesKHR acceleration_structure;
+	VkPhysicalDevicePushDescriptorPropertiesKHR push_descriptor;
 };
 
 void *build_pnext_chain(VulkanProperties &properties, uint32_t api_version,
