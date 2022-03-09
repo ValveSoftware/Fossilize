@@ -824,8 +824,14 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 
 bool FeatureFilter::Impl::sampler_is_supported(const VkSamplerCreateInfo *info) const
 {
+	// Only allow flags we recognize and validate.
+	constexpr VkSamplerCreateFlags supported_flags = 0;
+	if ((info->flags & ~supported_flags) != 0)
+		return false;
+
 	if (null_device)
 		return true;
+
 	return pnext_chain_is_supported(info->pNext);
 }
 
