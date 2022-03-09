@@ -824,8 +824,14 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 
 bool FeatureFilter::Impl::sampler_is_supported(const VkSamplerCreateInfo *info) const
 {
+	// Only allow flags we recognize and validate.
+	constexpr VkSamplerCreateFlags supported_flags = 0;
+	if ((info->flags & ~supported_flags) != 0)
+		return false;
+
 	if (null_device)
 		return true;
+
 	return pnext_chain_is_supported(info->pNext);
 }
 
@@ -833,12 +839,30 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 {
 	bool must_check_set_layout_before_accept = false;
 
-	// This should not get recorded, but if it does ...
-	if ((info->flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_HOST_ONLY_POOL_BIT_VALVE) != 0)
+	// Only allow flags we recognize and validate.
+	constexpr VkDescriptorSetLayoutCreateFlags supported_flags =
+			VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR |
+			VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
+
+	if ((info->flags & ~supported_flags) != 0)
 		return false;
 
 	if (null_device)
 		return true;
+
+	if ((info->flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR) != 0)
+	{
+		if (enabled_extensions.count(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME) == 0)
+			return false;
+	}
+
+	if ((info->flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT) != 0)
+	{
+		// There doesn't seem to be a specific feature bit for this flag, key it on extension being enabled.
+		// For specific descriptor types, we check the individual features.
+		if (enabled_extensions.count(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME) == 0)
+			return false;
+	}
 
 	struct DescriptorCounts
 	{
@@ -853,6 +877,7 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 		uint32_t acceleration_structure;
 	};
 	DescriptorCounts counts = {};
+	uint32_t total_count = 0;
 
 	auto *flags = find_pnext<VkDescriptorSetLayoutBindingFlagsCreateInfo>(
 			VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
@@ -1027,6 +1052,7 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 
 		if (count)
 			*count += info->pBindings[i].descriptorCount;
+		total_count += info->pBindings[i].descriptorCount;
 	}
 
 	if (pool_is_update_after_bind)
@@ -1072,6 +1098,12 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 			return false;
 	}
 
+	if ((info->flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR) != 0 &&
+	    total_count > props.push_descriptor.maxPushDescriptors)
+	{
+		return false;
+	}
+
 	if (must_check_set_layout_before_accept)
 	{
 		if (query && !query->descriptor_set_layout_is_supported(info))
@@ -1083,8 +1115,14 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 
 bool FeatureFilter::Impl::pipeline_layout_is_supported(const VkPipelineLayoutCreateInfo *info) const
 {
+	// Only allow flags we recognize and validate.
+	constexpr VkPipelineLayoutCreateFlags supported_flags = 0;
+	if ((info->flags & ~supported_flags) != 0)
+		return false;
+
 	if (null_device)
 		return true;
+
 	unsigned max_push_constant_size = 0;
 	for (unsigned i = 0; i < info->pushConstantRangeCount; i++)
 	{
@@ -1497,15 +1535,27 @@ bool FeatureFilter::Impl::validate_module_capabilities(const uint32_t *data, siz
 
 bool FeatureFilter::Impl::shader_module_is_supported(const VkShaderModuleCreateInfo *info) const
 {
+	// Only allow flags we recognize and validate.
+	constexpr VkShaderModuleCreateFlags supported_flags = 0;
+	if ((info->flags & ~supported_flags) != 0)
+		return false;
+
 	if (null_device)
 		return true;
+
 	if (!validate_module_capabilities(info->pCode, info->codeSize))
 		return false;
+
 	return pnext_chain_is_supported(info->pNext);
 }
 
 bool FeatureFilter::Impl::render_pass_is_supported(const VkRenderPassCreateInfo *info) const
 {
+	// Only allow flags we recognize and validate.
+	constexpr VkRenderPassCreateFlags supported_flags = 0;
+	if ((info->flags & ~supported_flags) != 0)
+		return false;
+
 	if (null_device)
 		return true;
 
@@ -1721,6 +1771,13 @@ bool FeatureFilter::Impl::subpass_dependency2_is_supported(const VkSubpassDepend
 
 bool FeatureFilter::Impl::subgroup_size_control_is_supported(const VkPipelineShaderStageCreateInfo &stage) const
 {
+	constexpr VkPipelineShaderStageCreateFlags supported_flags =
+			VK_PIPELINE_SHADER_STAGE_CREATE_ALLOW_VARYING_SUBGROUP_SIZE_BIT |
+			VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT;
+
+	if ((stage.flags & ~supported_flags) != 0)
+		return false;
+
 	if ((stage.flags & VK_PIPELINE_SHADER_STAGE_CREATE_ALLOW_VARYING_SUBGROUP_SIZE_BIT_EXT) != 0 &&
 	    features.subgroup_size_control.subgroupSizeControl == VK_FALSE)
 	{
@@ -1755,6 +1812,11 @@ bool FeatureFilter::Impl::subgroup_size_control_is_supported(const VkPipelineSha
 
 bool FeatureFilter::Impl::render_pass2_is_supported(const VkRenderPassCreateInfo2 *info) const
 {
+	// Only allow flags we recognize and validate.
+	constexpr VkRenderPassCreateFlags supported_flags = 0;
+	if ((info->flags & ~supported_flags) != 0)
+		return false;
+
 	if (null_device)
 		return true;
 
@@ -1836,8 +1898,41 @@ bool FeatureFilter::Impl::render_pass2_is_supported(const VkRenderPassCreateInfo
 
 bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelineCreateInfo *info) const
 {
+	// Only allow flags we recognize and validate.
+	constexpr VkPipelineCreateFlags supported_flags =
+			VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT |
+			VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT |
+			VK_PIPELINE_CREATE_DERIVATIVE_BIT |
+			VK_PIPELINE_CREATE_RENDERING_FRAGMENT_DENSITY_MAP_ATTACHMENT_BIT_EXT |
+			VK_PIPELINE_CREATE_VIEW_INDEX_FROM_DEVICE_INDEX_BIT |
+			VK_PIPELINE_CREATE_RENDERING_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR;
+
+	if ((info->flags & ~supported_flags) != 0)
+		return false;
+
 	if (null_device)
 		return true;
+
+	if ((info->flags & VK_PIPELINE_CREATE_VIEW_INDEX_FROM_DEVICE_INDEX_BIT) != 0 &&
+	    api_version < VK_API_VERSION_1_1)
+	{
+		return false;
+	}
+
+	if ((info->flags & VK_PIPELINE_CREATE_RENDERING_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR) != 0 &&
+	    (enabled_extensions.count(VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME) == 0 ||
+	     enabled_extensions.count(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME) == 0))
+	{
+		return false;
+	}
+
+	if ((info->flags & VK_PIPELINE_CREATE_RENDERING_FRAGMENT_DENSITY_MAP_ATTACHMENT_BIT_EXT) != 0 &&
+	    (enabled_extensions.count(VK_EXT_FRAGMENT_DENSITY_MAP_EXTENSION_NAME) == 0 ||
+	     enabled_extensions.count(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME) == 0))
+	{
+		return false;
+	}
+
 	if (info->pColorBlendState && !pnext_chain_is_supported(info->pColorBlendState->pNext))
 		return false;
 	if (info->pVertexInputState && !pnext_chain_is_supported(info->pVertexInputState->pNext))
@@ -2011,8 +2106,24 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 
 bool FeatureFilter::Impl::compute_pipeline_is_supported(const VkComputePipelineCreateInfo *info) const
 {
+	// Only allow flags we recognize and validate.
+	constexpr VkPipelineCreateFlags supported_flags =
+			VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT |
+			VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT |
+			VK_PIPELINE_CREATE_DERIVATIVE_BIT |
+			VK_PIPELINE_CREATE_DISPATCH_BASE_BIT;
+
+	if ((info->flags & ~supported_flags) != 0)
+		return false;
+
 	if (null_device)
 		return true;
+
+	if ((info->flags & VK_PIPELINE_CREATE_DISPATCH_BASE_BIT) != 0 &&
+	    api_version < VK_API_VERSION_1_1)
+	{
+		return false;
+	}
 
 	if (!subgroup_size_control_is_supported(info->stage))
 		return false;
@@ -2022,13 +2133,24 @@ bool FeatureFilter::Impl::compute_pipeline_is_supported(const VkComputePipelineC
 
 bool FeatureFilter::Impl::raytracing_pipeline_is_supported(const VkRayTracingPipelineCreateInfoKHR *info) const
 {
+	// Only allow flags we recognize and validate.
+	constexpr VkPipelineCreateFlags supported_flags =
+			VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT |
+			VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT |
+			VK_PIPELINE_CREATE_DERIVATIVE_BIT |
+			VK_PIPELINE_CREATE_RAY_TRACING_NO_NULL_ANY_HIT_SHADERS_BIT_KHR |
+			VK_PIPELINE_CREATE_RAY_TRACING_NO_NULL_CLOSEST_HIT_SHADERS_BIT_KHR |
+			VK_PIPELINE_CREATE_RAY_TRACING_NO_NULL_INTERSECTION_SHADERS_BIT_KHR |
+			VK_PIPELINE_CREATE_RAY_TRACING_NO_NULL_MISS_SHADERS_BIT_KHR |
+			VK_PIPELINE_CREATE_RAY_TRACING_SKIP_AABBS_BIT_KHR |
+			VK_PIPELINE_CREATE_RAY_TRACING_SKIP_TRIANGLES_BIT_KHR |
+			VK_PIPELINE_CREATE_LIBRARY_BIT_KHR;
+
+	if ((info->flags & ~supported_flags) != 0)
+		return false;
+
 	if (null_device)
 		return true;
-
-	if (features.ray_tracing_pipeline.rayTracingPipeline == VK_FALSE)
-		return false;
-	if (info->maxPipelineRayRecursionDepth > props.ray_tracing_pipeline.maxRayRecursionDepth)
-		return false;
 
 	if ((info->flags & (VK_PIPELINE_CREATE_RAY_TRACING_SKIP_AABBS_BIT_KHR |
 	                    VK_PIPELINE_CREATE_RAY_TRACING_SKIP_TRIANGLES_BIT_KHR)) != 0 &&
@@ -2036,6 +2158,18 @@ bool FeatureFilter::Impl::raytracing_pipeline_is_supported(const VkRayTracingPip
 	{
 		return false;
 	}
+
+	if ((info->flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0 &&
+	    !enabled_extensions.count(VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME))
+	{
+		return false;
+	}
+
+	if (features.ray_tracing_pipeline.rayTracingPipeline == VK_FALSE)
+		return false;
+
+	if (info->maxPipelineRayRecursionDepth > props.ray_tracing_pipeline.maxRayRecursionDepth)
+		return false;
 
 	if (info->pDynamicState)
 	{
@@ -2047,10 +2181,6 @@ bool FeatureFilter::Impl::raytracing_pipeline_is_supported(const VkRayTracingPip
 	}
 
 	if ((info->pLibraryInfo || info->pLibraryInterface) &&
-	    !enabled_extensions.count(VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME))
-		return false;
-
-	if ((info->flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0 &&
 	    !enabled_extensions.count(VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME))
 		return false;
 
