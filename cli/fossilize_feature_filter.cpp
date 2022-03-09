@@ -1891,8 +1891,41 @@ bool FeatureFilter::Impl::render_pass2_is_supported(const VkRenderPassCreateInfo
 
 bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelineCreateInfo *info) const
 {
+	// Only allow flags we recognize and validate.
+	constexpr VkPipelineCreateFlags supported_flags =
+			VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT |
+			VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT |
+			VK_PIPELINE_CREATE_DERIVATIVE_BIT |
+			VK_PIPELINE_CREATE_RENDERING_FRAGMENT_DENSITY_MAP_ATTACHMENT_BIT_EXT |
+			VK_PIPELINE_CREATE_VIEW_INDEX_FROM_DEVICE_INDEX_BIT |
+			VK_PIPELINE_CREATE_RENDERING_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR;
+
+	if ((info->flags & ~supported_flags) != 0)
+		return false;
+
 	if (null_device)
 		return true;
+
+	if ((info->flags & VK_PIPELINE_CREATE_VIEW_INDEX_FROM_DEVICE_INDEX_BIT) != 0 &&
+	    api_version < VK_API_VERSION_1_1)
+	{
+		return false;
+	}
+
+	if ((info->flags & VK_PIPELINE_CREATE_RENDERING_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR) != 0 &&
+	    (enabled_extensions.count(VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME) == 0 ||
+	     enabled_extensions.count(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME) == 0))
+	{
+		return false;
+	}
+
+	if ((info->flags & VK_PIPELINE_CREATE_RENDERING_FRAGMENT_DENSITY_MAP_ATTACHMENT_BIT_EXT) != 0 &&
+	    (enabled_extensions.count(VK_EXT_FRAGMENT_DENSITY_MAP_EXTENSION_NAME) == 0 ||
+	     enabled_extensions.count(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME) == 0))
+	{
+		return false;
+	}
+
 	if (info->pColorBlendState && !pnext_chain_is_supported(info->pColorBlendState->pNext))
 		return false;
 	if (info->pVertexInputState && !pnext_chain_is_supported(info->pVertexInputState->pNext))
@@ -2066,8 +2099,24 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 
 bool FeatureFilter::Impl::compute_pipeline_is_supported(const VkComputePipelineCreateInfo *info) const
 {
+	// Only allow flags we recognize and validate.
+	constexpr VkPipelineCreateFlags supported_flags =
+			VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT |
+			VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT |
+			VK_PIPELINE_CREATE_DERIVATIVE_BIT |
+			VK_PIPELINE_CREATE_DISPATCH_BASE_BIT;
+
+	if ((info->flags & ~supported_flags) != 0)
+		return false;
+
 	if (null_device)
 		return true;
+
+	if ((info->flags & VK_PIPELINE_CREATE_DISPATCH_BASE_BIT) != 0 &&
+	    api_version < VK_API_VERSION_1_1)
+	{
+		return false;
+	}
 
 	if (!subgroup_size_control_is_supported(info->stage))
 		return false;
@@ -2077,13 +2126,24 @@ bool FeatureFilter::Impl::compute_pipeline_is_supported(const VkComputePipelineC
 
 bool FeatureFilter::Impl::raytracing_pipeline_is_supported(const VkRayTracingPipelineCreateInfoKHR *info) const
 {
+	// Only allow flags we recognize and validate.
+	constexpr VkPipelineCreateFlags supported_flags =
+			VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT |
+			VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT |
+			VK_PIPELINE_CREATE_DERIVATIVE_BIT |
+			VK_PIPELINE_CREATE_RAY_TRACING_NO_NULL_ANY_HIT_SHADERS_BIT_KHR |
+			VK_PIPELINE_CREATE_RAY_TRACING_NO_NULL_CLOSEST_HIT_SHADERS_BIT_KHR |
+			VK_PIPELINE_CREATE_RAY_TRACING_NO_NULL_INTERSECTION_SHADERS_BIT_KHR |
+			VK_PIPELINE_CREATE_RAY_TRACING_NO_NULL_MISS_SHADERS_BIT_KHR |
+			VK_PIPELINE_CREATE_RAY_TRACING_SKIP_AABBS_BIT_KHR |
+			VK_PIPELINE_CREATE_RAY_TRACING_SKIP_TRIANGLES_BIT_KHR |
+			VK_PIPELINE_CREATE_LIBRARY_BIT_KHR;
+
+	if ((info->flags & ~supported_flags) != 0)
+		return false;
+
 	if (null_device)
 		return true;
-
-	if (features.ray_tracing_pipeline.rayTracingPipeline == VK_FALSE)
-		return false;
-	if (info->maxPipelineRayRecursionDepth > props.ray_tracing_pipeline.maxRayRecursionDepth)
-		return false;
 
 	if ((info->flags & (VK_PIPELINE_CREATE_RAY_TRACING_SKIP_AABBS_BIT_KHR |
 	                    VK_PIPELINE_CREATE_RAY_TRACING_SKIP_TRIANGLES_BIT_KHR)) != 0 &&
@@ -2091,6 +2151,18 @@ bool FeatureFilter::Impl::raytracing_pipeline_is_supported(const VkRayTracingPip
 	{
 		return false;
 	}
+
+	if ((info->flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0 &&
+	    !enabled_extensions.count(VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME))
+	{
+		return false;
+	}
+
+	if (features.ray_tracing_pipeline.rayTracingPipeline == VK_FALSE)
+		return false;
+
+	if (info->maxPipelineRayRecursionDepth > props.ray_tracing_pipeline.maxRayRecursionDepth)
+		return false;
 
 	if (info->pDynamicState)
 	{
@@ -2102,10 +2174,6 @@ bool FeatureFilter::Impl::raytracing_pipeline_is_supported(const VkRayTracingPip
 	}
 
 	if ((info->pLibraryInfo || info->pLibraryInterface) &&
-	    !enabled_extensions.count(VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME))
-		return false;
-
-	if ((info->flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0 &&
 	    !enabled_extensions.count(VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME))
 		return false;
 
