@@ -1535,10 +1535,17 @@ bool FeatureFilter::Impl::validate_module_capabilities(const uint32_t *data, siz
 
 bool FeatureFilter::Impl::shader_module_is_supported(const VkShaderModuleCreateInfo *info) const
 {
+	// Only allow flags we recognize and validate.
+	constexpr VkShaderModuleCreateFlags supported_flags = 0;
+	if ((info->flags & ~supported_flags) != 0)
+		return false;
+
 	if (null_device)
 		return true;
+
 	if (!validate_module_capabilities(info->pCode, info->codeSize))
 		return false;
+
 	return pnext_chain_is_supported(info->pNext);
 }
 
