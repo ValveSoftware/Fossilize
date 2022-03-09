@@ -1551,6 +1551,11 @@ bool FeatureFilter::Impl::shader_module_is_supported(const VkShaderModuleCreateI
 
 bool FeatureFilter::Impl::render_pass_is_supported(const VkRenderPassCreateInfo *info) const
 {
+	// Only allow flags we recognize and validate.
+	constexpr VkRenderPassCreateFlags supported_flags = 0;
+	if ((info->flags & ~supported_flags) != 0)
+		return false;
+
 	if (null_device)
 		return true;
 
@@ -1800,6 +1805,11 @@ bool FeatureFilter::Impl::subgroup_size_control_is_supported(const VkPipelineSha
 
 bool FeatureFilter::Impl::render_pass2_is_supported(const VkRenderPassCreateInfo2 *info) const
 {
+	// Only allow flags we recognize and validate.
+	constexpr VkRenderPassCreateFlags supported_flags = 0;
+	if ((info->flags & ~supported_flags) != 0)
+		return false;
+
 	if (null_device)
 		return true;
 
