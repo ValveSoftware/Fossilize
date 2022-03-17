@@ -2899,6 +2899,8 @@ static bool test_pdf_recording()
 			VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_ROBUSTNESS_FEATURES_EXT, nullptr, 4 };
 	VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV shading_rate_enums = {
 			VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_ENUMS_FEATURES_NV, nullptr, 5, 6, 7 };
+	VkPhysicalDeviceFragmentShadingRateFeaturesKHR shading_rate = {
+			VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR, nullptr, 8, 9, 10 };
 
 	// Expect to fail here.
 	if (test_pdf_recording(&dummy, h))
@@ -2928,7 +2930,7 @@ static bool test_pdf_recording()
 	}
 
 	{
-		Hash h0, h1, h2, h3;
+		Hash h0, h1, h2, h3, h4;
 		pdf2.pNext = nullptr;
 		if (!test_pdf_recording(&pdf2, h0))
 			return false;
@@ -2941,18 +2943,21 @@ static bool test_pdf_recording()
 		image_robustness.pNext = &shading_rate_enums;
 		if (!test_pdf_recording(&pdf2, h3))
 			return false;
+		shading_rate_enums.pNext = &shading_rate;
+		if (!test_pdf_recording(&pdf2, h4))
+			return false;
 
 		// Make sure all of these are serialized.
-		if (h0 == h1 || h1 == h2 || h2 == h3)
+		if (h0 == h1 || h1 == h2 || h2 == h3 || h3 == h4)
 			return false;
 
 		// If we move PDF2 last, hash should still be invariant.
-		shading_rate_enums.pNext = &pdf2;
+		shading_rate.pNext = &pdf2;
 		pdf2.pNext = nullptr;
 		if (!test_pdf_recording(&robustness2, h0))
 			return false;
 
-		if (h0 != h3)
+		if (h0 != h4)
 			return false;
 	}
 
