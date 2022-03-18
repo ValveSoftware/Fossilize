@@ -1599,7 +1599,7 @@ struct ThreadedReplayer : StateCreatorInterface
 			if (opts.pipeline_stats)
 			{
 				auto foz_path = opts.pipeline_stats_path + ".__tmp.foz";
-				pipeline_stats_db.reset(create_stream_archive_database(foz_path.c_str(), DatabaseMode::Append));
+				pipeline_stats_db.reset(create_stream_archive_database(foz_path.c_str(), DatabaseMode::OverWrite));
 				if (!pipeline_stats_db->prepare())
 				{
 					LOGW("Failed to prepare stats database. Disabling pipeline stats.\n");
@@ -3281,19 +3281,40 @@ static void stats_to_csv(const std::string &stats_path, rapidjson::Document &doc
 
 		auto &st = *itr;
 
+		if (!st.HasMember("db_path") || !st.HasMember("pipeline_type") || !st.HasMember("pipeline") || !st.HasMember("executables"))
+		{
+			LOGE("db_path, pipeline_type, pipeline and executable members expected, but not found. Stale stats FOZ file?\n");
+			return;
+		}
+
 		row[0] = st["db_path"].GetString();
 		row[1] = st["pipeline_type"].GetString();
 		row[2] = st["pipeline"].GetString();
-
 		auto &execs = st["executables"];
+
 		for (auto e_itr = execs.Begin(); e_itr != execs.End(); e_itr++)
 		{
 			auto &exec = *e_itr;
+
+			if (!exec.HasMember("executable_name") || !exec.HasMember("subgroup_size") || !exec.HasMember("stats"))
+			{
+				LOGE("Expected executable_name, subgroup_size and stats members, but not found. Stale stats file?\n");
+				return;
+			}
+
 			row[3] = exec["executable_name"].GetString();
 			row[4] = std::to_string(exec["subgroup_size"].GetUint());
+
 			for (auto st_itr = exec["stats"].Begin(); st_itr != exec["stats"].End(); st_itr++)
 			{
 				auto &stat = *st_itr;
+
+				if (!stat.HasMember("value") || !stat.HasMember("name"))
+				{
+					LOGE("Expected value and name members, but not found. Stale stats file?\n");
+					return;
+				}
+
 				std::string key = stat["name"].GetString();
 				size_t insert_at;
 
