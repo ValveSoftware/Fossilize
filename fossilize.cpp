@@ -134,6 +134,16 @@ struct DynamicStateInfo
 	bool fragment_shading_rate;
 };
 
+static VkPipelineCreateFlags normalize_pipeline_creation_flags(VkPipelineCreateFlags flags)
+{
+	// Remove flags which do not meaningfully contribute to compilation.
+	flags &= ~(VK_PIPELINE_CREATE_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR |
+			VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR |
+			VK_PIPELINE_CREATE_EARLY_RETURN_ON_FAILURE_BIT_EXT |
+			VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT_EXT);
+	return flags;
+}
+
 struct StateReplayer::Impl
 {
 	bool parse(StateCreatorInterface &iface, DatabaseInterface *resolver, const void *buffer, size_t size) FOSSILIZE_WARN_UNUSED;
@@ -2819,6 +2829,9 @@ bool StateReplayer::Impl::parse_compute_pipeline(StateCreatorInterface &iface, D
 	info.flags = obj["flags"].GetUint();
 	info.basePipelineIndex = obj["basePipelineIndex"].GetInt();
 
+	// For older captures, we might have captured these flags.
+	info.flags = normalize_pipeline_creation_flags(info.flags);
+
 	if (!parse_derived_pipeline_handle(iface, resolver, obj["basePipelineHandle"], pipelines,
 	                                   RESOURCE_COMPUTE_PIPELINE, &info.basePipelineHandle))
 		return false;
@@ -3432,6 +3445,9 @@ bool StateReplayer::Impl::parse_raytracing_pipeline(StateCreatorInterface &iface
 	info.basePipelineIndex = obj["basePipelineIndex"].GetInt();
 	info.maxPipelineRayRecursionDepth = obj["maxPipelineRayRecursionDepth"].GetUint();
 
+	// For older captures, we might have captured these flags.
+	info.flags = normalize_pipeline_creation_flags(info.flags);
+
 	if (obj.HasMember("stages"))
 	{
 		info.stageCount = obj["stages"].Size();
@@ -3507,6 +3523,9 @@ bool StateReplayer::Impl::parse_graphics_pipeline(StateCreatorInterface &iface, 
 	info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
 	info.flags = obj["flags"].GetUint();
 	info.basePipelineIndex = obj["basePipelineIndex"].GetInt();
+
+	// For older captures, we might have captured these flags.
+	info.flags = normalize_pipeline_creation_flags(info.flags);
 
 	if (!parse_derived_pipeline_handle(iface, resolver, obj["basePipelineHandle"], pipelines,
 	                                   RESOURCE_GRAPHICS_PIPELINE, &info.basePipelineHandle))
@@ -5826,16 +5845,6 @@ bool StateRecorder::Impl::copy_sub_create_info(const SubCreateInfo *&sub_info, S
 	}
 
 	return true;
-}
-
-static VkPipelineCreateFlags normalize_pipeline_creation_flags(VkPipelineCreateFlags flags)
-{
-	// Remove flags which do not meaningfully contribute to compilation.
-	flags &= ~(VK_PIPELINE_CREATE_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR |
-	           VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR |
-	           VK_PIPELINE_CREATE_EARLY_RETURN_ON_FAILURE_BIT_EXT |
-	           VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT_EXT);
-	return flags;
 }
 
 bool StateRecorder::Impl::copy_compute_pipeline(const VkComputePipelineCreateInfo *create_info, ScratchAllocator &alloc,
