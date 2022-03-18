@@ -68,7 +68,8 @@ R"delim(
 				"MutableDescriptorType",
 				"BufferDeviceAddress",
 				"DummyIgnored",
-				"ApplicationName"
+				"ApplicationName",
+				"FragmentShadingRate"
 			]
 		},
 		"test2" : { "minimumEngineVersion" : 10, "minimumApplicationVersion" : 1000 },
@@ -281,6 +282,7 @@ R"delim(
 		VkPhysicalDeviceVulkan12Features vulkan12_features = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
 		VkPhysicalDeviceDescriptorIndexingFeatures indexing_features = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES };
 		VkPhysicalDeviceMutableDescriptorTypeFeaturesVALVE mutable_features = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MUTABLE_DESCRIPTOR_TYPE_FEATURES_VALVE };
+		VkPhysicalDeviceFragmentShadingRateFeaturesKHR vrs_features = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR };
 
 		bda_features.pNext = &indexing_features;
 		indexing_features.pNext = &mutable_features;
@@ -316,18 +318,39 @@ R"delim(
 		if (hash5 != hash6)
 			return EXIT_FAILURE;
 
+		features2.pNext = nullptr;
+		auto hash7 = filter.get_bucket_hash(&props2, &appinfo, &features2);
+		features2.pNext = &vrs_features;
+		auto hash8 = filter.get_bucket_hash(&props2, &appinfo, &features2);
+		if (hash7 != hash8)
+			return EXIT_FAILURE;
+		vrs_features.primitiveFragmentShadingRate = VK_TRUE;
+		auto hash9 = filter.get_bucket_hash(&props2, &appinfo, &features2);
+		if (hash8 == hash9)
+			return EXIT_FAILURE;
+		vrs_features.primitiveFragmentShadingRate = VK_FALSE;
+		vrs_features.pipelineFragmentShadingRate = VK_TRUE;
+		auto hash10 = filter.get_bucket_hash(&props2, &appinfo, &features2);
+		if (hash9 == hash10)
+			return EXIT_FAILURE;
+		vrs_features.pipelineFragmentShadingRate = VK_FALSE;
+		vrs_features.attachmentFragmentShadingRate = VK_TRUE;
+		auto hash11 = filter.get_bucket_hash(&props2, &appinfo, &features2);
+		if (hash10 == hash11)
+			return EXIT_FAILURE;
+
 		// Spot check for ApplicationName.
 		appinfo.pApplicationName = "foo";
-		auto hash7 = filter.get_bucket_hash(&props2, &appinfo, &features2);
-		if (hash7 == hash6)
+		auto hash12 = filter.get_bucket_hash(&props2, &appinfo, &features2);
+		if (hash12 == hash11)
 			return EXIT_FAILURE;
 
 		// Check that the default variant hash is used.
 		appinfo.pApplicationName = "blah";
 		appinfo.pEngineName = "blah2";
-		auto hash8 = filter.get_bucket_hash(&props2, &appinfo, &features2);
-		auto hash9 = filter.get_bucket_hash(&props2, &appinfo, nullptr);
-		if (hash8 != hash9)
+		auto hash13 = filter.get_bucket_hash(&props2, &appinfo, &features2);
+		auto hash14 = filter.get_bucket_hash(&props2, &appinfo, nullptr);
+		if (hash13 != hash14)
 			return EXIT_FAILURE;
 	}
 

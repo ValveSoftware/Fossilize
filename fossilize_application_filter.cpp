@@ -64,7 +64,8 @@ enum class VariantDependency
 	EngineVersionMinor,
 	EngineVersionPatch,
 	ApplicationName,
-	EngineName
+	EngineName,
+	FragmentShadingRate
 };
 
 struct VariantDependencyMap
@@ -88,6 +89,7 @@ static const VariantDependencyMap variant_dependency_map[] = {
 	DEF(EngineVersionPatch),
 	DEF(ApplicationName),
 	DEF(EngineName),
+	DEF(FragmentShadingRate),
 };
 #undef DEF
 
@@ -229,6 +231,17 @@ static void hash_variant(Hasher &h, VariantDependency dep,
 		bool enabled = (bda && bda->bufferDeviceAddress) ||
 		               (features12 && features12->bufferDeviceAddress);
 		h.u32(uint32_t(enabled));
+		break;
+	}
+
+	case VariantDependency::FragmentShadingRate:
+	{
+		auto *vrs = find_pnext<VkPhysicalDeviceFragmentShadingRateFeaturesKHR>(
+				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR, device_pnext);
+
+		h.u32(uint32_t(vrs && vrs->attachmentFragmentShadingRate));
+		h.u32(uint32_t(vrs && vrs->pipelineFragmentShadingRate));
+		h.u32(uint32_t(vrs && vrs->primitiveFragmentShadingRate));
 		break;
 	}
 
