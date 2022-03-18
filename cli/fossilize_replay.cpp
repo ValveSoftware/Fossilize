@@ -1599,7 +1599,7 @@ struct ThreadedReplayer : StateCreatorInterface
 			if (opts.pipeline_stats)
 			{
 				auto foz_path = opts.pipeline_stats_path + ".__tmp.foz";
-				pipeline_stats_db.reset(create_stream_archive_database(foz_path.c_str(), DatabaseMode::Append));
+				pipeline_stats_db.reset(create_stream_archive_database(foz_path.c_str(), DatabaseMode::OverWrite));
 				if (!pipeline_stats_db->prepare())
 				{
 					LOGW("Failed to prepare stats database. Disabling pipeline stats.\n");
