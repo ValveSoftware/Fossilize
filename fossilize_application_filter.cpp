@@ -65,7 +65,8 @@ enum class VariantDependency
 	EngineVersionPatch,
 	ApplicationName,
 	EngineName,
-	FragmentShadingRate
+	FragmentShadingRate,
+	DynamicRendering
 };
 
 struct VariantDependencyMap
@@ -90,6 +91,7 @@ static const VariantDependencyMap variant_dependency_map[] = {
 	DEF(ApplicationName),
 	DEF(EngineName),
 	DEF(FragmentShadingRate),
+	DEF(DynamicRendering),
 };
 #undef DEF
 
@@ -242,6 +244,18 @@ static void hash_variant(Hasher &h, VariantDependency dep,
 		h.u32(uint32_t(vrs && vrs->attachmentFragmentShadingRate));
 		h.u32(uint32_t(vrs && vrs->pipelineFragmentShadingRate));
 		h.u32(uint32_t(vrs && vrs->primitiveFragmentShadingRate));
+		break;
+	}
+
+	case VariantDependency::DynamicRendering:
+	{
+		auto *dynamic_rendering = find_pnext<VkPhysicalDeviceDynamicRenderingFeatures>(
+				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES, device_pnext);
+		auto *features13 = find_pnext<VkPhysicalDeviceVulkan13Features>(
+				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES, device_pnext);
+		bool enabled = (dynamic_rendering && dynamic_rendering->dynamicRendering) ||
+		               (features13 && features13->dynamicRendering);
+		h.u32(uint32_t(enabled));
 		break;
 	}
 
