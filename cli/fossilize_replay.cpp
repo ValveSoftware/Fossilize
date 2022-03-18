@@ -3524,12 +3524,10 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 		for (auto &hash : resource_hashes)
 		{
 			size_t state_json_size = 0;
-			if (!resolver->read_entry(tag, hash, &state_json_size, nullptr, PAYLOAD_READ_RAW_FOSSILIZE_DB_BIT))
+			if (resolver->read_entry(tag, hash, &state_json_size, nullptr, PAYLOAD_READ_RAW_FOSSILIZE_DB_BIT))
 			{
-				LOGE("Failed to load blob from cache.\n");
-				return EXIT_FAILURE;
-			}
-			tag_total_size_compressed += state_json_size;
+				tag_total_size_compressed += state_json_size;
+			}			
 
 			if (!resolver->read_entry(tag, hash, &state_json_size, nullptr, 0))
 			{
@@ -3665,12 +3663,10 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 			for (auto &hash : *hashes)
 			{
 				size_t state_json_size = 0;
-				if (!resolver->read_entry(tag, hash, &state_json_size, nullptr, PAYLOAD_READ_RAW_FOSSILIZE_DB_BIT))
+				if (resolver->read_entry(tag, hash, &state_json_size, nullptr, PAYLOAD_READ_RAW_FOSSILIZE_DB_BIT))
 				{
-					LOGE("Failed to load blob from cache.\n");
-					return EXIT_FAILURE;
+					tag_total_size_compressed += state_json_size;
 				}
-				tag_total_size_compressed += state_json_size;
 
 				if (!resolver->read_entry(tag, hash, &state_json_size, nullptr, 0))
 				{
