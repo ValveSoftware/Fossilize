@@ -146,6 +146,29 @@ void filter_feature_enablement(VkPhysicalDeviceFeatures2 &pdf,
 			features.fragment_shading_rate_enums.noInvocationFragmentShadingRates = VK_FALSE;
 			features.fragment_shading_rate_enums.supersampleFragmentShadingRates = VK_FALSE;
 		}
+
+		const auto *fragment_shading_rate = find_pnext<VkPhysicalDeviceFragmentShadingRateFeaturesKHR>(
+				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR,
+				target_features->pNext);
+
+		if (fragment_shading_rate)
+		{
+			features.fragment_shading_rate.pipelineFragmentShadingRate =
+					features.fragment_shading_rate.pipelineFragmentShadingRate &&
+					fragment_shading_rate->pipelineFragmentShadingRate;
+			features.fragment_shading_rate.primitiveFragmentShadingRate =
+					features.fragment_shading_rate.primitiveFragmentShadingRate &&
+					fragment_shading_rate->primitiveFragmentShadingRate;
+			features.fragment_shading_rate.attachmentFragmentShadingRate =
+					features.fragment_shading_rate.attachmentFragmentShadingRate &&
+					fragment_shading_rate->attachmentFragmentShadingRate;
+		}
+		else
+		{
+			features.fragment_shading_rate.pipelineFragmentShadingRate = VK_FALSE;
+			features.fragment_shading_rate.primitiveFragmentShadingRate = VK_FALSE;
+			features.fragment_shading_rate.attachmentFragmentShadingRate = VK_FALSE;
+		}
 	}
 	else
 	{
@@ -157,6 +180,9 @@ void filter_feature_enablement(VkPhysicalDeviceFeatures2 &pdf,
 		features.fragment_shading_rate_enums.fragmentShadingRateEnums = VK_FALSE;
 		features.fragment_shading_rate_enums.noInvocationFragmentShadingRates = VK_FALSE;
 		features.fragment_shading_rate_enums.supersampleFragmentShadingRates = VK_FALSE;
+		features.fragment_shading_rate.pipelineFragmentShadingRate = VK_FALSE;
+		features.fragment_shading_rate.primitiveFragmentShadingRate = VK_FALSE;
+		features.fragment_shading_rate.attachmentFragmentShadingRate = VK_FALSE;
 	}
 }
 

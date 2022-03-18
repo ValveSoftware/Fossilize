@@ -224,6 +224,7 @@ struct StateReplayer::Impl
 	bool parse_robustness2_features(const Value &state, VkPhysicalDeviceRobustness2FeaturesEXT **out_features) FOSSILIZE_WARN_UNUSED;
 	bool parse_image_robustness_features(const Value &state, VkPhysicalDeviceImageRobustnessFeaturesEXT **out_features) FOSSILIZE_WARN_UNUSED;
 	bool parse_fragment_shading_rate_enums_features(const Value &state, VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV **out_features) FOSSILIZE_WARN_UNUSED;
+	bool parse_fragment_shading_rate_features(const Value &state, VkPhysicalDeviceFragmentShadingRateFeaturesKHR **out_features) FOSSILIZE_WARN_UNUSED;
 
 	bool parse_color_write(const Value &state, VkPipelineColorWriteCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_provoking_vertex(const Value &state, VkPipelineRasterizationProvokingVertexStateCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
@@ -374,6 +375,8 @@ struct StateRecorder::Impl
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkPhysicalDeviceFragmentShadingRateFeaturesKHR *create_info,
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPipelineColorWriteCreateInfoEXT *create_info,
 	                        ScratchAllocator &alloc,
 	                        const DynamicStateInfo *dynamic_state_info) FOSSILIZE_WARN_UNUSED;
@@ -516,6 +519,15 @@ static void hash_pnext_struct(const StateRecorder *,
 	h.u32(info.supersampleFragmentShadingRates);
 }
 
+static void hash_pnext_struct(const StateRecorder *,
+                              Hasher &h,
+                              const VkPhysicalDeviceFragmentShadingRateFeaturesKHR &info)
+{
+	h.u32(info.pipelineFragmentShadingRate);
+	h.u32(info.primitiveFragmentShadingRate);
+	h.u32(info.attachmentFragmentShadingRate);
+}
+
 static bool hash_pnext_chain_pdf2(const StateRecorder *recorder, Hasher &h, const void *pNext)
 {
 	while ((pNext = pnext_chain_pdf2_skip_ignored_entries(pNext)) != nullptr)
@@ -536,6 +548,10 @@ static bool hash_pnext_chain_pdf2(const StateRecorder *recorder, Hasher &h, cons
 
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_ENUMS_FEATURES_NV:
 			hash_pnext_struct(recorder, h, *static_cast<const VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR:
+			hash_pnext_struct(recorder, h, *static_cast<const VkPhysicalDeviceFragmentShadingRateFeaturesKHR *>(pNext));
 			break;
 
 		default:
@@ -4309,6 +4325,19 @@ bool StateReplayer::Impl::parse_fragment_shading_rate_enums_features(
 	return true;
 }
 
+bool StateReplayer::Impl::parse_fragment_shading_rate_features(
+		const Value &state,
+		VkPhysicalDeviceFragmentShadingRateFeaturesKHR **out_features)
+{
+	auto *features = allocator.allocate_cleared<VkPhysicalDeviceFragmentShadingRateFeaturesKHR>();
+	*out_features = features;
+
+	features->pipelineFragmentShadingRate = state["pipelineFragmentShadingRate"].GetUint();
+	features->primitiveFragmentShadingRate = state["primitiveFragmentShadingRate"].GetUint();
+	features->attachmentFragmentShadingRate = state["attachmentFragmentShadingRate"].GetUint();
+	return true;
+}
+
 bool StateReplayer::Impl::parse_pnext_chain_pdf2(const Value &pnext, void **outpNext)
 {
 	VkBaseInStructure *ret = nullptr;
@@ -4346,6 +4375,15 @@ bool StateReplayer::Impl::parse_pnext_chain_pdf2(const Value &pnext, void **outp
 			if (!parse_fragment_shading_rate_enums_features(next, &fragment_shading_rate_enums))
 				return false;
 			new_struct = reinterpret_cast<VkBaseInStructure *>(fragment_shading_rate_enums);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR:
+		{
+			VkPhysicalDeviceFragmentShadingRateFeaturesKHR *fragment_shading_rate = nullptr;
+			if (!parse_fragment_shading_rate_features(next, &fragment_shading_rate))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(fragment_shading_rate);
 			break;
 		}
 
@@ -5547,6 +5585,13 @@ void *StateRecorder::Impl::copy_pnext_struct(
 	return copy(create_info, 1, alloc);
 }
 
+void *StateRecorder::Impl::copy_pnext_struct(
+		const VkPhysicalDeviceFragmentShadingRateFeaturesKHR *create_info,
+		ScratchAllocator &alloc)
+{
+	return copy(create_info, 1, alloc);
+}
+
 bool StateRecorder::Impl::copy_pnext_chain_pdf2(const void *pNext, ScratchAllocator &alloc, void **out_pnext)
 {
 	VkBaseInStructure new_pnext = {};
@@ -5575,6 +5620,13 @@ bool StateRecorder::Impl::copy_pnext_chain_pdf2(const void *pNext, ScratchAlloca
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_ENUMS_FEATURES_NV:
 		{
 			auto *ci = static_cast<const VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR:
+		{
+			auto *ci = static_cast<const VkPhysicalDeviceFragmentShadingRateFeaturesKHR *>(pNext);
 			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
 			break;
 		}
@@ -8362,6 +8414,18 @@ static bool json_value(const VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV 
 }
 
 template <typename Allocator>
+static bool json_value(const VkPhysicalDeviceFragmentShadingRateFeaturesKHR &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("pipelineFragmentShadingRate", uint32_t(create_info.pipelineFragmentShadingRate), alloc);
+	value.AddMember("primitiveFragmentShadingRate", uint32_t(create_info.primitiveFragmentShadingRate), alloc);
+	value.AddMember("attachmentFragmentShadingRate", uint32_t(create_info.attachmentFragmentShadingRate), alloc);
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
 static bool pnext_chain_pdf2_json_value(const void *pNext, Allocator &alloc, Value *out_value)
 {
 	Value nexts(kArrayType);
@@ -8384,6 +8448,11 @@ static bool pnext_chain_pdf2_json_value(const void *pNext, Allocator &alloc, Val
 
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_ENUMS_FEATURES_NV:
 			if (!json_value(*static_cast<const VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR:
+			if (!json_value(*static_cast<const VkPhysicalDeviceFragmentShadingRateFeaturesKHR *>(pNext), alloc, &next))
 				return false;
 			break;
 
@@ -8957,6 +9026,7 @@ static const void *pnext_chain_pdf2_skip_ignored_entries(const void *pNext)
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT:
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_ROBUSTNESS_FEATURES_EXT:
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_ENUMS_FEATURES_NV:
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR:
 			ignored = false;
 			break;
 

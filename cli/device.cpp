@@ -153,6 +153,17 @@ static bool application_info_promote_robustness2(const VkApplicationInfo *app_in
 	return false;
 }
 
+static bool application_info_promote_fragment_shading_rate(const VkApplicationInfo *app_info)
+{
+	if (!app_info || !app_info->pEngineName)
+		return false;
+
+	if (strcmp("vkd3d", app_info->pEngineName) == 0)
+		return true;
+
+	return false;
+}
+
 bool VulkanDevice::init_device(const Options &opts)
 {
 	if (opts.null_device)
@@ -368,20 +379,41 @@ bool VulkanDevice::init_device(const Options &opts)
 	const auto *requested_pdf2 = opts.features;
 	VkPhysicalDeviceFeatures2 replacement_pdf2;
 	VkPhysicalDeviceRobustness2FeaturesEXT replacement_robustness2;
+	VkPhysicalDeviceFragmentShadingRateFeaturesKHR replacement_fragment_shading_rate;
 
-	if (opts.features && application_info_promote_robustness2(opts.application_info) &&
-	    find_pnext<VkPhysicalDeviceRobustness2FeaturesEXT>(
-			    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT,
-			    opts.features->pNext) == nullptr)
+	if (opts.features)
 	{
-		replacement_robustness2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT };
-		replacement_pdf2 = *opts.features;
-		replacement_pdf2.pNext = &replacement_robustness2;
-		replacement_robustness2.pNext = opts.features->pNext;
-		replacement_robustness2.robustBufferAccess2 = opts.features->features.robustBufferAccess;
-		replacement_robustness2.robustImageAccess2 = opts.features->features.robustBufferAccess;
-		replacement_robustness2.nullDescriptor = VK_TRUE;
-		requested_pdf2 = &replacement_pdf2;
+		if (application_info_promote_robustness2(opts.application_info) &&
+		    find_pnext<VkPhysicalDeviceRobustness2FeaturesEXT>(
+				    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT,
+				    opts.features->pNext) == nullptr)
+		{
+			replacement_robustness2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT };
+			replacement_pdf2 = *requested_pdf2;
+			replacement_pdf2.pNext = &replacement_robustness2;
+			replacement_robustness2.pNext = requested_pdf2->pNext;
+			replacement_robustness2.robustBufferAccess2 = opts.features->features.robustBufferAccess;
+			replacement_robustness2.robustImageAccess2 = opts.features->features.robustBufferAccess;
+			replacement_robustness2.nullDescriptor = VK_TRUE;
+
+			requested_pdf2 = &replacement_pdf2;
+		}
+
+		if (application_info_promote_fragment_shading_rate(opts.application_info) &&
+		    find_pnext<VkPhysicalDeviceFragmentShadingRateFeaturesKHR>(
+				    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR,
+				    opts.features->pNext) == nullptr)
+		{
+			replacement_fragment_shading_rate = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR };
+			replacement_pdf2 = *requested_pdf2;
+			replacement_fragment_shading_rate.pNext = requested_pdf2->pNext;
+			replacement_pdf2.pNext = &replacement_fragment_shading_rate;
+			replacement_fragment_shading_rate.pipelineFragmentShadingRate = VK_TRUE;
+			replacement_fragment_shading_rate.primitiveFragmentShadingRate = VK_TRUE;
+			replacement_fragment_shading_rate.attachmentFragmentShadingRate = VK_TRUE;
+
+			requested_pdf2 = &replacement_pdf2;
+		}
 	}
 
 	filter_feature_enablement(gpu_features2, features, requested_pdf2);
