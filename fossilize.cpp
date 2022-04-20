@@ -5973,6 +5973,11 @@ bool StateRecorder::Impl::copy_compute_pipeline(const VkComputePipelineCreateInf
                                                 const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
                                                 VkComputePipelineCreateInfo **out_create_info)
 {
+	// Ignore scenarios where we don't have a shader module.
+	// VK_EXT_graphics_pipeline_library can use VkShaderModuleCreateInfo as pNext, but ignore that for now.
+	if (create_info->stage.module == VK_NULL_HANDLE)
+		return false;
+
 	auto *info = copy(create_info, 1, alloc);
 	info->flags = normalize_pipeline_creation_flags(info->flags);
 
@@ -6000,6 +6005,12 @@ bool StateRecorder::Impl::copy_raytracing_pipeline(const VkRayTracingPipelineCre
                                                    uint32_t base_pipeline_count,
                                                    VkRayTracingPipelineCreateInfoKHR **out_info)
 {
+	// Ignore scenarios where we don't have a shader module.
+	// VK_EXT_graphics_pipeline_library can use VkShaderModuleCreateInfo as pNext, but ignore that for now.
+	for (uint32_t i = 0; i < create_info->stageCount; i++)
+		if (create_info->pStages[i].module == VK_NULL_HANDLE)
+			return false;
+
 	auto *info = copy(create_info, 1, alloc);
 	info->flags = normalize_pipeline_creation_flags(info->flags);
 
@@ -6044,6 +6055,12 @@ bool StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateI
                                                  const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
                                                  VkGraphicsPipelineCreateInfo **out_create_info)
 {
+	// Ignore scenarios where we don't have a shader module.
+	// VK_EXT_graphics_pipeline_library can use VkShaderModuleCreateInfo as pNext, but ignore that for now.
+	for (uint32_t i = 0; i < create_info->stageCount; i++)
+		if (create_info->pStages[i].module == VK_NULL_HANDLE)
+			return false;
+
 	auto *info = copy(create_info, 1, alloc);
 
 	// At the time of copy we don't really know the subpass meta state since the render pass is still being
