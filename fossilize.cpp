@@ -5488,6 +5488,13 @@ bool StateRecorder::get_hash_for_shader_module(VkShaderModule module, Hash *hash
 
 bool StateRecorder::get_hash_for_pipeline_layout(VkPipelineLayout layout, Hash *hash) const
 {
+	if (layout == VK_NULL_HANDLE)
+	{
+		// Allowed by VK_EXT_graphics_pipeline_library.
+		*hash = 0;
+		return true;
+	}
+
 	auto itr = impl->pipeline_layout_to_hash.find(layout);
 	if (itr == end(impl->pipeline_layout_to_hash))
 	{
@@ -5503,6 +5510,13 @@ bool StateRecorder::get_hash_for_pipeline_layout(VkPipelineLayout layout, Hash *
 
 bool StateRecorder::get_hash_for_descriptor_set_layout(VkDescriptorSetLayout layout, Hash *hash) const
 {
+	if (layout == VK_NULL_HANDLE)
+	{
+		// Allowed by VK_EXT_graphics_pipeline_library.
+		*hash = 0;
+		return true;
+	}
+
 	auto itr = impl->descriptor_set_layout_to_hash.find(layout);
 	if (itr == end(impl->descriptor_set_layout_to_hash))
 	{
@@ -6110,6 +6124,13 @@ bool StateRecorder::Impl::remap_sampler_handle(VkSampler sampler, VkSampler *out
 bool StateRecorder::Impl::remap_descriptor_set_layout_handle(VkDescriptorSetLayout layout,
                                                              VkDescriptorSetLayout *out_layout) const
 {
+	if (layout == VK_NULL_HANDLE)
+	{
+		// This is allowed in VK_EXT_graphics_pipeline_library.
+		*out_layout = VK_NULL_HANDLE;
+		return true;
+	}
+
 	auto itr = descriptor_set_layout_to_hash.find(layout);
 	if (itr == end(descriptor_set_layout_to_hash))
 	{
@@ -6126,6 +6147,13 @@ bool StateRecorder::Impl::remap_descriptor_set_layout_handle(VkDescriptorSetLayo
 
 bool StateRecorder::Impl::remap_pipeline_layout_handle(VkPipelineLayout layout, VkPipelineLayout *out_layout) const
 {
+	if (layout == VK_NULL_HANDLE)
+	{
+		// This is allowed in VK_EXT_graphics_pipeline_library.
+		*out_layout = VK_NULL_HANDLE;
+		return true;
+	}
+
 	auto itr = pipeline_layout_to_hash.find(layout);
 	if (itr == end(pipeline_layout_to_hash))
 	{
