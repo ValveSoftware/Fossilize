@@ -73,4 +73,5 @@ FE(SHADER_INTEGER_FUNCTIONS_2, integer_functions2_intel, INTEL);
 FE(MUTABLE_DESCRIPTOR_TYPE, mutable_descriptor_type_valve, VALVE);
 FE(ROBUSTNESS_2, robustness2, EXT);
 FE(IMAGE_ROBUSTNESS, image_robustness, EXT);
+FE(GRAPHICS_PIPELINE_LIBRARY, graphics_pipeline_library, EXT);
 FE(FRAGMENT_SHADING_RATE_ENUMS, fragment_shading_rate_enums, NV);

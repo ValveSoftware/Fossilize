@@ -1142,12 +1142,19 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 bool FeatureFilter::Impl::pipeline_layout_is_supported(const VkPipelineLayoutCreateInfo *info) const
 {
 	// Only allow flags we recognize and validate.
-	constexpr VkPipelineLayoutCreateFlags supported_flags = 0;
+	constexpr VkPipelineLayoutCreateFlags supported_flags = VK_PIPELINE_LAYOUT_CREATE_INDEPENDENT_SETS_BIT_EXT;
 	if ((info->flags & ~supported_flags) != 0)
 		return false;
 
 	if (null_device)
 		return true;
+
+	if ((info->flags & VK_PIPELINE_LAYOUT_CREATE_INDEPENDENT_SETS_BIT_EXT) != 0 &&
+	    (enabled_extensions.count(VK_EXT_GRAPHICS_PIPELINE_LIBRARY_EXTENSION_NAME) == 0 ||
+	     features.graphics_pipeline_library.graphicsPipelineLibrary == VK_FALSE))
+	{
+		return false;
+	}
 
 	unsigned max_push_constant_size = 0;
 	for (unsigned i = 0; i < info->pushConstantRangeCount; i++)
@@ -1933,7 +1940,10 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 			VK_PIPELINE_CREATE_VIEW_INDEX_FROM_DEVICE_INDEX_BIT |
 			VK_PIPELINE_CREATE_RENDERING_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR |
 			VK_PIPELINE_CREATE_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR |
-			VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR;
+			VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR |
+			VK_PIPELINE_CREATE_LIBRARY_BIT_KHR |
+			VK_PIPELINE_CREATE_LINK_TIME_OPTIMIZATION_BIT_EXT |
+			VK_PIPELINE_CREATE_RETAIN_LINK_TIME_OPTIMIZATION_INFO_BIT_EXT;
 
 	if ((info->flags & ~supported_flags) != 0)
 		return false;
@@ -1957,6 +1967,15 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 	if ((info->flags & VK_PIPELINE_CREATE_RENDERING_FRAGMENT_DENSITY_MAP_ATTACHMENT_BIT_EXT) != 0 &&
 	    (enabled_extensions.count(VK_EXT_FRAGMENT_DENSITY_MAP_EXTENSION_NAME) == 0 ||
 	     enabled_extensions.count(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME) == 0))
+	{
+		return false;
+	}
+
+	if ((info->flags & (VK_PIPELINE_CREATE_LIBRARY_BIT_KHR |
+	                    VK_PIPELINE_CREATE_LINK_TIME_OPTIMIZATION_BIT_EXT |
+	                    VK_PIPELINE_CREATE_RETAIN_LINK_TIME_OPTIMIZATION_INFO_BIT_EXT)) != 0 &&
+	    (enabled_extensions.count(VK_EXT_GRAPHICS_PIPELINE_LIBRARY_EXTENSION_NAME) == 0 ||
+	     features.graphics_pipeline_library.graphicsPipelineLibrary == VK_FALSE))
 	{
 		return false;
 	}
