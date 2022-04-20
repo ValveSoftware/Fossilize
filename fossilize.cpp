@@ -98,6 +98,8 @@ struct GlobalStateInfo
 	bool depth_stencil_state;
 	bool color_blend_state;
 	bool vertex_input;
+	bool rasterization_state;
+	bool render_pass_state;
 };
 
 struct DynamicStateInfo
@@ -246,6 +248,7 @@ struct StateReplayer::Impl
 	bool parse_fragment_shading_rate(const Value &state, VkPipelineFragmentShadingRateStateCreateInfoKHR **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_sampler_ycbcr_conversion(const Value &state,
 	                                    VkSamplerYcbcrConversionCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_graphics_pipeline_library(const Value &state, VkGraphicsPipelineLibraryCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_uints(const Value &attachments, const uint32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	bool parse_sints(const Value &attachments, const int32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	const char *duplicate_string(const char *str, size_t len);
@@ -406,6 +409,8 @@ struct StateRecorder::Impl
 	void *copy_pnext_struct(const VkPipelineFragmentShadingRateStateCreateInfoKHR *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkSamplerYcbcrConversionCreateInfo *create_info,
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkGraphicsPipelineLibraryCreateInfoEXT *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 
 	bool remap_sampler_handle(VkSampler sampler, VkSampler *out_sampler) const FOSSILIZE_WARN_UNUSED;
@@ -1064,6 +1069,13 @@ static void hash_pnext_struct(const StateRecorder *,
 	h.u32(info.forceExplicitReconstruction);
 }
 
+static void hash_pnext_struct(const StateRecorder *,
+                              Hasher &h,
+                              const VkGraphicsPipelineLibraryCreateInfoEXT &info)
+{
+	h.u32(info.flags);
+}
+
 static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const void *pNext,
                              const DynamicStateInfo *dynamic_state_info)
 {
@@ -1176,6 +1188,10 @@ static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const voi
 			hash_pnext_struct(recorder, h, *static_cast<const VkSamplerYcbcrConversionCreateInfo *>(pNext));
 			break;
 
+		case VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT:
+			hash_pnext_struct(recorder, h, *static_cast<const VkGraphicsPipelineLibraryCreateInfoEXT *>(pNext));
+			break;
+
 		default:
 			log_error_pnext_chain("Unsupported pNext found, cannot hash.", pNext);
 			return false;
@@ -1215,6 +1231,23 @@ static GlobalStateInfo parse_global_state_info(const VkGraphicsPipelineCreateInf
 {
 	GlobalStateInfo info = {};
 
+	info.rasterization_state = create_info.pRasterizationState != nullptr;
+	info.render_pass_state = true;
+
+	VkGraphicsPipelineLibraryFlagsEXT state_flags =
+			VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_OUTPUT_INTERFACE_BIT_EXT |
+			VK_GRAPHICS_PIPELINE_LIBRARY_PRE_RASTERIZATION_SHADERS_BIT_EXT |
+			VK_GRAPHICS_PIPELINE_LIBRARY_VERTEX_INPUT_INTERFACE_BIT_EXT |
+			VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT;
+
+	auto *graphics_pipeline_library = find_pnext<VkGraphicsPipelineLibraryCreateInfoEXT>(
+			VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT,
+			create_info.pNext);
+
+	// If we're not creating a library, assume we're defining a complete pipeline.
+	if ((create_info.flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0 && graphics_pipeline_library)
+		state_flags = graphics_pipeline_library->flags;
+
 	bool rasterizer_discard = !dynamic_info.rasterizer_discard_enable &&
 	                          create_info.pRasterizationState &&
 	                          create_info.pRasterizationState->rasterizerDiscardEnable == VK_TRUE;
@@ -1248,6 +1281,45 @@ static GlobalStateInfo parse_global_state_info(const VkGraphicsPipelineCreateInf
 		default:
 			break;
 		}
+	}
+
+	// If state is not part of the interface for a pipeline library, nop out that state explicitly.
+	if ((state_flags & VK_GRAPHICS_PIPELINE_LIBRARY_VERTEX_INPUT_INTERFACE_BIT_EXT) == 0)
+	{
+		info.input_assembly = false;
+		info.vertex_input = false;
+	}
+
+	if ((state_flags & VK_GRAPHICS_PIPELINE_LIBRARY_PRE_RASTERIZATION_SHADERS_BIT_EXT) == 0)
+	{
+		info.viewport_state = false;
+		info.rasterization_state = false;
+		info.tessellation_state = false;
+	}
+
+	if ((state_flags & VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT) == 0)
+	{
+		info.depth_stencil_state = false;
+	}
+
+	if ((state_flags & (
+			VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT |
+			VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_OUTPUT_INTERFACE_BIT_EXT)) == 0)
+	{
+		info.multisample_state = false;
+	}
+
+	if ((state_flags & VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_OUTPUT_INTERFACE_BIT_EXT) == 0)
+		info.color_blend_state = false;
+
+	// We can ignore formats for dynamic rendering if output interface isn't used, but that's too esoteric.
+	// We're mostly interested in ignoring pointers which could be garbage.
+	if ((state_flags & (
+			VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT |
+			VK_GRAPHICS_PIPELINE_LIBRARY_PRE_RASTERIZATION_SHADERS_BIT_EXT |
+			VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_OUTPUT_INTERFACE_BIT_EXT)) == 0)
+	{
+		info.render_pass_state = false;
 	}
 
 	return info;
@@ -1371,11 +1443,19 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 		h.s32(create_info.basePipelineIndex);
 	}
 
+	DynamicStateInfo dynamic_info = {};
+	if (create_info.pDynamicState)
+		dynamic_info = parse_dynamic_state_info(*create_info.pDynamicState);
+
 	if (!recorder.get_hash_for_pipeline_layout(create_info.layout, &hash))
 		return false;
 	h.u64(hash);
 
-	if (!recorder.get_hash_for_render_pass(create_info.renderPass, &hash))
+	// Need to query state info in two stages. Do we ignore render pass? If so, query a 0 hash.
+	// If we don't ignore render pass, we can query for subpass meta.
+	GlobalStateInfo global_info = parse_global_state_info(create_info, dynamic_info, { true, true });
+	hash = 0;
+	if (global_info.render_pass_state && !recorder.get_hash_for_render_pass(create_info.renderPass, &hash))
 		return false;
 	h.u64(hash);
 
@@ -1383,14 +1463,10 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 	if (!recorder.get_subpass_meta_for_pipeline(create_info, hash, &meta))
 		return false;
 
-	h.u32(create_info.subpass);
+	global_info = parse_global_state_info(create_info, dynamic_info, meta);
+
+	h.u32(global_info.render_pass_state ? create_info.subpass : 0u);
 	h.u32(create_info.stageCount);
-
-	DynamicStateInfo dynamic_info = {};
-	if (create_info.pDynamicState)
-		dynamic_info = parse_dynamic_state_info(*create_info.pDynamicState);
-
-	GlobalStateInfo global_info = parse_global_state_info(create_info, dynamic_info, meta);
 
 	if (create_info.pDynamicState)
 	{
@@ -1469,7 +1545,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 	else
 		h.u32(0);
 
-	if (create_info.pRasterizationState)
+	if (global_info.rasterization_state)
 	{
 		auto &rs = *create_info.pRasterizationState;
 		h.u32(rs.flags);
@@ -3923,7 +3999,7 @@ bool StateReplayer::Impl::parse_discard_rectangles(const Value &state,
 }
 
 bool StateReplayer::Impl::parse_memory_barrier2(const Value &state,
-						VkMemoryBarrier2KHR **out_info)
+                                                VkMemoryBarrier2KHR **out_info)
 {
 	auto *info = allocator.allocate_cleared<VkMemoryBarrier2KHR>();
 	*out_info = info;
@@ -3933,6 +4009,15 @@ bool StateReplayer::Impl::parse_memory_barrier2(const Value &state,
 	info->dstStageMask = static_cast<VkPipelineStageFlags2KHR>(state["dstStageMask"].GetUint());
 	info->dstAccessMask = static_cast<VkAccessFlags2KHR>(state["dstAccessMask"].GetUint());
 
+	return true;
+}
+
+bool StateReplayer::Impl::parse_graphics_pipeline_library(const Value &state,
+                                                          VkGraphicsPipelineLibraryCreateInfoEXT **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkGraphicsPipelineLibraryCreateInfoEXT>();
+	*out_info = info;
+	info->flags = state["flags"].GetUint();
 	return true;
 }
 
@@ -4281,6 +4366,15 @@ bool StateReplayer::Impl::parse_pnext_chain(const Value &pnext, const void **out
 			if (!parse_sampler_ycbcr_conversion(next, &conv))
 				return false;
 			new_struct = reinterpret_cast<VkBaseInStructure *>(conv);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT:
+		{
+			VkGraphicsPipelineLibraryCreateInfoEXT *graphics_pipeline_library = nullptr;
+			if (!parse_graphics_pipeline_library(next, &graphics_pipeline_library))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(graphics_pipeline_library);
 			break;
 		}
 
@@ -4812,6 +4906,13 @@ void *StateRecorder::Impl::copy_pnext_struct(const VkSamplerYcbcrConversionCreat
 	return conv;
 }
 
+void *StateRecorder::Impl::copy_pnext_struct(const VkGraphicsPipelineLibraryCreateInfoEXT *create_info,
+                                             ScratchAllocator &alloc)
+{
+	auto *gpl = copy(create_info, 1, alloc);
+	return gpl;
+}
+
 template <typename T>
 bool StateRecorder::Impl::copy_pnext_chains(const T *ts, uint32_t count, ScratchAllocator &alloc,
                                             const DynamicStateInfo *dynamic_state_info)
@@ -5029,6 +5130,13 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 				return false;
 
 			*ppNext = reinterpret_cast<VkBaseInStructure *>(new_create_info);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT:
+		{
+			auto *ci = static_cast<const VkGraphicsPipelineLibraryCreateInfoEXT *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
 			break;
 		}
 
@@ -5965,6 +6073,15 @@ bool StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateI
 		info->pViewportState = nullptr;
 	if (!global_info.multisample_state)
 		info->pMultisampleState = nullptr;
+	if (!global_info.rasterization_state)
+		info->pRasterizationState = nullptr;
+
+	// If we can ignore render pass state, do just that.
+	if (!global_info.render_pass_state)
+	{
+		info->renderPass = VK_NULL_HANDLE;
+		info->subpass = 0;
+	}
 
 	info->flags = normalize_pipeline_creation_flags(info->flags);
 
@@ -7416,6 +7533,16 @@ static bool json_value(const VkMemoryBarrier2KHR &create_info, Allocator &alloc,
 }
 
 template <typename Allocator>
+static bool json_value(const VkGraphicsPipelineLibraryCreateInfoEXT &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("flags", create_info.flags, alloc);
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
 static bool json_value(const VkPipelineFragmentShadingRateStateCreateInfoKHR &create_info, Allocator &alloc, Value *out_value,
                        const DynamicStateInfo *dynamic_state_info)
 {
@@ -7602,6 +7729,11 @@ static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *o
 
 		case VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_CREATE_INFO:
 			if (!json_value(*static_cast<const VkSamplerYcbcrConversionCreateInfo *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT:
+			if (!json_value(*static_cast<const VkGraphicsPipelineLibraryCreateInfoEXT *>(pNext), alloc, &next))
 				return false;
 			break;
 
@@ -8244,7 +8376,7 @@ static bool json_value(const VkGraphicsPipelineCreateInfo &pipe,
 		p.AddMember("vertexInputState", vi, alloc);
 	}
 
-	if (pipe.pRasterizationState)
+	if (global_info.rasterization_state)
 	{
 		Value rs(kObjectType);
 		rs.AddMember("flags", pipe.pRasterizationState->flags, alloc);
