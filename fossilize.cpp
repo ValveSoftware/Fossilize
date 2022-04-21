@@ -6462,7 +6462,19 @@ bool StateRecorder::Impl::remap_shader_module_handles(CreateInfo *info)
 	for (uint32_t i = 0; i < info->stageCount; i++)
 	{
 		auto &stage = const_cast<VkPipelineShaderStageCreateInfo &>(info->pStages[i]);
-		if (!remap_shader_module_handle(stage.module, &stage.module))
+
+		if (stage.module != VK_NULL_HANDLE)
+		{
+			if (!remap_shader_module_handle(stage.module, &stage.module))
+				return false;
+		}
+		else if (const auto *module = find_pnext<VkShaderModuleCreateInfo>(
+				VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, stage.pNext))
+		{
+			// TODO
+			return false;
+		}
+		else
 			return false;
 	}
 
@@ -6488,7 +6500,18 @@ bool StateRecorder::Impl::remap_graphics_pipeline_ci(VkGraphicsPipelineCreateInf
 
 bool StateRecorder::Impl::remap_compute_pipeline_ci(VkComputePipelineCreateInfo *info)
 {
-	if (!remap_shader_module_handle(info->stage.module, &info->stage.module))
+	if (info->stage.module != VK_NULL_HANDLE)
+	{
+		if (!remap_shader_module_handle(info->stage.module, &info->stage.module))
+			return false;
+	}
+	else if (const auto *module = find_pnext<VkShaderModuleCreateInfo>(
+			VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, info->stage.pNext))
+	{
+		// TODO
+		return false;
+	}
+	else
 		return false;
 
 	if (info->basePipelineHandle != VK_NULL_HANDLE)
