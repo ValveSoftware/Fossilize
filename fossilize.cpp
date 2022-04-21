@@ -316,7 +316,8 @@ struct StateRecorder::Impl
 
 	bool copy_descriptor_set_layout(const VkDescriptorSetLayoutCreateInfo *create_info, ScratchAllocator &alloc, VkDescriptorSetLayoutCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
 	bool copy_pipeline_layout(const VkPipelineLayoutCreateInfo *create_info, ScratchAllocator &alloc, VkPipelineLayoutCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
-	bool copy_shader_module(const VkShaderModuleCreateInfo *create_info, ScratchAllocator &alloc, VkShaderModuleCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
+	bool copy_shader_module(const VkShaderModuleCreateInfo *create_info, ScratchAllocator &alloc,
+	                        bool ignore_pnext, VkShaderModuleCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
 	bool copy_graphics_pipeline(const VkGraphicsPipelineCreateInfo *create_info, ScratchAllocator &alloc,
 	                            const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
 	                            VkGraphicsPipelineCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
@@ -5170,6 +5171,16 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 			break;
 		}
 
+		case VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO:
+		{
+			auto *ci = static_cast<const VkShaderModuleCreateInfo *>(pNext);
+			VkShaderModuleCreateInfo *new_module = nullptr;
+			if (!copy_shader_module(ci, alloc, true, &new_module))
+				return false;
+			*ppNext = reinterpret_cast<VkBaseInStructure *>(new_module);
+			break;
+		}
+
 		default:
 			LOGE_LEVEL("Cannot copy unknown pNext sType: %d.\n", int(pin->sType));
 			return false;
@@ -5530,7 +5541,7 @@ bool StateRecorder::record_shader_module(VkShaderModule module, const VkShaderMo
 		std::lock_guard<std::mutex> lock(impl->record_lock);
 
 		VkShaderModuleCreateInfo *new_info = nullptr;
-		if (!impl->copy_shader_module(&create_info, impl->temp_allocator, &new_info))
+		if (!impl->copy_shader_module(&create_info, impl->temp_allocator, false, &new_info))
 			return false;
 
 		impl->record_queue.push({api_object_cast<uint64_t>(module), new_info, custom_hash});
@@ -5698,12 +5709,15 @@ bool StateRecorder::get_subpass_meta_for_pipeline(const VkGraphicsPipelineCreate
 }
 
 bool StateRecorder::Impl::copy_shader_module(const VkShaderModuleCreateInfo *create_info, ScratchAllocator &alloc,
-                                             VkShaderModuleCreateInfo **out_create_info)
+                                             bool ignore_pnext, VkShaderModuleCreateInfo **out_create_info)
 {
-	if (create_info->pNext)
+	auto *info = copy(create_info, 1, alloc);
+
+	if (ignore_pnext)
+		info->pNext = nullptr;
+	else if (!copy_pnext_chain(info->pNext, alloc, &info->pNext, nullptr))
 		return false;
 
-	auto *info = copy(create_info, 1, alloc);
 	info->pCode = copy(info->pCode, info->codeSize / sizeof(uint32_t), alloc);
 
 	*out_create_info = info;
@@ -6003,11 +6017,6 @@ bool StateRecorder::Impl::copy_compute_pipeline(const VkComputePipelineCreateInf
                                                 const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
                                                 VkComputePipelineCreateInfo **out_create_info)
 {
-	// Ignore scenarios where we don't have a shader module.
-	// VK_EXT_graphics_pipeline_library can use VkShaderModuleCreateInfo as pNext, but ignore that for now.
-	if (create_info->stage.module == VK_NULL_HANDLE)
-		return false;
-
 	auto *info = copy(create_info, 1, alloc);
 	info->flags = normalize_pipeline_creation_flags(info->flags);
 
@@ -6035,12 +6044,6 @@ bool StateRecorder::Impl::copy_raytracing_pipeline(const VkRayTracingPipelineCre
                                                    uint32_t base_pipeline_count,
                                                    VkRayTracingPipelineCreateInfoKHR **out_info)
 {
-	// Ignore scenarios where we don't have a shader module.
-	// VK_EXT_graphics_pipeline_library can use VkShaderModuleCreateInfo as pNext, but ignore that for now.
-	for (uint32_t i = 0; i < create_info->stageCount; i++)
-		if (create_info->pStages[i].module == VK_NULL_HANDLE)
-			return false;
-
 	auto *info = copy(create_info, 1, alloc);
 	info->flags = normalize_pipeline_creation_flags(info->flags);
 
@@ -6085,12 +6088,6 @@ bool StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateI
                                                  const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
                                                  VkGraphicsPipelineCreateInfo **out_create_info)
 {
-	// Ignore scenarios where we don't have a shader module.
-	// VK_EXT_graphics_pipeline_library can use VkShaderModuleCreateInfo as pNext, but ignore that for now.
-	for (uint32_t i = 0; i < create_info->stageCount; i++)
-		if (create_info->pStages[i].module == VK_NULL_HANDLE)
-			return false;
-
 	auto *info = copy(create_info, 1, alloc);
 
 	// At the time of copy we don't really know the subpass meta state since the render pass is still being
@@ -6846,7 +6843,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 				if (!shader_modules.count(hash))
 				{
 					VkShaderModuleCreateInfo *create_info_copy = nullptr;
-					if (copy_shader_module(create_info, allocator, &create_info_copy))
+					if (copy_shader_module(create_info, allocator, false, &create_info_copy))
 						shader_modules[hash] = create_info_copy;
 				}
 			}
