@@ -277,7 +277,6 @@ struct StateRecorder::Impl
 	ScratchAllocator ycbcr_temp_allocator;
 	DatabaseInterface *database_iface = nullptr;
 	ApplicationInfoFilter *application_info_filter = nullptr;
-	bool need_prepare = false;
 
 	std::unordered_map<Hash, VkDescriptorSetLayoutCreateInfo *> descriptor_sets;
 	std::unordered_map<Hash, VkPipelineLayoutCreateInfo *> pipeline_layouts;
@@ -477,11 +476,16 @@ struct StateRecorder::Impl
 
 	bool copy_pnext_chain_pdf2(const void *pNext, ScratchAllocator &alloc, void **out_pnext) FOSSILIZE_WARN_UNUSED;
 
-	Hash record_shader_module(const WorkItem &record_item,
-	                          bool write_database_entries,
-	                          vector<uint8_t> &blob,
-	                          PayloadWriteFlags payload_flags,
-	                          bool &need_flush);
+	Hash record_shader_module(const WorkItem &record_item);
+
+	struct
+	{
+		bool write_database_entries = true;
+		PayloadWriteFlags payload_flags = 0;
+		bool need_flush = false;
+		bool need_prepare = true;
+		vector<uint8_t> blob;
+	} record_data;
 };
 
 // reinterpret_cast does not work reliably on MSVC 2013 for Vulkan objects.
@@ -6632,11 +6636,7 @@ bool StateRecorder::Impl::get_subpass_meta_for_pipeline(const VkGraphicsPipeline
 	return true;
 }
 
-Hash StateRecorder::Impl::record_shader_module(const WorkItem &record_item,
-                                               bool write_database_entries,
-                                               vector<uint8_t> &blob,
-                                               PayloadWriteFlags payload_flags,
-                                               bool &need_flush)
+Hash StateRecorder::Impl::record_shader_module(const WorkItem &record_item)
 {
 	auto *create_info = reinterpret_cast<VkShaderModuleCreateInfo *>(record_item.create_info);
 	Hash hash = record_item.custom_hash;
@@ -6647,20 +6647,22 @@ Hash StateRecorder::Impl::record_shader_module(const WorkItem &record_item,
 	if (record_item.handle != 0)
 		shader_module_to_hash[api_object_cast<VkShaderModule>(record_item.handle)] = hash;
 
+	auto &blob = record_data.blob;
+
 	if (database_iface)
 	{
-		if (write_database_entries)
+		if (record_data.write_database_entries)
 		{
 			if (register_application_link_hash(RESOURCE_SHADER_MODULE, hash, blob))
-				need_flush = true;
+				record_data.need_flush = true;
 
 			if (!database_iface->has_entry(RESOURCE_SHADER_MODULE, hash))
 			{
 				if (serialize_shader_module(hash, *create_info, blob, allocator))
 				{
 					database_iface->write_entry(RESOURCE_SHADER_MODULE, hash, blob.data(), blob.size(),
-					                            payload_flags);
-					need_flush = true;
+												record_data.payload_flags);
+					record_data.need_flush = true;
 				}
 				allocator.reset();
 			}
@@ -6682,44 +6684,51 @@ Hash StateRecorder::Impl::record_shader_module(const WorkItem &record_item,
 
 void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 {
-	PayloadWriteFlags payload_flags = 0;
-	if (compression)
-		payload_flags |= PAYLOAD_WRITE_COMPRESS_BIT;
-	if (checksum)
-		payload_flags |= PAYLOAD_WRITE_COMPUTE_CHECKSUM_BIT;
+	auto &blob = record_data.blob;
 
-	bool write_database_entries = true;
-
-	// Start by preparing in the thread since we need to parse an archive potentially, and that might block a little bit.
-	if (need_prepare && database_iface)
+	if (record_data.need_prepare)
 	{
-		if (!database_iface->prepare())
+		record_data.payload_flags = 0;
+		if (compression)
+			record_data.payload_flags |= PAYLOAD_WRITE_COMPRESS_BIT;
+		if (checksum)
+			record_data.payload_flags |= PAYLOAD_WRITE_COMPUTE_CHECKSUM_BIT;
+
+		// Keep a single, pre-allocated buffer.
+		record_data.write_database_entries = true;
+		blob.reserve(64 * 1024);
+
+		// Start by preparing in the thread since we need to parse an archive potentially,
+		// and that might block a little bit.
+		if (database_iface)
 		{
-			LOGE_LEVEL("Failed to prepare database, will not dump data to database.\n");
-			database_iface = nullptr;
+			if (!database_iface->prepare())
+			{
+				LOGE_LEVEL("Failed to prepare database, will not dump data to database.\n");
+				database_iface = nullptr;
+			}
+
+			// Check here in the worker thread if we should write database entries for this application info.
+			if (application_info_filter)
+				record_data.write_database_entries = application_info_filter->test_application_info(application_info);
 		}
 
-		// Check here in the worker thread if we should write database entries for this application info.
-		if (application_info_filter)
-			write_database_entries = application_info_filter->test_application_info(application_info);
+		if (database_iface && record_data.write_database_entries)
+		{
+			Hasher h;
+			Hashing::hash_application_feature_info(h, application_feature_hash);
+			if (serialize_application_info(blob))
+			{
+				database_iface->write_entry(RESOURCE_APPLICATION_INFO, h.get(), blob.data(), blob.size(),
+											record_data.payload_flags);
+			}
+			else
+				LOGE_LEVEL("Failed to serialize application info.\n");
+		}
 	}
 
-	// Keep a single, pre-allocated buffer.
-	vector<uint8_t> blob;
-	blob.reserve(64 * 1024);
-
-	if (database_iface && write_database_entries && need_prepare)
-	{
-		Hasher h;
-		Hashing::hash_application_feature_info(h, application_feature_hash);
-		if (serialize_application_info(blob))
-			database_iface->write_entry(RESOURCE_APPLICATION_INFO, h.get(), blob.data(), blob.size(), payload_flags);
-		else
-			LOGE_LEVEL("Failed to serialize application info.\n");
-	}
-
-	need_prepare = false;
-	bool need_flush = false;
+	record_data.need_prepare = false;
+	record_data.need_flush = false;
 
 	for (;;)
 	{
@@ -6738,7 +6747,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 			// necessary. Do not flush after every single write, as that might bog down the file system.
 			// Once no new writes have occured for a second, we flush, and go to deep sleep.
 			bool has_data;
-			if (need_flush)
+			if (record_data.need_flush)
 			{
 				has_data = record_cv.wait_for(lock, std::chrono::seconds(1),
 				                              [&]()
@@ -6755,10 +6764,10 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 				has_data = true;
 			}
 
-			if (database_iface && !has_data && need_flush)
+			if (database_iface && !has_data && record_data.need_flush)
 			{
 				database_iface->flush();
-				need_flush = false;
+				record_data.need_flush = false;
 				continue;
 			}
 			else
@@ -6786,18 +6795,18 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 
 			if (database_iface)
 			{
-				if (write_database_entries)
+				if (record_data.write_database_entries)
 				{
 					if (register_application_link_hash(RESOURCE_SAMPLER, hash, blob))
-						need_flush = true;
+						record_data.need_flush = true;
 
 					if (!database_iface->has_entry(RESOURCE_SAMPLER, hash))
 					{
 						if (serialize_sampler(hash, *create_info, blob))
 						{
 							database_iface->write_entry(RESOURCE_SAMPLER, hash, blob.data(), blob.size(),
-							                            payload_flags);
-							need_flush = true;
+														record_data.payload_flags);
+							record_data.need_flush = true;
 						}
 					}
 				}
@@ -6846,10 +6855,10 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 
 			if (database_iface)
 			{
-				if (write_database_entries)
+				if (record_data.write_database_entries)
 				{
 					if (register_application_link_hash(RESOURCE_RENDER_PASS, hash, blob))
-						need_flush = true;
+						record_data.need_flush = true;
 
 					if (!database_iface->has_entry(RESOURCE_RENDER_PASS, hash))
 					{
@@ -6857,8 +6866,8 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 						    (create_info2 && serialize_render_pass2(hash, *create_info2, blob)))
 						{
 							database_iface->write_entry(RESOURCE_RENDER_PASS, hash, blob.data(), blob.size(),
-							                            payload_flags);
-							need_flush = true;
+														record_data.payload_flags);
+							record_data.need_flush = true;
 						}
 					}
 				}
@@ -6887,7 +6896,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 
 		case VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO:
 		{
-			record_shader_module(record_item, write_database_entries, blob, payload_flags, need_flush);
+			record_shader_module(record_item);
 			break;
 		}
 
@@ -6909,18 +6918,18 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 
 			if (database_iface)
 			{
-				if (write_database_entries)
+				if (record_data.write_database_entries)
 				{
 					if (register_application_link_hash(RESOURCE_DESCRIPTOR_SET_LAYOUT, hash, blob))
-						need_flush = true;
+						record_data.need_flush = true;
 
 					if (!database_iface->has_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, hash))
 					{
 						if (serialize_descriptor_set_layout(hash, *create_info_copy, blob))
 						{
 							database_iface->write_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, hash, blob.data(), blob.size(),
-							                            payload_flags);
-							need_flush = true;
+														record_data.payload_flags);
+							record_data.need_flush = true;
 						}
 					}
 				}
@@ -6956,18 +6965,18 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 
 			if (database_iface)
 			{
-				if (write_database_entries)
+				if (record_data.write_database_entries)
 				{
 					if (register_application_link_hash(RESOURCE_PIPELINE_LAYOUT, hash, blob))
-						need_flush = true;
+						record_data.need_flush = true;
 
 					if (!database_iface->has_entry(RESOURCE_PIPELINE_LAYOUT, hash))
 					{
 						if (serialize_pipeline_layout(hash, *create_info_copy, blob))
 						{
 							database_iface->write_entry(RESOURCE_PIPELINE_LAYOUT, hash, blob.data(), blob.size(),
-							                            payload_flags);
-							need_flush = true;
+														record_data.payload_flags);
+							record_data.need_flush = true;
 						}
 					}
 				}
@@ -7002,18 +7011,18 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 
 			if (database_iface)
 			{
-				if (write_database_entries)
+				if (record_data.write_database_entries)
 				{
 					if (register_application_link_hash(RESOURCE_RAYTRACING_PIPELINE, hash, blob))
-						need_flush = true;
+						record_data.need_flush = true;
 
 					if (!database_iface->has_entry(RESOURCE_RAYTRACING_PIPELINE, hash))
 					{
 						if (serialize_raytracing_pipeline(hash, *create_info_copy, blob))
 						{
 							database_iface->write_entry(RESOURCE_RAYTRACING_PIPELINE, hash, blob.data(), blob.size(),
-							                            payload_flags);
-							need_flush = true;
+														record_data.payload_flags);
+							record_data.need_flush = true;
 						}
 					}
 				}
@@ -7049,18 +7058,18 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 
 			if (database_iface)
 			{
-				if (write_database_entries)
+				if (record_data.write_database_entries)
 				{
 					if (register_application_link_hash(RESOURCE_GRAPHICS_PIPELINE, hash, blob))
-						need_flush = true;
+						record_data.need_flush = true;
 
 					if (!database_iface->has_entry(RESOURCE_GRAPHICS_PIPELINE, hash))
 					{
 						if (serialize_graphics_pipeline(hash, *create_info_copy, blob))
 						{
 							database_iface->write_entry(RESOURCE_GRAPHICS_PIPELINE, hash, blob.data(), blob.size(),
-							                            payload_flags);
-							need_flush = true;
+														record_data.payload_flags);
+							record_data.need_flush = true;
 						}
 					}
 				}
@@ -7095,18 +7104,18 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 
 			if (database_iface)
 			{
-				if (write_database_entries)
+				if (record_data.write_database_entries)
 				{
 					if (register_application_link_hash(RESOURCE_COMPUTE_PIPELINE, hash, blob))
-						need_flush = true;
+						record_data.need_flush = true;
 
 					if (!database_iface->has_entry(RESOURCE_COMPUTE_PIPELINE, hash))
 					{
 						if (serialize_compute_pipeline(hash, *create_info_copy, blob))
 						{
 							database_iface->write_entry(RESOURCE_COMPUTE_PIPELINE, hash, blob.data(), blob.size(),
-							                            payload_flags);
-							need_flush = true;
+														record_data.payload_flags);
+							record_data.need_flush = true;
 						}
 					}
 				}
@@ -9207,7 +9216,7 @@ void StateRecorder::free_serialized(uint8_t *serialized)
 void StateRecorder::init_recording_thread(DatabaseInterface *iface)
 {
 	impl->database_iface = iface;
-	impl->need_prepare = true;
+	impl->record_data = {};
 
 	auto level = get_thread_log_level();
 	auto cb = Internal::get_thread_log_callback();
@@ -9222,7 +9231,7 @@ void StateRecorder::init_recording_thread(DatabaseInterface *iface)
 void StateRecorder::init_recording_synchronized(DatabaseInterface *iface)
 {
 	impl->database_iface = iface;
-	impl->need_prepare = true;
+	impl->record_data = {};
 }
 
 void StateRecorder::tear_down_recording_thread()
