@@ -6475,8 +6475,10 @@ bool StateRecorder::Impl::remap_shader_module_handles(CreateInfo *info)
 		else if (const auto *module = find_pnext<VkShaderModuleCreateInfo>(
 				VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, stage.pNext))
 		{
-			// TODO
-			return false;
+			WorkItem record_item = {};
+			record_item.create_info = const_cast<VkShaderModuleCreateInfo *>(module);
+			Hash h = record_shader_module(record_item);
+			stage.module = api_object_cast<VkShaderModule>(h);
 		}
 		else
 			return false;
@@ -6512,8 +6514,10 @@ bool StateRecorder::Impl::remap_compute_pipeline_ci(VkComputePipelineCreateInfo 
 	else if (const auto *module = find_pnext<VkShaderModuleCreateInfo>(
 			VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, info->stage.pNext))
 	{
-		// TODO
-		return false;
+		WorkItem record_item = {};
+		record_item.create_info = const_cast<VkShaderModuleCreateInfo *>(module);
+		Hash h = record_shader_module(record_item);
+		info->stage.module = api_object_cast<VkShaderModule>(h);
 	}
 	else
 		return false;
