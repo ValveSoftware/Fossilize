@@ -2853,6 +2853,49 @@ static bool test_logging()
 	return true;
 }
 
+static bool test_pnext_shader_module_hashing()
+{
+	StateRecorder recorder;
+
+	static const uint32_t code[] = { 1, 2, 3 };
+	VkShaderModuleCreateInfo module = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+	module.pCode = code;
+	module.codeSize = sizeof(code);
+
+	if (!recorder.record_shader_module(fake_handle<VkShaderModule>(1), module))
+		return false;
+
+	VkComputePipelineCreateInfo pso = { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
+	VkGraphicsPipelineCreateInfo gpso = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+	pso.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	pso.stage.module = fake_handle<VkShaderModule>(1);
+	pso.stage.pName = "main";
+	gpso.stageCount = 1;
+	gpso.pStages = &pso.stage;
+
+	Hash hash_graphics0 = 0, hash_graphics1 = 0;
+	Hash hash_compute0 = 0, hash_compute1 = 0;
+	if (!Hashing::compute_hash_compute_pipeline(recorder, pso, &hash_compute0))
+		return false;
+	if (!Hashing::compute_hash_graphics_pipeline(recorder, gpso, &hash_graphics0))
+		return false;
+
+	pso.stage.pNext = &module;
+	pso.stage.module = VK_NULL_HANDLE;
+
+	if (!Hashing::compute_hash_compute_pipeline(recorder, pso, &hash_compute1))
+		return false;
+	if (!Hashing::compute_hash_graphics_pipeline(recorder, gpso, &hash_graphics1))
+		return false;
+
+	if (hash_compute0 != hash_compute1)
+		return false;
+	if (hash_graphics0 != hash_graphics1)
+		return false;
+
+	return true;
+}
+
 static bool test_pdf_recording(const void *device_pnext, Hash &hash)
 {
 	hash = 0;
@@ -2985,6 +3028,8 @@ int main()
 	if (!test_export_concurrent_archive(true))
 		return EXIT_FAILURE;
 	if (!test_logging())
+		return EXIT_FAILURE;
+	if (!test_pnext_shader_module_hashing())
 		return EXIT_FAILURE;
 
 	if (!test_pdf_recording())

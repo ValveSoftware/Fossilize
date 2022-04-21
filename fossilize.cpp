@@ -58,7 +58,7 @@ using namespace std;
 namespace Fossilize
 {
 static const void *pnext_chain_skip_ignored_entries(const void *pNext);
-
+static bool pnext_chain_stype_is_hash_invariant(VkStructureType sType);
 static const void *pnext_chain_pdf2_skip_ignored_entries(const void *pNext);
 
 template <typename T>
@@ -1082,6 +1082,13 @@ static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const voi
 	while ((pNext = pnext_chain_skip_ignored_entries(pNext)) != nullptr)
 	{
 		auto *pin = static_cast<const VkBaseInStructure *>(pNext);
+
+		if (pnext_chain_stype_is_hash_invariant(pin->sType))
+		{
+			pNext = pin->pNext;
+			continue;
+		}
+
 		h.s32(pin->sType);
 
 		switch (pin->sType)
@@ -1210,7 +1217,18 @@ static bool compute_hash_stage(const StateRecorder &recorder, Hasher &h, const V
 	h.u32(stage.stage);
 
 	Hash hash;
-	if (!recorder.get_hash_for_shader_module(stage.module, &hash))
+	if (stage.module != VK_NULL_HANDLE)
+	{
+		if (!recorder.get_hash_for_shader_module(stage.module, &hash))
+			return false;
+	}
+	else if (const auto *module = find_pnext<VkShaderModuleCreateInfo>(
+			VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, stage.pNext))
+	{
+		if (!compute_hash_shader_module(*module, &hash))
+			return false;
+	}
+	else
 		return false;
 	h.u64(hash);
 
@@ -1758,8 +1776,20 @@ bool compute_hash_compute_pipeline(const StateRecorder &recorder, const VkComput
 
 	// Unfortunately, the hash order is incompatible with compute_hash_stage().
 	// For compatibility, cannot change this without a clean break.
-	if (!recorder.get_hash_for_shader_module(create_info.stage.module, &hash))
+	if (create_info.stage.module != VK_NULL_HANDLE)
+	{
+		if (!recorder.get_hash_for_shader_module(create_info.stage.module, &hash))
+			return false;
+	}
+	else if (const auto *module = find_pnext<VkShaderModuleCreateInfo>(
+			VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, create_info.stage.pNext))
+	{
+		if (!compute_hash_shader_module(*module, &hash))
+			return false;
+	}
+	else
 		return false;
+
 	h.u64(hash);
 
 	h.string(create_info.stage.pName);
@@ -9170,6 +9200,22 @@ StateRecorder::StateRecorder()
 StateRecorder::~StateRecorder()
 {
 	delete impl;
+}
+
+static bool pnext_chain_stype_is_hash_invariant(VkStructureType sType)
+{
+	switch (sType)
+	{
+	case VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO:
+		// This is purely used for copying purposes.
+		// For hashing purposes, this must be ignored.
+		return true;
+
+	default:
+		break;
+	}
+
+	return false;
 }
 
 static const void *pnext_chain_skip_ignored_entries(const void *pNext)
