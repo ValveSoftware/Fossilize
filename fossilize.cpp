@@ -7702,7 +7702,9 @@ static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *o
 	while ((pNext = pnext_chain_skip_ignored_entries(pNext)) != nullptr)
 	{
 		auto *pin = static_cast<const VkBaseInStructure *>(pNext);
+		bool ignored = false;
 		Value next;
+
 		switch (pin->sType)
 		{
 		case VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_DOMAIN_ORIGIN_STATE_CREATE_INFO:
@@ -7835,12 +7837,18 @@ static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *o
 				return false;
 			break;
 
+		case VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO:
+			// Ignored.
+			ignored = true;
+			break;
+
 		default:
 			log_error_pnext_chain("Unsupported pNext found, cannot hash sType.", pNext);
 			return false;
 		}
 
-		nexts.PushBack(next, alloc);
+		if (!ignored)
+			nexts.PushBack(next, alloc);
 		pNext = pin->pNext;
 	}
 
