@@ -603,6 +603,32 @@ static void record_render_passes(StateRecorder &recorder)
 		abort();
 }
 
+static void record_pipelines_pnext_shader(StateRecorder &recorder)
+{
+	VkShaderModuleCreateInfo module = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+	static const uint32_t data[] = { 1, 2, 3 };
+	module.codeSize = sizeof(data);
+	module.pCode = data;
+
+	VkShaderModuleValidationCacheCreateInfoEXT validate_info = { VK_STRUCTURE_TYPE_SHADER_MODULE_VALIDATION_CACHE_CREATE_INFO_EXT };
+	module.pNext = &validate_info;
+
+	VkComputePipelineCreateInfo pipe = { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
+	VkGraphicsPipelineCreateInfo gpipe = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+	pipe.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	pipe.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	pipe.stage.module = VK_NULL_HANDLE;
+	pipe.stage.pName = "foobar";
+	pipe.stage.pNext = &module;
+	gpipe.stageCount = 1;
+	gpipe.pStages = &pipe.stage;
+
+	if (!recorder.record_compute_pipeline(fake_handle<VkPipeline>(1987), pipe, nullptr, 0))
+		abort();
+	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(1988), gpipe, nullptr, 0))
+		abort();
+}
+
 static void record_compute_pipelines(StateRecorder &recorder)
 {
 	VkComputePipelineCreateInfo pipe = { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
@@ -2893,6 +2919,19 @@ static bool test_pnext_shader_module_hashing()
 	if (hash_graphics0 != hash_graphics1)
 		return false;
 
+	VkShaderModuleValidationCacheCreateInfoEXT validation_info = { VK_STRUCTURE_TYPE_SHADER_MODULE_VALIDATION_CACHE_CREATE_INFO_EXT };
+	module.pNext = &validation_info;
+	Hash hash_compute2 = 0, hash_graphics2 = 0;
+	if (!Hashing::compute_hash_compute_pipeline(recorder, pso, &hash_compute2))
+		return false;
+	if (!Hashing::compute_hash_graphics_pipeline(recorder, gpso, &hash_graphics2))
+		return false;
+
+	if (hash_compute1 != hash_compute2)
+		return false;
+	if (hash_graphics1 != hash_graphics2)
+		return false;
+
 	return true;
 }
 
@@ -3060,6 +3099,7 @@ int main()
 		record_render_passes2(recorder);
 		record_compute_pipelines(recorder);
 		record_graphics_pipelines(recorder);
+		record_pipelines_pnext_shader(recorder);
 		record_raytracing_pipelines(recorder);
 		record_graphics_pipelines_robustness(recorder);
 
