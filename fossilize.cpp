@@ -9228,6 +9228,7 @@ static const void *pnext_chain_skip_ignored_entries(const void *pNext)
 		switch (base->sType)
 		{
 		case VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO_EXT:
+		case VK_STRUCTURE_TYPE_SHADER_MODULE_VALIDATION_CACHE_CREATE_INFO_EXT:
 			// We need to ignore any pNext struct which represents output information from a pipeline object.
 			ignored = true;
 			break;
