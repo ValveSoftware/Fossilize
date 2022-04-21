@@ -476,6 +476,12 @@ struct StateRecorder::Impl
 	                       const DynamicStateInfo *dynamic_state_info) FOSSILIZE_WARN_UNUSED;
 
 	bool copy_pnext_chain_pdf2(const void *pNext, ScratchAllocator &alloc, void **out_pnext) FOSSILIZE_WARN_UNUSED;
+
+	Hash record_shader_module(const WorkItem &record_item,
+	                          bool write_database_entries,
+	                          vector<uint8_t> &blob,
+	                          PayloadWriteFlags payload_flags,
+	                          bool &need_flush);
 };
 
 // reinterpret_cast does not work reliably on MSVC 2013 for Vulkan objects.
@@ -6603,6 +6609,54 @@ bool StateRecorder::Impl::get_subpass_meta_for_pipeline(const VkGraphicsPipeline
 	return true;
 }
 
+Hash StateRecorder::Impl::record_shader_module(const WorkItem &record_item,
+                                               bool write_database_entries,
+                                               vector<uint8_t> &blob,
+                                               PayloadWriteFlags payload_flags,
+                                               bool &need_flush)
+{
+	auto *create_info = reinterpret_cast<VkShaderModuleCreateInfo *>(record_item.create_info);
+	Hash hash = record_item.custom_hash;
+	if (hash == 0)
+		if (!Hashing::compute_hash_shader_module(*create_info, &hash))
+			return hash;
+
+	if (record_item.handle != 0)
+		shader_module_to_hash[api_object_cast<VkShaderModule>(record_item.handle)] = hash;
+
+	if (database_iface)
+	{
+		if (write_database_entries)
+		{
+			if (register_application_link_hash(RESOURCE_SHADER_MODULE, hash, blob))
+				need_flush = true;
+
+			if (!database_iface->has_entry(RESOURCE_SHADER_MODULE, hash))
+			{
+				if (serialize_shader_module(hash, *create_info, blob, allocator))
+				{
+					database_iface->write_entry(RESOURCE_SHADER_MODULE, hash, blob.data(), blob.size(),
+					                            payload_flags);
+					need_flush = true;
+				}
+				allocator.reset();
+			}
+		}
+	}
+	else
+	{
+		// Retain for combined serialize() later.
+		if (!shader_modules.count(hash))
+		{
+			VkShaderModuleCreateInfo *create_info_copy = nullptr;
+			if (copy_shader_module(create_info, allocator, false, &create_info_copy))
+				shader_modules[hash] = create_info_copy;
+		}
+	}
+
+	return hash;
+}
+
 void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 {
 	PayloadWriteFlags payload_flags = 0;
@@ -6810,43 +6864,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 
 		case VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO:
 		{
-			auto *create_info = reinterpret_cast<VkShaderModuleCreateInfo *>(record_item.create_info);
-			auto hash = record_item.custom_hash;
-			if (hash == 0)
-				if (!Hashing::compute_hash_shader_module(*create_info, &hash))
-					break;
-
-			shader_module_to_hash[api_object_cast<VkShaderModule>(record_item.handle)] = hash;
-
-			if (database_iface)
-			{
-				if (write_database_entries)
-				{
-					if (register_application_link_hash(RESOURCE_SHADER_MODULE, hash, blob))
-						need_flush = true;
-
-					if (!database_iface->has_entry(RESOURCE_SHADER_MODULE, hash))
-					{
-						if (serialize_shader_module(hash, *create_info, blob, allocator))
-						{
-							database_iface->write_entry(RESOURCE_SHADER_MODULE, hash, blob.data(), blob.size(),
-							                            payload_flags);
-							need_flush = true;
-						}
-						allocator.reset();
-					}
-				}
-			}
-			else
-			{
-				// Retain for combined serialize() later.
-				if (!shader_modules.count(hash))
-				{
-					VkShaderModuleCreateInfo *create_info_copy = nullptr;
-					if (copy_shader_module(create_info, allocator, false, &create_info_copy))
-						shader_modules[hash] = create_info_copy;
-				}
-			}
+			record_shader_module(record_item, write_database_entries, blob, payload_flags, need_flush);
 			break;
 		}
 
