@@ -1487,6 +1487,39 @@ static void record_graphics_pipeline_libraries(StateRecorder &recorder)
 		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(2006), gpipe, nullptr, 0))
 			abort();
 	}
+
+	gpipe = pipe;
+	{
+		gpipe.flags = VK_PIPELINE_CREATE_LINK_TIME_OPTIMIZATION_BIT_EXT;
+		VkPipelineLibraryCreateInfoKHR libs = { VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR };
+		VkPipeline libraries[4] = {
+			fake_handle<VkPipeline>(1999),
+			fake_handle<VkPipeline>(2000),
+			fake_handle<VkPipeline>(2001),
+			fake_handle<VkPipeline>(2002),
+		};
+		libs.libraryCount = 3;
+		libs.pLibraries = libraries;
+		gpipe.pNext = &libs;
+
+		Hash hash[3];
+		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &hash[0]))
+			abort();
+		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(3000), gpipe, nullptr, 0))
+			abort();
+		libs.libraryCount = 4;
+		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &hash[1]))
+			abort();
+		if (hash[0] == hash[1])
+			abort();
+		libraries[3] = fake_handle<VkPipeline>(2003);
+		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &hash[2]))
+			abort();
+		if (hash[2] == hash[1])
+			abort();
+		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(3001), gpipe, nullptr, 0))
+			abort();
+	}
 }
 
 static void record_graphics_pipelines(StateRecorder &recorder)
