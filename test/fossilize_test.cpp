@@ -1201,6 +1201,49 @@ static void record_graphics_pipelines_robustness(StateRecorder &recorder)
 	}
 }
 
+static void record_graphics_pipeline_libraries(StateRecorder &recorder)
+{
+	VkGraphicsPipelineCreateInfo pipe = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+	pipe.layout = fake_handle<VkPipelineLayout>(10002);
+	pipe.subpass = 1;
+	pipe.renderPass = fake_handle<VkRenderPass>(30001);
+	pipe.stageCount = 2;
+	pipe.flags = VK_PIPELINE_CREATE_LIBRARY_BIT_KHR;
+
+	// First, test hash invariance. Based on which pipeline state we're creating, we have to ignore some state.
+	VkGraphicsPipelineLibraryCreateInfoEXT library_info = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT };
+	library_info.flags = VK_GRAPHICS_PIPELINE_LIBRARY_VERTEX_INPUT_INTERFACE_BIT_EXT;
+	pipe.pNext = &library_info;
+
+	auto gpipe = pipe;
+
+	Hash baseline_hash = 0;
+	if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &baseline_hash))
+		abort();
+	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(1999), gpipe, nullptr, 0))
+		abort();
+
+	set_invalid_pointer(gpipe.pColorBlendState);
+	set_invalid_pointer(gpipe.pMultisampleState);
+	set_invalid_pointer(gpipe.pDepthStencilState);
+	gpipe.subpass = 1932414;
+	set_invalid_pointer(gpipe.pViewportState);
+	set_invalid_pointer(gpipe.pRasterizationState);
+	set_invalid_pointer(gpipe.pTessellationState);
+	set_invalid_pointer(gpipe.pStages);
+	gpipe.stageCount = 3243;
+	gpipe.renderPass = fake_handle<VkRenderPass>(234234234);
+	gpipe.layout = fake_handle<VkPipelineLayout>(234234235);
+
+	Hash hash0 = 0;
+	if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &hash0))
+		abort();
+	if (hash0 != baseline_hash)
+		abort();
+	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(1999), gpipe, nullptr, 0))
+		abort();
+}
+
 static void record_graphics_pipelines(StateRecorder &recorder)
 {
 	VkSpecializationInfo spec = {};
@@ -3099,6 +3142,7 @@ int main()
 		record_render_passes2(recorder);
 		record_compute_pipelines(recorder);
 		record_graphics_pipelines(recorder);
+		record_graphics_pipeline_libraries(recorder);
 		record_pipelines_pnext_shader(recorder);
 		record_raytracing_pipelines(recorder);
 		record_graphics_pipelines_robustness(recorder);
