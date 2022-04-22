@@ -100,6 +100,8 @@ struct GlobalStateInfo
 	bool vertex_input;
 	bool rasterization_state;
 	bool render_pass_state;
+	bool layout_state;
+	bool module_state;
 };
 
 struct DynamicStateInfo
@@ -1262,6 +1264,8 @@ static GlobalStateInfo parse_global_state_info(const VkGraphicsPipelineCreateInf
 
 	info.rasterization_state = create_info.pRasterizationState != nullptr;
 	info.render_pass_state = true;
+	info.module_state = true;
+	info.layout_state = true;
 
 	VkGraphicsPipelineLibraryFlagsEXT state_flags =
 			VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_OUTPUT_INTERFACE_BIT_EXT |
@@ -1277,8 +1281,11 @@ static GlobalStateInfo parse_global_state_info(const VkGraphicsPipelineCreateInf
 	if ((create_info.flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0 && graphics_pipeline_library)
 		state_flags = graphics_pipeline_library->flags;
 
+	info.rasterization_state = create_info.pRasterizationState &&
+	                           (state_flags & VK_GRAPHICS_PIPELINE_LIBRARY_PRE_RASTERIZATION_SHADERS_BIT_EXT) != 0;
+
 	bool rasterizer_discard = !dynamic_info.rasterizer_discard_enable &&
-	                          create_info.pRasterizationState &&
+	                          info.rasterization_state &&
 	                          create_info.pRasterizationState->rasterizerDiscardEnable == VK_TRUE;
 
 	if (!rasterizer_discard)
@@ -1292,23 +1299,30 @@ static GlobalStateInfo parse_global_state_info(const VkGraphicsPipelineCreateInf
 	info.input_assembly = create_info.pInputAssemblyState != nullptr;
 	info.vertex_input = create_info.pVertexInputState != nullptr && !dynamic_info.vertex_input;
 
-	for (uint32_t i = 0; i < create_info.stageCount; i++)
+	info.module_state = (state_flags & (VK_GRAPHICS_PIPELINE_LIBRARY_PRE_RASTERIZATION_SHADERS_BIT_EXT |
+	                                    VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT)) != 0;
+	info.layout_state = info.module_state;
+
+	if (info.module_state)
 	{
-		switch (create_info.pStages[i].stage)
+		for (uint32_t i = 0; i < create_info.stageCount; i++)
 		{
-		case VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT:
-		case VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT:
-			info.tessellation_state = create_info.pTessellationState != nullptr;
-			break;
+			switch (create_info.pStages[i].stage)
+			{
+			case VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT:
+			case VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT:
+				info.tessellation_state = create_info.pTessellationState != nullptr;
+				break;
 
-		case VK_SHADER_STAGE_MESH_BIT_NV:
-		case VK_SHADER_STAGE_TASK_BIT_NV:
-			info.input_assembly = false;
-			info.vertex_input = false;
-			break;
+			case VK_SHADER_STAGE_MESH_BIT_NV:
+			case VK_SHADER_STAGE_TASK_BIT_NV:
+				info.input_assembly = false;
+				info.vertex_input = false;
+				break;
 
-		default:
-			break;
+			default:
+				break;
+			}
 		}
 	}
 
@@ -1475,14 +1489,20 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 	DynamicStateInfo dynamic_info = {};
 	if (create_info.pDynamicState)
 		dynamic_info = parse_dynamic_state_info(*create_info.pDynamicState);
+	GlobalStateInfo global_info = parse_global_state_info(create_info, dynamic_info, { true, true });
 
-	if (!recorder.get_hash_for_pipeline_layout(create_info.layout, &hash))
-		return false;
+	if (global_info.layout_state)
+	{
+		if (!recorder.get_hash_for_pipeline_layout(create_info.layout, &hash))
+			return false;
+	}
+	else
+		hash = 0;
+
 	h.u64(hash);
 
 	// Need to query state info in two stages. Do we ignore render pass? If so, query a 0 hash.
 	// If we don't ignore render pass, we can query for subpass meta.
-	GlobalStateInfo global_info = parse_global_state_info(create_info, dynamic_info, { true, true });
 	hash = 0;
 	if (global_info.render_pass_state && !recorder.get_hash_for_render_pass(create_info.renderPass, &hash))
 		return false;
@@ -1495,7 +1515,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 	global_info = parse_global_state_info(create_info, dynamic_info, meta);
 
 	h.u32(global_info.render_pass_state ? create_info.subpass : 0u);
-	h.u32(create_info.stageCount);
+	h.u32(global_info.module_state ? create_info.stageCount : 0u);
 
 	if (create_info.pDynamicState)
 	{
@@ -1749,11 +1769,14 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 	else
 		h.u32(0);
 
-	for (uint32_t i = 0; i < create_info.stageCount; i++)
+	if (global_info.module_state)
 	{
-		auto &stage = create_info.pStages[i];
-		if (!compute_hash_stage(recorder, h, stage))
-			return false;
+		for (uint32_t i = 0; i < create_info.stageCount; i++)
+		{
+			auto &stage = create_info.pStages[i];
+			if (!compute_hash_stage(recorder, h, stage))
+				return false;
+		}
 	}
 
 	if (!hash_pnext_chain(&recorder, h, create_info.pNext, &dynamic_info))
@@ -6137,6 +6160,9 @@ bool StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateI
 		info->subpass = 0;
 	}
 
+	if (!global_info.layout_state)
+		info->layout = VK_NULL_HANDLE;
+
 	info->flags = normalize_pipeline_creation_flags(info->flags);
 
 	if (!update_derived_pipeline(info, base_pipelines, base_pipeline_count))
@@ -6158,8 +6184,18 @@ bool StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateI
 		return false;
 	if (!copy_sub_create_info(info->pRasterizationState, alloc, &dynamic_info))
 		return false;
-	if (!copy_stages(info, alloc, &dynamic_info))
-		return false;
+
+	if (global_info.module_state)
+	{
+		if (!copy_stages(info, alloc, &dynamic_info))
+			return false;
+	}
+	else
+	{
+		info->stageCount = 0;
+		info->pStages = nullptr;
+	}
+
 	if (!copy_dynamic_state(info, alloc, &dynamic_info))
 		return false;
 
@@ -8630,10 +8666,13 @@ static bool json_value(const VkGraphicsPipelineCreateInfo &pipe,
 		p.AddMember("depthStencilState", ds, alloc);
 	}
 
-	Value stages;
-	if (!json_value(pipe.pStages, pipe.stageCount, alloc, &stages))
-		return false;
-	p.AddMember("stages", stages, alloc);
+	if (global_info.module_state)
+	{
+		Value stages;
+		if (!json_value(pipe.pStages, pipe.stageCount, alloc, &stages))
+			return false;
+		p.AddMember("stages", stages, alloc);
+	}
 
 	if (!pnext_chain_add_json_value(p, pipe, alloc, &dynamic_info))
 		return false;
