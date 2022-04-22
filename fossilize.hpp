@@ -243,6 +243,8 @@ public:
 	bool get_hash_for_graphics_pipeline_handle(VkPipeline pipeline, Hash *hash) const FOSSILIZE_WARN_UNUSED;
 	bool get_hash_for_compute_pipeline_handle(VkPipeline pipeline, Hash *hash) const FOSSILIZE_WARN_UNUSED;
 	bool get_hash_for_raytracing_pipeline_handle(VkPipeline pipeline, Hash *hash) const FOSSILIZE_WARN_UNUSED;
+	// Ray-tracing or graphics pipeline.
+	bool get_hash_for_pipeline_library_handle(VkPipeline pipeline, Hash *hash) const FOSSILIZE_WARN_UNUSED;
 	bool get_hash_for_render_pass(VkRenderPass render_pass, Hash *hash) const FOSSILIZE_WARN_UNUSED;
 	bool get_hash_for_sampler(VkSampler sampler, Hash *hash) const FOSSILIZE_WARN_UNUSED;
 

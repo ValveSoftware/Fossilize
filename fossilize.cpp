@@ -197,7 +197,10 @@ struct StateReplayer::Impl
 	bool parse_map_entries(const Value &map_entries, const VkSpecializationMapEntry **out_entries) FOSSILIZE_WARN_UNUSED;
 	bool parse_viewports(const Value &viewports, const VkViewport **out_viewports) FOSSILIZE_WARN_UNUSED;
 	bool parse_scissors(const Value &scissors, const VkRect2D **out_rects) FOSSILIZE_WARN_UNUSED;
-	bool parse_pnext_chain(const Value &pnext, const void **out_pnext) FOSSILIZE_WARN_UNUSED;
+	bool parse_pnext_chain(const Value &pnext, const void **out_pnext,
+	                       StateCreatorInterface *iface = nullptr,
+	                       DatabaseInterface *resolver = nullptr,
+	                       const Value *pipelines = nullptr) FOSSILIZE_WARN_UNUSED;
 	bool parse_vertex_input_state(const Value &state, const VkPipelineVertexInputStateCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_color_blend_state(const Value &state, const VkPipelineColorBlendStateCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_depth_stencil_state(const Value &state, const VkPipelineDepthStencilStateCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
@@ -251,6 +254,11 @@ struct StateReplayer::Impl
 	bool parse_sampler_ycbcr_conversion(const Value &state,
 	                                    VkSamplerYcbcrConversionCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_graphics_pipeline_library(const Value &state, VkGraphicsPipelineLibraryCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_pipeline_library(
+			StateCreatorInterface &iface, DatabaseInterface *resolver,
+			const Value &pipelines,
+			const Value &state, ResourceTag tag,
+			VkPipelineLibraryCreateInfoKHR **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_uints(const Value &attachments, const uint32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	bool parse_sints(const Value &attachments, const int32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	const char *duplicate_string(const char *str, size_t len);
@@ -413,6 +421,8 @@ struct StateRecorder::Impl
 	void *copy_pnext_struct(const VkSamplerYcbcrConversionCreateInfo *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkGraphicsPipelineLibraryCreateInfoEXT *create_info,
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkPipelineLibraryCreateInfoKHR *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 
 	bool remap_sampler_handle(VkSampler sampler, VkSampler *out_sampler) const FOSSILIZE_WARN_UNUSED;
@@ -1089,6 +1099,23 @@ static void hash_pnext_struct(const StateRecorder *,
 	h.u32(info.flags);
 }
 
+static bool hash_pnext_struct(const StateRecorder *recorder,
+                              Hasher &h,
+                              const VkPipelineLibraryCreateInfoKHR &info)
+{
+	Hash hash = 0;
+	h.u32(info.libraryCount);
+
+	for (uint32_t i = 0; i < info.libraryCount; i++)
+	{
+		if (!recorder->get_hash_for_pipeline_library_handle(info.pLibraries[i], &hash))
+			return false;
+		h.u64(hash);
+	}
+
+	return true;
+}
+
 static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const void *pNext,
                              const DynamicStateInfo *dynamic_state_info)
 {
@@ -1210,6 +1237,11 @@ static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const voi
 
 		case VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT:
 			hash_pnext_struct(recorder, h, *static_cast<const VkGraphicsPipelineLibraryCreateInfoEXT *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR:
+			if (!hash_pnext_struct(recorder, h, *static_cast<const VkPipelineLibraryCreateInfoKHR *>(pNext)))
+				return false;
 			break;
 
 		default:
@@ -1915,13 +1947,8 @@ bool compute_hash_raytracing_pipeline(const StateRecorder &recorder,
 
 	if (create_info.pLibraryInfo)
 	{
-		h.u32(create_info.pLibraryInfo->libraryCount);
-		for (uint32_t i = 0; i < create_info.pLibraryInfo->libraryCount; i++)
-		{
-			if (!recorder.get_hash_for_raytracing_pipeline_handle(create_info.pLibraryInfo->pLibraries[i], &hash))
-				return false;
-			h.u64(hash);
-		}
+		if (!hash_pnext_struct(&recorder, h, *create_info.pLibraryInfo))
+			return false;
 		if (!hash_pnext_chain(&recorder, h, create_info.pLibraryInfo->pNext, nullptr))
 			return false;
 	}
@@ -3609,25 +3636,10 @@ bool StateReplayer::Impl::parse_raytracing_pipeline(StateCreatorInterface &iface
 	if (obj.HasMember("libraryInfo"))
 	{
 		auto &lib_info = obj["libraryInfo"];
-		auto &library_list = lib_info["libraries"];
-		auto *library_info = allocator.allocate_cleared<VkPipelineLibraryCreateInfoKHR>();
-		auto *libraries = allocator.allocate_n<VkPipeline>(library_list.Size());
-
-		library_info->sType = VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR;
-		library_info->libraryCount = library_list.Size();
-		library_info->pLibraries = libraries;
+		VkPipelineLibraryCreateInfoKHR *library_info = nullptr;
+		if (!parse_pipeline_library(iface, resolver, pipelines, lib_info, RESOURCE_RAYTRACING_PIPELINE, &library_info))
+			return false;
 		info.pLibraryInfo = library_info;
-
-		for (auto itr = library_list.Begin(); itr != library_list.End(); ++itr, libraries++)
-		{
-			if (!parse_derived_pipeline_handle(iface, resolver, *itr, pipelines,
-			                                   RESOURCE_RAYTRACING_PIPELINE, libraries))
-				return false;
-		}
-
-		if (lib_info.HasMember("pNext"))
-			if (!parse_pnext_chain(lib_info["pNext"], &library_info->pNext))
-				return false;
 	}
 
 	if (obj.HasMember("dynamicState"))
@@ -3738,7 +3750,7 @@ bool StateReplayer::Impl::parse_graphics_pipeline(StateCreatorInterface &iface, 
 			return false;
 
 	if (obj.HasMember("pNext"))
-		if (!parse_pnext_chain(obj["pNext"], &info.pNext))
+		if (!parse_pnext_chain(obj["pNext"], &info.pNext, &iface, resolver, &pipelines))
 			return false;
 
 	if (!iface.enqueue_create_graphics_pipeline(hash, &info, &replayed_graphics_pipelines[hash]))
@@ -4085,6 +4097,32 @@ bool StateReplayer::Impl::parse_graphics_pipeline_library(const Value &state,
 	return true;
 }
 
+bool StateReplayer::Impl::parse_pipeline_library(
+		StateCreatorInterface &iface, DatabaseInterface *resolver,
+		const Value &pipelines,
+		const Value &lib_info, ResourceTag tag,
+		VkPipelineLibraryCreateInfoKHR **out_info)
+{
+	auto &library_list = lib_info["libraries"];
+	auto *library_info = allocator.allocate_cleared<VkPipelineLibraryCreateInfoKHR>();
+	auto *libraries = allocator.allocate_n<VkPipeline>(library_list.Size());
+
+	library_info->sType = VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR;
+	library_info->libraryCount = library_list.Size();
+	library_info->pLibraries = libraries;
+
+	for (auto itr = library_list.Begin(); itr != library_list.End(); ++itr, libraries++)
+		if (!parse_derived_pipeline_handle(iface, resolver, *itr, pipelines, tag, libraries))
+			return false;
+
+	if (lib_info.HasMember("pNext"))
+		if (!parse_pnext_chain(lib_info["pNext"], &library_info->pNext))
+			return false;
+
+	*out_info = library_info;
+	return true;
+}
+
 bool StateReplayer::Impl::parse_fragment_shading_rate(const Value &state,
                                                       VkPipelineFragmentShadingRateStateCreateInfoKHR **out_info)
 {
@@ -4195,7 +4233,10 @@ bool StateReplayer::Impl::parse_multiview_state(const Value &state, VkRenderPass
 	return true;
 }
 
-bool StateReplayer::Impl::parse_pnext_chain(const Value &pnext, const void **outpNext)
+bool StateReplayer::Impl::parse_pnext_chain(
+		const Value &pnext, const void **outpNext,
+		StateCreatorInterface *iface, DatabaseInterface *resolver,
+		const Value *pipelines)
 {
 	VkBaseInStructure *ret = nullptr;
 	VkBaseInStructure *chain = nullptr;
@@ -4439,6 +4480,17 @@ bool StateReplayer::Impl::parse_pnext_chain(const Value &pnext, const void **out
 			if (!parse_graphics_pipeline_library(next, &graphics_pipeline_library))
 				return false;
 			new_struct = reinterpret_cast<VkBaseInStructure *>(graphics_pipeline_library);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR:
+		{
+			VkPipelineLibraryCreateInfoKHR *library = nullptr;
+			if (!iface || !pipelines)
+				return false;
+			if (!parse_pipeline_library(*iface, resolver, *pipelines, next, RESOURCE_GRAPHICS_PIPELINE, &library))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(library);
 			break;
 		}
 
@@ -4977,6 +5029,14 @@ void *StateRecorder::Impl::copy_pnext_struct(const VkGraphicsPipelineLibraryCrea
 	return gpl;
 }
 
+void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineLibraryCreateInfoKHR *create_info,
+                                             ScratchAllocator &alloc)
+{
+	auto *libraries = copy(create_info, 1, alloc);
+	libraries->pLibraries = copy(libraries->pLibraries, libraries->libraryCount, alloc);
+	return libraries;
+}
+
 template <typename T>
 bool StateRecorder::Impl::copy_pnext_chains(const T *ts, uint32_t count, ScratchAllocator &alloc,
                                             const DynamicStateInfo *dynamic_state_info)
@@ -5211,6 +5271,13 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 			if (!copy_shader_module(ci, alloc, true, &new_module))
 				return false;
 			*ppNext = reinterpret_cast<VkBaseInStructure *>(new_module);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR:
+		{
+			auto *ci = static_cast<const VkPipelineLibraryCreateInfoKHR *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
 			break;
 		}
 
@@ -5606,6 +5673,26 @@ bool StateRecorder::get_hash_for_compute_pipeline_handle(VkPipeline pipeline, Ha
 		*hash = itr->second;
 		return true;
 	}
+}
+
+bool StateRecorder::get_hash_for_pipeline_library_handle(VkPipeline pipeline, Hash *hash) const
+{
+	auto itr = impl->raytracing_pipeline_to_hash.find(pipeline);
+	if (itr != end(impl->raytracing_pipeline_to_hash))
+	{
+		*hash = itr->second;
+		return true;
+	}
+
+	itr = impl->graphics_pipeline_to_hash.find(pipeline);
+	if (itr != end(impl->graphics_pipeline_to_hash))
+	{
+		*hash = itr->second;
+		return true;
+	}
+
+	log_failed_hash("Pipeline library", pipeline);
+	return false;
 }
 
 bool StateRecorder::get_hash_for_raytracing_pipeline_handle(VkPipeline pipeline, Hash *hash) const
@@ -6529,6 +6616,16 @@ bool StateRecorder::Impl::remap_graphics_pipeline_ci(VkGraphicsPipelineCreateInf
 		return false;
 	if (!remap_pipeline_layout_handle(info->layout, &info->layout))
 		return false;
+
+	auto *library = find_pnext<VkPipelineLibraryCreateInfoKHR>(
+			VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR, info->pNext);
+
+	if (library)
+	{
+		for (uint32_t i = 0; i < library->libraryCount; i++)
+			if (!remap_graphics_pipeline_handle(library->pLibraries[i], const_cast<VkPipeline *>(&library->pLibraries[i])))
+				return false;
+	}
 
 	if (info->basePipelineHandle != VK_NULL_HANDLE)
 		if (!remap_graphics_pipeline_handle(info->basePipelineHandle, &info->basePipelineHandle))
@@ -7725,6 +7822,30 @@ static bool json_value(const VkSamplerYcbcrConversionCreateInfo &create_info, Al
 }
 
 template <typename Allocator>
+static bool json_value(const VkPipelineLibraryCreateInfoKHR &create_info, Allocator &alloc,
+                       bool in_pnext_chain, Value *out_value)
+{
+	Value library_info(kObjectType);
+	Value libraries(kArrayType);
+	for (uint32_t i = 0; i < create_info.libraryCount; i++)
+		libraries.PushBack(uint64_string(api_object_cast<uint64_t>(create_info.pLibraries[i]), alloc), alloc);
+	library_info.AddMember("libraries", libraries, alloc);
+
+	if (in_pnext_chain)
+	{
+		library_info.AddMember("sType", create_info.sType, alloc);
+	}
+	else
+	{
+		if (!pnext_chain_add_json_value(library_info, create_info, alloc, nullptr))
+			return false;
+	}
+
+	*out_value = library_info;
+	return true;
+}
+
+template <typename Allocator>
 static bool json_value(const VkSubpassDescriptionDepthStencilResolve &create_info, Allocator &alloc, Value *out_value);
 template <typename Allocator>
 static bool json_value(const VkFragmentShadingRateAttachmentInfoKHR &create_info, Allocator &alloc, Value *out_value);
@@ -7876,6 +7997,11 @@ static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *o
 		case VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO:
 			// Ignored.
 			ignored = true;
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR:
+			if (!json_value(*static_cast<const VkPipelineLibraryCreateInfoKHR *>(pNext), alloc, true, &next))
+				return false;
 			break;
 
 		default:
@@ -8393,12 +8519,8 @@ static bool json_value(const VkRayTracingPipelineCreateInfoKHR &pipe, Allocator 
 
 	if (pipe.pLibraryInfo)
 	{
-		Value library_info(kObjectType);
-		Value libraries(kArrayType);
-		for (uint32_t i = 0; i < pipe.pLibraryInfo->libraryCount; i++)
-			libraries.PushBack(uint64_string(api_object_cast<uint64_t>(pipe.pLibraryInfo->pLibraries[i]), alloc), alloc);
-		library_info.AddMember("libraries", libraries, alloc);
-		if (!pnext_chain_add_json_value(library_info, *pipe.pLibraryInfo, alloc, nullptr))
+		Value library_info;
+		if (!json_value(*pipe.pLibraryInfo, alloc, false, &library_info))
 			return false;
 		p.AddMember("libraryInfo", library_info, alloc);
 	}
