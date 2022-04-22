@@ -1209,6 +1209,18 @@ static void record_graphics_pipeline_libraries(StateRecorder &recorder)
 	pipe.renderPass = fake_handle<VkRenderPass>(30001);
 	pipe.stageCount = 2;
 	pipe.flags = VK_PIPELINE_CREATE_LIBRARY_BIT_KHR;
+	VkPipelineShaderStageCreateInfo stages[2] = {};
+	VkShaderModuleCreateInfo module = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+	static const uint32_t code[] = { 1, 2, 3 };
+	module.pCode = code;
+	module.codeSize = sizeof(code);
+	stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	stages[0].pName = "a";
+	stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	stages[1].pName = "b";
+	stages[0].pNext = &module;
+	stages[1].pNext = &module;
+	pipe.pStages = stages;
 
 	// First, test hash invariance. Based on which pipeline state we're creating, we have to ignore some state.
 	VkGraphicsPipelineLibraryCreateInfoEXT library_info = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT };
@@ -1218,6 +1230,8 @@ static void record_graphics_pipeline_libraries(StateRecorder &recorder)
 	VkPipelineInputAssemblyStateCreateInfo ia = { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
 	VkPipelineColorBlendStateCreateInfo cb = { VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
 	VkPipelineMultisampleStateCreateInfo ms = { VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
+	VkPipelineDynamicStateCreateInfo dyn = { VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
+	VkPipelineDepthStencilStateCreateInfo ds = { VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
 
 	auto gpipe = pipe;
 	library_info.flags = VK_GRAPHICS_PIPELINE_LIBRARY_VERTEX_INPUT_INTERFACE_BIT_EXT;
@@ -1228,6 +1242,7 @@ static void record_graphics_pipeline_libraries(StateRecorder &recorder)
 		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(1999), gpipe, nullptr, 0))
 			abort();
 
+		// This state must be ignored.
 		set_invalid_pointer(gpipe.pColorBlendState);
 		set_invalid_pointer(gpipe.pMultisampleState);
 		set_invalid_pointer(gpipe.pDepthStencilState);
@@ -1240,7 +1255,11 @@ static void record_graphics_pipeline_libraries(StateRecorder &recorder)
 		gpipe.renderPass = fake_handle<VkRenderPass>(234234234);
 		gpipe.layout = fake_handle<VkPipelineLayout>(234234235);
 
-		Hash hash[3];
+		// State we care about:
+		// Vertex input state
+		// Input assembly state
+		// Dynamic state
+		Hash hash[4];
 		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &hash[0]))
 			abort();
 		if (hash[0] != baseline_hash)
@@ -1261,6 +1280,13 @@ static void record_graphics_pipeline_libraries(StateRecorder &recorder)
 			abort();
 		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(2001), gpipe, nullptr, 0))
 			abort();
+		gpipe.pDynamicState = &dyn;
+		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &hash[3]))
+			abort();
+		if (hash[3] == hash[2])
+			abort();
+		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(2002), gpipe, nullptr, 0))
+			abort();
 	}
 
 	gpipe = pipe;
@@ -1272,6 +1298,7 @@ static void record_graphics_pipeline_libraries(StateRecorder &recorder)
 		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(1999), gpipe, nullptr, 0))
 			abort();
 
+		// This state must be ignored.
 		set_invalid_pointer(gpipe.pDepthStencilState);
 		set_invalid_pointer(gpipe.pViewportState);
 		set_invalid_pointer(gpipe.pRasterizationState);
@@ -1280,6 +1307,10 @@ static void record_graphics_pipeline_libraries(StateRecorder &recorder)
 		gpipe.stageCount = 3243;
 		gpipe.layout = fake_handle<VkPipelineLayout>(234234235);
 
+		// State we care about:
+		// Multisampling
+		// ColorBlend
+		// Renderpass / subpass
 		Hash hash[4];
 		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &hash[0]))
 			abort();
@@ -1307,6 +1338,71 @@ static void record_graphics_pipeline_libraries(StateRecorder &recorder)
 		if (hash[3] == hash[2])
 			abort();
 		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(2001), gpipe, nullptr, 0))
+			abort();
+	}
+
+	gpipe = pipe;
+	library_info.flags = VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT;
+	{
+		Hash baseline_hash = 0;
+		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &baseline_hash))
+			abort();
+		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(1999), gpipe, nullptr, 0))
+			abort();
+
+		// This state must be ignored.
+		set_invalid_pointer(gpipe.pColorBlendState);
+		set_invalid_pointer(gpipe.pViewportState);
+		set_invalid_pointer(gpipe.pRasterizationState);
+		set_invalid_pointer(gpipe.pTessellationState);
+
+		// State we care about:
+		// Layout
+		// Multisampling
+		// Renderpass / subpass
+		// Depth-stencil
+		// Shaders
+		Hash hash[6];
+		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &hash[0]))
+			abort();
+		if (hash[0] != baseline_hash)
+			abort();
+		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(2000), gpipe, nullptr, 0))
+			abort();
+		gpipe.layout = VK_NULL_HANDLE;
+		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &hash[1]))
+			abort();
+		if (hash[1] == hash[0])
+			abort();
+		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(2001), gpipe, nullptr, 0))
+			abort();
+		gpipe.pMultisampleState = &ms;
+		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &hash[2]))
+			abort();
+		if (hash[2] == hash[1])
+			abort();
+		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(2002), gpipe, nullptr, 0))
+			abort();
+		gpipe.subpass = 0;
+		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &hash[3]))
+			abort();
+		if (hash[3] == hash[2])
+			abort();
+		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(2003), gpipe, nullptr, 0))
+			abort();
+		gpipe.pDepthStencilState = &ds;
+		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &hash[4]))
+			abort();
+		if (hash[4] == hash[3])
+			abort();
+		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(2004), gpipe, nullptr, 0))
+			abort();
+		stages[0].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &hash[5]))
+			abort();
+		if (hash[5] == hash[4])
+			abort();
+		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(2005), gpipe, nullptr, 0))
 			abort();
 	}
 }
