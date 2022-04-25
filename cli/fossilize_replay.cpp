@@ -1943,6 +1943,18 @@ struct ThreadedReplayer : StateCreatorInterface
 		if (opts.pipeline_stats)
 			info->flags |= VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR;
 
+		// Compute does not support pipeline libraries, but sanitizes the code paths.
+		auto *library_info = find_pnext<VkPipelineLibraryCreateInfoKHR>(
+				VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR, create_info->pNext);
+		bool consumes_libraries = library_info && library_info->libraryCount != 0;
+		bool generates_library = (create_info->flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0;
+
+		if (generates_library && consumes_libraries)
+		{
+			LOGE("Consuming pipeline libraries while creating a pipeline library. This cannot work.\n");
+			return false;
+		}
+
 		auto &per_thread = get_per_thread_data();
 		unsigned index = per_thread.current_parse_index;
 		unsigned memory_index = per_thread.memory_context_index;
@@ -1958,9 +1970,11 @@ struct ThreadedReplayer : StateCreatorInterface
 		else
 		{
 			lock_guard<mutex> holder(hash_lock);
-			compute_parents[hash] = {
-				const_cast<VkComputePipelineCreateInfo *>(create_info), hash, pipeline, index,
-			};
+			if (generates_library)
+			{
+				auto &p = compute_parents[hash];
+				p = { const_cast<VkComputePipelineCreateInfo *>(create_info), hash, pipeline, index };
+			}
 		}
 
 		*pipeline = (VkPipeline)hash;
@@ -1981,6 +1995,17 @@ struct ThreadedReplayer : StateCreatorInterface
 		if (opts.pipeline_stats)
 			info->flags |= VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR;
 
+		auto *library_info = find_pnext<VkPipelineLibraryCreateInfoKHR>(
+				VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR, create_info->pNext);
+		bool consumes_libraries = library_info && library_info->libraryCount != 0;
+		bool generates_library = (create_info->flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0;
+
+		if (generates_library && consumes_libraries)
+		{
+			LOGE("Consuming pipeline libraries while creating a pipeline library. This cannot work.\n");
+			return false;
+		}
+
 		auto &per_thread = get_per_thread_data();
 		unsigned index = per_thread.current_parse_index;
 		unsigned memory_index = per_thread.memory_context_index;
@@ -1996,9 +2021,11 @@ struct ThreadedReplayer : StateCreatorInterface
 		else
 		{
 			lock_guard<mutex> holder(hash_lock);
-			graphics_parents[hash] = {
-				const_cast<VkGraphicsPipelineCreateInfo *>(create_info), hash, pipeline, index,
-			};
+			if (generates_library)
+			{
+				auto &p = graphics_parents[hash];
+				p = { const_cast<VkGraphicsPipelineCreateInfo *>(create_info), hash, pipeline, index };
+			}
 		}
 
 		*pipeline = (VkPipeline)hash;
@@ -2043,9 +2070,11 @@ struct ThreadedReplayer : StateCreatorInterface
 		else
 		{
 			lock_guard<mutex> holder(hash_lock);
-			raytracing_parents[hash] = {
-				const_cast<VkRayTracingPipelineCreateInfoKHR *>(create_info), hash, pipeline, index,
-			};
+			if (generates_library)
+			{
+				auto &p = raytracing_parents[hash];
+				p = { const_cast<VkRayTracingPipelineCreateInfoKHR *>(create_info), hash, pipeline, index };
+			}
 		}
 
 		*pipeline = (VkPipeline)hash;
