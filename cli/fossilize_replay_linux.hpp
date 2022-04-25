@@ -982,6 +982,12 @@ static int run_master_process(const VulkanDevice::Options &opts,
 	StallState stall_state;
 	bool use_stall_state = poll_stall_information(stall_state);
 
+	// We might have inherited awkward signal state from parent process, which will interfere
+	// with the signalfd loop. Reset the dispositions to their default state.
+	signal(SIGCHLD, SIG_DFL);
+	signal(SIGINT, SIG_DFL);
+	signal(SIGTERM, SIG_DFL);
+
 	// We will wait for child processes explicitly with signalfd.
 	// Block delivery of signals in the normal way.
 	// For this to work, there cannot be any other threads in the process

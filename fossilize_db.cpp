@@ -548,7 +548,7 @@ struct DumbDirectoryDatabase : DatabaseInterface
 
 		while (auto *pEntry = readdir(dp))
 		{
-			if (shutdown_requested.load())
+			if (shutdown_requested.load(std::memory_order_relaxed))
 				return false;
 
 			if (pEntry->d_type != DT_REG)
@@ -761,7 +761,7 @@ struct ZipDatabase : DatabaseInterface
 
 			for (unsigned i = 0; i < files; i++)
 			{
-				if (shutdown_requested.load())
+				if (shutdown_requested.load(std::memory_order_relaxed))
 					return false;
 
 				if (mz_zip_reader_is_file_a_directory(&mz, i))
@@ -1119,7 +1119,7 @@ struct StreamArchive : DatabaseInterface
 			size_t len = ftell(file);
 			rewind(file);
 
-			if (len != 0 && !shutdown_requested.load())
+			if (len != 0 && !shutdown_requested.load(std::memory_order_relaxed))
 			{
 				uint8_t magic[MagicSize];
 				if (fread(magic, 1, MagicSize, file) != MagicSize)
@@ -1136,7 +1136,7 @@ struct StreamArchive : DatabaseInterface
 
 				while (offset < len)
 				{
-					if (shutdown_requested.load())
+					if (shutdown_requested.load(std::memory_order_relaxed))
 						return false;
 
 					begin_append_offset = offset;
@@ -2235,7 +2235,7 @@ DatabaseInterface *create_concurrent_database_with_encoded_extra_paths(const cha
 
 void DatabaseInterface::request_shutdown()
 {
-	shutdown_requested.store(true);
+	shutdown_requested.store(true, std::memory_order_relaxed);
 }
 
 bool merge_concurrent_databases(const char *append_archive, const char * const *source_paths, size_t num_source_paths)

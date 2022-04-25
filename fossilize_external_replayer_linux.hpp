@@ -107,6 +107,7 @@ struct ExternalReplayer::Impl
 	int fd = -1;
 	int kill_fd = -1;
 	int control_fd = -1;
+	int child_fd = -1;
 	SharedControlBlock *shm_block = nullptr;
 	size_t shm_block_size = 0;
 	int wstatus = 0;
@@ -152,6 +153,8 @@ ExternalReplayer::Impl::~Impl()
 		close(kill_fd);
 	if (control_fd >= 0)
 		close(control_fd);
+	if (child_fd >= 0)
+		close(child_fd);
 
 	if (shm_block)
 		munmap(shm_block, shm_block_size);
@@ -171,6 +174,9 @@ void ExternalReplayer::Impl::reset_pid()
 	if (control_fd >= 0)
 		close(control_fd);
 	control_fd = -1;
+	if (child_fd >= 0)
+		close(child_fd);
+	child_fd = -1;
 }
 
 bool ExternalReplayer::Impl::poll_global_resource_usage(GlobalResourceUsage &stats) const
@@ -406,10 +412,13 @@ int ExternalReplayer::Impl::wait()
 	ExternalReplayer::Progress progress = {};
 	poll_progress(progress);
 
+#if 0
+	// FIXME: This code should be correct. Investigate why it seems to cause stability issues.
 	for (;;)
 	{
 		if (waitpid(pid, &wstatus, 0) < 0)
 		{
+			LOGE("waitpid failed! errno = %d.\n", errno);
 			wstatus = -errno;
 			synthesized_exit_code = true;
 			break;
@@ -419,6 +428,58 @@ int ExternalReplayer::Impl::wait()
 		if (WIFEXITED(wstatus) || WIFSIGNALED(wstatus))
 			break;
 	}
+#else
+	// The normal approach here is to use waitpid and block until completion
+	// but that approach appears to have some stability issues.
+	// The theory is that a parent process might be calling waitpid(-1, NOWAIT) in a thread or signal handler
+	// which could confuse things.
+	// Instead, use child_fd as a canary for when the child process tree dies.
+	if (child_fd >= 0)
+	{
+		char dummy;
+		int r = ::read(child_fd, &dummy, sizeof(dummy));
+		if (r < 0)
+			LOGE("Failed to wait for child process to end.\n");
+		else if (r > 0)
+			LOGE("Unexpected return for child process, %d.\n", r);
+		close(child_fd);
+		child_fd = -1;
+	}
+
+	int r = waitpid(pid, &wstatus, WNOHANG);
+	if (r == 0)
+	{
+		// There is a race between the last reference to child_fd being closed
+		// and SIGCHLD being delivered.
+		// Unfortunately, there is no robust way to poll for waitpid with a timeout
+		// (outside of the very recent pidfd in Linux 5.x+),
+		// so do it in a dumb way ... We should receive the wstatus shortly.
+		for (int i = 0; i < 100 && r == 0; i++)
+		{
+			usleep(1000);
+			r = waitpid(pid, &wstatus, WNOHANG);
+			if (r < 0)
+			{
+				wstatus = -errno;
+				synthesized_exit_code = true;
+			}
+		}
+
+		if (r == 0)
+		{
+			LOGW("waitpid loop timed out.\n");
+			wstatus = 0;
+			synthesized_exit_code = true;
+		}
+	}
+	else if (r < 0)
+	{
+		// Could happen if process has set SIG_IGN or NOCLDWAIT for SIGCHLD.
+		LOGW("Child has already been reaped.\n");
+		wstatus = -errno;
+		synthesized_exit_code = true;
+	}
+#endif
 
 	// Pump the fifo through.
 	poll_progress(progress);
@@ -861,6 +922,10 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 	if (pipe(fds) < 0)
 		return false;
 
+	int child_fds[2];
+	if (pipe(child_fds) < 0)
+		return false;
+
 	int control_fds[2] = { -1, -1 };
 	if (socketpair(AF_UNIX, SOCK_SEQPACKET, 0, control_fds) < 0)
 		return false;
@@ -877,11 +942,15 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 		close(control_fds[0]);
 		control_fd = control_fds[1];
 		shutdown(control_fd, SHUT_RD);
+
+		child_fd = child_fds[0];
+		close(child_fds[1]);
 	}
 	else if (new_pid == 0)
 	{
 		close(fds[0]);
 		close(control_fds[1]);
+		close(child_fds[0]);
 		shutdown(control_fds[0], SHUT_WR);
 
 		if (!options.inherit_process_group)
@@ -898,6 +967,9 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 		close(fds[1]);
 
 		start_replayer_process(options, control_fds[0]);
+
+		// When this process tree dies, the final reference to child_fds[1] will close
+		// and this is a pollable way to ensure that the replayer is dead.
 	}
 	else
 	{
