@@ -1349,6 +1349,8 @@ static void record_graphics_pipeline_libraries(StateRecorder &recorder)
 	gpipe = pipe;
 	library_info.flags = VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT;
 	{
+		gpipe.renderPass = VK_NULL_HANDLE;
+
 		Hash baseline_hash = 0;
 		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &baseline_hash))
 			abort();

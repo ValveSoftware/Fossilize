@@ -6751,10 +6751,28 @@ bool StateRecorder::Impl::get_subpass_meta_for_pipeline(const VkGraphicsPipeline
                                                         Hash render_pass_hash,
                                                         SubpassMeta *meta) const
 {
+	auto *library_info = find_pnext<VkGraphicsPipelineLibraryCreateInfoEXT>(
+			VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT, create_info.pNext);
+	bool force_depth_stencil = false;
+
+	if (!render_pass_hash && library_info)
+	{
+		// If we have fragment shaders, but no idea what our render pass looks like,
+		// we might be forced to emit depth stencil state, even if we don't end up needing it.
+		// VUID we consider here:
+		// If renderPass is VK_NULL_HANDLE and the pipeline is being created with fragment shader state
+		// but not fragment output interface state,
+		// pDepthStencilState must be a valid pointer to a valid VkPipelineDepthStencilStateCreateInfo structure
+		bool fragment = (library_info->flags & VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT) != 0;
+		bool output = (library_info->flags & VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_OUTPUT_INTERFACE_BIT_EXT) != 0;
+		force_depth_stencil = fragment && !output;
+	}
+
 	// If a render pass is present, use that.
 	if (render_pass_hash)
 	{
-		return get_subpass_meta_for_render_pass_hash(render_pass_hash, create_info.subpass, meta);
+		if (!get_subpass_meta_for_render_pass_hash(render_pass_hash, create_info.subpass, meta))
+			return false;
 	}
 	else if (auto *rendering_create_info = find_pnext<VkPipelineRenderingCreateInfoKHR>(
 			VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR, create_info.pNext))
@@ -6765,10 +6783,12 @@ bool StateRecorder::Impl::get_subpass_meta_for_pipeline(const VkGraphicsPipeline
 	}
 	else
 	{
-		// If the pNext is not present, colorCount = 0, depth = UNDEFINED.
 		meta->uses_color = false;
 		meta->uses_depth_stencil = false;
 	}
+
+	if (force_depth_stencil)
+		meta->uses_depth_stencil = true;
 
 	return true;
 }
