@@ -684,9 +684,6 @@ void ExternalReplayer::Impl::start_replayer_process(const ExternalReplayer::Opti
 	if (options.enable_validation)
 		argv.push_back("--enable-validation");
 
-	if (options.ignore_derived_pipelines)
-		argv.push_back("--ignore-derived-pipelines");
-
 	if (options.null_device)
 		argv.push_back("--null-device");
 

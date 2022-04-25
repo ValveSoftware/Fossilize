@@ -127,6 +127,8 @@ public:
 
 		// Ignores derived pipelines, reduces memory consumption when replaying.
 		// Only useful if the driver in question ignores use of derived pipelines when hashing pipelines internally.
+		// OBSOLETE. This option is only kept for backwards compat.
+		// All known drivers ignore derived pipelines and is no longer replayed as-is.
 		bool ignore_derived_pipelines;
 
 		// Creates a dummy device, useful for benchmarking time and/or memory consumption in isolation.
