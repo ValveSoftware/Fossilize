@@ -2088,6 +2088,16 @@ struct ThreadedReplayer : StateCreatorInterface
 			if (create_info->pStages[i].module == VK_NULL_HANDLE)
 				valid_handles = false;
 
+		auto *library = find_pnext<VkPipelineLibraryCreateInfoKHR>(
+				VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR, create_info->pNext);
+
+		if (library)
+		{
+			for (uint32_t i = 0; i < library->libraryCount; i++)
+				if (library->pLibraries[i] == VK_NULL_HANDLE)
+					valid_handles = false;
+		}
+
 		PipelineWorkItem work_item = {};
 		work_item.hash = hash;
 		work_item.tag = RESOURCE_GRAPHICS_PIPELINE;
