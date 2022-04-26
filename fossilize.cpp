@@ -164,6 +164,7 @@ struct StateReplayer::Impl
 
 	void copy_handle_references(const Impl &impl);
 	void forget_handle_references();
+	void forget_pipeline_handle_references();
 	bool parse_samplers(StateCreatorInterface &iface, const Value &samplers) FOSSILIZE_WARN_UNUSED;
 	bool parse_descriptor_set_layouts(StateCreatorInterface &iface, const Value &layouts) FOSSILIZE_WARN_UNUSED;
 	bool parse_pipeline_layouts(StateCreatorInterface &iface, const Value &layouts) FOSSILIZE_WARN_UNUSED;
@@ -4680,6 +4681,11 @@ void StateReplayer::forget_handle_references()
 	impl->forget_handle_references();
 }
 
+void StateReplayer::forget_pipeline_handle_references()
+{
+	impl->forget_pipeline_handle_references();
+}
+
 void StateReplayer::Impl::copy_handle_references(const StateReplayer::Impl &other)
 {
 	replayed_samplers = other.replayed_samplers;
@@ -4689,6 +4695,14 @@ void StateReplayer::Impl::copy_handle_references(const StateReplayer::Impl &othe
 	replayed_render_passes = other.replayed_render_passes;
 	replayed_compute_pipelines = other.replayed_compute_pipelines;
 	replayed_graphics_pipelines = other.replayed_graphics_pipelines;
+	replayed_raytracing_pipelines = other.replayed_raytracing_pipelines;
+}
+
+void StateReplayer::Impl::forget_pipeline_handle_references()
+{
+	replayed_compute_pipelines.clear();
+	replayed_graphics_pipelines.clear();
+	replayed_raytracing_pipelines.clear();
 }
 
 void StateReplayer::Impl::forget_handle_references()
@@ -4698,8 +4712,7 @@ void StateReplayer::Impl::forget_handle_references()
 	replayed_pipeline_layouts.clear();
 	replayed_shader_modules.clear();
 	replayed_render_passes.clear();
-	replayed_compute_pipelines.clear();
-	replayed_graphics_pipelines.clear();
+	forget_pipeline_handle_references();
 }
 
 bool StateReplayer::Impl::parse(StateCreatorInterface &iface, DatabaseInterface *resolver, const void *buffer_, size_t total_size)

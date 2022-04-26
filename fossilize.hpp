@@ -165,6 +165,7 @@ public:
 	void copy_handle_references(const StateReplayer &replayer);
 
 	void forget_handle_references();
+	void forget_pipeline_handle_references();
 
 	ScratchAllocator &get_allocator();
 
