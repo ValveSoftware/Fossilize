@@ -1470,6 +1470,17 @@ struct ThreadedReplayer : StateCreatorInterface
 		for (auto &render_pass : render_passes)
 			if (render_pass.second)
 				vkDestroyRenderPass(device->get_device(), render_pass.second, nullptr);
+
+		free_pipelines();
+
+		shader_modules.delete_cache([this](Hash, VkShaderModule module) {
+			if (module != VK_NULL_HANDLE)
+				vkDestroyShaderModule(device->get_device(), module, nullptr);
+		});
+	}
+
+	void free_pipelines()
+	{
 		for (auto &pipeline : compute_pipelines)
 			if (pipeline.second)
 				vkDestroyPipeline(device->get_device(), pipeline.second, nullptr);
@@ -1480,10 +1491,14 @@ struct ThreadedReplayer : StateCreatorInterface
 			if (pipeline.second)
 				vkDestroyPipeline(device->get_device(), pipeline.second, nullptr);
 
-		shader_modules.delete_cache([this](Hash, VkShaderModule module) {
-			if (module != VK_NULL_HANDLE)
-				vkDestroyShaderModule(device->get_device(), module, nullptr);
-		});
+		// Keep track of how many entries we would have had for accurate reporting.
+		compute_pipelines_cleared += compute_pipelines.size();
+		graphics_pipelines_cleared += graphics_pipelines.size();
+		raytracing_pipelines_cleared += raytracing_pipelines.size();
+
+		compute_pipelines.clear();
+		graphics_pipelines.clear();
+		raytracing_pipelines.clear();
 	}
 
 	bool validate_validation_cache_header(const vector<uint8_t> &blob) const
@@ -1962,7 +1977,6 @@ struct ThreadedReplayer : StateCreatorInterface
 
 		if (!force_outside_range && index < deferred_compute[memory_index].size())
 		{
-			assert(index < deferred_compute[memory_index].size());
 			deferred_compute[memory_index][index] = {
 				const_cast<VkComputePipelineCreateInfo *>(create_info), hash, pipeline, index,
 			};
@@ -2380,68 +2394,58 @@ struct ThreadedReplayer : StateCreatorInterface
 
 	template <typename DerivedInfo>
 	void enqueue_parent_pipeline(const DerivedInfo &info, Hash h,
-	                             const unordered_map<Hash, VkPipeline> &pipelines,
-	                             unordered_set<Hash> &outside_range_hashes)
+	                             const unordered_map<Hash, VkPipeline> &pipelines)
 	{
 		if (!h)
 			return;
 
 		// pipelines will have an entry if we called enqueue_pipeline() already for this hash,
 		// it's not necessarily complete yet!
-		bool is_inside_range = pipelines.count(h) != 0;
+		bool is_outside_range = pipelines.count(h) == 0;
 
-		if (!is_inside_range)
+		if (is_outside_range)
 		{
-			// We have not seen this parent pipeline before.
-			// Make sure this auxillary entry has been parsed and is not seen before.
-			if (!outside_range_hashes.count(h))
-			{
-				PipelineWorkItem work_item;
-				work_item.index = info.index;
-				work_item.hash = h;
-				work_item.parse_only = true;
-				work_item.force_outside_range = true;
-				work_item.memory_context_index = PARENT_PIPELINE_MEMORY_CONTEXT;
-				work_item.tag = DerivedInfo::get_tag();
-				outside_range_hashes.insert(h);
-				enqueue_work_item(work_item);
-			}
+			PipelineWorkItem work_item;
+			work_item.index = info.index;
+			work_item.hash = h;
+			work_item.parse_only = true;
+			work_item.force_outside_range = true;
+			work_item.memory_context_index = PARENT_PIPELINE_MEMORY_CONTEXT;
+			work_item.tag = DerivedInfo::get_tag();
+			enqueue_work_item(work_item);
 		}
 	}
 
 	template <typename DerivedInfo>
 	void enqueue_parent_pipelines_pipeline_library(const DerivedInfo &info,
 												   const VkPipelineLibraryCreateInfoKHR &library_info,
-	                                               const unordered_map<Hash, VkPipeline> &pipelines,
-	                                               unordered_set<Hash> &outside_range_hashes)
+	                                               const unordered_map<Hash, VkPipeline> &pipelines)
 	{
 		for (uint32_t i = 0; i < library_info.libraryCount; i++)
 		{
 			Hash h = (Hash)library_info.pLibraries[i];
-			enqueue_parent_pipeline(info, h, pipelines, outside_range_hashes);
+			enqueue_parent_pipeline(info, h, pipelines);
 		}
 	}
 
 	template <typename DerivedInfo>
 	void enqueue_parent_pipelines(const DerivedInfo &info,
-	                              const unordered_map<Hash, VkPipeline> &pipelines,
-	                              unordered_set<Hash> &outside_range_hashes)
+	                              const unordered_map<Hash, VkPipeline> &pipelines)
 	{
 		if (info.info)
 		{
 			auto *library = find_pnext<VkPipelineLibraryCreateInfoKHR>(
 					VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR, info.info->pNext);
 			if (library)
-				enqueue_parent_pipelines_pipeline_library(info, *library, pipelines, outside_range_hashes);
+				enqueue_parent_pipelines_pipeline_library(info, *library, pipelines);
 		}
 	}
 
 	void enqueue_parent_pipelines(const DeferredRayTracingInfo &info,
-	                              const unordered_map<Hash, VkPipeline> &pipelines,
-	                              unordered_set<Hash> &outside_range_hashes)
+	                              const unordered_map<Hash, VkPipeline> &pipelines)
 	{
 		if (info.info && info.info->pLibraryInfo)
-			enqueue_parent_pipelines_pipeline_library(info, *info.info->pLibraryInfo, pipelines, outside_range_hashes);
+			enqueue_parent_pipelines_pipeline_library(info, *info.info->pLibraryInfo, pipelines);
 	}
 
 	template <typename DerivedInfo>
@@ -2456,7 +2460,7 @@ struct ThreadedReplayer : StateCreatorInterface
 		enum PassOrder
 		{
 			PARSE_ENQUEUE_OFFSET = 0,
-			MAINTAIN_SHADER_MODULE_LRU_CACHE = 1,
+			MAINTAIN_LRU_CACHE = 1,
 			ENQUEUE_SHADER_MODULES_PRIMARY_OFFSET = 2,
 			RESOLVE_SHADER_MODULE_AND_ENQUEUE_PIPELINES_PRIMARY_OFFSET = 3,
 			ENQUEUE_OUT_OF_RANGE_PARENT_PIPELINES = 4,
@@ -2464,8 +2468,6 @@ struct ThreadedReplayer : StateCreatorInterface
 			ENQUEUE_DERIVED_PIPELINES_OFFSET = 6,
 			PASS_COUNT = 7
 		};
-
-		auto outside_range_hashes = make_shared<unordered_set<Hash>>();
 
 		unsigned memory_index = 0;
 		unsigned iteration = 0;
@@ -2498,13 +2500,20 @@ struct ThreadedReplayer : StateCreatorInterface
 
 			// Submit pipelines to be parsed.
 			work.push_back({ get_order_index(PARSE_ENQUEUE_OFFSET),
-			                 [this, &hashes, &pipelines, deferred, memory_index, to_submit, hash_offset]() {
+			                 [this, &hashes, deferred, memory_index, to_submit, hash_offset]() {
 				                 // Drain old allocators.
 				                 sync_worker_memory_context(memory_index);
 				                 // Reset per memory-context allocators.
 				                 for (auto &data : per_thread_data)
+				                 {
 					                 if (data.per_thread_replayers)
+					                 {
 						                 data.per_thread_replayers[memory_index].get_allocator().reset();
+						                 // We might have to replay the same pipeline multiple times,
+						                 // forget handle references.
+						                 data.per_thread_replayers[memory_index].forget_pipeline_handle_references();
+					                 }
+				                 }
 
 				                 deferred[memory_index].resize(to_submit);
 				                 for (unsigned index = hash_offset; index < hash_offset + to_submit; index++)
@@ -2536,8 +2545,10 @@ struct ThreadedReplayer : StateCreatorInterface
 							                 }
 						                 }
 					                 }
-					                 else if (pipelines.count(hashes[index]) == 0)
+					                 else
 					                 {
+						                 // We are going to free all existing parent pipelines, so we cannot reuse
+						                 // any pipeline that was already compiled.
 						                 ThreadedReplayer::PipelineWorkItem work_item;
 						                 work_item.hash = hashes[index];
 						                 work_item.tag = DerivedInfo::get_tag();
@@ -2557,18 +2568,12 @@ struct ThreadedReplayer : StateCreatorInterface
 
 						                 enqueue_work_item(work_item);
 					                 }
-					                 else
-					                 {
-						                 // This pipeline has already been processed before in order to resolve parent pipelines.
-						                 // Don't do anything with it this iteration since it has already been compiled.
-						                 deferred[memory_index][index - hash_offset] = {};
-					                 }
 				                 }
 			                 }});
 
 			if (memory_index == 0)
 			{
-				work.push_back({ get_order_index(MAINTAIN_SHADER_MODULE_LRU_CACHE),
+				work.push_back({ get_order_index(MAINTAIN_LRU_CACHE),
 				                 [this]() {
 					                 // Now all worker threads are drained for any work which needs shader modules,
 					                 // so we can maintain the shader module LRU cache while we're parsing new pipelines in parallel.
@@ -2586,6 +2591,19 @@ struct ThreadedReplayer : StateCreatorInterface
 					                 for (auto &per_thread : per_thread_data)
 						                 if (per_thread.per_thread_replayers)
 							                 per_thread.per_thread_replayers[SHADER_MODULE_MEMORY_CONTEXT].forget_handle_references();
+
+									 // We also know that pipelines are not being compiled,
+									 // so we can free pipelines.
+									 // When using graphics pipeline libraries, most pipelines
+									 // will be "parent" pipelines, which leads to excessive memory bloat
+									 // if we keep them around indefinitely.
+					                 free_pipelines();
+
+					                 // We might have to replay the same pipeline multiple times,
+					                 // forget handle references.
+					                 for (auto &per_thread : per_thread_data)
+						                 if (per_thread.per_thread_replayers)
+							                 per_thread.per_thread_replayers[PARENT_PIPELINE_MEMORY_CONTEXT].forget_pipeline_handle_references();
 				                 }});
 			}
 
@@ -2611,7 +2629,8 @@ struct ThreadedReplayer : StateCreatorInterface
 				                 // Make sure all VkShaderModules have been queued and completed.
 				                 // We reserve a special memory context for all shader modules since other memory indices
 				                 // might queue up shader module work which we need in our memory index.
-				                 // Remap VkShaderModule references from hashes to real handles and enqueue all non-derived pipelines for work.
+				                 // Remap VkShaderModule references from hashes to real handles and enqueue
+				                 // all non-derived pipelines for work.
 				                 sync_worker_memory_context(SHADER_MODULE_MEMORY_CONTEXT);
 
 				                 for (auto &item : deferred[memory_index])
@@ -2626,10 +2645,10 @@ struct ThreadedReplayer : StateCreatorInterface
 			                 }});
 
 			work.push_back({ get_order_index(ENQUEUE_OUT_OF_RANGE_PARENT_PIPELINES),
-			                 [this, &pipelines, derived, outside_range_hashes]() {
+			                 [this, &pipelines, derived]() {
 				                 // Figure out which of the parent pipelines we need.
 				                 for (auto &d : *derived)
-					                 enqueue_parent_pipelines(d, pipelines, *outside_range_hashes);
+					                 enqueue_parent_pipelines(d, pipelines);
 			                 }});
 
 			if (memory_index == 0)
@@ -2788,9 +2807,14 @@ struct ThreadedReplayer : StateCreatorInterface
 	ObjectCache<VkShaderModule> shader_modules;
 
 	std::unordered_map<Hash, VkRenderPass> render_passes;
+
 	std::unordered_map<Hash, VkPipeline> compute_pipelines;
 	std::unordered_map<Hash, VkPipeline> graphics_pipelines;
 	std::unordered_map<Hash, VkPipeline> raytracing_pipelines;
+	size_t compute_pipelines_cleared = 0;
+	size_t graphics_pipelines_cleared = 0;
+	size_t raytracing_pipelines_cleared = 0;
+
 	std::unordered_set<Hash> masked_shader_modules;
 	std::unordered_map<VkShaderModule, Hash> shader_module_to_hash;
 	std::unordered_set<VkShaderModule> enqueued_shader_modules;
@@ -3689,15 +3713,19 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 	     uint64_t(replayer.shader_module_total_size.load()),
 	     uint64_t(replayer.shader_module_total_compressed_size.load()));
 
+	replayer.compute_pipelines_cleared += replayer.compute_pipelines.size();
+	replayer.graphics_pipelines_cleared += replayer.graphics_pipelines.size();
+	replayer.raytracing_pipelines_cleared += replayer.raytracing_pipelines.size();
+
 	unsigned long total_size =
 		replayer.samplers.size() +
 		replayer.layouts.size() +
 		replayer.pipeline_layouts.size() +
 		replayer.shader_modules.get_current_object_count() +
 		replayer.render_passes.size() +
-		replayer.compute_pipelines.size() +
-		replayer.graphics_pipelines.size() +
-		replayer.raytracing_pipelines.size();
+		replayer.compute_pipelines_cleared +
+		replayer.graphics_pipelines_cleared +
+		replayer.raytracing_pipelines_cleared;
 
 	long elapsed_ms_prepare = chrono::duration_cast<chrono::milliseconds>(end_prepare - start_prepare).count();
 	long elapsed_ms_read_archive = chrono::duration_cast<chrono::milliseconds>(end_create_archive - start_create_archive).count();
@@ -3745,9 +3773,9 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 	LOGI("  descriptor set layouts:%7lu\n", (unsigned long)replayer.layouts.size());
 	LOGI("  pipeline layouts:      %7lu\n", (unsigned long)replayer.pipeline_layouts.size());
 	LOGI("  render passes:         %7lu\n", (unsigned long)replayer.render_passes.size());
-	LOGI("  compute pipelines:     %7lu\n", (unsigned long)replayer.compute_pipelines.size());
-	LOGI("  graphics pipelines:    %7lu\n", (unsigned long)replayer.graphics_pipelines.size());
-	LOGI("  raytracing pipelines:  %7lu\n", (unsigned long)replayer.raytracing_pipelines.size());
+	LOGI("  compute pipelines:     %7lu\n", (unsigned long)replayer.compute_pipelines_cleared);
+	LOGI("  graphics pipelines:    %7lu\n", (unsigned long)replayer.graphics_pipelines_cleared);
+	LOGI("  raytracing pipelines:  %7lu\n", (unsigned long)replayer.raytracing_pipelines_cleared);
 
 	return EXIT_SUCCESS;
 }
