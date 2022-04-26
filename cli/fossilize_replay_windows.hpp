@@ -503,9 +503,6 @@ bool ProcessProgress::start_child_process()
 	cmdline += " --shader-cache-size ";
 	cmdline += std::to_string(Global::base_replayer_options.shader_cache_size_mb);
 
-	if (Global::base_replayer_options.ignore_derived_pipelines)
-		cmdline += " --ignore-derived-pipelines";
-
 	if (!Global::base_replayer_options.pipeline_stats_path.empty())
 	{
 		cmdline += " --enable-pipeline-stats ";
