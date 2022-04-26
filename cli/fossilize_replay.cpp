@@ -2094,7 +2094,17 @@ struct ThreadedReplayer : StateCreatorInterface
 		work_item.index = index;
 		work_item.memory_context_index = memory_context_index;
 
-		if (create_info->stage.module != VK_NULL_HANDLE)
+		bool valid_handles = true;
+		auto *library = find_pnext<VkPipelineLibraryCreateInfoKHR>(
+				VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR, create_info->pNext);
+		if (library)
+		{
+			for (uint32_t i = 0; i < library->libraryCount; i++)
+				if (library->pLibraries[i] == VK_NULL_HANDLE)
+					valid_handles = false;
+		}
+
+		if (create_info->stage.module != VK_NULL_HANDLE && valid_handles)
 		{
 			work_item.create_info.compute_create_info = create_info;
 			// Pointer to value in std::unordered_map remains fixed per spec (node-based).
