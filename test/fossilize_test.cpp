@@ -603,6 +603,32 @@ static void record_render_passes(StateRecorder &recorder)
 		abort();
 }
 
+static void record_pipelines_pnext_shader(StateRecorder &recorder)
+{
+	VkShaderModuleCreateInfo module = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+	static const uint32_t data[] = { 1, 2, 3 };
+	module.codeSize = sizeof(data);
+	module.pCode = data;
+
+	VkShaderModuleValidationCacheCreateInfoEXT validate_info = { VK_STRUCTURE_TYPE_SHADER_MODULE_VALIDATION_CACHE_CREATE_INFO_EXT };
+	module.pNext = &validate_info;
+
+	VkComputePipelineCreateInfo pipe = { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
+	VkGraphicsPipelineCreateInfo gpipe = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+	pipe.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	pipe.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	pipe.stage.module = VK_NULL_HANDLE;
+	pipe.stage.pName = "foobar";
+	pipe.stage.pNext = &module;
+	gpipe.stageCount = 1;
+	gpipe.pStages = &pipe.stage;
+
+	if (!recorder.record_compute_pipeline(fake_handle<VkPipeline>(1987), pipe, nullptr, 0))
+		abort();
+	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(1988), gpipe, nullptr, 0))
+		abort();
+}
+
 static void record_compute_pipelines(StateRecorder &recorder)
 {
 	VkComputePipelineCreateInfo pipe = { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
@@ -1171,6 +1197,329 @@ static void record_graphics_pipelines_robustness(StateRecorder &recorder)
 			*test.state_word_f32 += 1.0f;
 		hash_and_record(1);
 		if ((hash[0] != hash[1]) != test.variant_in_dynamic_case)
+			abort();
+	}
+}
+
+static void record_graphics_pipeline_libraries(StateRecorder &recorder)
+{
+	VkGraphicsPipelineCreateInfo pipe = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+	pipe.layout = fake_handle<VkPipelineLayout>(10002);
+	pipe.subpass = 1;
+	pipe.renderPass = fake_handle<VkRenderPass>(30001);
+	pipe.stageCount = 2;
+	pipe.flags = VK_PIPELINE_CREATE_LIBRARY_BIT_KHR;
+	VkPipelineShaderStageCreateInfo stages[2] = {};
+	VkShaderModuleCreateInfo module = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+	static const uint32_t code[] = { 1, 2, 3 };
+	module.pCode = code;
+	module.codeSize = sizeof(code);
+	stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	stages[0].pName = "a";
+	stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	stages[1].pName = "b";
+	stages[0].pNext = &module;
+	stages[1].pNext = &module;
+	pipe.pStages = stages;
+
+	// First, test hash invariance. Based on which pipeline state we're creating, we have to ignore some state.
+	VkGraphicsPipelineLibraryCreateInfoEXT library_info = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT };
+	pipe.pNext = &library_info;
+
+	VkPipelineVertexInputStateCreateInfo vi = { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+	VkPipelineInputAssemblyStateCreateInfo ia = { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
+	VkPipelineColorBlendStateCreateInfo cb = { VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
+	VkPipelineMultisampleStateCreateInfo ms = { VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
+	VkPipelineDynamicStateCreateInfo dyn = { VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
+	VkPipelineDepthStencilStateCreateInfo ds = { VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
+	VkPipelineViewportStateCreateInfo vp = { VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
+	VkPipelineRasterizationStateCreateInfo rs = { VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
+	VkPipelineTessellationStateCreateInfo tes = { VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO };
+
+	auto gpipe = pipe;
+	library_info.flags = VK_GRAPHICS_PIPELINE_LIBRARY_VERTEX_INPUT_INTERFACE_BIT_EXT;
+	{
+		Hash baseline_hash = 0;
+		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &baseline_hash))
+			abort();
+		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(1999), gpipe, nullptr, 0))
+			abort();
+
+		// This state must be ignored.
+		set_invalid_pointer(gpipe.pColorBlendState);
+		set_invalid_pointer(gpipe.pMultisampleState);
+		set_invalid_pointer(gpipe.pDepthStencilState);
+		gpipe.subpass = 1932414;
+		set_invalid_pointer(gpipe.pViewportState);
+		set_invalid_pointer(gpipe.pRasterizationState);
+		set_invalid_pointer(gpipe.pTessellationState);
+		set_invalid_pointer(gpipe.pStages);
+		gpipe.stageCount = 3243;
+		gpipe.renderPass = fake_handle<VkRenderPass>(234234234);
+		gpipe.layout = fake_handle<VkPipelineLayout>(234234235);
+
+		// State we care about:
+		// Vertex input state
+		// Input assembly state
+		// Dynamic state
+		Hash hash[4];
+		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &hash[0]))
+			abort();
+		if (hash[0] != baseline_hash)
+			abort();
+		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(1999), gpipe, nullptr, 0))
+			abort();
+		gpipe.pVertexInputState = &vi;
+		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &hash[1]))
+			abort();
+		if (hash[1] == hash[0])
+			abort();
+		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(2000), gpipe, nullptr, 0))
+			abort();
+		gpipe.pInputAssemblyState = &ia;
+		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &hash[2]))
+			abort();
+		if (hash[2] == hash[1])
+			abort();
+		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(2001), gpipe, nullptr, 0))
+			abort();
+		gpipe.pDynamicState = &dyn;
+		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &hash[3]))
+			abort();
+		if (hash[3] == hash[2])
+			abort();
+		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(2002), gpipe, nullptr, 0))
+			abort();
+	}
+
+	gpipe = pipe;
+	library_info.flags = VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_OUTPUT_INTERFACE_BIT_EXT;
+	{
+		Hash baseline_hash = 0;
+		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &baseline_hash))
+			abort();
+		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(1999), gpipe, nullptr, 0))
+			abort();
+
+		// This state must be ignored.
+		set_invalid_pointer(gpipe.pDepthStencilState);
+		set_invalid_pointer(gpipe.pViewportState);
+		set_invalid_pointer(gpipe.pRasterizationState);
+		set_invalid_pointer(gpipe.pTessellationState);
+		set_invalid_pointer(gpipe.pStages);
+		set_invalid_pointer(gpipe.pVertexInputState);
+		set_invalid_pointer(gpipe.pInputAssemblyState);
+		gpipe.stageCount = 3243;
+		gpipe.layout = fake_handle<VkPipelineLayout>(234234235);
+
+		// State we care about:
+		// Multisampling
+		// ColorBlend
+		// Renderpass / subpass
+		Hash hash[4];
+		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &hash[0]))
+			abort();
+		if (hash[0] != baseline_hash)
+			abort();
+		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(1999), gpipe, nullptr, 0))
+			abort();
+		gpipe.pMultisampleState = &ms;
+		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &hash[1]))
+			abort();
+		if (hash[1] == hash[0])
+			abort();
+		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(2000), gpipe, nullptr, 0))
+			abort();
+		gpipe.pColorBlendState = &cb;
+		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &hash[2]))
+			abort();
+		if (hash[2] == hash[1])
+			abort();
+		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(2001), gpipe, nullptr, 0))
+			abort();
+		gpipe.subpass = 0;
+		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &hash[3]))
+			abort();
+		if (hash[3] == hash[2])
+			abort();
+		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(2001), gpipe, nullptr, 0))
+			abort();
+	}
+
+	gpipe = pipe;
+	library_info.flags = VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT;
+	{
+		gpipe.renderPass = VK_NULL_HANDLE;
+
+		Hash baseline_hash = 0;
+		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &baseline_hash))
+			abort();
+		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(1999), gpipe, nullptr, 0))
+			abort();
+
+		// This state must be ignored.
+		set_invalid_pointer(gpipe.pColorBlendState);
+		set_invalid_pointer(gpipe.pViewportState);
+		set_invalid_pointer(gpipe.pRasterizationState);
+		set_invalid_pointer(gpipe.pTessellationState);
+		set_invalid_pointer(gpipe.pVertexInputState);
+		set_invalid_pointer(gpipe.pInputAssemblyState);
+
+		// State we care about:
+		// Layout
+		// Multisampling
+		// Renderpass / subpass
+		// Depth-stencil
+		// Shaders
+		Hash hash[6];
+		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &hash[0]))
+			abort();
+		if (hash[0] != baseline_hash)
+			abort();
+		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(2000), gpipe, nullptr, 0))
+			abort();
+		gpipe.layout = VK_NULL_HANDLE;
+		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &hash[1]))
+			abort();
+		if (hash[1] == hash[0])
+			abort();
+		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(2001), gpipe, nullptr, 0))
+			abort();
+		gpipe.pMultisampleState = &ms;
+		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &hash[2]))
+			abort();
+		if (hash[2] == hash[1])
+			abort();
+		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(2002), gpipe, nullptr, 0))
+			abort();
+		gpipe.subpass = 0;
+		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &hash[3]))
+			abort();
+		if (hash[3] == hash[2])
+			abort();
+		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(2003), gpipe, nullptr, 0))
+			abort();
+		gpipe.pDepthStencilState = &ds;
+		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &hash[4]))
+			abort();
+		if (hash[4] == hash[3])
+			abort();
+		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(2004), gpipe, nullptr, 0))
+			abort();
+		stages[0].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &hash[5]))
+			abort();
+		if (hash[5] == hash[4])
+			abort();
+		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(2005), gpipe, nullptr, 0))
+			abort();
+	}
+
+	gpipe = pipe;
+	library_info.flags = VK_GRAPHICS_PIPELINE_LIBRARY_PRE_RASTERIZATION_SHADERS_BIT_EXT;
+	{
+		Hash baseline_hash = 0;
+		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &baseline_hash))
+			abort();
+		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(1999), gpipe, nullptr, 0))
+			abort();
+
+		// This state must be ignored.
+		set_invalid_pointer(gpipe.pColorBlendState);
+		set_invalid_pointer(gpipe.pMultisampleState);
+		set_invalid_pointer(gpipe.pDepthStencilState);
+		set_invalid_pointer(gpipe.pVertexInputState);
+		set_invalid_pointer(gpipe.pInputAssemblyState);
+
+		// State we care about:
+		// Layout
+		// Viewport
+		// Renderpass / subpass
+		// Rasterization
+		// Tessellation
+		// Shaders
+		Hash hash[7];
+		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &hash[0]))
+			abort();
+		if (hash[0] != baseline_hash)
+			abort();
+		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(2000), gpipe, nullptr, 0))
+			abort();
+		gpipe.layout = VK_NULL_HANDLE;
+		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &hash[1]))
+			abort();
+		if (hash[1] == hash[0])
+			abort();
+		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(2001), gpipe, nullptr, 0))
+			abort();
+		gpipe.pViewportState = &vp;
+		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &hash[2]))
+			abort();
+		if (hash[2] == hash[1])
+			abort();
+		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(2002), gpipe, nullptr, 0))
+			abort();
+		gpipe.subpass = 0;
+		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &hash[3]))
+			abort();
+		if (hash[3] == hash[2])
+			abort();
+		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(2003), gpipe, nullptr, 0))
+			abort();
+		gpipe.pRasterizationState = &rs;
+		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &hash[4]))
+			abort();
+		if (hash[4] == hash[3])
+			abort();
+		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(2004), gpipe, nullptr, 0))
+			abort();
+		stages[0].stage = VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT;
+		gpipe.pTessellationState = &tes;
+		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &hash[5]))
+			abort();
+		if (hash[5] == hash[4])
+			abort();
+		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(2005), gpipe, nullptr, 0))
+			abort();
+		stages[0].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &hash[6]))
+			abort();
+		if (hash[6] == hash[5])
+			abort();
+		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(2006), gpipe, nullptr, 0))
+			abort();
+	}
+
+	gpipe = pipe;
+	{
+		gpipe.flags = VK_PIPELINE_CREATE_LINK_TIME_OPTIMIZATION_BIT_EXT;
+		VkPipelineLibraryCreateInfoKHR libs = { VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR };
+		VkPipeline libraries[4] = {
+			fake_handle<VkPipeline>(1999),
+			fake_handle<VkPipeline>(2000),
+			fake_handle<VkPipeline>(2001),
+			fake_handle<VkPipeline>(2002),
+		};
+		libs.libraryCount = 3;
+		libs.pLibraries = libraries;
+		gpipe.pNext = &libs;
+
+		Hash hash[3];
+		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &hash[0]))
+			abort();
+		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(3000), gpipe, nullptr, 0))
+			abort();
+		libs.libraryCount = 4;
+		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &hash[1]))
+			abort();
+		if (hash[0] == hash[1])
+			abort();
+		libraries[3] = fake_handle<VkPipeline>(2003);
+		if (!Hashing::compute_hash_graphics_pipeline(recorder, gpipe, &hash[2]))
+			abort();
+		if (hash[2] == hash[1])
+			abort();
+		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(3001), gpipe, nullptr, 0))
 			abort();
 	}
 }
@@ -2853,6 +3202,62 @@ static bool test_logging()
 	return true;
 }
 
+static bool test_pnext_shader_module_hashing()
+{
+	StateRecorder recorder;
+
+	static const uint32_t code[] = { 1, 2, 3 };
+	VkShaderModuleCreateInfo module = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+	module.pCode = code;
+	module.codeSize = sizeof(code);
+
+	if (!recorder.record_shader_module(fake_handle<VkShaderModule>(1), module))
+		return false;
+
+	VkComputePipelineCreateInfo pso = { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
+	VkGraphicsPipelineCreateInfo gpso = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+	pso.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	pso.stage.module = fake_handle<VkShaderModule>(1);
+	pso.stage.pName = "main";
+	gpso.stageCount = 1;
+	gpso.pStages = &pso.stage;
+
+	Hash hash_graphics0 = 0, hash_graphics1 = 0;
+	Hash hash_compute0 = 0, hash_compute1 = 0;
+	if (!Hashing::compute_hash_compute_pipeline(recorder, pso, &hash_compute0))
+		return false;
+	if (!Hashing::compute_hash_graphics_pipeline(recorder, gpso, &hash_graphics0))
+		return false;
+
+	pso.stage.pNext = &module;
+	pso.stage.module = VK_NULL_HANDLE;
+
+	if (!Hashing::compute_hash_compute_pipeline(recorder, pso, &hash_compute1))
+		return false;
+	if (!Hashing::compute_hash_graphics_pipeline(recorder, gpso, &hash_graphics1))
+		return false;
+
+	if (hash_compute0 != hash_compute1)
+		return false;
+	if (hash_graphics0 != hash_graphics1)
+		return false;
+
+	VkShaderModuleValidationCacheCreateInfoEXT validation_info = { VK_STRUCTURE_TYPE_SHADER_MODULE_VALIDATION_CACHE_CREATE_INFO_EXT };
+	module.pNext = &validation_info;
+	Hash hash_compute2 = 0, hash_graphics2 = 0;
+	if (!Hashing::compute_hash_compute_pipeline(recorder, pso, &hash_compute2))
+		return false;
+	if (!Hashing::compute_hash_graphics_pipeline(recorder, gpso, &hash_graphics2))
+		return false;
+
+	if (hash_compute1 != hash_compute2)
+		return false;
+	if (hash_graphics1 != hash_graphics2)
+		return false;
+
+	return true;
+}
+
 static bool test_pdf_recording(const void *device_pnext, Hash &hash)
 {
 	hash = 0;
@@ -2986,6 +3391,8 @@ int main()
 		return EXIT_FAILURE;
 	if (!test_logging())
 		return EXIT_FAILURE;
+	if (!test_pnext_shader_module_hashing())
+		return EXIT_FAILURE;
 
 	if (!test_pdf_recording())
 		return EXIT_FAILURE;
@@ -3015,6 +3422,8 @@ int main()
 		record_render_passes2(recorder);
 		record_compute_pipelines(recorder);
 		record_graphics_pipelines(recorder);
+		record_graphics_pipeline_libraries(recorder);
+		record_pipelines_pnext_shader(recorder);
 		record_raytracing_pipelines(recorder);
 		record_graphics_pipelines_robustness(recorder);
 

@@ -83,6 +83,7 @@ struct VulkanFeatures
 	VkPhysicalDeviceMutableDescriptorTypeFeaturesVALVE mutable_descriptor_type_valve;
 	VkPhysicalDeviceRobustness2FeaturesEXT robustness2;
 	VkPhysicalDeviceImageRobustnessFeaturesEXT image_robustness;
+	VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT graphics_pipeline_library;
 	VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV fragment_shading_rate_enums;
 };
 
