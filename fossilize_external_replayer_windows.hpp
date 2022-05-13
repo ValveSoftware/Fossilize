@@ -476,17 +476,25 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 	}
 
 	std::string cmdline;
-	cmdline += "\"";
-	if (options.external_replayer_path)
-		cmdline += options.external_replayer_path;
-	else
-		cmdline += Path::get_executable_path();
-	cmdline += "\"";
 
-	if (options.external_replayer_extra_path)
+	if (options.num_external_replayer_arguments)
 	{
-		cmdline += " \"";
-		cmdline += options.external_replayer_extra_path;
+		for (unsigned i = 0; i < options.num_external_replayer_arguments; i++)
+		{
+			if (i != 0)
+				cmdline += " ";
+			cmdline += "\"";
+			cmdline += options.external_replayer_arguments[i];
+			cmdline += "\"";
+		}
+	}
+	else
+	{
+		cmdline += "\"";
+		if (options.external_replayer_path)
+			cmdline += options.external_replayer_path;
+		else
+			cmdline += Path::get_executable_path();
 		cmdline += "\"";
 	}
 
