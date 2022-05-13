@@ -596,23 +596,23 @@ void ExternalReplayer::Impl::start_replayer_process(const ExternalReplayer::Opti
 	char num_thread_holder[16];
 
 	std::string self_path;
-	if (!options.external_replayer_path)
+	std::vector<const char *> argv;
+	if (options.num_external_replayer_arguments)
+	{
+		for (unsigned i = 0; i < options.num_external_replayer_arguments; i++)
+			argv.push_back(options.external_replayer_arguments[i]);
+	}
+	else if (options.external_replayer_path)
+		argv.push_back(options.external_replayer_path);
+	else
 	{
 #ifdef __linux__
 		self_path = "/proc/self/exe";
 #else
 		self_path = Path::get_executable_path();
 #endif
-	}
-
-	std::vector<const char *> argv;
-	if (options.external_replayer_path)
-		argv.push_back(options.external_replayer_path);
-	else
 		argv.push_back(self_path.c_str());
-
-	if (options.external_replayer_extra_path)
-		argv.push_back(options.external_replayer_extra_path);
+	}
 
 	for (unsigned i = 0; i < options.num_databases; i++)
 		argv.push_back(options.databases[i]);
@@ -791,8 +791,7 @@ void ExternalReplayer::Impl::start_replayer_process(const ExternalReplayer::Opti
 	for (unsigned i = 0; i < options.num_environment_variables; i++)
 		setenv(options.environment_variables[i].key, options.environment_variables[i].value, 1);
 
-	if (execv(options.external_replayer_path ? options.external_replayer_path : self_path.c_str(),
-	          const_cast<char * const*>(argv.data())) < 0)
+	if (execv(argv[0], const_cast<char * const*>(argv.data())) < 0)
 	{
 		LOGE("Failed to start external process %s with execv.\n", options.external_replayer_path);
 		exit(errno);
