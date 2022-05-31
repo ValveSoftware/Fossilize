@@ -141,6 +141,8 @@ struct PruneReplayer : StateCreatorInterface
 
 	void access_descriptor_set(Hash hash)
 	{
+		if (!hash)
+			return;
 		if (accessed_descriptor_sets.count(hash))
 			return;
 		accessed_descriptor_sets.insert(hash);
@@ -163,6 +165,8 @@ struct PruneReplayer : StateCreatorInterface
 
 	void access_pipeline_layout(Hash hash)
 	{
+		if (!hash)
+			return;
 		if (accessed_pipeline_layouts.count(hash))
 			return;
 		accessed_pipeline_layouts.insert(hash);
@@ -292,7 +296,8 @@ struct PruneReplayer : StateCreatorInterface
 			if (allow_pipeline)
 			{
 				access_pipeline_layout((Hash) create_info->layout);
-				accessed_render_passes.insert((Hash) create_info->renderPass);
+				if (create_info->renderPass != VK_NULL_HANDLE)
+					accessed_render_passes.insert((Hash) create_info->renderPass);
 				for (uint32_t stage = 0; stage < create_info->stageCount; stage++)
 					accessed_shader_modules.insert((Hash) create_info->pStages[stage].module);
 				accessed_graphics_pipelines.insert(hash);
