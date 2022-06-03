@@ -63,6 +63,13 @@
 using namespace Fossilize;
 using namespace std;
 
+#ifndef FOSSILIZE_REPLAY_WRAPPER_ENV
+#define FOSSILIZE_REPLAY_WRAPPER_ENV "FOSSILIZE_REPLAY_WRAPPER"
+#endif
+#ifndef FOSSILIZE_REPLAY_WRAPPER_ORIGINAL_APP_ENV
+#define FOSSILIZE_REPLAY_WRAPPER_ORIGINAL_APP_ENV "FOSSILIZE_REPLAY_WRAPPER_ORIGINAL_APP"
+#endif
+
 //#define SIMULATE_UNSTABLE_DRIVER
 //#define SIMULATE_SPURIOUS_DEADLOCK
 
@@ -3818,6 +3825,14 @@ int main(int argc, char *argv[])
 #endif
 
 	bool log_memory = false;
+
+        // If a wrapper is specified, pass execution entirely to the wrapper.
+        const char *wrapper_path = getenv(FOSSILIZE_REPLAY_WRAPPER_ENV);
+        if (wrapper_path && *wrapper_path)
+        {
+                dispatch_to_replay_wrapper(wrapper_path, argv);
+                // If execution fails, just continue on normally.
+        }
 
 	CLICallbacks cbs;
 	cbs.default_handler = [&](const char *arg) { databases.push_back(arg); };
