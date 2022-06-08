@@ -1244,8 +1244,7 @@ static void log_process_memory()
 }
 
 // Wrapper not supported.
-static void dispatch_to_replay_wrapper(const char *wrapper_path,
-                                       char *const argv[])
+static void dispatch_to_replay_wrapper(const char *wrapper_path, char *const argv[])
 {
-        LOGE("Replay wrapper not supported on platform.\n");
+	LOGE("Replay wrapper not supported on platform.\n");
 }

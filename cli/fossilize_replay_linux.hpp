@@ -1542,14 +1542,10 @@ static void log_process_memory()
 
 // Attempt to dispatch to a replay wrapper which is never expected to return.
 // Wrapper is responsible for clearing the environment to prevent loops.
-static void dispatch_to_replay_wrapper(const char *wrapper_path,
-                                       char *const argv[])
+static void dispatch_to_replay_wrapper(const char *wrapper_path, char *const argv[])
 {
-        string exec_path = Path::get_executable_path();
-        if (exec_path.length())
-        {
-                setenv(FOSSILIZE_REPLAY_WRAPPER_ORIGINAL_APP_ENV,
-                       exec_path.c_str(), 1);
-        }
-        execvp(wrapper_path, argv);
+	string exec_path = Path::get_executable_path();
+	if (!exec_path.empty())
+		setenv(FOSSILIZE_REPLAY_WRAPPER_ORIGINAL_APP_ENV, exec_path.c_str(), 1);
+	execvp(wrapper_path, argv);
 }
