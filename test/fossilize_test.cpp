@@ -497,9 +497,9 @@ static void record_render_passes2(StateRecorder &recorder)
 	VkMemoryBarrier2KHR memory_barrier2 =
 			{ VK_STRUCTURE_TYPE_MEMORY_BARRIER_2_KHR };
 	memory_barrier2.pNext = nullptr;
-	memory_barrier2.srcStageMask = 10;
+	memory_barrier2.srcStageMask = 10ull << 32;
 	memory_barrier2.srcAccessMask = 34;
-	memory_barrier2.dstStageMask = 199;
+	memory_barrier2.dstStageMask = 199ull << 32;
 	memory_barrier2.dstAccessMask = 49;
 	deps[0].pNext = &memory_barrier2;
 

@@ -1056,10 +1056,10 @@ static void hash_pnext_struct(const StateRecorder *,
                               Hasher &h,
                               const VkMemoryBarrier2KHR &info)
 {
-	h.u32(info.srcStageMask);
-	h.u32(info.srcAccessMask);
-	h.u32(info.dstStageMask);
-	h.u32(info.dstAccessMask);
+	h.u64(info.srcStageMask);
+	h.u64(info.srcAccessMask);
+	h.u64(info.dstStageMask);
+	h.u64(info.dstAccessMask);
 }
 
 static void hash_pnext_struct(const StateRecorder *,
@@ -4081,10 +4081,10 @@ bool StateReplayer::Impl::parse_memory_barrier2(const Value &state,
 	auto *info = allocator.allocate_cleared<VkMemoryBarrier2KHR>();
 	*out_info = info;
 
-	info->srcStageMask = static_cast<VkPipelineStageFlags2KHR>(state["srcStageMask"].GetUint());
-	info->srcAccessMask = static_cast<VkAccessFlags2KHR>(state["srcAccessMask"].GetUint());
-	info->dstStageMask = static_cast<VkPipelineStageFlags2KHR>(state["dstStageMask"].GetUint());
-	info->dstAccessMask = static_cast<VkAccessFlags2KHR>(state["dstAccessMask"].GetUint());
+	info->srcStageMask = static_cast<VkPipelineStageFlags2KHR>(state["srcStageMask"].GetUint64());
+	info->srcAccessMask = static_cast<VkAccessFlags2KHR>(state["srcAccessMask"].GetUint64());
+	info->dstStageMask = static_cast<VkPipelineStageFlags2KHR>(state["dstStageMask"].GetUint64());
+	info->dstAccessMask = static_cast<VkAccessFlags2KHR>(state["dstAccessMask"].GetUint64());
 
 	return true;
 }

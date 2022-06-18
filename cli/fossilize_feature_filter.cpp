@@ -1495,7 +1495,7 @@ bool FeatureFilter::Impl::validate_module_capabilities(const uint32_t *data, siz
 		return false;
 	}
 
-	unsigned num_words = size >> 2;
+	auto num_words = unsigned(size >> 2);
 	if (data[0] != spv::MagicNumber)
 	{
 		LOGE("Invalid magic number of module.\n");
