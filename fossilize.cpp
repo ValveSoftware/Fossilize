@@ -262,6 +262,8 @@ struct StateReplayer::Impl
 			const Value &pipelines,
 			const Value &state, ResourceTag tag,
 			VkPipelineLibraryCreateInfoKHR **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_viewport_depth_clip_control(
+			const Value &state, VkPipelineViewportDepthClipControlCreateInfoEXT **clip) FOSSILIZE_WARN_UNUSED;
 	bool parse_uints(const Value &attachments, const uint32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	bool parse_sints(const Value &attachments, const int32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	const char *duplicate_string(const char *str, size_t len);
@@ -429,6 +431,8 @@ struct StateRecorder::Impl
 	void *copy_pnext_struct(const VkGraphicsPipelineLibraryCreateInfoEXT *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPipelineLibraryCreateInfoKHR *create_info,
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkPipelineViewportDepthClipControlCreateInfoEXT *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 
 	bool remap_sampler_handle(VkSampler sampler, VkSampler *out_sampler) const FOSSILIZE_WARN_UNUSED;
@@ -1149,6 +1153,13 @@ static bool hash_pnext_struct(const StateRecorder *recorder,
 	return true;
 }
 
+static void hash_pnext_struct(const StateRecorder *,
+                              Hasher &h,
+                              const VkPipelineViewportDepthClipControlCreateInfoEXT &info)
+{
+	h.u32(info.negativeOneToOne);
+}
+
 static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const void *pNext,
                              const DynamicStateInfo *dynamic_state_info)
 {
@@ -1280,6 +1291,10 @@ static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const voi
 		case VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR:
 			if (!hash_pnext_struct(recorder, h, *static_cast<const VkPipelineLibraryCreateInfoKHR *>(pNext)))
 				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_DEPTH_CLIP_CONTROL_CREATE_INFO_EXT:
+			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineViewportDepthClipControlCreateInfoEXT *>(pNext));
 			break;
 
 		default:
@@ -4260,6 +4275,15 @@ bool StateReplayer::Impl::parse_sampler_ycbcr_conversion(const Value &state,
 	return true;
 }
 
+bool StateReplayer::Impl::parse_viewport_depth_clip_control(const Value &state,
+                                                            VkPipelineViewportDepthClipControlCreateInfoEXT **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkPipelineViewportDepthClipControlCreateInfoEXT>();
+	*out_info = info;
+	info->negativeOneToOne = state["negativeOneToOne"].GetUint();
+	return true;
+}
+
 bool StateReplayer::Impl::parse_mutable_descriptor_type(const Value &state,
                                                         VkMutableDescriptorTypeCreateInfoVALVE **out_info)
 {
@@ -4593,6 +4617,15 @@ bool StateReplayer::Impl::parse_pnext_chain(
 			if (!parse_pipeline_library(*iface, resolver, *pipelines, next, RESOURCE_GRAPHICS_PIPELINE, &library))
 				return false;
 			new_struct = reinterpret_cast<VkBaseInStructure *>(library);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_DEPTH_CLIP_CONTROL_CREATE_INFO_EXT:
+		{
+			VkPipelineViewportDepthClipControlCreateInfoEXT *clip = nullptr;
+			if (!parse_viewport_depth_clip_control(next, &clip))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(clip);
 			break;
 		}
 
@@ -5176,6 +5209,13 @@ void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineLibraryCreateInfoKH
 	return libraries;
 }
 
+void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineViewportDepthClipControlCreateInfoEXT *create_info,
+                                             ScratchAllocator &alloc)
+{
+	auto *clip = copy(create_info, 1, alloc);
+	return clip;
+}
+
 template <typename T>
 bool StateRecorder::Impl::copy_pnext_chains(const T *ts, uint32_t count, ScratchAllocator &alloc,
                                             const DynamicStateInfo *dynamic_state_info)
@@ -5423,6 +5463,13 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 		case VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR:
 		{
 			auto *ci = static_cast<const VkPipelineLibraryCreateInfoKHR *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_DEPTH_CLIP_CONTROL_CREATE_INFO_EXT:
+		{
+			auto *ci = static_cast<const VkPipelineViewportDepthClipControlCreateInfoEXT *>(pNext);
 			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
 			break;
 		}
@@ -8012,6 +8059,17 @@ static bool json_value(const VkPipelineLibraryCreateInfoKHR &create_info, Alloca
 }
 
 template <typename Allocator>
+static bool json_value(const VkPipelineViewportDepthClipControlCreateInfoEXT &create_info,
+                       Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("negativeOneToOne", create_info.negativeOneToOne, alloc);
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
 static bool json_value(const VkSubpassDescriptionDepthStencilResolve &create_info, Allocator &alloc, Value *out_value);
 template <typename Allocator>
 static bool json_value(const VkFragmentShadingRateAttachmentInfoKHR &create_info, Allocator &alloc, Value *out_value);
@@ -8172,6 +8230,11 @@ static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *o
 
 		case VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR:
 			if (!json_value(*static_cast<const VkPipelineLibraryCreateInfoKHR *>(pNext), alloc, true, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_DEPTH_CLIP_CONTROL_CREATE_INFO_EXT:
+			if (!json_value(*static_cast<const VkPipelineViewportDepthClipControlCreateInfoEXT *>(pNext), alloc, &next))
 				return false;
 			break;
 

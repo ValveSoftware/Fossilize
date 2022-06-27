@@ -1811,6 +1811,15 @@ static void record_graphics_pipelines(StateRecorder &recorder)
 	sample_location.sampleLocationsEnable = VK_TRUE;
 	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100006), pipe, nullptr, 0))
 		abort();
+
+	VkPipelineViewportDepthClipControlCreateInfoEXT clip_control = { VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_DEPTH_CLIP_CONTROL_CREATE_INFO_EXT };
+	clip_control.negativeOneToOne = VK_FALSE;
+	vp.pNext = &clip_control;
+	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100007), pipe, nullptr, 0))
+		abort();
+	clip_control.negativeOneToOne = VK_TRUE;
+	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100008), pipe, nullptr, 0))
+		abort();
 }
 
 static void record_raytracing_pipelines(StateRecorder &recorder)
