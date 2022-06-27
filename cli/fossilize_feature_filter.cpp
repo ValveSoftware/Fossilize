@@ -846,6 +846,29 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 			break;
 		}
 
+		case VK_STRUCTURE_TYPE_PIPELINE_SAMPLE_LOCATIONS_STATE_CREATE_INFO_EXT:
+		{
+			if (!enabled_extensions.count(VK_EXT_SAMPLE_LOCATIONS_EXTENSION_NAME))
+				return false;
+
+			auto *info = static_cast<const VkPipelineSampleLocationsStateCreateInfoEXT *>(pNext);
+			// If count is 0, this is part of dynamic state, so just ignore it.
+			if (!info->sampleLocationsEnable || info->sampleLocationsInfo.sampleLocationsCount == 0)
+				break;
+
+			if (info->sampleLocationsInfo.sampleLocationGridSize.width > props.sample_locations.maxSampleLocationGridSize.width ||
+			    info->sampleLocationsInfo.sampleLocationGridSize.height > props.sample_locations.maxSampleLocationGridSize.height)
+			{
+				return false;
+			}
+
+			if ((props.sample_locations.sampleLocationSampleCounts & info->sampleLocationsInfo.sampleLocationsPerPixel) == 0)
+				return false;
+
+			// Sample positions are clamped by implementation.
+			break;
+		}
+
 		default:
 			LOGE("Unrecognized pNext sType: %u. Treating as unsupported.\n", unsigned(base->sType));
 			return false;
