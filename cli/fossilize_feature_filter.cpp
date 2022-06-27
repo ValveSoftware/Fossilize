@@ -1452,8 +1452,8 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 		return features.compute_shader_derivatives.computeDerivativeGroupQuads == VK_TRUE;
 	case spv::CapabilityComputeDerivativeGroupLinearNV:
 		return features.compute_shader_derivatives.computeDerivativeGroupLinear == VK_TRUE;
-	case spv::CapabilityFragmentBarycentricNV:
-		return features.barycentric_nv.fragmentShaderBarycentric == VK_TRUE;
+	case spv::CapabilityFragmentBarycentricKHR:
+		return features.barycentric.fragmentShaderBarycentric == VK_TRUE;
 	case spv::CapabilityImageFootprintNV:
 		return features.image_footprint_nv.imageFootprint == VK_TRUE;
 	case spv::CapabilityFragmentDensityEXT:
