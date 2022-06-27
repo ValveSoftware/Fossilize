@@ -3212,6 +3212,10 @@ bool StateReplayer::Impl::parse_depth_stencil_state(const Value &ds, const VkPip
 	state->back.reference = ds["back"]["reference"].GetUint();
 	state->back.writeMask = ds["back"]["writeMask"].GetUint();
 
+	if (ds.HasMember("pNext"))
+		if (!parse_pnext_chain(ds["pNext"], &state->pNext))
+			return false;
+
 	*out_info = state;
 	return true;
 }
@@ -3263,6 +3267,10 @@ bool StateReplayer::Impl::parse_input_assembly_state(const Value &ia, const VkPi
 	state->flags = ia["flags"].GetUint();
 	state->primitiveRestartEnable = ia["primitiveRestartEnable"].GetUint();
 	state->topology = static_cast<VkPrimitiveTopology>(ia["topology"].GetUint());
+
+	if (ia.HasMember("pNext"))
+		if (!parse_pnext_chain(ia["pNext"], &state->pNext))
+			return false;
 
 	*out_info = state;
 	return true;
@@ -3455,6 +3463,10 @@ bool StateReplayer::Impl::parse_viewport_state(const Value &vp, const VkPipeline
 	state->viewportCount = vp["viewportCount"].GetUint();
 	if (vp.HasMember("viewports"))
 		if (!parse_viewports(vp["viewports"], &state->pViewports))
+			return false;
+
+	if (vp.HasMember("pNext"))
+		if (!parse_pnext_chain(vp["pNext"], &state->pNext))
 			return false;
 
 	*out_info = state;
@@ -8869,6 +8881,8 @@ static bool json_value(const VkGraphicsPipelineCreateInfo &pipe,
 		ia.AddMember("flags", pipe.pInputAssemblyState->flags, alloc);
 		ia.AddMember("topology", pipe.pInputAssemblyState->topology, alloc);
 		ia.AddMember("primitiveRestartEnable", pipe.pInputAssemblyState->primitiveRestartEnable, alloc);
+		if (!pnext_chain_add_json_value(ia, *pipe.pInputAssemblyState, alloc, &dynamic_info))
+			return false;
 		p.AddMember("inputAssemblyState", ia, alloc);
 	}
 
@@ -8959,6 +8973,8 @@ static bool json_value(const VkGraphicsPipelineCreateInfo &pipe,
 			}
 			vp.AddMember("scissors", scissors, alloc);
 		}
+		if (!pnext_chain_add_json_value(vp, *pipe.pViewportState, alloc, &dynamic_info))
+			return false;
 		p.AddMember("viewportState", vp, alloc);
 	}
 
@@ -8989,6 +9005,8 @@ static bool json_value(const VkGraphicsPipelineCreateInfo &pipe,
 		serialize_stencil(back, pipe.pDepthStencilState->back);
 		ds.AddMember("front", front, alloc);
 		ds.AddMember("back", back, alloc);
+		if (!pnext_chain_add_json_value(ds, *pipe.pDepthStencilState, alloc, &dynamic_info))
+			return false;
 		p.AddMember("depthStencilState", ds, alloc);
 	}
 
