@@ -74,7 +74,7 @@ struct VulkanFeatures
 	VkPhysicalDeviceProvokingVertexFeaturesEXT provoking_vertex;
 	VkPhysicalDeviceCustomBorderColorFeaturesEXT custom_border_color;
 	VkPhysicalDeviceComputeShaderDerivativesFeaturesNV compute_shader_derivatives;
-	VkPhysicalDeviceFragmentShaderBarycentricFeaturesNV barycentric_nv;
+	VkPhysicalDeviceFragmentShaderBarycentricFeaturesKHR barycentric;
 	VkPhysicalDeviceShaderImageFootprintFeaturesNV image_footprint_nv;
 	VkPhysicalDeviceShadingRateImageFeaturesNV shading_rate_nv;
 	VkPhysicalDeviceCooperativeMatrixFeaturesNV cooperative_matrix_nv;
@@ -85,6 +85,7 @@ struct VulkanFeatures
 	VkPhysicalDeviceImageRobustnessFeaturesEXT image_robustness;
 	VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT graphics_pipeline_library;
 	VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV fragment_shading_rate_enums;
+	VkPhysicalDeviceDepthClipControlFeaturesEXT depth_clip_control;
 };
 
 void *build_pnext_chain(VulkanFeatures &features, uint32_t api_version,
@@ -108,6 +109,7 @@ struct VulkanProperties
 	VkPhysicalDeviceRayTracingPipelinePropertiesKHR ray_tracing_pipeline;
 	VkPhysicalDeviceAccelerationStructurePropertiesKHR acceleration_structure;
 	VkPhysicalDevicePushDescriptorPropertiesKHR push_descriptor;
+	VkPhysicalDeviceSampleLocationsPropertiesEXT sample_locations;
 };
 
 void *build_pnext_chain(VulkanProperties &properties, uint32_t api_version,

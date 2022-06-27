@@ -32,3 +32,4 @@ PE(SUBGROUP_SIZE_CONTROL, subgroup_size_control, EXT);
 PE(INLINE_UNIFORM_BLOCK, inline_uniform_block, EXT);
 PE(VERTEX_ATTRIBUTE_DIVISOR, attribute_divisor, EXT);
 PE(PUSH_DESCRIPTOR, push_descriptor, KHR);
+PE(SAMPLE_LOCATIONS, sample_locations, EXT);

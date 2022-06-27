@@ -846,6 +846,40 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 			break;
 		}
 
+		case VK_STRUCTURE_TYPE_PIPELINE_SAMPLE_LOCATIONS_STATE_CREATE_INFO_EXT:
+		{
+			if (!enabled_extensions.count(VK_EXT_SAMPLE_LOCATIONS_EXTENSION_NAME))
+				return false;
+
+			auto *info = static_cast<const VkPipelineSampleLocationsStateCreateInfoEXT *>(pNext);
+			// If count is 0, this is part of dynamic state, so just ignore it.
+			if (!info->sampleLocationsEnable || info->sampleLocationsInfo.sampleLocationsCount == 0)
+				break;
+
+			if (info->sampleLocationsInfo.sampleLocationGridSize.width > props.sample_locations.maxSampleLocationGridSize.width ||
+			    info->sampleLocationsInfo.sampleLocationGridSize.height > props.sample_locations.maxSampleLocationGridSize.height)
+			{
+				return false;
+			}
+
+			if ((props.sample_locations.sampleLocationSampleCounts & info->sampleLocationsInfo.sampleLocationsPerPixel) == 0)
+				return false;
+
+			// Sample positions are clamped by implementation.
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_DEPTH_CLIP_CONTROL_CREATE_INFO_EXT:
+		{
+			if (!enabled_extensions.count(VK_EXT_DEPTH_CLIP_CONTROL_EXTENSION_NAME) ||
+			    !features.depth_clip_control.depthClipControl)
+			{
+				return false;
+			}
+
+			break;
+		}
+
 		default:
 			LOGE("Unrecognized pNext sType: %u. Treating as unsupported.\n", unsigned(base->sType));
 			return false;
@@ -1418,8 +1452,8 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 		return features.compute_shader_derivatives.computeDerivativeGroupQuads == VK_TRUE;
 	case spv::CapabilityComputeDerivativeGroupLinearNV:
 		return features.compute_shader_derivatives.computeDerivativeGroupLinear == VK_TRUE;
-	case spv::CapabilityFragmentBarycentricNV:
-		return features.barycentric_nv.fragmentShaderBarycentric == VK_TRUE;
+	case spv::CapabilityFragmentBarycentricKHR:
+		return features.barycentric.fragmentShaderBarycentric == VK_TRUE;
 	case spv::CapabilityImageFootprintNV:
 		return features.image_footprint_nv.imageFootprint == VK_TRUE;
 	case spv::CapabilityFragmentDensityEXT:

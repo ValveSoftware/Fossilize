@@ -136,6 +136,7 @@ struct DynamicStateInfo
 	bool depth_bias_enable;
 	bool discard_rectangle;
 	bool fragment_shading_rate;
+	bool sample_locations;
 };
 
 static VkPipelineCreateFlags normalize_pipeline_creation_flags(VkPipelineCreateFlags flags)
@@ -245,6 +246,7 @@ struct StateReplayer::Impl
 	bool parse_fragment_shading_rate_features(const Value &state, VkPhysicalDeviceFragmentShadingRateFeaturesKHR **out_features) FOSSILIZE_WARN_UNUSED;
 
 	bool parse_color_write(const Value &state, VkPipelineColorWriteCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_sample_locations(const Value &state, VkPipelineSampleLocationsStateCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_provoking_vertex(const Value &state, VkPipelineRasterizationProvokingVertexStateCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_sampler_custom_border_color(const Value &state, VkSamplerCustomBorderColorCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_sampler_reduction_mode(const Value &state, VkSamplerReductionModeCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
@@ -260,6 +262,8 @@ struct StateReplayer::Impl
 			const Value &pipelines,
 			const Value &state, ResourceTag tag,
 			VkPipelineLibraryCreateInfoKHR **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_viewport_depth_clip_control(
+			const Value &state, VkPipelineViewportDepthClipControlCreateInfoEXT **clip) FOSSILIZE_WARN_UNUSED;
 	bool parse_uints(const Value &attachments, const uint32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	bool parse_sints(const Value &attachments, const int32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	const char *duplicate_string(const char *str, size_t len);
@@ -404,6 +408,9 @@ struct StateRecorder::Impl
 	void *copy_pnext_struct(const VkPipelineColorWriteCreateInfoEXT *create_info,
 	                        ScratchAllocator &alloc,
 	                        const DynamicStateInfo *dynamic_state_info) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkPipelineSampleLocationsStateCreateInfoEXT *create_info,
+	                        ScratchAllocator &alloc,
+	                        const DynamicStateInfo *dynamic_state_info) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPipelineRasterizationProvokingVertexStateCreateInfoEXT *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkSamplerCustomBorderColorCreateInfoEXT *create_info,
@@ -424,6 +431,8 @@ struct StateRecorder::Impl
 	void *copy_pnext_struct(const VkGraphicsPipelineLibraryCreateInfoEXT *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPipelineLibraryCreateInfoKHR *create_info,
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkPipelineViewportDepthClipControlCreateInfoEXT *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 
 	bool remap_sampler_handle(VkSampler sampler, VkSampler *out_sampler) const FOSSILIZE_WARN_UNUSED;
@@ -994,6 +1003,33 @@ static void hash_pnext_struct(const StateRecorder *,
 			h.u32(info.pColorWriteEnables[i]);
 }
 
+static bool hash_pnext_struct(const StateRecorder *,
+                              Hasher &h,
+                              const VkPipelineSampleLocationsStateCreateInfoEXT &info,
+                              const DynamicStateInfo *dynamic_state_info)
+{
+	h.u32(info.sampleLocationsEnable);
+	if (info.sampleLocationsEnable && dynamic_state_info && !dynamic_state_info->sample_locations)
+	{
+		if (info.sampleLocationsInfo.pNext)
+			return false;
+
+		h.u32(info.sampleLocationsInfo.sampleLocationGridSize.width);
+		h.u32(info.sampleLocationsInfo.sampleLocationGridSize.height);
+		h.u32(info.sampleLocationsInfo.sampleLocationsPerPixel);
+		h.u32(info.sampleLocationsInfo.sampleLocationsCount);
+		for (uint32_t i = 0; i < info.sampleLocationsInfo.sampleLocationsCount; i++)
+		{
+			h.f32(info.sampleLocationsInfo.pSampleLocations[i].x);
+			h.f32(info.sampleLocationsInfo.pSampleLocations[i].y);
+		}
+	}
+	else
+		h.u32(0);
+
+	return true;
+}
+
 static void hash_pnext_struct(const StateRecorder *,
                               Hasher &h,
                               const VkPipelineRasterizationProvokingVertexStateCreateInfoEXT &info)
@@ -1117,6 +1153,13 @@ static bool hash_pnext_struct(const StateRecorder *recorder,
 	return true;
 }
 
+static void hash_pnext_struct(const StateRecorder *,
+                              Hasher &h,
+                              const VkPipelineViewportDepthClipControlCreateInfoEXT &info)
+{
+	h.u32(info.negativeOneToOne);
+}
+
 static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const void *pNext,
                              const DynamicStateInfo *dynamic_state_info)
 {
@@ -1204,6 +1247,11 @@ static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const voi
 			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineColorWriteCreateInfoEXT *>(pNext), dynamic_state_info);
 			break;
 
+		case VK_STRUCTURE_TYPE_PIPELINE_SAMPLE_LOCATIONS_STATE_CREATE_INFO_EXT:
+			if (!hash_pnext_struct(recorder, h, *static_cast<const VkPipelineSampleLocationsStateCreateInfoEXT *>(pNext), dynamic_state_info))
+				return false;
+			break;
+
 		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_PROVOKING_VERTEX_STATE_CREATE_INFO_EXT:
 			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineRasterizationProvokingVertexStateCreateInfoEXT *>(pNext));
 			break;
@@ -1243,6 +1291,10 @@ static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const voi
 		case VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR:
 			if (!hash_pnext_struct(recorder, h, *static_cast<const VkPipelineLibraryCreateInfoKHR *>(pNext)))
 				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_DEPTH_CLIP_CONTROL_CREATE_INFO_EXT:
+			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineViewportDepthClipControlCreateInfoEXT *>(pNext));
 			break;
 
 		default:
@@ -1494,6 +1546,9 @@ static DynamicStateInfo parse_dynamic_state_info(const VkPipelineDynamicStateCre
 			break;
 		case VK_DYNAMIC_STATE_FRAGMENT_SHADING_RATE_KHR:
 			info.fragment_shading_rate = true;
+			break;
+		case VK_DYNAMIC_STATE_SAMPLE_LOCATIONS_EXT:
+			info.sample_locations = true;
 			break;
 		default:
 			break;
@@ -3172,6 +3227,10 @@ bool StateReplayer::Impl::parse_depth_stencil_state(const Value &ds, const VkPip
 	state->back.reference = ds["back"]["reference"].GetUint();
 	state->back.writeMask = ds["back"]["writeMask"].GetUint();
 
+	if (ds.HasMember("pNext"))
+		if (!parse_pnext_chain(ds["pNext"], &state->pNext))
+			return false;
+
 	*out_info = state;
 	return true;
 }
@@ -3223,6 +3282,10 @@ bool StateReplayer::Impl::parse_input_assembly_state(const Value &ia, const VkPi
 	state->flags = ia["flags"].GetUint();
 	state->primitiveRestartEnable = ia["primitiveRestartEnable"].GetUint();
 	state->topology = static_cast<VkPrimitiveTopology>(ia["topology"].GetUint());
+
+	if (ia.HasMember("pNext"))
+		if (!parse_pnext_chain(ia["pNext"], &state->pNext))
+			return false;
 
 	*out_info = state;
 	return true;
@@ -3293,6 +3356,10 @@ bool StateReplayer::Impl::parse_multisample_state(const Value &ms, const VkPipel
 
 	state->sampleShadingEnable = ms["sampleShadingEnable"].GetUint();
 	state->rasterizationSamples = static_cast<VkSampleCountFlagBits>(ms["rasterizationSamples"].GetUint());
+
+	if (ms.HasMember("pNext"))
+		if (!parse_pnext_chain(ms["pNext"], &state->pNext))
+			return false;
 
 	*out_info = state;
 	return true;
@@ -3411,6 +3478,10 @@ bool StateReplayer::Impl::parse_viewport_state(const Value &vp, const VkPipeline
 	state->viewportCount = vp["viewportCount"].GetUint();
 	if (vp.HasMember("viewports"))
 		if (!parse_viewports(vp["viewports"], &state->pViewports))
+			return false;
+
+	if (vp.HasMember("pNext"))
+		if (!parse_pnext_chain(vp["pNext"], &state->pNext))
 			return false;
 
 	*out_info = state;
@@ -3978,7 +4049,7 @@ bool StateReplayer::Impl::parse_pipeline_rendering_info(const Value &state,
 }
 
 bool StateReplayer::Impl::parse_color_write(const Value &state,
-					    VkPipelineColorWriteCreateInfoEXT **out_info)
+                                            VkPipelineColorWriteCreateInfoEXT **out_info)
 {
 	auto *info = allocator.allocate_cleared<VkPipelineColorWriteCreateInfoEXT>();
 	*out_info = info;
@@ -3992,6 +4063,42 @@ bool StateReplayer::Impl::parse_color_write(const Value &state,
 		static_assert(sizeof(VkBool32) == sizeof(uint32_t), "VkBool32 is not 32-bit.");
 		if (!parse_uints(enables, reinterpret_cast<const VkBool32 **>(&info->pColorWriteEnables)))
 			return false;
+	}
+
+	return true;
+}
+
+bool StateReplayer::Impl::parse_sample_locations(const Value &state,
+                                                 VkPipelineSampleLocationsStateCreateInfoEXT **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkPipelineSampleLocationsStateCreateInfoEXT>();
+	*out_info = info;
+
+	info->sampleLocationsEnable = state["sampleLocationsEnable"].GetUint();
+	if (state.HasMember("sampleLocationsInfo"))
+	{
+		auto &loc_info = state["sampleLocationsInfo"];
+		info->sampleLocationsInfo.sType = static_cast<VkStructureType>(loc_info["sType"].GetUint());
+		info->sampleLocationsInfo.sampleLocationsPerPixel = static_cast<VkSampleCountFlagBits>(loc_info["sampleLocationsPerPixel"].GetUint());
+		info->sampleLocationsInfo.sampleLocationGridSize.width = loc_info["sampleLocationGridSize"]["width"].GetUint();
+		info->sampleLocationsInfo.sampleLocationGridSize.height = loc_info["sampleLocationGridSize"]["height"].GetUint();
+
+		if (loc_info.HasMember("sampleLocations"))
+		{
+			auto &locs = loc_info["sampleLocations"];
+
+			auto *locations = allocator.allocate_n<VkSampleLocationEXT>(locs.Size());
+			info->sampleLocationsInfo.sampleLocationsCount = uint32_t(locs.Size());
+			info->sampleLocationsInfo.pSampleLocations = locations;
+
+			for (auto itr = locs.Begin(); itr != locs.End(); ++itr)
+			{
+				auto &elem = *itr;
+				locations->x = elem["x"].GetFloat();
+				locations->y = elem["y"].GetFloat();
+				locations++;
+			}
+		}
 	}
 
 	return true;
@@ -4165,6 +4272,15 @@ bool StateReplayer::Impl::parse_sampler_ycbcr_conversion(const Value &state,
 	info->chromaFilter = static_cast<VkFilter>(state["chromaFilter"].GetUint());
 	info->forceExplicitReconstruction = state["forceExplicitReconstruction"].GetUint();
 
+	return true;
+}
+
+bool StateReplayer::Impl::parse_viewport_depth_clip_control(const Value &state,
+                                                            VkPipelineViewportDepthClipControlCreateInfoEXT **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkPipelineViewportDepthClipControlCreateInfoEXT>();
+	*out_info = info;
+	info->negativeOneToOne = state["negativeOneToOne"].GetUint();
 	return true;
 }
 
@@ -4403,6 +4519,15 @@ bool StateReplayer::Impl::parse_pnext_chain(
 			break;
 		}
 
+		case VK_STRUCTURE_TYPE_PIPELINE_SAMPLE_LOCATIONS_STATE_CREATE_INFO_EXT:
+		{
+			VkPipelineSampleLocationsStateCreateInfoEXT *sample_locations = nullptr;
+			if (!parse_sample_locations(next, &sample_locations))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(sample_locations);
+			break;
+		}
+
 		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_PROVOKING_VERTEX_STATE_CREATE_INFO_EXT:
 		{
 			VkPipelineRasterizationProvokingVertexStateCreateInfoEXT *provoking_vertex = nullptr;
@@ -4492,6 +4617,15 @@ bool StateReplayer::Impl::parse_pnext_chain(
 			if (!parse_pipeline_library(*iface, resolver, *pipelines, next, RESOURCE_GRAPHICS_PIPELINE, &library))
 				return false;
 			new_struct = reinterpret_cast<VkBaseInStructure *>(library);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_DEPTH_CLIP_CONTROL_CREATE_INFO_EXT:
+		{
+			VkPipelineViewportDepthClipControlCreateInfoEXT *clip = nullptr;
+			if (!parse_viewport_depth_clip_control(next, &clip))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(clip);
 			break;
 		}
 
@@ -4973,6 +5107,31 @@ void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineColorWriteCreateInf
 	return color_write;
 }
 
+void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineSampleLocationsStateCreateInfoEXT *create_info,
+                                             ScratchAllocator &alloc,
+                                             const DynamicStateInfo *dynamic_state_info)
+{
+	// This is only a thing for VkImageMemoryBarrier pNext.
+	if (create_info->sampleLocationsInfo.pNext)
+		return nullptr;
+
+	auto *sample_locations = copy(create_info, 1, alloc);
+	if (dynamic_state_info && !dynamic_state_info->sample_locations && sample_locations->sampleLocationsEnable)
+	{
+		sample_locations->sampleLocationsInfo.pSampleLocations =
+				copy(sample_locations->sampleLocationsInfo.pSampleLocations,
+				     sample_locations->sampleLocationsInfo.sampleLocationsCount, alloc);
+	}
+	else
+	{
+		// Otherwise, ignore the location info.
+		// Either it's dynamic, or ignored due to sampleLocationsEnable being VK_FALSE.
+		sample_locations->sampleLocationsInfo = { VK_STRUCTURE_TYPE_SAMPLE_LOCATIONS_INFO_EXT };
+	}
+
+	return sample_locations;
+}
+
 void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineRasterizationProvokingVertexStateCreateInfoEXT *create_info,
                                              ScratchAllocator &alloc)
 {
@@ -5048,6 +5207,13 @@ void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineLibraryCreateInfoKH
 	auto *libraries = copy(create_info, 1, alloc);
 	libraries->pLibraries = copy(libraries->pLibraries, libraries->libraryCount, alloc);
 	return libraries;
+}
+
+void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineViewportDepthClipControlCreateInfoEXT *create_info,
+                                             ScratchAllocator &alloc)
+{
+	auto *clip = copy(create_info, 1, alloc);
+	return clip;
 }
 
 template <typename T>
@@ -5197,6 +5363,13 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 			break;
 		}
 
+		case VK_STRUCTURE_TYPE_PIPELINE_SAMPLE_LOCATIONS_STATE_CREATE_INFO_EXT:
+		{
+			auto *ci = static_cast<const VkPipelineSampleLocationsStateCreateInfoEXT *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc, dynamic_state_info));
+			break;
+		}
+
 		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_PROVOKING_VERTEX_STATE_CREATE_INFO_EXT:
 		{
 			auto *ci = static_cast<const VkPipelineRasterizationProvokingVertexStateCreateInfoEXT *>(pNext);
@@ -5290,6 +5463,13 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 		case VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR:
 		{
 			auto *ci = static_cast<const VkPipelineLibraryCreateInfoKHR *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_DEPTH_CLIP_CONTROL_CREATE_INFO_EXT:
+		{
+			auto *ci = static_cast<const VkPipelineViewportDepthClipControlCreateInfoEXT *>(pNext);
 			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
 			break;
 		}
@@ -7879,6 +8059,17 @@ static bool json_value(const VkPipelineLibraryCreateInfoKHR &create_info, Alloca
 }
 
 template <typename Allocator>
+static bool json_value(const VkPipelineViewportDepthClipControlCreateInfoEXT &create_info,
+                       Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("negativeOneToOne", create_info.negativeOneToOne, alloc);
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
 static bool json_value(const VkSubpassDescriptionDepthStencilResolve &create_info, Allocator &alloc, Value *out_value);
 template <typename Allocator>
 static bool json_value(const VkFragmentShadingRateAttachmentInfoKHR &create_info, Allocator &alloc, Value *out_value);
@@ -7982,6 +8173,11 @@ static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *o
 				return false;
 			break;
 
+		case VK_STRUCTURE_TYPE_PIPELINE_SAMPLE_LOCATIONS_STATE_CREATE_INFO_EXT:
+			if (!json_value(*static_cast<const VkPipelineSampleLocationsStateCreateInfoEXT *>(pNext), alloc, &next, dynamic_state_info))
+				return false;
+			break;
+
 		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_PROVOKING_VERTEX_STATE_CREATE_INFO_EXT:
 			if (!json_value(*static_cast<const VkPipelineRasterizationProvokingVertexStateCreateInfoEXT *>(pNext), alloc, &next))
 				return false;
@@ -8034,6 +8230,11 @@ static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *o
 
 		case VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR:
 			if (!json_value(*static_cast<const VkPipelineLibraryCreateInfoKHR *>(pNext), alloc, true, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_DEPTH_CLIP_CONTROL_CREATE_INFO_EXT:
+			if (!json_value(*static_cast<const VkPipelineViewportDepthClipControlCreateInfoEXT *>(pNext), alloc, &next))
 				return false;
 			break;
 
@@ -8114,6 +8315,49 @@ static bool json_value(const VkFragmentShadingRateAttachmentInfoKHR &create_info
 			return false;
 		value.AddMember("fragmentShadingRateAttachment", att, alloc);
 	}
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
+static bool json_value(const VkPipelineSampleLocationsStateCreateInfoEXT &create_info, Allocator &alloc, Value *out_value,
+                       const DynamicStateInfo *dynamic_state_info)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("sampleLocationsEnable", create_info.sampleLocationsEnable, alloc);
+
+	if (create_info.sampleLocationsEnable && dynamic_state_info && !dynamic_state_info->sample_locations)
+	{
+		Value locations(kObjectType);
+		auto &info = create_info.sampleLocationsInfo;
+
+		locations.AddMember("sType", info.sType, alloc);
+		locations.AddMember("sampleLocationsPerPixel", info.sampleLocationsPerPixel, alloc);
+
+		{
+			Value extent(kObjectType);
+			extent.AddMember("width", info.sampleLocationGridSize.width, alloc);
+			extent.AddMember("height", info.sampleLocationGridSize.height, alloc);
+			locations.AddMember("sampleLocationGridSize", extent, alloc);
+		}
+
+		if (info.sampleLocationsCount)
+		{
+			Value locs(kArrayType);
+			for (uint32_t i = 0; i < info.sampleLocationsCount; i++)
+			{
+				Value loc(kObjectType);
+				loc.AddMember("x", info.pSampleLocations[i].x, alloc);
+				loc.AddMember("y", info.pSampleLocations[i].y, alloc);
+				locs.PushBack(loc, alloc);
+			}
+			locations.AddMember("sampleLocations", locs, alloc);
+		}
+
+		value.AddMember("sampleLocationsInfo", locations, alloc);
+	}
+
 	*out_value = value;
 	return true;
 }
@@ -8635,6 +8879,8 @@ static bool json_value(const VkGraphicsPipelineCreateInfo &pipe,
 			ms.AddMember("sampleMask", sm, alloc);
 		}
 
+		if (!pnext_chain_add_json_value(ms, *pipe.pMultisampleState, alloc, &dynamic_info))
+			return false;
 		p.AddMember("multisampleState", ms, alloc);
 	}
 
@@ -8698,6 +8944,8 @@ static bool json_value(const VkGraphicsPipelineCreateInfo &pipe,
 		ia.AddMember("flags", pipe.pInputAssemblyState->flags, alloc);
 		ia.AddMember("topology", pipe.pInputAssemblyState->topology, alloc);
 		ia.AddMember("primitiveRestartEnable", pipe.pInputAssemblyState->primitiveRestartEnable, alloc);
+		if (!pnext_chain_add_json_value(ia, *pipe.pInputAssemblyState, alloc, &dynamic_info))
+			return false;
 		p.AddMember("inputAssemblyState", ia, alloc);
 	}
 
@@ -8788,6 +9036,8 @@ static bool json_value(const VkGraphicsPipelineCreateInfo &pipe,
 			}
 			vp.AddMember("scissors", scissors, alloc);
 		}
+		if (!pnext_chain_add_json_value(vp, *pipe.pViewportState, alloc, &dynamic_info))
+			return false;
 		p.AddMember("viewportState", vp, alloc);
 	}
 
@@ -8818,6 +9068,8 @@ static bool json_value(const VkGraphicsPipelineCreateInfo &pipe,
 		serialize_stencil(back, pipe.pDepthStencilState->back);
 		ds.AddMember("front", front, alloc);
 		ds.AddMember("back", back, alloc);
+		if (!pnext_chain_add_json_value(ds, *pipe.pDepthStencilState, alloc, &dynamic_info))
+			return false;
 		p.AddMember("depthStencilState", ds, alloc);
 	}
 
