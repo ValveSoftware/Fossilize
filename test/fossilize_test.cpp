@@ -1689,7 +1689,7 @@ static void record_graphics_pipelines(StateRecorder &recorder)
 	rs.depthBiasSlopeFactor = 0.3f;
 	rs.depthBiasConstantFactor = 0.8f;
 	rs.depthBiasClamp = 0.5f;
-	rs.rasterizerDiscardEnable = VK_TRUE;
+	rs.rasterizerDiscardEnable = VK_FALSE;
 	rs.lineWidth = 0.1f;
 	rs.cullMode = VK_CULL_MODE_FRONT_AND_BACK;
 
@@ -1794,6 +1794,22 @@ static void record_graphics_pipelines(StateRecorder &recorder)
 	pipe.pNext = &fragment_shading_rate;
 
 	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100004), pipe, nullptr, 0))
+		abort();
+
+	VkPipelineSampleLocationsStateCreateInfoEXT sample_location = { VK_STRUCTURE_TYPE_PIPELINE_SAMPLE_LOCATIONS_STATE_CREATE_INFO_EXT };
+	sample_location.sampleLocationsInfo.sType = VK_STRUCTURE_TYPE_SAMPLE_LOCATIONS_INFO_EXT;
+	sample_location.sampleLocationsInfo.sampleLocationGridSize = { 2, 3 };
+	sample_location.sampleLocationsInfo.sampleLocationsPerPixel = VK_SAMPLE_COUNT_2_BIT;
+	sample_location.sampleLocationsInfo.sampleLocationsCount = 2;
+	const VkSampleLocationEXT locations[2] = {{ 0.125f, 0.5f }, { -0.25f, 0.25f }};
+	sample_location.sampleLocationsInfo.pSampleLocations = locations;
+	ms.pNext = &sample_location;
+	pipe.basePipelineHandle = VK_NULL_HANDLE;
+
+	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100005), pipe, nullptr, 0))
+		abort();
+	sample_location.sampleLocationsEnable = VK_TRUE;
+	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100006), pipe, nullptr, 0))
 		abort();
 }
 
