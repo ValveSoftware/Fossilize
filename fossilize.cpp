@@ -498,7 +498,7 @@ struct StateRecorder::Impl
 
 	bool copy_pnext_chain_pdf2(const void *pNext, ScratchAllocator &alloc, void **out_pnext) FOSSILIZE_WARN_UNUSED;
 
-	Hash record_shader_module(const WorkItem &record_item);
+	Hash record_shader_module(const WorkItem &record_item, bool dependent_record);
 
 	struct
 	{
@@ -6793,7 +6793,7 @@ bool StateRecorder::Impl::remap_shader_module_handles(CreateInfo *info)
 		{
 			WorkItem record_item = {};
 			record_item.create_info = const_cast<VkShaderModuleCreateInfo *>(module);
-			Hash h = record_shader_module(record_item);
+			Hash h = record_shader_module(record_item, true);
 			stage.module = api_object_cast<VkShaderModule>(h);
 		}
 		else
@@ -6842,7 +6842,7 @@ bool StateRecorder::Impl::remap_compute_pipeline_ci(VkComputePipelineCreateInfo 
 	{
 		WorkItem record_item = {};
 		record_item.create_info = const_cast<VkShaderModuleCreateInfo *>(module);
-		Hash h = record_shader_module(record_item);
+		Hash h = record_shader_module(record_item, true);
 		info->stage.module = api_object_cast<VkShaderModule>(h);
 	}
 	else
@@ -6986,7 +6986,7 @@ bool StateRecorder::Impl::get_subpass_meta_for_pipeline(const VkGraphicsPipeline
 	return true;
 }
 
-Hash StateRecorder::Impl::record_shader_module(const WorkItem &record_item)
+Hash StateRecorder::Impl::record_shader_module(const WorkItem &record_item, bool dependent_record)
 {
 	auto *create_info = reinterpret_cast<VkShaderModuleCreateInfo *>(record_item.create_info);
 	Hash hash = record_item.custom_hash;
@@ -7014,9 +7014,13 @@ Hash StateRecorder::Impl::record_shader_module(const WorkItem &record_item)
 												record_data.payload_flags);
 					record_data.need_flush = true;
 				}
-				allocator.reset();
 			}
 		}
+
+		// If this is called as part of a graphics pipeline library call, we must be very careful not
+		// to reclaim the scratch allocator memory (yet). Otherwise we risk corruption.
+		if (!dependent_record)
+			allocator.reset();
 	}
 	else
 	{
@@ -7246,7 +7250,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 
 		case VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO:
 		{
-			record_shader_module(record_item);
+			record_shader_module(record_item, false);
 			break;
 		}
 
