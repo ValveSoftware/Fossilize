@@ -175,6 +175,18 @@ static bool graphics_pipeline_library_state_flags_have_module_state(VkGraphicsPi
 	                 VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT)) != 0;
 }
 
+static bool shader_stage_is_identifier_only(const VkPipelineShaderStageCreateInfo &stage)
+{
+	if (stage.module == VK_NULL_HANDLE)
+	{
+		auto *pnext = find_pnext<VkShaderModuleCreateInfo>(VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, stage.pNext);
+		if (!pnext)
+			return true;
+	}
+
+	return false;
+}
+
 struct StateReplayer::Impl
 {
 	bool parse(StateCreatorInterface &iface, DatabaseInterface *resolver, const void *buffer, size_t size) FOSSILIZE_WARN_UNUSED;
@@ -1573,6 +1585,15 @@ static DynamicStateInfo parse_dynamic_state_info(const VkPipelineDynamicStateCre
 
 bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraphicsPipelineCreateInfo &create_info, Hash *out_hash)
 {
+	// Ignore pipelines that cannot result in meaningful replay.
+	auto state_flags = graphics_pipeline_get_effective_state_flags(create_info);
+	if (graphics_pipeline_library_state_flags_have_module_state(state_flags))
+	{
+		for (uint32_t i = 0; i < create_info.stageCount; i++)
+			if (shader_stage_is_identifier_only(create_info.pStages[i]))
+				return false;
+	}
+
 	Hasher h;
 	Hash hash;
 
@@ -1889,6 +1910,10 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 
 bool compute_hash_compute_pipeline(const StateRecorder &recorder, const VkComputePipelineCreateInfo &create_info, Hash *out_hash)
 {
+	// Ignore pipelines that cannot result in meaningful replay.
+	if (shader_stage_is_identifier_only(create_info.stage))
+		return false;
+
 	Hasher h;
 	Hash hash;
 
@@ -1950,6 +1975,11 @@ bool compute_hash_raytracing_pipeline(const StateRecorder &recorder,
                                       const VkRayTracingPipelineCreateInfoKHR &create_info,
                                       Hash *out_hash)
 {
+	// Ignore pipelines that cannot result in meaningful replay.
+	for (uint32_t i = 0; i < create_info.stageCount; i++)
+		if (shader_stage_is_identifier_only(create_info.pStages[i]))
+			return false;
+
 	Hasher h;
 	Hash hash;
 
@@ -5736,18 +5766,6 @@ bool StateRecorder::record_pipeline_layout(VkPipelineLayout pipeline_layout, con
 
 	impl->pump_synchronized_recording(this);
 	return true;
-}
-
-static bool shader_stage_is_identifier_only(const VkPipelineShaderStageCreateInfo &stage)
-{
-	if (stage.module == VK_NULL_HANDLE)
-	{
-		auto *pnext = find_pnext<VkShaderModuleCreateInfo>(VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, stage.pNext);
-		if (!pnext)
-			return true;
-	}
-
-	return false;
 }
 
 bool StateRecorder::record_graphics_pipeline(VkPipeline pipeline, const VkGraphicsPipelineCreateInfo &create_info,
