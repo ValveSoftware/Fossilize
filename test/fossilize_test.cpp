@@ -1201,6 +1201,45 @@ static void record_graphics_pipelines_robustness(StateRecorder &recorder)
 	}
 }
 
+static void record_pipelines_identifier(StateRecorder &recorder)
+{
+	VkGraphicsPipelineCreateInfo pipe = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+	VkPipelineShaderStageCreateInfo stage = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
+	stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	pipe.pStages = &stage;
+	pipe.stageCount = 1;
+
+	VkPipelineShaderStageModuleIdentifierCreateInfoEXT ident = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_MODULE_IDENTIFIER_CREATE_INFO_EXT };
+	ident.identifierSize = 1;
+	const uint8_t zero = 0;
+	ident.pIdentifier = &zero;
+	stage.pNext = &ident;
+
+	Hash hash;
+
+	// These should fail.
+	if (Hashing::compute_hash_graphics_pipeline(recorder, pipe, &hash))
+		abort();
+	// These should succeed as noops.
+	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(40000), pipe, nullptr, 0))
+		abort();
+
+	VkComputePipelineCreateInfo cpipe = { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
+	cpipe.stage = stage;
+	if (Hashing::compute_hash_compute_pipeline(recorder, cpipe, &hash))
+		abort();
+	if (!recorder.record_compute_pipeline(fake_handle<VkPipeline>(40000), cpipe, nullptr, 0))
+		abort();
+
+	VkRayTracingPipelineCreateInfoKHR rtpipe = { VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR };
+	rtpipe.pStages = &stage;
+	rtpipe.stageCount = 1;
+	if (Hashing::compute_hash_raytracing_pipeline(recorder, rtpipe, &hash))
+		abort();
+	if (!recorder.record_raytracing_pipeline(fake_handle<VkPipeline>(40000), rtpipe, nullptr, 0))
+		abort();
+}
+
 static void record_graphics_pipeline_libraries(StateRecorder &recorder)
 {
 	VkGraphicsPipelineCreateInfo pipe = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
@@ -3451,6 +3490,7 @@ int main()
 		record_pipelines_pnext_shader(recorder);
 		record_raytracing_pipelines(recorder);
 		record_graphics_pipelines_robustness(recorder);
+		record_pipelines_identifier(recorder);
 
 		uint8_t *serialized;
 		size_t serialized_size;
