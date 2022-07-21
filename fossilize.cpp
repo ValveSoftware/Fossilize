@@ -149,6 +149,32 @@ static VkPipelineCreateFlags normalize_pipeline_creation_flags(VkPipelineCreateF
 	return flags;
 }
 
+static VkGraphicsPipelineLibraryFlagsEXT graphics_pipeline_get_effective_state_flags(
+		const VkGraphicsPipelineCreateInfo &create_info)
+{
+	VkGraphicsPipelineLibraryFlagsEXT state_flags =
+			VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_OUTPUT_INTERFACE_BIT_EXT |
+			VK_GRAPHICS_PIPELINE_LIBRARY_PRE_RASTERIZATION_SHADERS_BIT_EXT |
+			VK_GRAPHICS_PIPELINE_LIBRARY_VERTEX_INPUT_INTERFACE_BIT_EXT |
+			VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT;
+
+	auto *graphics_pipeline_library = find_pnext<VkGraphicsPipelineLibraryCreateInfoEXT>(
+			VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT,
+			create_info.pNext);
+
+	// If we're not creating a library, assume we're defining a complete pipeline.
+	if ((create_info.flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0 && graphics_pipeline_library)
+		state_flags = graphics_pipeline_library->flags;
+
+	return state_flags;
+}
+
+static bool graphics_pipeline_library_state_flags_have_module_state(VkGraphicsPipelineLibraryFlagsEXT flags)
+{
+	return (flags & (VK_GRAPHICS_PIPELINE_LIBRARY_PRE_RASTERIZATION_SHADERS_BIT_EXT |
+	                 VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT)) != 0;
+}
+
 struct StateReplayer::Impl
 {
 	bool parse(StateCreatorInterface &iface, DatabaseInterface *resolver, const void *buffer, size_t size) FOSSILIZE_WARN_UNUSED;
@@ -1352,19 +1378,7 @@ static GlobalStateInfo parse_global_state_info(const VkGraphicsPipelineCreateInf
 	info.module_state = true;
 	info.layout_state = true;
 
-	VkGraphicsPipelineLibraryFlagsEXT state_flags =
-			VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_OUTPUT_INTERFACE_BIT_EXT |
-			VK_GRAPHICS_PIPELINE_LIBRARY_PRE_RASTERIZATION_SHADERS_BIT_EXT |
-			VK_GRAPHICS_PIPELINE_LIBRARY_VERTEX_INPUT_INTERFACE_BIT_EXT |
-			VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT;
-
-	auto *graphics_pipeline_library = find_pnext<VkGraphicsPipelineLibraryCreateInfoEXT>(
-			VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT,
-			create_info.pNext);
-
-	// If we're not creating a library, assume we're defining a complete pipeline.
-	if ((create_info.flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0 && graphics_pipeline_library)
-		state_flags = graphics_pipeline_library->flags;
+	auto state_flags = graphics_pipeline_get_effective_state_flags(create_info);
 
 	info.rasterization_state = create_info.pRasterizationState &&
 	                           (state_flags & VK_GRAPHICS_PIPELINE_LIBRARY_PRE_RASTERIZATION_SHADERS_BIT_EXT) != 0;
@@ -1384,8 +1398,7 @@ static GlobalStateInfo parse_global_state_info(const VkGraphicsPipelineCreateInf
 	info.input_assembly = create_info.pInputAssemblyState != nullptr;
 	info.vertex_input = create_info.pVertexInputState != nullptr && !dynamic_info.vertex_input;
 
-	info.module_state = (state_flags & (VK_GRAPHICS_PIPELINE_LIBRARY_PRE_RASTERIZATION_SHADERS_BIT_EXT |
-	                                    VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT)) != 0;
+	info.module_state = graphics_pipeline_library_state_flags_have_module_state(state_flags);
 	info.layout_state = info.module_state;
 
 	if (info.module_state)
@@ -5725,10 +5738,32 @@ bool StateRecorder::record_pipeline_layout(VkPipelineLayout pipeline_layout, con
 	return true;
 }
 
+static bool shader_stage_is_identifier_only(const VkPipelineShaderStageCreateInfo &stage)
+{
+	if (stage.module == VK_NULL_HANDLE)
+	{
+		auto *pnext = find_pnext<VkShaderModuleCreateInfo>(VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, stage.pNext);
+		if (!pnext)
+			return true;
+	}
+
+	return false;
+}
+
 bool StateRecorder::record_graphics_pipeline(VkPipeline pipeline, const VkGraphicsPipelineCreateInfo &create_info,
                                              const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
                                              Hash custom_hash)
 {
+	// Ignore pipelines that cannot result in meaningful replay.
+	// We are not allowed to look at pStages unless we're emitting pre-raster / fragment shader interface.
+	auto state_flags = graphics_pipeline_get_effective_state_flags(create_info);
+	if (graphics_pipeline_library_state_flags_have_module_state(state_flags))
+	{
+		for (uint32_t i = 0; i < create_info.stageCount; i++)
+			if (shader_stage_is_identifier_only(create_info.pStages[i]))
+				return true;
+	}
+
 	{
 		std::lock_guard<std::mutex> lock(impl->record_lock);
 
@@ -5748,6 +5783,10 @@ bool StateRecorder::record_compute_pipeline(VkPipeline pipeline, const VkCompute
                                             const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
                                             Hash custom_hash)
 {
+	// Ignore pipelines that cannot result in meaningful replay.
+	if (shader_stage_is_identifier_only(create_info.stage))
+		return true;
+
 	{
 		std::lock_guard<std::mutex> lock(impl->record_lock);
 
@@ -5768,6 +5807,11 @@ bool StateRecorder::record_raytracing_pipeline(
 		const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
 		Hash custom_hash)
 {
+	// Ignore pipelines that cannot result in meaningful replay.
+	for (uint32_t i = 0; i < create_info.stageCount; i++)
+		if (shader_stage_is_identifier_only(create_info.pStages[i]))
+			return true;
+
 	{
 		std::lock_guard<std::mutex> lock(impl->record_lock);
 
@@ -9738,6 +9782,7 @@ static const void *pnext_chain_skip_ignored_entries(const void *pNext)
 		{
 		case VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO_EXT:
 		case VK_STRUCTURE_TYPE_SHADER_MODULE_VALIDATION_CACHE_CREATE_INFO_EXT:
+		case VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_MODULE_IDENTIFIER_CREATE_INFO_EXT:
 			// We need to ignore any pNext struct which represents output information from a pipeline object.
 			ignored = true;
 			break;
