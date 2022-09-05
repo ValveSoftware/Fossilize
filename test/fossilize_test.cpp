@@ -873,8 +873,8 @@ static void record_graphics_pipelines_robustness(StateRecorder &recorder)
 	// If we have a mesh shader stage, verify vertex input and input state is ignored.
 	{
 		reset_state();
-		stages[0].stage = VK_SHADER_STAGE_MESH_BIT_NV;
-		stages[1].stage = VK_SHADER_STAGE_TASK_BIT_NV;
+		stages[0].stage = VK_SHADER_STAGE_MESH_BIT_EXT;
+		stages[1].stage = VK_SHADER_STAGE_TASK_BIT_EXT;
 		hash_and_record(0);
 		set_invalid_pointer(pipe.pVertexInputState);
 		set_invalid_pointer(pipe.pInputAssemblyState);
