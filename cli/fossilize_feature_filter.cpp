@@ -2186,6 +2186,40 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 
 	for (uint32_t i = 0; i < info->stageCount; i++)
 	{
+		switch (info->pStages[i].stage)
+		{
+		case VK_SHADER_STAGE_VERTEX_BIT:
+		case VK_SHADER_STAGE_FRAGMENT_BIT:
+			break;
+
+		case VK_SHADER_STAGE_COMPUTE_BIT:
+			return false;
+
+		case VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT:
+		case VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT:
+			if (!features2.features.tessellationShader)
+				return false;
+			break;
+
+		case VK_SHADER_STAGE_GEOMETRY_BIT:
+			if (!features2.features.geometryShader)
+				return false;
+			break;
+
+		case VK_SHADER_STAGE_MESH_BIT_EXT:
+			if (!features.mesh_shader.meshShader && !features.mesh_shader_nv.meshShader)
+				return false;
+			break;
+
+		case VK_SHADER_STAGE_TASK_BIT_EXT:
+			if (!features.mesh_shader.taskShader && !features.mesh_shader_nv.taskShader)
+				return false;
+			break;
+
+		default:
+			return false;
+		}
+
 		if (!subgroup_size_control_is_supported(info->pStages[i]))
 			return false;
 		if (!pnext_chain_is_supported(info->pStages[i].pNext))
