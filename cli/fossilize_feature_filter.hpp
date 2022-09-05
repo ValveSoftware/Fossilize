@@ -86,6 +86,8 @@ struct VulkanFeatures
 	VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT graphics_pipeline_library;
 	VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV fragment_shading_rate_enums;
 	VkPhysicalDeviceDepthClipControlFeaturesEXT depth_clip_control;
+	VkPhysicalDeviceMeshShaderFeaturesNV mesh_shader_nv;
+	VkPhysicalDeviceMeshShaderFeaturesEXT mesh_shader;
 };
 
 void *build_pnext_chain(VulkanFeatures &features, uint32_t api_version,

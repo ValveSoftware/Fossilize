@@ -76,3 +76,5 @@ FE(IMAGE_ROBUSTNESS, image_robustness, EXT);
 FE(GRAPHICS_PIPELINE_LIBRARY, graphics_pipeline_library, EXT);
 FE(FRAGMENT_SHADING_RATE_ENUMS, fragment_shading_rate_enums, NV);
 FE(DEPTH_CLIP_CONTROL, depth_clip_control, EXT);
+FE(MESH_SHADER, mesh_shader_nv, NV);
+FE(MESH_SHADER, mesh_shader, EXT);
