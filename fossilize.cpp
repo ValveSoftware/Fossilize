@@ -1424,8 +1424,8 @@ static GlobalStateInfo parse_global_state_info(const VkGraphicsPipelineCreateInf
 				info.tessellation_state = create_info.pTessellationState != nullptr;
 				break;
 
-			case VK_SHADER_STAGE_MESH_BIT_NV:
-			case VK_SHADER_STAGE_TASK_BIT_NV:
+			case VK_SHADER_STAGE_MESH_BIT_EXT:
+			case VK_SHADER_STAGE_TASK_BIT_EXT:
 				info.input_assembly = false;
 				info.vertex_input = false;
 				break;

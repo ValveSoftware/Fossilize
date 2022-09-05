@@ -1461,7 +1461,8 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 		return features.shading_rate_nv.shadingRateImage == VK_TRUE ||
 		       features.fragment_density.fragmentDensityMap == VK_TRUE;
 	case spv::CapabilityMeshShadingNV:
-		return enabled_extensions.count(VK_NV_MESH_SHADER_EXTENSION_NAME) == VK_TRUE;
+		return enabled_extensions.count(VK_NV_MESH_SHADER_EXTENSION_NAME) == VK_TRUE &&
+		       features.mesh_shader_nv.meshShader;
 	case spv::CapabilityRayTracingNV:
 		return enabled_extensions.count(VK_NV_RAY_TRACING_EXTENSION_NAME) == VK_TRUE;
 	case spv::CapabilityTransformFeedback:
@@ -1507,6 +1508,9 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 	case spv::CapabilityDotProductInput4x8BitKHR:
 	case spv::CapabilityDotProductInput4x8BitPackedKHR:
 		return features.shader_integer_dot_product.shaderIntegerDotProduct == VK_TRUE;
+	case spv::CapabilityMeshShadingEXT:
+		return enabled_extensions.count(VK_EXT_MESH_SHADER_EXTENSION_NAME) == VK_TRUE &&
+		       features.mesh_shader.meshShader;
 
 	default:
 		LOGE("Unrecognized SPIR-V capability %u, treating as unsupported.\n", unsigned(cap));
@@ -2186,6 +2190,40 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 
 	for (uint32_t i = 0; i < info->stageCount; i++)
 	{
+		switch (info->pStages[i].stage)
+		{
+		case VK_SHADER_STAGE_VERTEX_BIT:
+		case VK_SHADER_STAGE_FRAGMENT_BIT:
+			break;
+
+		case VK_SHADER_STAGE_COMPUTE_BIT:
+			return false;
+
+		case VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT:
+		case VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT:
+			if (!features2.features.tessellationShader)
+				return false;
+			break;
+
+		case VK_SHADER_STAGE_GEOMETRY_BIT:
+			if (!features2.features.geometryShader)
+				return false;
+			break;
+
+		case VK_SHADER_STAGE_MESH_BIT_EXT:
+			if (!features.mesh_shader.meshShader && !features.mesh_shader_nv.meshShader)
+				return false;
+			break;
+
+		case VK_SHADER_STAGE_TASK_BIT_EXT:
+			if (!features.mesh_shader.taskShader && !features.mesh_shader_nv.taskShader)
+				return false;
+			break;
+
+		default:
+			return false;
+		}
+
 		if (!subgroup_size_control_is_supported(info->pStages[i]))
 			return false;
 		if (!pnext_chain_is_supported(info->pStages[i].pNext))
