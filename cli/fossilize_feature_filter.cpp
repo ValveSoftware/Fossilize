@@ -1461,7 +1461,8 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 		return features.shading_rate_nv.shadingRateImage == VK_TRUE ||
 		       features.fragment_density.fragmentDensityMap == VK_TRUE;
 	case spv::CapabilityMeshShadingNV:
-		return enabled_extensions.count(VK_NV_MESH_SHADER_EXTENSION_NAME) == VK_TRUE;
+		return enabled_extensions.count(VK_NV_MESH_SHADER_EXTENSION_NAME) == VK_TRUE &&
+		       features.mesh_shader_nv.meshShader;
 	case spv::CapabilityRayTracingNV:
 		return enabled_extensions.count(VK_NV_RAY_TRACING_EXTENSION_NAME) == VK_TRUE;
 	case spv::CapabilityTransformFeedback:
@@ -1507,6 +1508,9 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 	case spv::CapabilityDotProductInput4x8BitKHR:
 	case spv::CapabilityDotProductInput4x8BitPackedKHR:
 		return features.shader_integer_dot_product.shaderIntegerDotProduct == VK_TRUE;
+	case spv::CapabilityMeshShadingEXT:
+		return enabled_extensions.count(VK_EXT_MESH_SHADER_EXTENSION_NAME) == VK_TRUE &&
+		       features.mesh_shader.meshShader;
 
 	default:
 		LOGE("Unrecognized SPIR-V capability %u, treating as unsupported.\n", unsigned(cap));
