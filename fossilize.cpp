@@ -7091,12 +7091,19 @@ Hash StateRecorder::Impl::record_shader_module(const WorkItem &record_item, bool
 {
 	auto *create_info = reinterpret_cast<VkShaderModuleCreateInfo *>(record_item.create_info);
 	Hash hash = record_item.custom_hash;
+	auto vk_object = api_object_cast<VkShaderModule>(record_item.handle);
+
 	if (hash == 0)
+	{
 		if (!Hashing::compute_hash_shader_module(*create_info, &hash))
+		{
+			shader_module_to_hash.erase(vk_object);
 			return hash;
+		}
+	}
 
 	if (record_item.handle != 0)
-		shader_module_to_hash[api_object_cast<VkShaderModule>(record_item.handle)] = hash;
+		shader_module_to_hash[vk_object] = hash;
 
 	auto &blob = record_data.blob;
 
@@ -7242,11 +7249,19 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 		{
 			auto *create_info = reinterpret_cast<VkSamplerCreateInfo *>(record_item.create_info);
 			auto hash = record_item.custom_hash;
-			if (hash == 0)
-				if (!Hashing::compute_hash_sampler(*create_info, &hash))
-					break;
+			auto vk_object = api_object_cast<VkSampler>(record_item.handle);
 
-			sampler_to_hash[api_object_cast<VkSampler>(record_item.handle)] = hash;
+			if (hash == 0)
+			{
+				if (!Hashing::compute_hash_sampler(*create_info, &hash))
+				{
+					// Forget this reference if we had one with same pointer value.
+					sampler_to_hash.erase(vk_object);
+					break;
+				}
+			}
+
+			sampler_to_hash[vk_object] = hash;
 
 			if (database_iface)
 			{
@@ -7296,16 +7311,19 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 				subpass_meta = analyze_subpass_meta_storage(*create_info);
 			}
 
+			auto vk_object = api_object_cast<VkRenderPass>(record_item.handle);
 			auto hash = record_item.custom_hash;
 			if (hash == 0)
 			{
-				if (create_info && !Hashing::compute_hash_render_pass(*create_info, &hash))
+				if ((create_info && !Hashing::compute_hash_render_pass(*create_info, &hash)) ||
+				    (create_info2 && !Hashing::compute_hash_render_pass2(*create_info2, &hash)))
+				{
+					render_pass_to_hash.erase(vk_object);
 					break;
-				if (create_info2 && !Hashing::compute_hash_render_pass2(*create_info2, &hash))
-					break;
+				}
 			}
 
-			render_pass_to_hash[api_object_cast<VkRenderPass>(record_item.handle)] = hash;
+			render_pass_to_hash[vk_object] = hash;
 			render_pass_hash_to_subpass_meta[hash] = std::move(subpass_meta);
 
 			if (database_iface)
@@ -7359,17 +7377,26 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 		{
 			auto *create_info = reinterpret_cast<VkDescriptorSetLayoutCreateInfo *>(record_item.create_info);
 			auto hash = record_item.custom_hash;
+			auto vk_object = api_object_cast<VkDescriptorSetLayout>(record_item.handle);
+
 			if (hash == 0)
+			{
 				if (!Hashing::compute_hash_descriptor_set_layout(*recorder, *create_info, &hash))
+				{
+					descriptor_set_layout_to_hash.erase(vk_object);
 					break;
+				}
+			}
 
 			VkDescriptorSetLayoutCreateInfo *create_info_copy = nullptr;
-			if (!copy_descriptor_set_layout(create_info, allocator, &create_info_copy))
+			if (!copy_descriptor_set_layout(create_info, allocator, &create_info_copy) ||
+			    !remap_descriptor_set_layout_ci(create_info_copy))
+			{
+				descriptor_set_layout_to_hash.erase(vk_object);
 				break;
-			if (!remap_descriptor_set_layout_ci(create_info_copy))
-				break;
+			}
 
-			descriptor_set_layout_to_hash[api_object_cast<VkDescriptorSetLayout>(record_item.handle)] = hash;
+			descriptor_set_layout_to_hash[vk_object] = hash;
 
 			if (database_iface)
 			{
@@ -7406,17 +7433,26 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 		{
 			auto *create_info = reinterpret_cast<VkPipelineLayoutCreateInfo *>(record_item.create_info);
 			auto hash = record_item.custom_hash;
+			auto vk_object = api_object_cast<VkPipelineLayout>(record_item.handle);
+
 			if (hash == 0)
+			{
 				if (!Hashing::compute_hash_pipeline_layout(*recorder, *create_info, &hash))
+				{
+					pipeline_layout_to_hash.erase(vk_object);
 					break;
+				}
+			}
 
 			VkPipelineLayoutCreateInfo *create_info_copy = nullptr;
-			if (!copy_pipeline_layout(create_info, allocator, &create_info_copy))
+			if (!copy_pipeline_layout(create_info, allocator, &create_info_copy) ||
+			    !remap_pipeline_layout_ci(create_info_copy))
+			{
+				pipeline_layout_to_hash.erase(vk_object);
 				break;
-			if (!remap_pipeline_layout_ci(create_info_copy))
-				break;
+			}
 
-			pipeline_layout_to_hash[api_object_cast<VkPipelineLayout>(record_item.handle)] = hash;
+			pipeline_layout_to_hash[vk_object] = hash;
 
 			if (database_iface)
 			{
@@ -7452,17 +7488,26 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 		{
 			auto *create_info = reinterpret_cast<VkRayTracingPipelineCreateInfoKHR *>(record_item.create_info);
 			auto hash = record_item.custom_hash;
+			auto vk_object = api_object_cast<VkPipeline>(record_item.handle);
+
 			if (hash == 0)
+			{
 				if (!Hashing::compute_hash_raytracing_pipeline(*recorder, *create_info, &hash))
+				{
+					raytracing_pipeline_to_hash.erase(vk_object);
 					break;
+				}
+			}
 
 			VkRayTracingPipelineCreateInfoKHR *create_info_copy = nullptr;
-			if (!copy_raytracing_pipeline(create_info, allocator, nullptr, 0, &create_info_copy))
+			if (!copy_raytracing_pipeline(create_info, allocator, nullptr, 0, &create_info_copy) ||
+			    !remap_raytracing_pipeline_ci(create_info_copy))
+			{
+				raytracing_pipeline_to_hash.erase(vk_object);
 				break;
-			if (!remap_raytracing_pipeline_ci(create_info_copy))
-				break;
+			}
 
-			raytracing_pipeline_to_hash[api_object_cast<VkPipeline>(record_item.handle)] = hash;
+			raytracing_pipeline_to_hash[vk_object] = hash;
 
 			if (database_iface)
 			{
@@ -7499,17 +7544,26 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 		{
 			auto *create_info = reinterpret_cast<VkGraphicsPipelineCreateInfo *>(record_item.create_info);
 			auto hash = record_item.custom_hash;
+			auto vk_object = api_object_cast<VkPipeline>(record_item.handle);
+
 			if (hash == 0)
+			{
 				if (!Hashing::compute_hash_graphics_pipeline(*recorder, *create_info, &hash))
+				{
+					graphics_pipeline_to_hash.erase(vk_object);
 					break;
+				}
+			}
 
 			VkGraphicsPipelineCreateInfo *create_info_copy = nullptr;
-			if (!copy_graphics_pipeline(create_info, allocator, nullptr, 0, &create_info_copy))
+			if (!copy_graphics_pipeline(create_info, allocator, nullptr, 0, &create_info_copy) ||
+			    !remap_graphics_pipeline_ci(create_info_copy))
+			{
+				graphics_pipeline_to_hash.erase(vk_object);
 				break;
-			if (!remap_graphics_pipeline_ci(create_info_copy))
-				break;
+			}
 
-			graphics_pipeline_to_hash[api_object_cast<VkPipeline>(record_item.handle)] = hash;
+			graphics_pipeline_to_hash[vk_object] = hash;
 
 			if (database_iface)
 			{
@@ -7545,17 +7599,26 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 		{
 			auto *create_info = reinterpret_cast<VkComputePipelineCreateInfo *>(record_item.create_info);
 			auto hash = record_item.custom_hash;
+			auto vk_object = api_object_cast<VkPipeline>(record_item.handle);
+
 			if (hash == 0)
+			{
 				if (!Hashing::compute_hash_compute_pipeline(*recorder, *create_info, &hash))
+				{
+					compute_pipeline_to_hash.erase(vk_object);
 					break;
+				}
+			}
 
 			VkComputePipelineCreateInfo *create_info_copy = nullptr;
-			if (!copy_compute_pipeline(create_info, allocator, nullptr, 0, &create_info_copy))
+			if (!copy_compute_pipeline(create_info, allocator, nullptr, 0, &create_info_copy) ||
+			    !remap_compute_pipeline_ci(create_info_copy))
+			{
+				compute_pipeline_to_hash.erase(vk_object);
 				break;
-			if (!remap_compute_pipeline_ci(create_info_copy))
-				break;
+			}
 
-			compute_pipeline_to_hash[api_object_cast<VkPipeline>(record_item.handle)] = hash;
+			compute_pipeline_to_hash[vk_object] = hash;
 
 			if (database_iface)
 			{
