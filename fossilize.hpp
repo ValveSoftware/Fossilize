@@ -120,6 +120,11 @@ public:
 	// Replaying application needs to detect that pNext, create its own YCbCr object and replace the struct
 	// with a YCBCR_CONVERSION_INFO.
 	// See Device::create_sampler_with_ycbcr_remap().
+
+	// Sampler objects are enqueued on-demand if they are not replayed by the time descriptor set layouts are parsed.
+	// It is plausible that only a small subset of sampler objects actually end up being used as immutable samplers,
+	// and it's feasible for the recorder to hold on to sampler objects just in-case.
+
 	virtual bool enqueue_create_sampler(Hash hash, const VkSamplerCreateInfo *create_info, VkSampler *sampler) = 0;
 	virtual bool enqueue_create_descriptor_set_layout(Hash hash, const VkDescriptorSetLayoutCreateInfo *create_info, VkDescriptorSetLayout *layout) = 0;
 	virtual bool enqueue_create_pipeline_layout(Hash hash, const VkPipelineLayoutCreateInfo *create_info, VkPipelineLayout *layout) = 0;
@@ -137,6 +142,8 @@ public:
 
 	// Wait for all shader modules to be ready.
 	virtual void sync_shader_modules() {}
+	// Wait for all samplers to be ready.
+	virtual void sync_samplers() {}
 
 	// Notifies the replayer that we are done replaying a type.
 	// Replay can ignore this if it deals with synchronization between replayed types.

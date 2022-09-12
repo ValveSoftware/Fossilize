@@ -3472,8 +3472,7 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 
 	static const ResourceTag initial_playback_order[] = {
 		RESOURCE_APPLICATION_INFO, // This will create the device, etc.
-		RESOURCE_SAMPLER, // Trivial, run in main thread.
-		RESOURCE_DESCRIPTOR_SET_LAYOUT, // Trivial, run in main thread
+		RESOURCE_DESCRIPTOR_SET_LAYOUT, // Trivial, run in main thread. Dependent immutable samplers are pulled in on-demand.
 		RESOURCE_PIPELINE_LAYOUT, // Trivial, run in main thread
 		RESOURCE_RENDER_PASS, // Trivial, run in main thread
 	};

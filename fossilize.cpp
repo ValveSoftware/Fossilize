@@ -205,7 +205,7 @@ struct StateReplayer::Impl
 	void forget_handle_references();
 	void forget_pipeline_handle_references();
 	bool parse_samplers(StateCreatorInterface &iface, const Value &samplers) FOSSILIZE_WARN_UNUSED;
-	bool parse_descriptor_set_layouts(StateCreatorInterface &iface, const Value &layouts) FOSSILIZE_WARN_UNUSED;
+	bool parse_descriptor_set_layouts(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &layouts) FOSSILIZE_WARN_UNUSED;
 	bool parse_pipeline_layouts(StateCreatorInterface &iface, const Value &layouts) FOSSILIZE_WARN_UNUSED;
 	bool parse_shader_modules(StateCreatorInterface &iface, const Value &modules, const uint8_t *varint, size_t varint_size) FOSSILIZE_WARN_UNUSED;
 	bool parse_render_passes(StateCreatorInterface &iface, const Value &passes) FOSSILIZE_WARN_UNUSED;
@@ -221,8 +221,10 @@ struct StateReplayer::Impl
 
 	bool parse_push_constant_ranges(const Value &ranges, const VkPushConstantRange **out_ranges) FOSSILIZE_WARN_UNUSED;
 	bool parse_set_layouts(const Value &layouts, const VkDescriptorSetLayout **out_layouts) FOSSILIZE_WARN_UNUSED;
-	bool parse_descriptor_set_bindings(const Value &bindings, const VkDescriptorSetLayoutBinding **out_bindings) FOSSILIZE_WARN_UNUSED;
-	bool parse_immutable_samplers(const Value &samplers, const VkSampler **out_sampler) FOSSILIZE_WARN_UNUSED;
+	bool parse_descriptor_set_bindings(StateCreatorInterface &iface, DatabaseInterface *resolver,
+	                                   const Value &bindings, const VkDescriptorSetLayoutBinding **out_bindings) FOSSILIZE_WARN_UNUSED;
+	bool parse_immutable_samplers(StateCreatorInterface &iface, DatabaseInterface *resolver,
+	                              const Value &samplers, const VkSampler **out_sampler) FOSSILIZE_WARN_UNUSED;
 	bool parse_render_pass_attachments(const Value &attachments, const VkAttachmentDescription **out_attachments) FOSSILIZE_WARN_UNUSED;
 	bool parse_render_pass_dependencies(const Value &dependencies, const VkSubpassDependency **out_dependencies) FOSSILIZE_WARN_UNUSED;
 	bool parse_render_pass_subpasses(const Value &subpass, const VkSubpassDescription **out_descriptions) FOSSILIZE_WARN_UNUSED;
@@ -2332,28 +2334,59 @@ const char *StateReplayer::Impl::duplicate_string(const char *str, size_t len)
 	return c;
 }
 
-bool StateReplayer::Impl::parse_immutable_samplers(const Value &samplers, const VkSampler **out_sampler)
+bool StateReplayer::Impl::parse_immutable_samplers(StateCreatorInterface &iface, DatabaseInterface *resolver,
+                                                   const Value &samplers, const VkSampler **out_sampler)
 {
 	auto *samps = allocator.allocate_n<VkSampler>(samplers.Size());
 	auto *ret = samps;
 	for (auto itr = samplers.Begin(); itr != samplers.End(); ++itr, samps++)
 	{
-		auto index = string_to_uint64(itr->GetString());
-		if (index > 0)
+		auto sampler_hash = string_to_uint64(itr->GetString());
+		if (sampler_hash > 0)
 		{
-			auto sampler_itr = replayed_samplers.find(index);
+			auto sampler_itr = replayed_samplers.find(sampler_hash);
 			if (sampler_itr == end(replayed_samplers))
 			{
-				log_missing_resource("Immutable sampler", index);
+				size_t external_state_size = 0;
+				if (!resolver || !resolver->read_entry(RESOURCE_SAMPLER, sampler_hash,
+				                                       &external_state_size, nullptr,
+				                                       PAYLOAD_READ_NO_FLAGS))
+				{
+					log_missing_resource("Immutable sampler", sampler_hash);
+					return false;
+				}
+
+				vector<uint8_t> external_state(external_state_size);
+
+				if (!resolver->read_entry(RESOURCE_SAMPLER, sampler_hash,
+				                          &external_state_size, external_state.data(),
+				                          PAYLOAD_READ_NO_FLAGS))
+				{
+					log_missing_resource("Immutable sampler", sampler_hash);
+					return false;
+				}
+
+				if (!this->parse(iface, resolver, external_state.data(), external_state.size()))
+					return false;
+
+				iface.sync_samplers();
+				sampler_itr = replayed_samplers.find(sampler_hash);
+			}
+			else
+				iface.sync_samplers();
+
+			if (sampler_itr == replayed_samplers.end())
+			{
+				log_missing_resource("Immutable sampler", sampler_hash);
 				return false;
 			}
 			else if (sampler_itr->second == VK_NULL_HANDLE)
 			{
-				log_invalid_resource("Immutable sampler", index);
+				log_invalid_resource("Immutable sampler", sampler_hash);
 				return false;
 			}
-			else
-				*samps = sampler_itr->second;
+
+			*samps = sampler_itr->second;
 		}
 	}
 
@@ -2375,7 +2408,8 @@ StateRecorder::Impl::~Impl()
 	sync_thread();
 }
 
-bool StateReplayer::Impl::parse_descriptor_set_bindings(const Value &bindings,
+bool StateReplayer::Impl::parse_descriptor_set_bindings(StateCreatorInterface &iface, DatabaseInterface *resolver,
+                                                        const Value &bindings,
                                                         const VkDescriptorSetLayoutBinding **out_bindings)
 {
 	auto *set_bindings = allocator.allocate_n_cleared<VkDescriptorSetLayoutBinding>(bindings.Size());
@@ -2388,8 +2422,13 @@ bool StateReplayer::Impl::parse_descriptor_set_bindings(const Value &bindings,
 		set_bindings->descriptorType = static_cast<VkDescriptorType>(b["descriptorType"].GetUint());
 		set_bindings->stageFlags = b["stageFlags"].GetUint();
 		if (b.HasMember("immutableSamplers"))
-			if (!parse_immutable_samplers(b["immutableSamplers"], &set_bindings->pImmutableSamplers))
+		{
+			if (!parse_immutable_samplers(iface, resolver,
+			                              b["immutableSamplers"], &set_bindings->pImmutableSamplers))
+			{
 				return false;
+			}
+		}
 	}
 
 	*out_bindings = ret;
@@ -2529,7 +2568,7 @@ bool StateReplayer::Impl::parse_pipeline_layouts(StateCreatorInterface &iface, c
 	return true;
 }
 
-bool StateReplayer::Impl::parse_descriptor_set_layouts(StateCreatorInterface &iface, const Value &layouts)
+bool StateReplayer::Impl::parse_descriptor_set_layouts(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &layouts)
 {
 	auto *infos = allocator.allocate_n_cleared<VkDescriptorSetLayoutCreateInfo>(layouts.MemberCount());
 
@@ -2548,7 +2587,7 @@ bool StateReplayer::Impl::parse_descriptor_set_layouts(StateCreatorInterface &if
 		{
 			auto &bindings = obj["bindings"];
 			info.bindingCount = bindings.Size();
-			if (!parse_descriptor_set_bindings(bindings, &info.pBindings))
+			if (!parse_descriptor_set_bindings(iface, resolver, bindings, &info.pBindings))
 				return false;
 		}
 
@@ -4945,7 +4984,7 @@ bool StateReplayer::Impl::parse(StateCreatorInterface &iface, DatabaseInterface 
 			return false;
 
 	if (doc.HasMember("setLayouts"))
-		if (!parse_descriptor_set_layouts(iface, doc["setLayouts"]))
+		if (!parse_descriptor_set_layouts(iface, resolver, doc["setLayouts"]))
 			return false;
 
 	if (doc.HasMember("pipelineLayouts"))
