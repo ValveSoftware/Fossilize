@@ -316,6 +316,7 @@ struct StateReplayer::Impl
 
 struct WorkItem
 {
+	VkStructureType type;
 	uint64_t handle;
 	void *create_info;
 	Hash custom_hash;
@@ -5738,9 +5739,15 @@ bool StateRecorder::record_sampler(VkSampler sampler, const VkSamplerCreateInfo 
 
 		VkSamplerCreateInfo *new_info = nullptr;
 		if (!impl->copy_sampler(&create_info, impl->temp_allocator, &new_info))
+		{
+			// Have to forget any reference if this API handle is recycled.
+			impl->record_queue.push({VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO, api_object_cast<uint64_t>(sampler),
+			                         nullptr, 0});
 			return false;
+		}
 
-		impl->record_queue.push({api_object_cast<uint64_t>(sampler), new_info, custom_hash});
+		impl->record_queue.push({VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO, api_object_cast<uint64_t>(sampler),
+		                         new_info, custom_hash});
 		impl->record_cv.notify_one();
 	}
 
@@ -5756,7 +5763,11 @@ bool StateRecorder::record_ycbcr_conversion(VkSamplerYcbcrConversion conv,
 
 		VkSamplerYcbcrConversionCreateInfo *new_info = nullptr;
 		if (!impl->copy_ycbcr_conversion(&create_info, impl->ycbcr_temp_allocator, &new_info))
+		{
+			// Have to forget any reference if this API handle is recycled.
+			impl->ycbcr_conversions.erase(conv);
 			return false;
+		}
 
 		// We don't directly serialize these objects. Just remember it for later if a VkSampler is created.
 		impl->ycbcr_conversions[conv] = new_info;
@@ -5774,9 +5785,15 @@ bool StateRecorder::record_descriptor_set_layout(VkDescriptorSetLayout set_layou
 
 		VkDescriptorSetLayoutCreateInfo *new_info = nullptr;
 		if (!impl->copy_descriptor_set_layout(&create_info, impl->temp_allocator, &new_info))
+		{
+			// Have to forget any reference if this API handle is recycled.
+			impl->record_queue.push({VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, api_object_cast<uint64_t>(set_layout),
+			                         nullptr, 0});
 			return false;
+		}
 
-		impl->record_queue.push({api_object_cast<uint64_t>(set_layout), new_info, custom_hash});
+		impl->record_queue.push({VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, api_object_cast<uint64_t>(set_layout),
+		                         new_info, custom_hash});
 		impl->record_cv.notify_one();
 	}
 
@@ -5797,9 +5814,15 @@ bool StateRecorder::record_pipeline_layout(VkPipelineLayout pipeline_layout, con
 
 		VkPipelineLayoutCreateInfo *new_info = nullptr;
 		if (!impl->copy_pipeline_layout(&create_info, impl->temp_allocator, &new_info))
+		{
+			// Have to forget any reference if this API handle is recycled.
+			impl->record_queue.push({VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, api_object_cast<uint64_t>(pipeline_layout),
+			                         nullptr, 0});
 			return false;
+		}
 
-		impl->record_queue.push({api_object_cast<uint64_t>(pipeline_layout), new_info, custom_hash});
+		impl->record_queue.push({VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, api_object_cast<uint64_t>(pipeline_layout),
+		                         new_info, custom_hash});
 		impl->record_cv.notify_one();
 	}
 
@@ -5817,8 +5840,15 @@ bool StateRecorder::record_graphics_pipeline(VkPipeline pipeline, const VkGraphi
 	if (graphics_pipeline_library_state_flags_have_module_state(state_flags))
 	{
 		for (uint32_t i = 0; i < create_info.stageCount; i++)
+		{
 			if (shader_stage_is_identifier_only(create_info.pStages[i]))
+			{
+				// Have to forget any reference if this API handle is recycled.
+				impl->record_queue.push({VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, api_object_cast<uint64_t>(pipeline),
+				                         nullptr, 0});
 				return true;
+			}
+		}
 	}
 
 	{
@@ -5826,9 +5856,15 @@ bool StateRecorder::record_graphics_pipeline(VkPipeline pipeline, const VkGraphi
 
 		VkGraphicsPipelineCreateInfo *new_info = nullptr;
 		if (!impl->copy_graphics_pipeline(&create_info, impl->temp_allocator, base_pipelines, base_pipeline_count, &new_info))
+		{
+			// Have to forget any reference if this API handle is recycled.
+			impl->record_queue.push({VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, api_object_cast<uint64_t>(pipeline),
+			                         nullptr, 0});
 			return false;
+		}
 
-		impl->record_queue.push({api_object_cast<uint64_t>(pipeline), new_info, custom_hash});
+		impl->record_queue.push({VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, api_object_cast<uint64_t>(pipeline),
+		                         new_info, custom_hash});
 		impl->record_cv.notify_one();
 	}
 
@@ -5842,16 +5878,27 @@ bool StateRecorder::record_compute_pipeline(VkPipeline pipeline, const VkCompute
 {
 	// Ignore pipelines that cannot result in meaningful replay.
 	if (shader_stage_is_identifier_only(create_info.stage))
+	{
+		// Have to forget any reference if this API handle is recycled.
+		impl->record_queue.push({VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO, api_object_cast<uint64_t>(pipeline),
+		                         nullptr, 0});
 		return true;
+	}
 
 	{
 		std::lock_guard<std::mutex> lock(impl->record_lock);
 
 		VkComputePipelineCreateInfo *new_info = nullptr;
 		if (!impl->copy_compute_pipeline(&create_info, impl->temp_allocator, base_pipelines, base_pipeline_count, &new_info))
+		{
+			// Have to forget any reference if this API handle is recycled.
+			impl->record_queue.push({VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO, api_object_cast<uint64_t>(pipeline),
+			                         nullptr, 0});
 			return false;
+		}
 
-		impl->record_queue.push({api_object_cast<uint64_t>(pipeline), new_info, custom_hash});
+		impl->record_queue.push({VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO, api_object_cast<uint64_t>(pipeline),
+		                         new_info, custom_hash});
 		impl->record_cv.notify_one();
 	}
 
@@ -5866,8 +5913,15 @@ bool StateRecorder::record_raytracing_pipeline(
 {
 	// Ignore pipelines that cannot result in meaningful replay.
 	for (uint32_t i = 0; i < create_info.stageCount; i++)
+	{
 		if (shader_stage_is_identifier_only(create_info.pStages[i]))
+		{
+			// Have to forget any reference if this API handle is recycled.
+			impl->record_queue.push({VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR,
+			                         api_object_cast<uint64_t>(pipeline), nullptr, 0});
 			return true;
+		}
+	}
 
 	{
 		std::lock_guard<std::mutex> lock(impl->record_lock);
@@ -5876,10 +5930,14 @@ bool StateRecorder::record_raytracing_pipeline(
 		if (!impl->copy_raytracing_pipeline(&create_info, impl->temp_allocator,
 		                                    base_pipelines, base_pipeline_count, &new_info))
 		{
+			// Have to forget any reference if this API handle is recycled.
+			impl->record_queue.push({VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR,
+			                         api_object_cast<uint64_t>(pipeline), nullptr, 0});
 			return false;
 		}
 
-		impl->record_queue.push({api_object_cast<uint64_t>(pipeline), new_info, custom_hash});
+		impl->record_queue.push({VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR,
+		                         api_object_cast<uint64_t>(pipeline), new_info, custom_hash});
 		impl->record_cv.notify_one();
 	}
 
@@ -5895,9 +5953,15 @@ bool StateRecorder::record_render_pass(VkRenderPass render_pass, const VkRenderP
 
 		VkRenderPassCreateInfo *new_info = nullptr;
 		if (!impl->copy_render_pass(&create_info, impl->temp_allocator, &new_info))
+		{
+			// Have to forget any reference if this API handle is recycled.
+			impl->record_queue.push({VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+			                         api_object_cast<uint64_t>(render_pass), nullptr, 0});
 			return false;
+		}
 
-		impl->record_queue.push({api_object_cast<uint64_t>(render_pass), new_info, custom_hash});
+		impl->record_queue.push({VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO, api_object_cast<uint64_t>(render_pass),
+		                         new_info, custom_hash});
 		impl->record_cv.notify_one();
 	}
 
@@ -5913,9 +5977,17 @@ bool StateRecorder::record_render_pass2(VkRenderPass render_pass, const VkRender
 
 		VkRenderPassCreateInfo2 *new_info = nullptr;
 		if (!impl->copy_render_pass2(&create_info, impl->temp_allocator, &new_info))
+		{
+			// Have to forget any reference if this API handle is recycled.
+			impl->record_queue.push({VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2,
+			                         api_object_cast<uint64_t>(render_pass),
+			                         nullptr, 0});
 			return false;
+		}
 
-		impl->record_queue.push({api_object_cast<uint64_t>(render_pass), new_info, custom_hash});
+		impl->record_queue.push({VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2,
+		                         api_object_cast<uint64_t>(render_pass),
+		                         new_info, custom_hash});
 		impl->record_cv.notify_one();
 	}
 
@@ -5930,15 +6002,25 @@ bool StateRecorder::record_shader_module(VkShaderModule module, const VkShaderMo
 		if (create_info.pNext)
 		{
 			log_error_pnext_chain("pNext in VkShaderModuleCreateInfo not supported.", create_info.pNext);
+			// Have to forget any reference if this API handle is recycled.
+			impl->record_queue.push({VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+			                         api_object_cast<uint64_t>(module),
+			                         nullptr, 0});
 			return false;
 		}
 		std::lock_guard<std::mutex> lock(impl->record_lock);
 
 		VkShaderModuleCreateInfo *new_info = nullptr;
 		if (!impl->copy_shader_module(&create_info, impl->temp_allocator, false, &new_info))
+		{
+			impl->record_queue.push({VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+			                         api_object_cast<uint64_t>(module),
+			                         nullptr, 0});
 			return false;
+		}
 
-		impl->record_queue.push({api_object_cast<uint64_t>(module), new_info, custom_hash});
+		impl->record_queue.push({VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, api_object_cast<uint64_t>(module),
+		                         new_info, custom_hash});
 		impl->record_cv.notify_one();
 	}
 
@@ -5950,7 +6032,7 @@ void StateRecorder::Impl::record_end()
 {
 	// Signal end of recording with empty work item
 	std::lock_guard<std::mutex> lock(record_lock);
-	record_queue.push({ 0, nullptr, 0 });
+	record_queue.push({ VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO /* dummy value */, 0, nullptr, 0 });
 	record_cv.notify_one();
 }
 
@@ -7095,7 +7177,7 @@ Hash StateRecorder::Impl::record_shader_module(const WorkItem &record_item, bool
 
 	if (hash == 0)
 	{
-		if (!Hashing::compute_hash_shader_module(*create_info, &hash))
+		if (!create_info || !Hashing::compute_hash_shader_module(*create_info, &hash))
 		{
 			shader_module_to_hash.erase(vk_object);
 			return hash;
@@ -7239,10 +7321,11 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 			}
 		}
 
-		if (!record_item.create_info)
+		if (!record_item.create_info && record_item.handle == 0)
 			break;
 
-		VkStructureType record_type = reinterpret_cast<VkBaseInStructure *>(record_item.create_info)->sType;
+		auto record_type = record_item.type;
+
 		switch (record_type)
 		{
 		case VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO:
@@ -7253,7 +7336,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 
 			if (hash == 0)
 			{
-				if (!Hashing::compute_hash_sampler(*create_info, &hash))
+				if (!create_info || !Hashing::compute_hash_sampler(*create_info, &hash))
 				{
 					// Forget this reference if we had one with same pointer value.
 					sampler_to_hash.erase(vk_object);
@@ -7299,23 +7382,28 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 		{
 			VkRenderPassCreateInfo *create_info = nullptr;
 			VkRenderPassCreateInfo2 *create_info2 = nullptr;
-			SubpassMetaStorage subpass_meta;
-			if (record_type == VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2)
+			SubpassMetaStorage subpass_meta = {};
+
+			if (record_item.create_info)
 			{
-				create_info2 = reinterpret_cast<VkRenderPassCreateInfo2 *>(record_item.create_info);
-				subpass_meta = analyze_subpass_meta_storage(*create_info2);
-			}
-			else
-			{
-				create_info = reinterpret_cast<VkRenderPassCreateInfo *>(record_item.create_info);
-				subpass_meta = analyze_subpass_meta_storage(*create_info);
+				if (record_type == VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2)
+				{
+					create_info2 = reinterpret_cast<VkRenderPassCreateInfo2 *>(record_item.create_info);
+					subpass_meta = analyze_subpass_meta_storage(*create_info2);
+				}
+				else
+				{
+					create_info = reinterpret_cast<VkRenderPassCreateInfo *>(record_item.create_info);
+					subpass_meta = analyze_subpass_meta_storage(*create_info);
+				}
 			}
 
 			auto vk_object = api_object_cast<VkRenderPass>(record_item.handle);
 			auto hash = record_item.custom_hash;
 			if (hash == 0)
 			{
-				if ((create_info && !Hashing::compute_hash_render_pass(*create_info, &hash)) ||
+				if (!record_item.create_info ||
+				    (create_info && !Hashing::compute_hash_render_pass(*create_info, &hash)) ||
 				    (create_info2 && !Hashing::compute_hash_render_pass2(*create_info2, &hash)))
 				{
 					render_pass_to_hash.erase(vk_object);
@@ -7381,7 +7469,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 
 			if (hash == 0)
 			{
-				if (!Hashing::compute_hash_descriptor_set_layout(*recorder, *create_info, &hash))
+				if (!create_info || !Hashing::compute_hash_descriptor_set_layout(*recorder, *create_info, &hash))
 				{
 					descriptor_set_layout_to_hash.erase(vk_object);
 					break;
@@ -7437,7 +7525,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 
 			if (hash == 0)
 			{
-				if (!Hashing::compute_hash_pipeline_layout(*recorder, *create_info, &hash))
+				if (!create_info || !Hashing::compute_hash_pipeline_layout(*recorder, *create_info, &hash))
 				{
 					pipeline_layout_to_hash.erase(vk_object);
 					break;
@@ -7492,7 +7580,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 
 			if (hash == 0)
 			{
-				if (!Hashing::compute_hash_raytracing_pipeline(*recorder, *create_info, &hash))
+				if (!create_info || !Hashing::compute_hash_raytracing_pipeline(*recorder, *create_info, &hash))
 				{
 					raytracing_pipeline_to_hash.erase(vk_object);
 					break;
@@ -7548,7 +7636,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 
 			if (hash == 0)
 			{
-				if (!Hashing::compute_hash_graphics_pipeline(*recorder, *create_info, &hash))
+				if (!create_info || !Hashing::compute_hash_graphics_pipeline(*recorder, *create_info, &hash))
 				{
 					graphics_pipeline_to_hash.erase(vk_object);
 					break;
@@ -7603,7 +7691,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 
 			if (hash == 0)
 			{
-				if (!Hashing::compute_hash_compute_pipeline(*recorder, *create_info, &hash))
+				if (!create_info || !Hashing::compute_hash_compute_pipeline(*recorder, *create_info, &hash))
 				{
 					compute_pipeline_to_hash.erase(vk_object);
 					break;
