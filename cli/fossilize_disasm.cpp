@@ -1037,8 +1037,7 @@ int main(int argc, char *argv[])
 		bool replay_all = !filter_replayer.filter_modules.empty();
 
 		static const ResourceTag early_playback_order[] = {
-			RESOURCE_SAMPLER,
-			RESOURCE_DESCRIPTOR_SET_LAYOUT,
+			RESOURCE_DESCRIPTOR_SET_LAYOUT, // Implicitly pulls in samplers.
 			RESOURCE_PIPELINE_LAYOUT,
 			RESOURCE_RENDER_PASS,
 		};
