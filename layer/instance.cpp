@@ -348,6 +348,7 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDevicePropert
 #endif
 
 	bool needs_bucket = infoFilter && infoFilter->needs_buckets(appInfo);
+	shouldRecordImmutableSamplers = !infoFilter || infoFilter->should_record_immutable_samplers(appInfo);
 
 	// Don't write a bucket if we're going to filter out the application.
 	if (needs_bucket && appInfo && infoFilter && !infoFilter->test_application_info(appInfo))

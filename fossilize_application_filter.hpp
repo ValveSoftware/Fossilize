@@ -57,6 +57,7 @@ public:
 	Hash get_bucket_hash(const VkPhysicalDeviceProperties2 *props,
 	                     const VkApplicationInfo *info,
 	                     const void *device_pnext);
+	bool should_record_immutable_samplers(const VkApplicationInfo *info);
 
 private:
 	struct Impl;
