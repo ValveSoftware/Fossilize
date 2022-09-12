@@ -57,7 +57,9 @@ R"delim(
 				"TEST_ENV" : { "equals" : "bar2", "contains": "" },
 				"TEST" : { "nonnull" : true }
 			}
-		}
+		},
+		"test5" : { "recordImmutableSamplers" : true },
+		"test6" : { "recordImmutableSamplers" : false }
 	},
 	"engineFilters" : {
 		"test1" : {
@@ -81,7 +83,9 @@ R"delim(
 				"TEST_ENV" : { "equals" : "bar2", "contains": "" },
 				"TEST" : { "nonnull" : true }
 			}
-		}
+		},
+		"test5" : { "recordImmutableSamplers" : false },
+		"test6" : { "recordImmutableSamplers" : true }
 	},
 	"defaultBucketVariantDependencies" : [
 		"ApplicationName",
@@ -370,6 +374,23 @@ R"delim(
 		auto hash17 = filter.get_bucket_hash(&props2, &appinfo, &features2);
 		auto hash18 = filter.get_bucket_hash(&props2, &appinfo, nullptr);
 		if (hash17 != hash18)
+			return EXIT_FAILURE;
+	}
+
+	{
+		appinfo.pApplicationName = "test5";
+		appinfo.pEngineName = nullptr;
+		if (!filter.should_record_immutable_samplers(&appinfo))
+			return EXIT_FAILURE;
+		appinfo.pApplicationName = "test6";
+		if (filter.should_record_immutable_samplers(&appinfo))
+			return EXIT_FAILURE;
+		appinfo.pApplicationName = nullptr;
+		appinfo.pEngineName = "test5";
+		if (filter.should_record_immutable_samplers(&appinfo))
+			return EXIT_FAILURE;
+		appinfo.pEngineName = "test6";
+		if (!filter.should_record_immutable_samplers(&appinfo))
 			return EXIT_FAILURE;
 	}
 
