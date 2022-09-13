@@ -3433,6 +3433,237 @@ static bool test_pdf_recording()
 	return true;
 }
 
+static bool test_reused_handles()
+{
+	std::vector<Hash> expect_pass[RESOURCE_COUNT];
+	std::vector<Hash> expect_fail[RESOURCE_COUNT];
+
+	{
+		auto db = std::unique_ptr<DatabaseInterface>(create_stream_archive_database(".__test_tmp.foz", DatabaseMode::OverWrite));
+		if (!db)
+			return false;
+
+		StateRecorder recorder;
+
+		VkDeviceCreateInfo dummy_pnext = {VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
+
+		auto fake_sampler = fake_handle<VkSampler>(1);
+		auto fake_set_layout = fake_handle<VkDescriptorSetLayout>(1);
+		auto fake_layout = fake_handle<VkPipelineLayout>(1);
+		auto fake_sampler2 = fake_handle<VkSampler>(2);
+		auto fake_set_layout2 = fake_handle<VkDescriptorSetLayout>(2);
+		auto fake_layout2 = fake_handle<VkPipelineLayout>(2);
+		auto fake_layout3 = fake_handle<VkPipelineLayout>(3);
+
+		auto fake_render_pass = fake_handle<VkRenderPass>(1);
+		auto fake_render_pass2 = fake_handle<VkRenderPass>(2);
+		auto fake_module = fake_handle<VkShaderModule>(1);
+		auto fake_pipe = fake_handle<VkPipeline>(1);
+		auto fake_pipe2 = fake_handle<VkPipeline>(2);
+
+		VkSamplerCreateInfo samp = {VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+		VkDescriptorSetLayoutCreateInfo set_layout_info = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+		VkPipelineLayoutCreateInfo layout_info = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+		VkShaderModuleCreateInfo module_info = {VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
+		VkRenderPassCreateInfo pass_info = {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+		VkRenderPassCreateInfo2 pass_info2 = {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2};
+		VkGraphicsPipelineCreateInfo gpipe = {VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
+		VkComputePipelineCreateInfo cpipe = {VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
+		VkDescriptorSetLayoutBinding binding = {};
+		VkSubpassDescription subpass = {};
+		VkSubpassDescription2 subpass2 = { VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_2 };
+
+		binding.pImmutableSamplers = &fake_sampler;
+		binding.descriptorCount = 1;
+		binding.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+
+		set_layout_info.bindingCount = 1;
+		set_layout_info.pBindings = &binding;
+
+		layout_info.setLayoutCount = 1;
+		layout_info.pSetLayouts = &fake_set_layout;
+
+		pass_info.subpassCount = 1;
+		pass_info.pSubpasses = &subpass;
+
+		pass_info2.subpassCount = 1;
+		pass_info2.pSubpasses = &subpass2;
+
+		uint32_t blank = 0xf00f;
+		module_info.codeSize = sizeof(blank);
+		module_info.pCode = &blank;
+
+		recorder.init_recording_thread(db.get());
+
+		if (!recorder.record_sampler(fake_sampler, samp, 1))
+			return false;
+		if (!recorder.record_sampler(fake_sampler2, samp, 1))
+			return false;
+		expect_pass[RESOURCE_SAMPLER].push_back(1);
+		if (!recorder.record_descriptor_set_layout(fake_set_layout, set_layout_info, 1))
+			return false;
+		if (!recorder.record_descriptor_set_layout(fake_set_layout2, set_layout_info, 1))
+			return false;
+		expect_pass[RESOURCE_DESCRIPTOR_SET_LAYOUT].push_back(1);
+		if (!recorder.record_pipeline_layout(fake_layout, layout_info, 1))
+			return false;
+		if (!recorder.record_pipeline_layout(fake_layout2, layout_info, 1))
+			return false;
+		if (!recorder.record_pipeline_layout(fake_layout3, layout_info, 1))
+			return false;
+		expect_pass[RESOURCE_PIPELINE_LAYOUT].push_back(1);
+		if (!recorder.record_render_pass(fake_render_pass, pass_info, 1))
+			return false;
+		expect_pass[RESOURCE_RENDER_PASS].push_back(1);
+		if (!recorder.record_render_pass2(fake_render_pass2, pass_info2, 2))
+			return false;
+		expect_pass[RESOURCE_RENDER_PASS].push_back(2);
+		if (!recorder.record_shader_module(fake_module, module_info, 1))
+			return false;
+		expect_pass[RESOURCE_SHADER_MODULE].push_back(1);
+
+		gpipe.layout = fake_layout;
+		gpipe.renderPass = fake_render_pass;
+		if (!recorder.record_graphics_pipeline(fake_pipe, gpipe, nullptr, 0, 1))
+			return false;
+		expect_pass[RESOURCE_GRAPHICS_PIPELINE].push_back(1);
+		gpipe.renderPass = fake_render_pass2;
+		if (!recorder.record_graphics_pipeline(fake_pipe2, gpipe, nullptr, 0, 2))
+			return false;
+		expect_pass[RESOURCE_GRAPHICS_PIPELINE].push_back(2);
+
+		cpipe.stage.module = fake_module;
+		cpipe.stage.pName = "main";
+		cpipe.layout = fake_layout3;
+		if (!recorder.record_compute_pipeline(fake_pipe, cpipe, nullptr, 0, 1))
+			return false;
+		expect_pass[RESOURCE_COMPUTE_PIPELINE].push_back(1);
+
+		auto gpipe_derived = gpipe;
+		auto cpipe_derived = cpipe;
+		gpipe_derived.flags = VK_PIPELINE_CREATE_DERIVATIVE_BIT;
+		cpipe_derived.flags = VK_PIPELINE_CREATE_DERIVATIVE_BIT;
+		gpipe_derived.basePipelineHandle = fake_pipe;
+		cpipe_derived.basePipelineHandle = fake_pipe;
+		if (!recorder.record_graphics_pipeline(fake_pipe2, gpipe_derived, nullptr, 0, 1000))
+			return false;
+		expect_pass[RESOURCE_GRAPHICS_PIPELINE].push_back(1000);
+		if (!recorder.record_compute_pipeline(fake_pipe2, cpipe_derived, nullptr, 0, 1000))
+			return false;
+		expect_pass[RESOURCE_COMPUTE_PIPELINE].push_back(1000);
+
+		// Record a bogus sampler with reused API handle.
+		samp.pNext = &dummy_pnext;
+		if (recorder.record_sampler(fake_sampler, samp, 2))
+			return false;
+		expect_fail[RESOURCE_SAMPLER].push_back(2);
+
+		// This descriptor set layout record should fail in serialization because of invalid sampler reference.
+		if (!recorder.record_descriptor_set_layout(fake_set_layout, set_layout_info, 2))
+			return false;
+		expect_fail[RESOURCE_DESCRIPTOR_SET_LAYOUT].push_back(2);
+		set_layout_info.pNext = &dummy_pnext;
+		if (recorder.record_descriptor_set_layout(fake_set_layout2, set_layout_info, 3))
+			return false;
+		expect_fail[RESOURCE_DESCRIPTOR_SET_LAYOUT].push_back(3);
+
+		// This pipeline layout will fail in serialization because of invalid descriptor set reference.
+		if (!recorder.record_pipeline_layout(fake_layout, layout_info, 2))
+			return false;
+		expect_fail[RESOURCE_PIPELINE_LAYOUT].push_back(2);
+
+		// Should fail in serialization.
+		if (!recorder.record_graphics_pipeline(fake_pipe, gpipe, nullptr, 0, 3))
+			return false;
+		expect_fail[RESOURCE_GRAPHICS_PIPELINE].push_back(3);
+
+		layout_info.pSetLayouts = &fake_set_layout2;
+		if (!recorder.record_pipeline_layout(fake_layout2, layout_info, 3))
+			return false;
+		expect_fail[RESOURCE_PIPELINE_LAYOUT].push_back(3);
+
+		// Should also fail in serialization.
+		gpipe.layout = fake_layout2;
+		if (!recorder.record_graphics_pipeline(fake_pipe, gpipe, nullptr, 0, 4))
+			return false;
+		expect_fail[RESOURCE_GRAPHICS_PIPELINE].push_back(4);
+
+		// Sanity check that this still works.
+		gpipe.layout = fake_layout3;
+		if (!recorder.record_graphics_pipeline(fake_pipe, gpipe, nullptr, 0, 5))
+			return false;
+		expect_pass[RESOURCE_GRAPHICS_PIPELINE].push_back(5);
+
+		pass_info.pNext = &dummy_pnext;
+		subpass2.pNext = &dummy_pnext;
+		if (recorder.record_render_pass(fake_render_pass, pass_info, 3))
+			return false;
+		expect_fail[RESOURCE_RENDER_PASS].push_back(3);
+		if (recorder.record_render_pass2(fake_render_pass2, pass_info2, 4))
+			return false;
+		expect_fail[RESOURCE_RENDER_PASS].push_back(4);
+
+		// Should fail in serialization.
+		gpipe.renderPass = fake_render_pass;
+		if (!recorder.record_graphics_pipeline(fake_pipe, gpipe, nullptr, 0, 6))
+			return false;
+		expect_fail[RESOURCE_GRAPHICS_PIPELINE].push_back(6);
+		gpipe.renderPass = fake_render_pass2;
+		if (!recorder.record_graphics_pipeline(fake_pipe, gpipe, nullptr, 0, 7))
+			return false;
+		expect_fail[RESOURCE_GRAPHICS_PIPELINE].push_back(7);
+
+		module_info.pNext = &dummy_pnext;
+		if (recorder.record_shader_module(fake_module, module_info, 2))
+			return false;
+		expect_fail[RESOURCE_SHADER_MODULE].push_back(2);
+
+		// Should fail in serialization.
+		if (!recorder.record_compute_pipeline(fake_pipe, cpipe, nullptr, 0, 2))
+			return false;
+		expect_fail[RESOURCE_COMPUTE_PIPELINE].push_back(2);
+
+		// Should fail to serialize since derived pipelines are invalid.
+		if (!recorder.record_graphics_pipeline(fake_pipe2, gpipe_derived, nullptr, 0, 1001))
+			return false;
+		expect_fail[RESOURCE_GRAPHICS_PIPELINE].push_back(1001);
+		if (!recorder.record_compute_pipeline(fake_pipe2, cpipe_derived, nullptr, 0, 1001))
+			return false;
+		expect_fail[RESOURCE_COMPUTE_PIPELINE].push_back(1001);
+
+		// Same.
+		gpipe_derived.basePipelineHandle = fake_pipe2;
+		cpipe_derived.basePipelineHandle = fake_pipe2;
+		if (!recorder.record_graphics_pipeline(fake_pipe, gpipe_derived, nullptr, 0, 1002))
+			return false;
+		expect_fail[RESOURCE_GRAPHICS_PIPELINE].push_back(1002);
+		if (!recorder.record_compute_pipeline(fake_pipe, cpipe_derived, nullptr, 0, 1002))
+			return false;
+		expect_fail[RESOURCE_COMPUTE_PIPELINE].push_back(1002);
+	}
+
+	{
+		auto db = std::unique_ptr<DatabaseInterface>(create_stream_archive_database(".__test_tmp.foz", DatabaseMode::ReadOnly));
+		if (!db || !db->prepare())
+			return false;
+
+		size_t size = 0;
+		for (int i = 0; i < RESOURCE_COUNT; i++)
+		{
+			for (auto &hash : expect_pass[i])
+				if (!db->read_entry(ResourceTag(i), hash, &size, nullptr, PAYLOAD_READ_NO_FLAGS))
+					return false;
+
+			for (auto &hash : expect_fail[i])
+				if (db->read_entry(ResourceTag(i), hash, &size, nullptr, PAYLOAD_READ_NO_FLAGS))
+					return false;
+		}
+	}
+
+	remove(".__test_tmp.foz");
+	return true;
+}
+
 int main()
 {
 	if (!test_concurrent_database_extra_paths())
@@ -3459,6 +3690,9 @@ int main()
 		return EXIT_FAILURE;
 
 	if (!test_pdf_recording())
+		return EXIT_FAILURE;
+
+	if (!test_reused_handles())
 		return EXIT_FAILURE;
 
 	std::vector<uint8_t> res;
