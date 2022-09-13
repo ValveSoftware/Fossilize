@@ -523,6 +523,10 @@ struct StateRecorder::Impl
 	std::queue<WorkItem> record_queue;
 	std::thread worker_thread;
 
+	void push_work_locked(const WorkItem &item);
+	template <typename T>
+	void push_unregister_locked(VkStructureType sType, T obj);
+
 	bool compression = false;
 	bool checksum = false;
 
@@ -5737,6 +5741,19 @@ void StateRecorder::Impl::pump_synchronized_recording(StateRecorder *recorder)
 	}
 }
 
+void StateRecorder::Impl::push_work_locked(const WorkItem &item)
+{
+	record_queue.push(item);
+	record_cv.notify_one();
+}
+
+template <typename T>
+void StateRecorder::Impl::push_unregister_locked(VkStructureType sType, T obj)
+{
+	record_queue.push({sType, api_object_cast<uint64_t>(obj), nullptr, 0});
+	record_cv.notify_one();
+}
+
 bool StateRecorder::record_sampler(VkSampler sampler, const VkSamplerCreateInfo &create_info, Hash custom_hash)
 {
 	{
@@ -5746,14 +5763,12 @@ bool StateRecorder::record_sampler(VkSampler sampler, const VkSamplerCreateInfo 
 		if (!impl->copy_sampler(&create_info, impl->temp_allocator, &new_info))
 		{
 			// Have to forget any reference if this API handle is recycled.
-			impl->record_queue.push({VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO, api_object_cast<uint64_t>(sampler),
-			                         nullptr, 0});
+			impl->push_unregister_locked(VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO, sampler);
 			return false;
 		}
 
-		impl->record_queue.push({VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO, api_object_cast<uint64_t>(sampler),
-		                         new_info, custom_hash});
-		impl->record_cv.notify_one();
+		impl->push_work_locked({VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO, api_object_cast<uint64_t>(sampler),
+		                        new_info, custom_hash});
 	}
 
 	impl->pump_synchronized_recording(this);
@@ -5792,14 +5807,12 @@ bool StateRecorder::record_descriptor_set_layout(VkDescriptorSetLayout set_layou
 		if (!impl->copy_descriptor_set_layout(&create_info, impl->temp_allocator, &new_info))
 		{
 			// Have to forget any reference if this API handle is recycled.
-			impl->record_queue.push({VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, api_object_cast<uint64_t>(set_layout),
-			                         nullptr, 0});
+			impl->push_unregister_locked(VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, set_layout);
 			return false;
 		}
 
-		impl->record_queue.push({VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, api_object_cast<uint64_t>(set_layout),
-		                         new_info, custom_hash});
-		impl->record_cv.notify_one();
+		impl->push_work_locked({VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, api_object_cast<uint64_t>(set_layout),
+		                        new_info, custom_hash});
 	}
 
 	impl->pump_synchronized_recording(this);
@@ -5810,25 +5823,26 @@ bool StateRecorder::record_pipeline_layout(VkPipelineLayout pipeline_layout, con
                                            Hash custom_hash)
 {
 	{
+		std::lock_guard<std::mutex> lock(impl->record_lock);
+
 		if (create_info.pNext)
 		{
 			log_error_pnext_chain("pNext in VkPipelineLayoutCreateInfo not supported.", create_info.pNext);
+			// Have to forget any reference if this API handle is recycled.
+			impl->push_unregister_locked(VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, pipeline_layout);
 			return false;
 		}
-		std::lock_guard<std::mutex> lock(impl->record_lock);
 
 		VkPipelineLayoutCreateInfo *new_info = nullptr;
 		if (!impl->copy_pipeline_layout(&create_info, impl->temp_allocator, &new_info))
 		{
 			// Have to forget any reference if this API handle is recycled.
-			impl->record_queue.push({VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, api_object_cast<uint64_t>(pipeline_layout),
-			                         nullptr, 0});
+			impl->push_unregister_locked(VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, pipeline_layout);
 			return false;
 		}
 
-		impl->record_queue.push({VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, api_object_cast<uint64_t>(pipeline_layout),
-		                         new_info, custom_hash});
-		impl->record_cv.notify_one();
+		impl->push_work_locked({VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, api_object_cast<uint64_t>(pipeline_layout),
+		                        new_info, custom_hash});
 	}
 
 	impl->pump_synchronized_recording(this);
@@ -5849,8 +5863,8 @@ bool StateRecorder::record_graphics_pipeline(VkPipeline pipeline, const VkGraphi
 			if (shader_stage_is_identifier_only(create_info.pStages[i]))
 			{
 				// Have to forget any reference if this API handle is recycled.
-				impl->record_queue.push({VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, api_object_cast<uint64_t>(pipeline),
-				                         nullptr, 0});
+				std::lock_guard<std::mutex> lock(impl->record_lock);
+				impl->push_unregister_locked(VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, pipeline);
 				return true;
 			}
 		}
@@ -5863,14 +5877,12 @@ bool StateRecorder::record_graphics_pipeline(VkPipeline pipeline, const VkGraphi
 		if (!impl->copy_graphics_pipeline(&create_info, impl->temp_allocator, base_pipelines, base_pipeline_count, &new_info))
 		{
 			// Have to forget any reference if this API handle is recycled.
-			impl->record_queue.push({VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, api_object_cast<uint64_t>(pipeline),
-			                         nullptr, 0});
+			impl->push_unregister_locked(VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, pipeline);
 			return false;
 		}
 
-		impl->record_queue.push({VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, api_object_cast<uint64_t>(pipeline),
-		                         new_info, custom_hash});
-		impl->record_cv.notify_one();
+		impl->push_work_locked({VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, api_object_cast<uint64_t>(pipeline),
+		                        new_info, custom_hash});
 	}
 
 	impl->pump_synchronized_recording(this);
@@ -5884,9 +5896,9 @@ bool StateRecorder::record_compute_pipeline(VkPipeline pipeline, const VkCompute
 	// Ignore pipelines that cannot result in meaningful replay.
 	if (shader_stage_is_identifier_only(create_info.stage))
 	{
+		std::lock_guard<std::mutex> lock(impl->record_lock);
 		// Have to forget any reference if this API handle is recycled.
-		impl->record_queue.push({VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO, api_object_cast<uint64_t>(pipeline),
-		                         nullptr, 0});
+		impl->push_unregister_locked(VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO, pipeline);
 		return true;
 	}
 
@@ -5897,14 +5909,12 @@ bool StateRecorder::record_compute_pipeline(VkPipeline pipeline, const VkCompute
 		if (!impl->copy_compute_pipeline(&create_info, impl->temp_allocator, base_pipelines, base_pipeline_count, &new_info))
 		{
 			// Have to forget any reference if this API handle is recycled.
-			impl->record_queue.push({VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO, api_object_cast<uint64_t>(pipeline),
-			                         nullptr, 0});
+			impl->push_unregister_locked(VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO, pipeline);
 			return false;
 		}
 
-		impl->record_queue.push({VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO, api_object_cast<uint64_t>(pipeline),
-		                         new_info, custom_hash});
-		impl->record_cv.notify_one();
+		impl->push_work_locked({VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO, api_object_cast<uint64_t>(pipeline),
+		                        new_info, custom_hash});
 	}
 
 	impl->pump_synchronized_recording(this);
@@ -5921,9 +5931,9 @@ bool StateRecorder::record_raytracing_pipeline(
 	{
 		if (shader_stage_is_identifier_only(create_info.pStages[i]))
 		{
+			std::lock_guard<std::mutex> lock(impl->record_lock);
 			// Have to forget any reference if this API handle is recycled.
-			impl->record_queue.push({VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR,
-			                         api_object_cast<uint64_t>(pipeline), nullptr, 0});
+			impl->push_unregister_locked(VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR, pipeline);
 			return true;
 		}
 	}
@@ -5936,14 +5946,12 @@ bool StateRecorder::record_raytracing_pipeline(
 		                                    base_pipelines, base_pipeline_count, &new_info))
 		{
 			// Have to forget any reference if this API handle is recycled.
-			impl->record_queue.push({VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR,
-			                         api_object_cast<uint64_t>(pipeline), nullptr, 0});
+			impl->push_unregister_locked(VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR, pipeline);
 			return false;
 		}
 
-		impl->record_queue.push({VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR,
-		                         api_object_cast<uint64_t>(pipeline), new_info, custom_hash});
-		impl->record_cv.notify_one();
+		impl->push_work_locked({VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR,
+		                        api_object_cast<uint64_t>(pipeline), new_info, custom_hash});
 	}
 
 	impl->pump_synchronized_recording(this);
@@ -5960,14 +5968,13 @@ bool StateRecorder::record_render_pass(VkRenderPass render_pass, const VkRenderP
 		if (!impl->copy_render_pass(&create_info, impl->temp_allocator, &new_info))
 		{
 			// Have to forget any reference if this API handle is recycled.
-			impl->record_queue.push({VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
-			                         api_object_cast<uint64_t>(render_pass), nullptr, 0});
+			impl->push_unregister_locked(VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO, render_pass);
 			return false;
 		}
 
-		impl->record_queue.push({VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO, api_object_cast<uint64_t>(render_pass),
-		                         new_info, custom_hash});
-		impl->record_cv.notify_one();
+		impl->push_work_locked({VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+		                        api_object_cast<uint64_t>(render_pass),
+		                        new_info, custom_hash});
 	}
 
 	impl->pump_synchronized_recording(this);
@@ -5984,16 +5991,13 @@ bool StateRecorder::record_render_pass2(VkRenderPass render_pass, const VkRender
 		if (!impl->copy_render_pass2(&create_info, impl->temp_allocator, &new_info))
 		{
 			// Have to forget any reference if this API handle is recycled.
-			impl->record_queue.push({VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2,
-			                         api_object_cast<uint64_t>(render_pass),
-			                         nullptr, 0});
+			impl->push_unregister_locked(VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2, render_pass);
 			return false;
 		}
 
-		impl->record_queue.push({VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2,
-		                         api_object_cast<uint64_t>(render_pass),
-		                         new_info, custom_hash});
-		impl->record_cv.notify_one();
+		impl->push_work_locked({VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2,
+		                        api_object_cast<uint64_t>(render_pass),
+		                        new_info, custom_hash});
 	}
 
 	impl->pump_synchronized_recording(this);
@@ -6004,29 +6008,26 @@ bool StateRecorder::record_shader_module(VkShaderModule module, const VkShaderMo
                                          Hash custom_hash)
 {
 	{
+		std::lock_guard<std::mutex> lock(impl->record_lock);
+
 		if (create_info.pNext)
 		{
 			log_error_pnext_chain("pNext in VkShaderModuleCreateInfo not supported.", create_info.pNext);
 			// Have to forget any reference if this API handle is recycled.
-			impl->record_queue.push({VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-			                         api_object_cast<uint64_t>(module),
-			                         nullptr, 0});
+			impl->push_unregister_locked(VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, module);
 			return false;
 		}
-		std::lock_guard<std::mutex> lock(impl->record_lock);
 
 		VkShaderModuleCreateInfo *new_info = nullptr;
 		if (!impl->copy_shader_module(&create_info, impl->temp_allocator, false, &new_info))
 		{
-			impl->record_queue.push({VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
-			                         api_object_cast<uint64_t>(module),
-			                         nullptr, 0});
+			// Have to forget any reference if this API handle is recycled.
+			impl->push_unregister_locked(VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, module);
 			return false;
 		}
 
-		impl->record_queue.push({VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, api_object_cast<uint64_t>(module),
-		                         new_info, custom_hash});
-		impl->record_cv.notify_one();
+		impl->push_work_locked({VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, api_object_cast<uint64_t>(module),
+		                        new_info, custom_hash});
 	}
 
 	impl->pump_synchronized_recording(this);
@@ -6037,8 +6038,7 @@ void StateRecorder::Impl::record_end()
 {
 	// Signal end of recording with empty work item
 	std::lock_guard<std::mutex> lock(record_lock);
-	record_queue.push({ VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO /* dummy value */, 0, nullptr, 0 });
-	record_cv.notify_one();
+	push_work_locked({ VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO /* dummy value */, 0, nullptr, 0 });
 }
 
 bool StateRecorder::get_hash_for_compute_pipeline_handle(VkPipeline pipeline, Hash *hash) const
