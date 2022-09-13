@@ -644,12 +644,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateSamplerYcbcrConversionKHR(
 	return res;
 }
 
-static PFN_vkVoidFunction interceptCoreDeviceCommand(const char *pName)
+static PFN_vkVoidFunction interceptCoreDeviceCommand(Instance *instance, const char *pName)
 {
 	static const struct
 	{
 		const char *name;
 		PFN_vkVoidFunction proc;
+		bool is_sampler;
 	} coreDeviceCommands[] = {
 		{ "vkGetDeviceProcAddr", reinterpret_cast<PFN_vkVoidFunction>(VK_LAYER_fossilize_GetDeviceProcAddr) },
 		{ "vkDestroyDevice", reinterpret_cast<PFN_vkVoidFunction>(DestroyDevice) },
@@ -658,19 +659,25 @@ static PFN_vkVoidFunction interceptCoreDeviceCommand(const char *pName)
 		{ "vkCreatePipelineLayout", reinterpret_cast<PFN_vkVoidFunction>(CreatePipelineLayout) },
 		{ "vkCreateGraphicsPipelines", reinterpret_cast<PFN_vkVoidFunction>(CreateGraphicsPipelines) },
 		{ "vkCreateComputePipelines", reinterpret_cast<PFN_vkVoidFunction>(CreateComputePipelines) },
-		{ "vkCreateSampler", reinterpret_cast<PFN_vkVoidFunction>(CreateSampler) },
+		{ "vkCreateSampler", reinterpret_cast<PFN_vkVoidFunction>(CreateSampler), true },
 		{ "vkCreateShaderModule", reinterpret_cast<PFN_vkVoidFunction>(CreateShaderModule) },
 		{ "vkCreateRenderPass", reinterpret_cast<PFN_vkVoidFunction>(CreateRenderPass) },
 		{ "vkCreateRenderPass2", reinterpret_cast<PFN_vkVoidFunction>(CreateRenderPass2) },
 		{ "vkCreateRenderPass2KHR", reinterpret_cast<PFN_vkVoidFunction>(CreateRenderPass2KHR) },
-		{ "vkCreateSamplerYcbcrConversion", reinterpret_cast<PFN_vkVoidFunction>(CreateSamplerYcbcrConversion) },
-		{ "vkCreateSamplerYcbcrConversionKHR", reinterpret_cast<PFN_vkVoidFunction>(CreateSamplerYcbcrConversionKHR) },
+		{ "vkCreateSamplerYcbcrConversion", reinterpret_cast<PFN_vkVoidFunction>(CreateSamplerYcbcrConversion), true },
+		{ "vkCreateSamplerYcbcrConversionKHR", reinterpret_cast<PFN_vkVoidFunction>(CreateSamplerYcbcrConversionKHR), true },
 		{ "vkCreateRayTracingPipelinesKHR", reinterpret_cast<PFN_vkVoidFunction>(CreateRayTracingPipelinesKHR) },
 	};
 
 	for (auto &cmd : coreDeviceCommands)
+	{
+		if (cmd.is_sampler && !instance->recordsImmutableSamplers())
+			continue;
+
 		if (strcmp(cmd.name, pName) == 0)
 			return cmd.proc;
+	}
+
 	return nullptr;
 }
 }
@@ -693,7 +700,7 @@ VK_LAYER_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL VK_LAYER_fossilize_GetD
 	// This means we never expose wrappers which will end up dispatching into nullptr.
 	if (proc)
 	{
-		auto wrapped_proc = interceptCoreDeviceCommand(pName);
+		auto wrapped_proc = interceptCoreDeviceCommand(layer->getInstance(), pName);
 		if (wrapped_proc)
 			proc = wrapped_proc;
 	}
@@ -720,7 +727,7 @@ VK_LAYER_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL VK_LAYER_fossilize_GetI
 	// This means we never expose wrappers which will end up dispatching into nullptr.
 	if (proc)
 	{
-		auto wrapped_proc = interceptCoreDeviceCommand(pName);
+		auto wrapped_proc = interceptCoreDeviceCommand(layer, pName);
 		if (wrapped_proc)
 			proc = wrapped_proc;
 	}

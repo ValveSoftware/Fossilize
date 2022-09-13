@@ -69,6 +69,11 @@ public:
 		return synchronized;
 	}
 
+	bool recordsImmutableSamplers() const
+	{
+		return shouldRecordImmutableSamplers;
+	}
+
 	static void braceForGraphicsPipelineCrash(StateRecorder *recorder, const VkGraphicsPipelineCreateInfo *info);
 	static void braceForComputePipelineCrash(StateRecorder *recorder, const VkComputePipelineCreateInfo *info);
 	static void braceForRayTracingPipelineCrash(StateRecorder *recorder, const VkRayTracingPipelineCreateInfoKHR *info);
@@ -83,5 +88,6 @@ private:
 	ApplicationInfoFilter *infoFilter = nullptr;
 	bool enableCrashHandler = false;
 	bool synchronized = false;
+	bool shouldRecordImmutableSamplers = true;
 };
 }

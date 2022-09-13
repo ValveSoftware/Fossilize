@@ -100,6 +100,7 @@ struct AppInfo
 	uint32_t minimum_api_version = VK_MAKE_VERSION(1, 0, 0);
 	uint32_t minimum_application_version = 0;
 	uint32_t minimum_engine_version = 0;
+	bool record_immutable_samplers = true;
 	std::vector<EnvInfo> env_infos;
 	std::vector<VariantDependency> variant_dependencies;
 };
@@ -122,6 +123,7 @@ struct ApplicationInfoFilter::Impl
 	bool filter_env_info(const EnvInfo &info) const;
 	bool parse(const std::string &path);
 	bool check_success();
+	bool should_record_immutable_samplers(const VkApplicationInfo *info);
 
 	bool needs_buckets(const VkApplicationInfo *info);
 	Hash get_bucket_hash(const VkPhysicalDeviceProperties2 *props,
@@ -137,6 +139,30 @@ bool ApplicationInfoFilter::Impl::check_success()
 	if (task.valid())
 		task.wait();
 	return parsing_success;
+}
+
+bool ApplicationInfoFilter::Impl::should_record_immutable_samplers(const VkApplicationInfo *info)
+{
+	if (task.valid())
+		task.wait();
+	if (!parsing_success)
+		return true;
+
+	if (info && info->pApplicationName)
+	{
+		auto itr = application_infos.find(info->pApplicationName);
+		if (itr != application_infos.end())
+			return itr->second.record_immutable_samplers;
+	}
+
+	if (info && info->pEngineName)
+	{
+		auto itr = engine_infos.find(info->pEngineName);
+		if (itr != engine_infos.end())
+			return itr->second.record_immutable_samplers;
+	}
+
+	return true;
 }
 
 bool ApplicationInfoFilter::Impl::filter_env_info(const EnvInfo &info) const
@@ -544,6 +570,16 @@ static unsigned default_get_member_uint(const Value &value, const char *member, 
 	return memb->GetUint();
 }
 
+static bool default_get_member_bool(const Value &value, const char *member, bool default_value)
+{
+	auto *memb = maybe_get_member(value, member);
+	if (!memb)
+		return default_value;
+	if (!memb->IsBool())
+		return default_value;
+	return memb->GetBool();
+}
+
 static bool add_blacklists(std::unordered_set<std::string> &output, const Value *blacklist)
 {
 	if (!blacklist->IsArray())
@@ -653,6 +689,7 @@ static bool add_application_filters(std::unordered_map<std::string, AppInfo> &ou
 		info.minimum_api_version = default_get_member_uint(value, "minimumApiVersion");
 		info.minimum_engine_version = default_get_member_uint(value, "minimumEngineVersion");
 		info.minimum_application_version = default_get_member_uint(value, "minimumApplicationVersion");
+		info.record_immutable_samplers = default_get_member_bool(value, "recordImmutableSamplers", true);
 		if (value.HasMember("blacklistedEnvironments"))
 			if (!parse_blacklist_environments(value["blacklistedEnvironments"], info.env_infos))
 				return false;
@@ -755,6 +792,11 @@ Hash ApplicationInfoFilter::get_bucket_hash(const VkPhysicalDeviceProperties2 *p
 bool ApplicationInfoFilter::check_success()
 {
 	return impl->check_success();
+}
+
+bool ApplicationInfoFilter::should_record_immutable_samplers(const VkApplicationInfo *info)
+{
+	return impl->should_record_immutable_samplers(info);
 }
 
 void ApplicationInfoFilter::set_environment_resolver(const char *(*getenv_wrapper)(const char *, void *), void *userdata)
