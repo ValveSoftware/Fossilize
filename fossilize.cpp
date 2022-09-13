@@ -1351,6 +1351,9 @@ static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const voi
 
 static bool compute_hash_stage(const StateRecorder &recorder, Hasher &h, const VkPipelineShaderStageCreateInfo &stage)
 {
+	if (!stage.pName)
+		return false;
+
 	h.u32(stage.flags);
 	h.string(stage.pName);
 	h.u32(stage.stage);
@@ -1915,6 +1918,8 @@ bool compute_hash_compute_pipeline(const StateRecorder &recorder, const VkComput
 {
 	// Ignore pipelines that cannot result in meaningful replay.
 	if (shader_stage_is_identifier_only(create_info.stage))
+		return false;
+	if (!create_info.stage.pName)
 		return false;
 
 	Hasher h;
@@ -6454,6 +6459,9 @@ bool StateRecorder::Impl::copy_stages(CreateInfo *info, ScratchAllocator &alloc,
 	for (uint32_t i = 0; i < info->stageCount; i++)
 	{
 		auto &stage = const_cast<VkPipelineShaderStageCreateInfo &>(info->pStages[i]);
+
+		if (!stage.pName)
+			return false;
 
 		stage.pName = copy(stage.pName, strlen(stage.pName) + 1, alloc);
 		if (stage.pSpecializationInfo)
