@@ -1844,7 +1844,9 @@ struct ThreadedReplayer : StateCreatorInterface
 		{
 			auto start_time = chrono::steady_clock::now();
 			spv_target_env env;
-			if (device->get_api_version() >= VK_VERSION_1_2)
+			if (device->get_api_version() >= VK_VERSION_1_3)
+				env = SPV_ENV_VULKAN_1_3;
+			else if (device->get_api_version() >= VK_VERSION_1_2)
 				env = SPV_ENV_VULKAN_1_2;
 			else if (device->get_api_version() >= VK_VERSION_1_1)
 				env = SPV_ENV_VULKAN_1_1;

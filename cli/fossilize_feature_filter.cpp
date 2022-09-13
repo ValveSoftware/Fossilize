@@ -1541,10 +1541,18 @@ bool FeatureFilter::Impl::validate_module_capabilities(const uint32_t *data, siz
 	}
 
 	unsigned version = data[1];
-	if (version > 0x10500)
+	if (version > 0x10600)
 	{
-		LOGE("SPIR-V version above 1.5 not recognized.\n");
+		LOGE("SPIR-V version above 1.6 not recognized.\n");
 		return false;
+	}
+	else if (version == 0x10600)
+	{
+		if (api_version < VK_API_VERSION_1_3)
+		{
+			LOGE("SPIR-V 1.6 is only supported in Vulkan 1.3 and up.\n");
+			return false;
+		}
 	}
 	else if (version == 0x10500)
 	{
@@ -1567,6 +1575,14 @@ bool FeatureFilter::Impl::validate_module_capabilities(const uint32_t *data, siz
 		if (api_version < VK_API_VERSION_1_1)
 		{
 			LOGE("Need Vulkan 1.1 for SPIR-V 1.3.\n");
+			return false;
+		}
+	}
+	else if (version > 0x10000)
+	{
+		if (api_version < VK_API_VERSION_1_1)
+		{
+			LOGE("Need Vulkan 1.1 for SPIR-V 1.1 or 1.2.\n");
 			return false;
 		}
 	}
