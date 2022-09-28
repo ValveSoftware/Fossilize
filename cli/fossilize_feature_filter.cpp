@@ -42,9 +42,13 @@ void *build_pnext_chain(VulkanFeatures &features, uint32_t api_version,
 	for (uint32_t i = 0; i < extension_count; i++)
 		enabled_extension_set.insert(enabled_extensions[i]);
 
-#define CHAIN(struct_type, member, min_api_version, required_extension) \
+#define CHAIN(struct_type, member, min_api_version, required_extension, required_extension_alias) \
 	do { \
-		if (enabled_extension_set.count(required_extension) != 0 && api_version >= min_api_version) { \
+        bool is_minimum_api_version = api_version >= min_api_version; \
+		bool supports_extension = enabled_extension_set.count(required_extension) != 0; \
+        if (!supports_extension && required_extension_alias) \
+			supports_extension = enabled_extension_set.count(required_extension_alias) != 0; \
+		if (is_minimum_api_version && supports_extension) { \
 			member.sType = struct_type; \
 			if (!pNext) pNext = &member; \
 			if (ppNext) *ppNext = &member; \
@@ -54,16 +58,20 @@ void *build_pnext_chain(VulkanFeatures &features, uint32_t api_version,
 
 #define F(struct_type, member, minimum_api_version, required_extension) \
 	CHAIN(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_FEATURES, features.member, \
-	VK_API_VERSION_##minimum_api_version, VK_##required_extension##_EXTENSION_NAME)
+	VK_API_VERSION_##minimum_api_version, VK_##required_extension##_EXTENSION_NAME, nullptr)
 #define FE(struct_type, member, ext) \
 	CHAIN(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_FEATURES_##ext, features.member, \
-	VK_API_VERSION_1_0, VK_##ext##_##struct_type##_EXTENSION_NAME)
+	VK_API_VERSION_1_0, VK_##ext##_##struct_type##_EXTENSION_NAME, nullptr)
+#define FE_ALIAS(struct_type, member, ext, ext_alias) \
+	CHAIN(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_FEATURES_##ext, features.member, \
+	VK_API_VERSION_1_0, VK_##ext##_##struct_type##_EXTENSION_NAME, VK_##ext_alias##_##struct_type##_EXTENSION_NAME)
 
 #include "fossilize_feature_filter_features.inc"
 
 #undef CHAIN
 #undef F
 #undef FE
+#undef FE_ALIAS
 
 	return pNext;
 }
@@ -305,6 +313,11 @@ void FeatureFilter::Impl::init_features(const void *pNext)
 		features.member.pNext = nullptr; \
 		break
 
+#define FE_ALIAS(struct_type, member, ext, ext_alias) case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_FEATURES_##ext: \
+		memcpy(&features.member, base, sizeof(features.member)); \
+		features.member.pNext = nullptr; \
+		break
+
 		switch (base->sType)
 		{
 #include "fossilize_feature_filter_features.inc"
@@ -314,6 +327,7 @@ void FeatureFilter::Impl::init_features(const void *pNext)
 
 #undef F
 #undef FE
+#undef FE_ALIAS
 
 		pNext = base->pNext;
 	}
@@ -560,12 +574,12 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 			// The details are validated explicitly elsewhere since we need to know the shader create info to deduce correctness.
 			break;
 
-		case VK_STRUCTURE_TYPE_MUTABLE_DESCRIPTOR_TYPE_CREATE_INFO_VALVE:
+		case VK_STRUCTURE_TYPE_MUTABLE_DESCRIPTOR_TYPE_CREATE_INFO_EXT:
 		{
-			if (features.mutable_descriptor_type_valve.mutableDescriptorType == VK_FALSE)
+			if (features.mutable_descriptor_type.mutableDescriptorType == VK_FALSE)
 				return false;
 
-			auto *lists = static_cast<const VkMutableDescriptorTypeCreateInfoVALVE *>(pNext);
+			auto *lists = static_cast<const VkMutableDescriptorTypeCreateInfoEXT *>(pNext);
 			for (uint32_t i = 0; i < lists->mutableDescriptorTypeListCount; i++)
 			{
 				for (uint32_t j = 0; j < lists->pMutableDescriptorTypeLists[i].descriptorTypeCount; j++)
@@ -953,8 +967,8 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 			VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
 			info->pNext);
 
-	auto *mutable_info = find_pnext<VkMutableDescriptorTypeCreateInfoVALVE>(
-			VK_STRUCTURE_TYPE_MUTABLE_DESCRIPTOR_TYPE_CREATE_INFO_VALVE,
+	auto *mutable_info = find_pnext<VkMutableDescriptorTypeCreateInfoEXT>(
+			VK_STRUCTURE_TYPE_MUTABLE_DESCRIPTOR_TYPE_CREATE_INFO_EXT,
 			info->pNext);
 
 	bool pool_is_update_after_bind = (info->flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT) != 0;
@@ -1048,10 +1062,10 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 			count = &counts.acceleration_structure;
 			break;
 
-		case VK_DESCRIPTOR_TYPE_MUTABLE_VALVE:
+		case VK_DESCRIPTOR_TYPE_MUTABLE_EXT:
 		{
 			DescriptorCounts mutable_counts = {};
-			if (features.mutable_descriptor_type_valve.mutableDescriptorType == VK_FALSE)
+			if (features.mutable_descriptor_type.mutableDescriptorType == VK_FALSE)
 				return false;
 			if (!mutable_info || i >= mutable_info->mutableDescriptorTypeListCount)
 				return false;

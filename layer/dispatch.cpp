@@ -489,7 +489,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateDescriptorSetLayout(VkDevice device,
 	VkResult result = layer->getTable()->CreateDescriptorSetLayout(device, pCreateInfo, pAllocator, pSetLayout);
 
 	// No point in recording a host only layout since we will never be able to use it in a pipeline layout.
-	if (result == VK_SUCCESS && (pCreateInfo->flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_HOST_ONLY_POOL_BIT_VALVE) == 0)
+	if (result == VK_SUCCESS && (pCreateInfo->flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_HOST_ONLY_POOL_BIT_EXT) == 0)
 	{
 		if (!layer->getRecorder().record_descriptor_set_layout(*pSetLayout, *pCreateInfo))
 			LOGW_LEVEL("Failed to record descriptor set layout, usually caused by unsupported pNext.\n");

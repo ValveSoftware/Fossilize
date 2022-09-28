@@ -240,8 +240,8 @@ static void hash_variant(Hasher &h, VariantDependency dep,
 
 	case VariantDependency::MutableDescriptorType:
 	{
-		auto *mut = find_pnext<VkPhysicalDeviceMutableDescriptorTypeFeaturesVALVE>(
-				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MUTABLE_DESCRIPTOR_TYPE_FEATURES_VALVE,
+		auto *mut = find_pnext<VkPhysicalDeviceMutableDescriptorTypeFeaturesEXT>(
+				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MUTABLE_DESCRIPTOR_TYPE_FEATURES_EXT,
 				device_pnext);
 		h.u32(uint32_t(mut && mut->mutableDescriptorType));
 		break;

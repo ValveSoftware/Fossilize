@@ -272,7 +272,7 @@ struct StateReplayer::Impl
 	bool parse_rasterization_conservative_state(const Value &state, VkPipelineRasterizationConservativeStateCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_rasterization_line_state(const Value &state, VkPipelineRasterizationLineStateCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_shader_stage_required_subgroup_size(const Value &state, VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
-	bool parse_mutable_descriptor_type(const Value &state, VkMutableDescriptorTypeCreateInfoVALVE **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_mutable_descriptor_type(const Value &state, VkMutableDescriptorTypeCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_attachment_description_stencil_layout(const Value &state, VkAttachmentDescriptionStencilLayout **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_attachment_reference_stencil_layout(const Value &state, VkAttachmentReferenceStencilLayout **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_subpass_description_depth_stencil_resolve(const Value &state, VkSubpassDescriptionDepthStencilResolve **out_info) FOSSILIZE_WARN_UNUSED;
@@ -426,7 +426,7 @@ struct StateRecorder::Impl
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
-	void *copy_pnext_struct(const VkMutableDescriptorTypeCreateInfoVALVE *create_info,
+	void *copy_pnext_struct(const VkMutableDescriptorTypeCreateInfoEXT *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkAttachmentDescriptionStencilLayout *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
@@ -948,7 +948,7 @@ static void hash_pnext_struct(const StateRecorder *,
 
 static void hash_pnext_struct(const StateRecorder *,
                               Hasher &h,
-                              const VkMutableDescriptorTypeCreateInfoVALVE &mutable_info)
+                              const VkMutableDescriptorTypeCreateInfoEXT &mutable_info)
 {
 	h.u32(mutable_info.mutableDescriptorTypeListCount);
 	for (uint32_t i = 0; i < mutable_info.mutableDescriptorTypeListCount; i++)
@@ -1262,8 +1262,8 @@ static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const voi
 			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT *>(pNext));
 			break;
 
-		case VK_STRUCTURE_TYPE_MUTABLE_DESCRIPTOR_TYPE_CREATE_INFO_VALVE:
-			hash_pnext_struct(recorder, h, *static_cast<const VkMutableDescriptorTypeCreateInfoVALVE *>(pNext));
+		case VK_STRUCTURE_TYPE_MUTABLE_DESCRIPTOR_TYPE_CREATE_INFO_EXT:
+			hash_pnext_struct(recorder, h, *static_cast<const VkMutableDescriptorTypeCreateInfoEXT *>(pNext));
 			break;
 
 		case VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_STENCIL_LAYOUT_KHR:
@@ -4377,9 +4377,9 @@ bool StateReplayer::Impl::parse_viewport_depth_clip_control(const Value &state,
 }
 
 bool StateReplayer::Impl::parse_mutable_descriptor_type(const Value &state,
-                                                        VkMutableDescriptorTypeCreateInfoVALVE **out_info)
+                                                        VkMutableDescriptorTypeCreateInfoEXT **out_info)
 {
-	auto *info = allocator.allocate_cleared<VkMutableDescriptorTypeCreateInfoVALVE>();
+	auto *info = allocator.allocate_cleared<VkMutableDescriptorTypeCreateInfoEXT>();
 	*out_info = info;
 
 	if (!state.HasMember("mutableDescriptorTypeLists"))
@@ -4390,7 +4390,7 @@ bool StateReplayer::Impl::parse_mutable_descriptor_type(const Value &state,
 		return true;
 
 	auto out_count = lists.Size();
-	auto *out_lists = allocator.allocate_n_cleared<VkMutableDescriptorTypeListVALVE>(out_count);
+	auto *out_lists = allocator.allocate_n_cleared<VkMutableDescriptorTypeListEXT>(out_count);
 
 	info->mutableDescriptorTypeListCount = out_count;
 	info->pMutableDescriptorTypeLists = out_lists;
@@ -4548,9 +4548,9 @@ bool StateReplayer::Impl::parse_pnext_chain(
 			break;
 		}
 
-		case VK_STRUCTURE_TYPE_MUTABLE_DESCRIPTOR_TYPE_CREATE_INFO_VALVE:
+		case VK_STRUCTURE_TYPE_MUTABLE_DESCRIPTOR_TYPE_CREATE_INFO_EXT:
 		{
-			VkMutableDescriptorTypeCreateInfoVALVE *info = nullptr;
+			VkMutableDescriptorTypeCreateInfoEXT *info = nullptr;
 			if (!parse_mutable_descriptor_type(next, &info))
 				return false;
 			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
@@ -5106,7 +5106,7 @@ void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineShaderStageRequired
 	return copy(create_info, 1, alloc);
 }
 
-void *StateRecorder::Impl::copy_pnext_struct(const VkMutableDescriptorTypeCreateInfoVALVE *create_info,
+void *StateRecorder::Impl::copy_pnext_struct(const VkMutableDescriptorTypeCreateInfoEXT *create_info,
                                              ScratchAllocator &alloc)
 {
 	auto *info = copy(create_info, 1, alloc);
@@ -5115,7 +5115,7 @@ void *StateRecorder::Impl::copy_pnext_struct(const VkMutableDescriptorTypeCreate
 
 	for (uint32_t i = 0; i < info->mutableDescriptorTypeListCount; i++)
 	{
-		auto &l = const_cast<VkMutableDescriptorTypeListVALVE &>(info->pMutableDescriptorTypeLists[i]);
+		auto &l = const_cast<VkMutableDescriptorTypeListEXT &>(info->pMutableDescriptorTypeLists[i]);
 		if (l.pDescriptorTypes)
 			l.pDescriptorTypes = copy(l.pDescriptorTypes, l.descriptorTypeCount, alloc);
 	}
@@ -5400,9 +5400,9 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 			break;
 		}
 
-		case VK_STRUCTURE_TYPE_MUTABLE_DESCRIPTOR_TYPE_CREATE_INFO_VALVE:
+		case VK_STRUCTURE_TYPE_MUTABLE_DESCRIPTOR_TYPE_CREATE_INFO_EXT:
 		{
-			auto *ci = static_cast<const VkMutableDescriptorTypeCreateInfoVALVE *>(pNext);
+			auto *ci = static_cast<const VkMutableDescriptorTypeCreateInfoEXT *>(pNext);
 			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
 			break;
 		}
@@ -8053,7 +8053,7 @@ static bool json_value(const VkPipelineShaderStageRequiredSubgroupSizeCreateInfo
 }
 
 template <typename Allocator>
-static bool json_value(const VkMutableDescriptorTypeCreateInfoVALVE &create_info, Allocator &alloc, Value *out_value)
+static bool json_value(const VkMutableDescriptorTypeCreateInfoEXT &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
 	value.AddMember("sType", create_info.sType, alloc);
@@ -8402,8 +8402,8 @@ static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *o
 				return false;
 			break;
 
-		case VK_STRUCTURE_TYPE_MUTABLE_DESCRIPTOR_TYPE_CREATE_INFO_VALVE:
-			if (!json_value(*static_cast<const VkMutableDescriptorTypeCreateInfoVALVE *>(pNext), alloc, &next))
+		case VK_STRUCTURE_TYPE_MUTABLE_DESCRIPTOR_TYPE_CREATE_INFO_EXT:
+			if (!json_value(*static_cast<const VkMutableDescriptorTypeCreateInfoEXT *>(pNext), alloc, &next))
 				return false;
 			break;
 
