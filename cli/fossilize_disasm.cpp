@@ -645,6 +645,14 @@ static string disassemble_spirv_glsl(const VkShaderModuleCreateInfo *create_info
 			model = SpvExecutionModelCallableKHR;
 			break;
 
+		case VK_SHADER_STAGE_TASK_BIT_EXT:
+			model = SpvExecutionModelTaskEXT;
+			break;
+
+		case VK_SHADER_STAGE_MESH_BIT_EXT:
+			model = SpvExecutionModelMeshEXT;
+			break;
+
 		default:
 			return "// Failed";
 		}
@@ -880,6 +888,10 @@ static string stage_to_string(VkShaderStageFlagBits stage)
 		return "rchit";
 	case VK_SHADER_STAGE_CALLABLE_BIT_KHR:
 		return "rcall";
+	case VK_SHADER_STAGE_TASK_BIT_EXT:
+		return "task";
+	case VK_SHADER_STAGE_MESH_BIT_EXT:
+		return "mesh";
 	default:
 		return "????";
 	}
