@@ -555,7 +555,9 @@ static string disassemble_spirv_asm(const VkShaderModuleCreateInfo *create_info)
 {
 	string str;
 	spvtools::SpirvTools tools(SPV_ENV_VULKAN_1_2);
-	if (!tools.Disassemble(create_info->pCode, create_info->codeSize / sizeof(uint32_t), &str))
+	const uint32_t options = spvtools::SpirvTools::kDefaultDisassembleOption &
+							 ~SPV_BINARY_TO_TEXT_OPTION_NO_HEADER;
+	if (!tools.Disassemble(create_info->pCode, create_info->codeSize / sizeof(uint32_t), &str, options))
 		return "";
 	return str;
 }
