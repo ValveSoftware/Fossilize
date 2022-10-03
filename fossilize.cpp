@@ -1559,6 +1559,39 @@ static DynamicStateInfo parse_dynamic_state_info(const VkPipelineDynamicStateCre
 		DYN_STATE(FRAGMENT_SHADING_RATE_KHR, fragment_shading_rate);
 		DYN_STATE(SAMPLE_LOCATIONS_EXT, sample_locations);
 
+		// Dynamic state 3
+		DYN_STATE(TESSELLATION_DOMAIN_ORIGIN_EXT, tessellation_domain_origin);
+		DYN_STATE(DEPTH_CLAMP_ENABLE_EXT, depth_clamp_enable);
+		DYN_STATE(POLYGON_MODE_EXT, polygon_mode);
+		DYN_STATE(RASTERIZATION_SAMPLES_EXT, rasterization_samples);
+		DYN_STATE(SAMPLE_MASK_EXT, sample_mask);
+		DYN_STATE(ALPHA_TO_COVERAGE_ENABLE_EXT, alpha_to_coverage_enable);
+		DYN_STATE(ALPHA_TO_ONE_ENABLE_EXT, alpha_to_one_enable);
+		DYN_STATE(LOGIC_OP_ENABLE_EXT, logic_op_enable);
+		DYN_STATE(COLOR_BLEND_ENABLE_EXT, color_blend_enable);
+		DYN_STATE(COLOR_BLEND_EQUATION_EXT, color_blend_equation);
+		DYN_STATE(COLOR_WRITE_MASK_EXT, color_write_mask);
+		DYN_STATE(RASTERIZATION_STREAM_EXT, rasterization_stream);
+		DYN_STATE(CONSERVATIVE_RASTERIZATION_MODE_EXT, conservative_rasterization_mode);
+		DYN_STATE(EXTRA_PRIMITIVE_OVERESTIMATION_SIZE_EXT, extra_primitive_overestimation_size);
+		DYN_STATE(DEPTH_CLIP_ENABLE_EXT, depth_clip_enable);
+		DYN_STATE(SAMPLE_LOCATIONS_ENABLE_EXT, sample_locations_enable);
+		DYN_STATE(COLOR_BLEND_ADVANCED_EXT, color_blend_advanced);
+		DYN_STATE(PROVOKING_VERTEX_MODE_EXT, provoking_vertex_mode);
+		DYN_STATE(LINE_RASTERIZATION_MODE_EXT, line_rasterization_mode);
+		DYN_STATE(LINE_STIPPLE_ENABLE_EXT, line_stipple_enable);
+		DYN_STATE(DEPTH_CLIP_NEGATIVE_ONE_TO_ONE_EXT, depth_clip_negative_one_to_one);
+		DYN_STATE(VIEWPORT_W_SCALING_ENABLE_NV, viewport_w_scaling_enable);
+		DYN_STATE(VIEWPORT_SWIZZLE_NV, viewport_swizzle);
+		DYN_STATE(COVERAGE_TO_COLOR_ENABLE_NV, coverage_to_color_enable);
+		DYN_STATE(COVERAGE_TO_COLOR_LOCATION_NV, coverage_to_color_location);
+		DYN_STATE(COVERAGE_MODULATION_MODE_NV, coverage_modulation_mode);
+		DYN_STATE(COVERAGE_MODULATION_TABLE_ENABLE_NV, coverage_modulation_table_enable);
+		DYN_STATE(COVERAGE_MODULATION_TABLE_NV, coverage_modulation_table);
+		DYN_STATE(SHADING_RATE_IMAGE_ENABLE_NV, shading_rate_image_enable);
+		DYN_STATE(REPRESENTATIVE_FRAGMENT_TEST_ENABLE_NV, representative_fragment_test_enable);
+		DYN_STATE(COVERAGE_REDUCTION_MODE_NV, coverage_reduction_mode);
+
 		case VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT_EXT:
 			info.scissor_count = true;
 			info.scissor = true;
