@@ -1491,104 +1491,55 @@ static GlobalStateInfo parse_global_state_info(const VkGraphicsPipelineCreateInf
 static DynamicStateInfo parse_dynamic_state_info(const VkPipelineDynamicStateCreateInfo &dynamic_info)
 {
 	DynamicStateInfo info = {};
+#define DYN_STATE(state, member) case VK_DYNAMIC_STATE_##state: info.member = true; break
 	for (uint32_t i = 0; i < dynamic_info.dynamicStateCount; i++)
 	{
 		switch (dynamic_info.pDynamicStates[i])
 		{
-		case VK_DYNAMIC_STATE_DEPTH_BIAS:
-			info.depth_bias = true;
-			break;
-		case VK_DYNAMIC_STATE_DEPTH_BOUNDS:
-			info.depth_bounds = true;
-			break;
-		case VK_DYNAMIC_STATE_STENCIL_WRITE_MASK:
-			info.stencil_write_mask = true;
-			break;
-		case VK_DYNAMIC_STATE_STENCIL_REFERENCE:
-			info.stencil_reference = true;
-			break;
-		case VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK:
-			info.stencil_compare = true;
-			break;
-		case VK_DYNAMIC_STATE_BLEND_CONSTANTS:
-			info.blend_constants = true;
-			break;
+		DYN_STATE(DEPTH_BIAS, depth_bias);
+		DYN_STATE(DEPTH_BOUNDS, depth_bounds);
+		DYN_STATE(STENCIL_WRITE_MASK, stencil_write_mask);
+		DYN_STATE(STENCIL_REFERENCE, stencil_reference);
+		DYN_STATE(STENCIL_COMPARE_MASK, stencil_compare);
+		DYN_STATE(BLEND_CONSTANTS, blend_constants);
+		DYN_STATE(SCISSOR, scissor);
+		DYN_STATE(VIEWPORT, viewport);
+		DYN_STATE(LINE_WIDTH, line_width);
+		DYN_STATE(CULL_MODE, cull_mode);
+		DYN_STATE(FRONT_FACE, front_face);
+		DYN_STATE(DEPTH_TEST_ENABLE_EXT, depth_test_enable);
+		DYN_STATE(DEPTH_WRITE_ENABLE_EXT, depth_write_enable);
+		DYN_STATE(DEPTH_COMPARE_OP_EXT, depth_compare_op);
+		DYN_STATE(DEPTH_BOUNDS_TEST_ENABLE_EXT, depth_bounds_test_enable);
+		DYN_STATE(STENCIL_TEST_ENABLE_EXT, stencil_test_enable);
+		DYN_STATE(STENCIL_OP_EXT, stencil_op);
+		DYN_STATE(VERTEX_INPUT_EXT, vertex_input);
+		DYN_STATE(VERTEX_INPUT_BINDING_STRIDE_EXT, vertex_input_binding_stride);
+		DYN_STATE(PATCH_CONTROL_POINTS_EXT, patch_control_points);
+		DYN_STATE(RASTERIZER_DISCARD_ENABLE_EXT, rasterizer_discard_enable);
+		DYN_STATE(DEPTH_BIAS_ENABLE_EXT, depth_bias_enable);
+		DYN_STATE(LOGIC_OP_EXT, logic_op);
+		DYN_STATE(COLOR_WRITE_ENABLE_EXT, color_write_enable);
+		DYN_STATE(PRIMITIVE_RESTART_ENABLE_EXT, primitive_restart_enable);
+		DYN_STATE(DISCARD_RECTANGLE_EXT, discard_rectangle);
+		DYN_STATE(FRAGMENT_SHADING_RATE_KHR, fragment_shading_rate);
+		DYN_STATE(SAMPLE_LOCATIONS_EXT, sample_locations);
+
 		case VK_DYNAMIC_STATE_SCISSOR_WITH_COUNT_EXT:
 			info.scissor_count = true;
-			// fallthrough
-		case VK_DYNAMIC_STATE_SCISSOR:
 			info.scissor = true;
 			break;
+
 		case VK_DYNAMIC_STATE_VIEWPORT_WITH_COUNT_EXT:
 			info.viewport_count = true;
-			// fallthrough
-		case VK_DYNAMIC_STATE_VIEWPORT:
 			info.viewport = true;
 			break;
-		case VK_DYNAMIC_STATE_LINE_WIDTH:
-			info.line_width = true;
-			break;
-		case VK_DYNAMIC_STATE_CULL_MODE_EXT:
-			info.cull_mode = true;
-			break;
-		case VK_DYNAMIC_STATE_FRONT_FACE_EXT:
-			info.front_face = true;
-			break;
-		case VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE_EXT:
-			info.depth_test_enable = true;
-			break;
-		case VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE_EXT:
-			info.depth_write_enable = true;
-			break;
-		case VK_DYNAMIC_STATE_DEPTH_COMPARE_OP_EXT:
-			info.depth_compare_op = true;
-			break;
-		case VK_DYNAMIC_STATE_DEPTH_BOUNDS_TEST_ENABLE_EXT:
-			info.depth_bounds_test_enable = true;
-			break;
-		case VK_DYNAMIC_STATE_STENCIL_TEST_ENABLE_EXT:
-			info.stencil_test_enable = true;
-			break;
-		case VK_DYNAMIC_STATE_STENCIL_OP_EXT:
-			info.stencil_op = true;
-			break;
-		case VK_DYNAMIC_STATE_VERTEX_INPUT_EXT:
-			info.vertex_input = true;
-			break;
-		case VK_DYNAMIC_STATE_VERTEX_INPUT_BINDING_STRIDE_EXT:
-			info.vertex_input_binding_stride = true;
-			break;
-		case VK_DYNAMIC_STATE_PATCH_CONTROL_POINTS_EXT:
-			info.patch_control_points = true;
-			break;
-		case VK_DYNAMIC_STATE_RASTERIZER_DISCARD_ENABLE_EXT:
-			info.rasterizer_discard_enable = true;
-			break;
-		case VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE_EXT:
-			info.depth_bias_enable = true;
-			break;
-		case VK_DYNAMIC_STATE_LOGIC_OP_EXT:
-			info.logic_op = true;
-			break;
-		case VK_DYNAMIC_STATE_COLOR_WRITE_ENABLE_EXT:
-			info.color_write_enable = true;
-			break;
-		case VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE_EXT:
-			info.primitive_restart_enable = true;
-			break;
-		case VK_DYNAMIC_STATE_DISCARD_RECTANGLE_EXT:
-			info.discard_rectangle = true;
-			break;
-		case VK_DYNAMIC_STATE_FRAGMENT_SHADING_RATE_KHR:
-			info.fragment_shading_rate = true;
-			break;
-		case VK_DYNAMIC_STATE_SAMPLE_LOCATIONS_EXT:
-			info.sample_locations = true;
-			break;
+
 		default:
 			break;
 		}
 	}
+#undef DYN_STATE
 
 	return info;
 }
