@@ -138,6 +138,7 @@ struct DynamicStateInfo
 	bool discard_rectangle;
 	bool fragment_shading_rate;
 	bool sample_locations;
+	bool line_stipple;
 
 	// Dynamic state 3
 	bool tessellation_domain_origin;
@@ -888,9 +889,10 @@ static void hash_specialization_info(Hasher &h, const VkSpecializationInfo &spec
 
 static void hash_pnext_struct(const StateRecorder *,
                               Hasher &h,
-                              const VkPipelineTessellationDomainOriginStateCreateInfo &create_info)
+                              const VkPipelineTessellationDomainOriginStateCreateInfo &create_info,
+                              const DynamicStateInfo *dynamic_state_info)
 {
-	h.u32(create_info.domainOrigin);
+	h.u32(dynamic_state_info && dynamic_state_info->tessellation_domain_origin ? 0 : create_info.domainOrigin);
 }
 
 static void hash_pnext_struct(const StateRecorder *,
@@ -907,18 +909,20 @@ static void hash_pnext_struct(const StateRecorder *,
 
 static void hash_pnext_struct(const StateRecorder *,
                               Hasher &h,
-                              const VkPipelineRasterizationDepthClipStateCreateInfoEXT &create_info)
+                              const VkPipelineRasterizationDepthClipStateCreateInfoEXT &create_info,
+                              const DynamicStateInfo *dynamic_state_info)
 {
 	h.u32(create_info.flags);
-	h.u32(create_info.depthClipEnable);
+	h.u32(dynamic_state_info && dynamic_state_info->depth_clip_enable ? 0 : create_info.depthClipEnable);
 }
 
 static void hash_pnext_struct(const StateRecorder *,
                               Hasher &h,
-                              const VkPipelineRasterizationStateStreamCreateInfoEXT &create_info)
+                              const VkPipelineRasterizationStateStreamCreateInfoEXT &create_info,
+                              const DynamicStateInfo *dynamic_state_info)
 {
 	h.u32(create_info.flags);
-	h.u32(create_info.rasterizationStream);
+	h.u32(dynamic_state_info && dynamic_state_info->rasterization_stream ? 0 : create_info.rasterizationStream);
 }
 
 static void hash_pnext_struct(const StateRecorder *,
@@ -947,30 +951,44 @@ static void hash_pnext_struct(const StateRecorder *,
 
 static void hash_pnext_struct(const StateRecorder *,
                               Hasher &h,
-                              const VkPipelineColorBlendAdvancedStateCreateInfoEXT &create_info)
+                              const VkPipelineColorBlendAdvancedStateCreateInfoEXT &create_info,
+                              const DynamicStateInfo *dynamic_state_info)
 {
-	h.u32(create_info.srcPremultiplied);
-	h.u32(create_info.dstPremultiplied);
-	h.u32(create_info.blendOverlap);
+	if (dynamic_state_info && dynamic_state_info->color_blend_advanced)
+	{
+		h.u32(0);
+	}
+	else
+	{
+		h.u32(create_info.srcPremultiplied);
+		h.u32(create_info.dstPremultiplied);
+		h.u32(create_info.blendOverlap);
+	}
 }
 
 static void hash_pnext_struct(const StateRecorder *,
                               Hasher &h,
-                              const VkPipelineRasterizationConservativeStateCreateInfoEXT &create_info)
+                              const VkPipelineRasterizationConservativeStateCreateInfoEXT &create_info,
+                              const DynamicStateInfo *dynamic_state_info)
 {
 	h.u32(create_info.flags);
-	h.u32(create_info.conservativeRasterizationMode);
-	h.f32(create_info.extraPrimitiveOverestimationSize);
+	h.u32(dynamic_state_info && dynamic_state_info->conservative_rasterization_mode ? 0 : create_info.conservativeRasterizationMode);
+	h.f32(dynamic_state_info && dynamic_state_info->extra_primitive_overestimation_size ? 0.0f : create_info.extraPrimitiveOverestimationSize);
 }
 
 static void hash_pnext_struct(const StateRecorder *,
                               Hasher &h,
-                              const VkPipelineRasterizationLineStateCreateInfoEXT &create_info)
+                              const VkPipelineRasterizationLineStateCreateInfoEXT &create_info,
+                              const DynamicStateInfo *dynamic_state_info)
 {
-	h.u32(create_info.lineRasterizationMode);
-	h.u32(create_info.stippledLineEnable);
-	h.u32(create_info.lineStippleFactor);
-	h.u32(create_info.lineStipplePattern);
+	bool can_enable_stipple = (dynamic_state_info && dynamic_state_info->line_stipple_enable) || create_info.stippledLineEnable;
+	bool dynamic_stipple_values = dynamic_state_info && dynamic_state_info->line_stipple;
+	bool enable_stipple_values = can_enable_stipple && !dynamic_stipple_values;
+
+	h.u32(dynamic_state_info && dynamic_state_info->line_rasterization_mode ? 0 : create_info.lineRasterizationMode);
+	h.u32(dynamic_state_info && dynamic_state_info->line_stipple_enable ? 0 : create_info.stippledLineEnable);
+	h.u32(enable_stipple_values ? create_info.lineStippleFactor : 0);
+	h.u32(enable_stipple_values ? create_info.lineStipplePattern : 0);
 }
 
 static void hash_pnext_struct(const StateRecorder *,
@@ -1087,8 +1105,10 @@ static bool hash_pnext_struct(const StateRecorder *,
                               const VkPipelineSampleLocationsStateCreateInfoEXT &info,
                               const DynamicStateInfo *dynamic_state_info)
 {
-	h.u32(info.sampleLocationsEnable);
-	if (info.sampleLocationsEnable && dynamic_state_info && !dynamic_state_info->sample_locations)
+	bool dynamic_enable = dynamic_state_info && dynamic_state_info->sample_locations_enable;
+	bool dynamic_locations = dynamic_state_info && dynamic_state_info->sample_locations;
+	h.u32(dynamic_enable ? 0 : info.sampleLocationsEnable);
+	if ((dynamic_enable || info.sampleLocationsEnable) && !dynamic_locations)
 	{
 		if (info.sampleLocationsInfo.pNext)
 			return false;
@@ -1111,9 +1131,10 @@ static bool hash_pnext_struct(const StateRecorder *,
 
 static void hash_pnext_struct(const StateRecorder *,
                               Hasher &h,
-                              const VkPipelineRasterizationProvokingVertexStateCreateInfoEXT &info)
+                              const VkPipelineRasterizationProvokingVertexStateCreateInfoEXT &info,
+                              const DynamicStateInfo *dynamic_state_info)
 {
-	h.u32(info.provokingVertexMode);
+	h.u32(dynamic_state_info && dynamic_state_info->provoking_vertex_mode ? 0 : info.provokingVertexMode);
 }
 
 static void hash_pnext_struct(const StateRecorder *,
@@ -1234,9 +1255,10 @@ static bool hash_pnext_struct(const StateRecorder *recorder,
 
 static void hash_pnext_struct(const StateRecorder *,
                               Hasher &h,
-                              const VkPipelineViewportDepthClipControlCreateInfoEXT &info)
+                              const VkPipelineViewportDepthClipControlCreateInfoEXT &info,
+                              const DynamicStateInfo *dynamic_state_info)
 {
-	h.u32(info.negativeOneToOne);
+	h.u32(dynamic_state_info && dynamic_state_info->depth_clip_negative_one_to_one ? 0 : info.negativeOneToOne);
 }
 
 static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const void *pNext,
@@ -1257,7 +1279,7 @@ static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const voi
 		switch (pin->sType)
 		{
 		case VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_DOMAIN_ORIGIN_STATE_CREATE_INFO:
-			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineTessellationDomainOriginStateCreateInfo *>(pNext));
+			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineTessellationDomainOriginStateCreateInfo *>(pNext), dynamic_state_info);
 			break;
 
 		case VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_DIVISOR_STATE_CREATE_INFO_EXT:
@@ -1265,11 +1287,11 @@ static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const voi
 			break;
 
 		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_DEPTH_CLIP_STATE_CREATE_INFO_EXT:
-			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineRasterizationDepthClipStateCreateInfoEXT *>(pNext));
+			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineRasterizationDepthClipStateCreateInfoEXT *>(pNext), dynamic_state_info);
 			break;
 
 		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_STREAM_CREATE_INFO_EXT:
-			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineRasterizationStateStreamCreateInfoEXT *>(pNext));
+			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineRasterizationStateStreamCreateInfoEXT *>(pNext), dynamic_state_info);
 			break;
 
 		case VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO:
@@ -1281,15 +1303,15 @@ static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const voi
 			break;
 
 		case VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_ADVANCED_STATE_CREATE_INFO_EXT:
-			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineColorBlendAdvancedStateCreateInfoEXT *>(pNext));
+			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineColorBlendAdvancedStateCreateInfoEXT *>(pNext), dynamic_state_info);
 			break;
 
 		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_CONSERVATIVE_STATE_CREATE_INFO_EXT:
-			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineRasterizationConservativeStateCreateInfoEXT *>(pNext));
+			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineRasterizationConservativeStateCreateInfoEXT *>(pNext), dynamic_state_info);
 			break;
 
 		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_LINE_STATE_CREATE_INFO_EXT:
-			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineRasterizationLineStateCreateInfoEXT *>(pNext));
+			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineRasterizationLineStateCreateInfoEXT *>(pNext), dynamic_state_info);
 			break;
 
 		case VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT:
@@ -1332,7 +1354,7 @@ static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const voi
 			break;
 
 		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_PROVOKING_VERTEX_STATE_CREATE_INFO_EXT:
-			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineRasterizationProvokingVertexStateCreateInfoEXT *>(pNext));
+			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineRasterizationProvokingVertexStateCreateInfoEXT *>(pNext), dynamic_state_info);
 			break;
 
 		case VK_STRUCTURE_TYPE_SAMPLER_CUSTOM_BORDER_COLOR_CREATE_INFO_EXT:
@@ -1373,7 +1395,7 @@ static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const voi
 			break;
 
 		case VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_DEPTH_CLIP_CONTROL_CREATE_INFO_EXT:
-			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineViewportDepthClipControlCreateInfoEXT *>(pNext));
+			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineViewportDepthClipControlCreateInfoEXT *>(pNext), dynamic_state_info);
 			break;
 
 		default:
@@ -1558,6 +1580,7 @@ static DynamicStateInfo parse_dynamic_state_info(const VkPipelineDynamicStateCre
 		DYN_STATE(DISCARD_RECTANGLE_EXT, discard_rectangle);
 		DYN_STATE(FRAGMENT_SHADING_RATE_KHR, fragment_shading_rate);
 		DYN_STATE(SAMPLE_LOCATIONS_EXT, sample_locations);
+		DYN_STATE(LINE_STIPPLE_EXT, line_stipple);
 
 		// Dynamic state 3
 		DYN_STATE(TESSELLATION_DOMAIN_ORIGIN_EXT, tessellation_domain_origin);
@@ -1736,6 +1759,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 		auto &ia = *create_info.pInputAssemblyState;
 		h.u32(ia.flags);
 		h.u32(dynamic_info.primitive_restart_enable ? 0 : ia.primitiveRestartEnable);
+		// Dynamic 3 makes this fully ignored, but it depends on a property. For sanity's sake we need to hash this.
 		h.u32(ia.topology);
 
 		if (!hash_pnext_chain(&recorder, h, ia.pNext, &dynamic_info))
@@ -1749,10 +1773,10 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 		auto &rs = *create_info.pRasterizationState;
 		h.u32(rs.flags);
 		h.u32(dynamic_info.cull_mode ? 0 : rs.cullMode);
-		h.u32(rs.depthClampEnable);
+		h.u32(dynamic_info.depth_clamp_enable ? 0 : rs.depthClampEnable);
 		h.u32(dynamic_info.front_face ? 0 : rs.frontFace);
 		h.u32(dynamic_info.rasterizer_discard_enable ? 0 : rs.rasterizerDiscardEnable);
-		h.u32(rs.polygonMode);
+		h.u32(dynamic_info.polygon_mode ? 0 : rs.polygonMode);
 		h.u32(dynamic_info.depth_bias_enable ? 0 : rs.depthBiasEnable);
 
 		if ((rs.depthBiasEnable || dynamic_info.depth_bias_enable) && !dynamic_info.depth_bias)
@@ -1775,12 +1799,12 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 	{
 		auto &ms = *create_info.pMultisampleState;
 		h.u32(ms.flags);
-		h.u32(ms.alphaToCoverageEnable);
-		h.u32(ms.alphaToOneEnable);
+		h.u32(dynamic_info.alpha_to_coverage_enable ? 0 : ms.alphaToCoverageEnable);
+		h.u32(dynamic_info.alpha_to_one_enable ? 0 : ms.alphaToOneEnable);
 		h.f32(ms.minSampleShading);
-		h.u32(ms.rasterizationSamples);
+		h.u32(dynamic_info.rasterization_samples ? 0 : ms.rasterizationSamples);
 		h.u32(ms.sampleShadingEnable);
-		if (ms.pSampleMask)
+		if (!dynamic_info.sample_mask && ms.pSampleMask)
 		{
 			uint32_t elems = (ms.rasterizationSamples + 31) / 32;
 			for (uint32_t i = 0; i < elems; i++)
@@ -1863,32 +1887,38 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 		auto &b = *create_info.pColorBlendState;
 		h.u32(b.flags);
 		h.u32(b.attachmentCount);
-		h.u32(b.logicOpEnable);
-		h.u32(dynamic_info.logic_op || !b.logicOpEnable ? 0 : b.logicOp);
+		h.u32(dynamic_info.logic_op_enable ? 0 : b.logicOpEnable);
+		h.u32(dynamic_info.logic_op || (!b.logicOpEnable && !dynamic_info.logic_op_enable) ? 0 : b.logicOp);
 
 		bool need_blend_constants = false;
 
 		for (uint32_t i = 0; i < b.attachmentCount; i++)
 		{
-			h.u32(b.pAttachments[i].blendEnable);
-			h.u32(b.pAttachments[i].colorWriteMask);
-			if (b.pAttachments[i].blendEnable)
+			h.u32(dynamic_info.color_blend_enable ? 0 : b.pAttachments[i].blendEnable);
+			h.u32(dynamic_info.color_write_mask ? 0 : b.pAttachments[i].colorWriteMask);
+			if (b.pAttachments[i].blendEnable || dynamic_info.color_blend_enable)
 			{
-				h.u32(b.pAttachments[i].alphaBlendOp);
-				h.u32(b.pAttachments[i].colorBlendOp);
-				h.u32(b.pAttachments[i].dstAlphaBlendFactor);
-				h.u32(b.pAttachments[i].srcAlphaBlendFactor);
-				h.u32(b.pAttachments[i].dstColorBlendFactor);
-				h.u32(b.pAttachments[i].srcColorBlendFactor);
+				if (!dynamic_info.color_blend_equation)
+				{
+					h.u32(b.pAttachments[i].alphaBlendOp);
+					h.u32(dynamic_info.color_blend_advanced ? 0 : b.pAttachments[i].colorBlendOp);
+					h.u32(b.pAttachments[i].dstAlphaBlendFactor);
+					h.u32(b.pAttachments[i].srcAlphaBlendFactor);
+					h.u32(b.pAttachments[i].dstColorBlendFactor);
+					h.u32(b.pAttachments[i].srcColorBlendFactor);
+				}
+				else
+					h.u32(0);
 
-				if (b.pAttachments[i].dstAlphaBlendFactor == VK_BLEND_FACTOR_CONSTANT_ALPHA ||
+				if (dynamic_info.color_blend_equation ||
+				    b.pAttachments[i].dstAlphaBlendFactor == VK_BLEND_FACTOR_CONSTANT_ALPHA ||
 				    b.pAttachments[i].dstAlphaBlendFactor == VK_BLEND_FACTOR_CONSTANT_COLOR ||
 				    b.pAttachments[i].srcAlphaBlendFactor == VK_BLEND_FACTOR_CONSTANT_ALPHA ||
 				    b.pAttachments[i].srcAlphaBlendFactor == VK_BLEND_FACTOR_CONSTANT_COLOR ||
-					b.pAttachments[i].dstColorBlendFactor == VK_BLEND_FACTOR_CONSTANT_ALPHA ||
-					b.pAttachments[i].dstColorBlendFactor == VK_BLEND_FACTOR_CONSTANT_COLOR ||
-					b.pAttachments[i].srcColorBlendFactor == VK_BLEND_FACTOR_CONSTANT_ALPHA ||
-					b.pAttachments[i].srcColorBlendFactor == VK_BLEND_FACTOR_CONSTANT_COLOR)
+				    b.pAttachments[i].dstColorBlendFactor == VK_BLEND_FACTOR_CONSTANT_ALPHA ||
+				    b.pAttachments[i].dstColorBlendFactor == VK_BLEND_FACTOR_CONSTANT_COLOR ||
+				    b.pAttachments[i].srcColorBlendFactor == VK_BLEND_FACTOR_CONSTANT_ALPHA ||
+				    b.pAttachments[i].srcColorBlendFactor == VK_BLEND_FACTOR_CONSTANT_COLOR)
 				{
 					need_blend_constants = true;
 				}
@@ -5225,8 +5255,10 @@ void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineSampleLocationsStat
 	if (create_info->sampleLocationsInfo.pNext)
 		return nullptr;
 
+	bool dynamic_enable = dynamic_state_info && dynamic_state_info->sample_locations_enable;
 	auto *sample_locations = copy(create_info, 1, alloc);
-	if (dynamic_state_info && !dynamic_state_info->sample_locations && sample_locations->sampleLocationsEnable)
+	if (dynamic_state_info && !dynamic_state_info->sample_locations &&
+	    (sample_locations->sampleLocationsEnable || dynamic_enable))
 	{
 		sample_locations->sampleLocationsInfo.pSampleLocations =
 				copy(sample_locations->sampleLocationsInfo.pSampleLocations,
@@ -5273,13 +5305,13 @@ void *StateRecorder::Impl::copy_pnext_struct(const VkRenderPassInputAttachmentAs
 
 void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineDiscardRectangleStateCreateInfoEXT *create_info,
                                              ScratchAllocator &alloc,
-					     const DynamicStateInfo *dynamic_state_info)
+                                             const DynamicStateInfo *dynamic_state_info)
 {
 	auto *discard_rectangles = copy(create_info, 1, alloc);
-	if (dynamic_state_info && !dynamic_state_info->discard_rectangle)
-		discard_rectangles->pDiscardRectangles = copy(discard_rectangles->pDiscardRectangles, discard_rectangles->discardRectangleCount, alloc);
-	else
+	if (dynamic_state_info && dynamic_state_info->discard_rectangle)
 		discard_rectangles->pDiscardRectangles = nullptr;
+	else
+		discard_rectangles->pDiscardRectangles = copy(discard_rectangles->pDiscardRectangles, discard_rectangles->discardRectangleCount, alloc);
 	return discard_rectangles;
 }
 
@@ -6713,6 +6745,8 @@ bool StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateI
 	if (info->pMultisampleState)
 	{
 		auto &ms = const_cast<VkPipelineMultisampleStateCreateInfo &>(*info->pMultisampleState);
+		if (dynamic_info.sample_mask)
+			ms.pSampleMask = nullptr;
 		if (ms.pSampleMask)
 			ms.pSampleMask = copy(ms.pSampleMask, (ms.rasterizationSamples + 31) / 32, alloc);
 	}
@@ -8609,7 +8643,9 @@ static bool json_value(const VkPipelineSampleLocationsStateCreateInfoEXT &create
 	value.AddMember("sType", create_info.sType, alloc);
 	value.AddMember("sampleLocationsEnable", create_info.sampleLocationsEnable, alloc);
 
-	if (create_info.sampleLocationsEnable && dynamic_state_info && !dynamic_state_info->sample_locations)
+	bool dynamic_enable = dynamic_state_info && dynamic_state_info->sample_locations_enable;
+	if ((dynamic_enable || create_info.sampleLocationsEnable) &&
+	    dynamic_state_info && !dynamic_state_info->sample_locations)
 	{
 		Value locations(kObjectType);
 		auto &info = create_info.sampleLocationsInfo;
