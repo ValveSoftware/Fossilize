@@ -120,6 +120,7 @@ struct DynamicStateInfo
 	bool cull_mode;
 	bool front_face;
 	// Primitive topology isn't fully dynamic, so we need to hash it.
+	// With dynamic state 3 unrestricted the topology is irrelevant, but that's a property.
 	bool depth_test_enable;
 	bool depth_write_enable;
 	bool depth_compare_op;
@@ -137,6 +138,39 @@ struct DynamicStateInfo
 	bool discard_rectangle;
 	bool fragment_shading_rate;
 	bool sample_locations;
+
+	// Dynamic state 3
+	bool tessellation_domain_origin;
+	bool depth_clamp_enable;
+	bool polygon_mode;
+	bool rasterization_samples;
+	bool sample_mask;
+	bool alpha_to_coverage_enable;
+	bool alpha_to_one_enable;
+	bool logic_op_enable;
+	bool color_blend_enable;
+	bool color_blend_equation;
+	bool color_write_mask;
+	bool rasterization_stream;
+	bool conservative_rasterization_mode;
+	bool extra_primitive_overestimation_size;
+	bool depth_clip_enable;
+	bool sample_locations_enable;
+	bool color_blend_advanced;
+	bool provoking_vertex_mode;
+	bool line_rasterization_mode;
+	bool line_stipple_enable;
+	bool depth_clip_negative_one_to_one;
+	bool viewport_w_scaling_enable;
+	bool viewport_swizzle;
+	bool coverage_to_color_enable;
+	bool coverage_to_color_location;
+	bool coverage_modulation_mode;
+	bool coverage_modulation_table_enable;
+	bool coverage_modulation_table;
+	bool shading_rate_image_enable;
+	bool representative_fragment_test_enable;
+	bool coverage_reduction_mode;
 };
 
 static VkPipelineCreateFlags normalize_pipeline_creation_flags(VkPipelineCreateFlags flags)
