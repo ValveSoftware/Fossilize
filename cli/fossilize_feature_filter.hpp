@@ -66,6 +66,7 @@ struct VulkanFeatures
 	VkPhysicalDeviceSubgroupSizeControlFeaturesEXT subgroup_size_control;
 	VkPhysicalDeviceExtendedDynamicStateFeaturesEXT extended_dynamic_state;
 	VkPhysicalDeviceExtendedDynamicState2FeaturesEXT extended_dynamic_state2;
+	VkPhysicalDeviceExtendedDynamicState3FeaturesEXT extended_dynamic_state3;
 	VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT vertex_input_dynamic_state;
 	VkPhysicalDeviceColorWriteEnableFeaturesEXT color_write_enable;
 	VkPhysicalDeviceShaderImageAtomicInt64FeaturesEXT shader_image_atomic_int64;
@@ -112,6 +113,7 @@ struct VulkanProperties
 	VkPhysicalDeviceAccelerationStructurePropertiesKHR acceleration_structure;
 	VkPhysicalDevicePushDescriptorPropertiesKHR push_descriptor;
 	VkPhysicalDeviceSampleLocationsPropertiesEXT sample_locations;
+	VkPhysicalDeviceExtendedDynamicState3PropertiesEXT extended_dynamic_state3;
 };
 
 void *build_pnext_chain(VulkanProperties &properties, uint32_t api_version,
