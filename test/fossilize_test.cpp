@@ -740,6 +740,15 @@ static void record_graphics_pipelines_robustness(StateRecorder &recorder)
 	VkPipelineRasterizationStateCreateInfo rs;
 	VkPipelineInputAssemblyStateCreateInfo ia;
 	VkPipelineColorWriteCreateInfoEXT color_write;
+	VkPipelineRasterizationLineStateCreateInfoEXT line;
+	VkPipelineTessellationDomainOriginStateCreateInfo domain_info;
+	VkPipelineColorBlendAdvancedStateCreateInfoEXT color_blend_advanced;
+	VkPipelineRasterizationStateStreamCreateInfoEXT stream_info;
+	VkPipelineRasterizationConservativeStateCreateInfoEXT conservative_info;
+	VkPipelineRasterizationDepthClipStateCreateInfoEXT depth_clip;
+	VkPipelineRasterizationProvokingVertexStateCreateInfoEXT provoking_vertex;
+	VkPipelineViewportDepthClipControlCreateInfoEXT negative_one_to_one;
+	VkPipelineSampleLocationsStateCreateInfoEXT sample_locations;
 	VkViewport viewports[2] = {};
 	VkRect2D scissors[2] = {};
 	VkBool32 color_write_enable;
@@ -769,6 +778,16 @@ static void record_graphics_pipelines_robustness(StateRecorder &recorder)
 		rs = { VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
 		ia = { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
 		color_write = { VK_STRUCTURE_TYPE_PIPELINE_COLOR_WRITE_CREATE_INFO_EXT };
+		line = { VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_LINE_STATE_CREATE_INFO_EXT };
+		domain_info = { VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_DOMAIN_ORIGIN_STATE_CREATE_INFO };
+		color_blend_advanced = { VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_ADVANCED_STATE_CREATE_INFO_EXT };
+		stream_info = { VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_STREAM_CREATE_INFO_EXT };
+		conservative_info = { VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_CONSERVATIVE_STATE_CREATE_INFO_EXT };
+		depth_clip = { VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_DEPTH_CLIP_STATE_CREATE_INFO_EXT };
+		provoking_vertex = { VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_PROVOKING_VERTEX_STATE_CREATE_INFO_EXT };
+		negative_one_to_one = { VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_DEPTH_CLIP_CONTROL_CREATE_INFO_EXT };
+		sample_locations = { VK_STRUCTURE_TYPE_PIPELINE_SAMPLE_LOCATIONS_STATE_CREATE_INFO_EXT };
+		sample_locations.sampleLocationsInfo = { VK_STRUCTURE_TYPE_SAMPLE_LOCATIONS_INFO_EXT };
 		pipe.renderPass = fake_handle<VkRenderPass>(90);
 		color_write_enable = VK_FALSE;
 		color_write.pColorWriteEnables = &color_write_enable;
@@ -1165,6 +1184,120 @@ static void record_graphics_pipelines_robustness(StateRecorder &recorder)
 	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_COLOR_WRITE_ENABLE_EXT, &color_write_enable, nullptr,
 	                                  [&]() { blend.pNext = &color_write; },
 	                                  [&]() { blend.pNext = &color_write; }});
+
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_LINE_STIPPLE_EXT, &line.lineStippleFactor, nullptr,
+									  [&]() { rs.pNext = &line; line.stippledLineEnable = VK_TRUE; },
+									  [&]() { rs.pNext = &line; line.stippledLineEnable = VK_TRUE; }});
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_LINE_STIPPLE_EXT, &line.lineStippleFactor, nullptr,
+									  [&]() { rs.pNext = &line; },
+									  [&]() { rs.pNext = &line; }, true, false});
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_LINE_STIPPLE_ENABLE_EXT, &line.lineStippleFactor, nullptr,
+									  [&]() { rs.pNext = &line; },
+									  [&]() { rs.pNext = &line; }, true, true});
+
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_LINE_RASTERIZATION_MODE_EXT,
+									  reinterpret_cast<uint32_t *>(&line.lineRasterizationMode), nullptr,
+									  [&]() { rs.pNext = &line; },
+									  [&]() { rs.pNext = &line; }});
+
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_TESSELLATION_DOMAIN_ORIGIN_EXT,
+	                                  reinterpret_cast<uint32_t *>(&domain_info.domainOrigin), nullptr,
+	                                  [&]() { set_tess_shaders(); tess.pNext = &domain_info; },
+	                                  [&]() { set_tess_shaders(); tess.pNext = &domain_info; }});
+
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_DEPTH_CLAMP_ENABLE_EXT,
+	                                  &rs.depthClampEnable, nullptr,
+	                                  {}, {}});
+
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_POLYGON_MODE_EXT,
+	                                  reinterpret_cast<uint32_t *>(&rs.polygonMode), nullptr,
+	                                  {}, {}});
+
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_ALPHA_TO_COVERAGE_ENABLE_EXT,
+	                                  &ms.alphaToCoverageEnable, nullptr,
+	                                  {}, {}});
+
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_ALPHA_TO_ONE_ENABLE_EXT,
+	                                  &ms.alphaToOneEnable, nullptr,
+	                                  {}, {}});
+
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_LOGIC_OP_ENABLE_EXT,
+	                                  &blend.logicOpEnable, nullptr,
+	                                  {}, {}});
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_LOGIC_OP_ENABLE_EXT,
+	                                  reinterpret_cast<uint32_t *>(&blend.logicOp), nullptr,
+	                                  {}, {}, true, true});
+
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_COLOR_BLEND_ENABLE_EXT,
+									  &blend_attachment.blendEnable, nullptr,
+									  set_blend_factor_invariant, set_blend_factor_invariant });
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_COLOR_BLEND_ENABLE_EXT,
+	                                  reinterpret_cast<uint32_t *>(&blend_attachment.alphaBlendOp),
+	                                  nullptr,
+									  set_blend_factor_invariant, set_blend_factor_invariant, true, true });
+
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_COLOR_BLEND_EQUATION_EXT,
+									  reinterpret_cast<uint32_t *>(&blend_attachment.alphaBlendOp), nullptr,
+									  set_blend_factor,
+									  set_blend_factor});
+
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_COLOR_BLEND_ADVANCED_EXT,
+									  reinterpret_cast<uint32_t *>(&blend_attachment.colorBlendOp), nullptr,
+									  set_blend_factor,
+									  set_blend_factor});
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_COLOR_BLEND_ADVANCED_EXT,
+	                                  &color_blend_advanced.dstPremultiplied, nullptr,
+	                                  [&]() { set_blend_factor(); blend.pNext = &color_blend_advanced; },
+	                                  [&]() { set_blend_factor(); blend.pNext = &color_blend_advanced; }});
+
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_COLOR_WRITE_MASK_EXT,
+									  &blend_attachment.colorWriteMask, nullptr,
+									  set_blend_factor, set_blend_factor });
+
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_RASTERIZATION_STREAM_EXT,
+									  &stream_info.rasterizationStream, nullptr,
+									  [&]() { rs.pNext = &stream_info; },
+									  [&]() { rs.pNext = &stream_info; }});
+
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_CONSERVATIVE_RASTERIZATION_MODE_EXT,
+	                                  reinterpret_cast<uint32_t *>(&conservative_info.conservativeRasterizationMode),
+	                                  nullptr,
+	                                  [&]() { rs.pNext = &conservative_info; },
+	                                  [&]() { rs.pNext = &conservative_info; }});
+
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_EXTRA_PRIMITIVE_OVERESTIMATION_SIZE_EXT,
+	                                  nullptr,
+	                                  &conservative_info.extraPrimitiveOverestimationSize,
+	                                  [&]() { rs.pNext = &conservative_info; },
+	                                  [&]() { rs.pNext = &conservative_info; }});
+
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_DEPTH_CLIP_ENABLE_EXT,
+									  &depth_clip.depthClipEnable, nullptr,
+									  [&]() { rs.pNext = &depth_clip; },
+									  [&]() { rs.pNext = &depth_clip; }});
+
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_PROVOKING_VERTEX_MODE_EXT,
+									  reinterpret_cast<uint32_t *>(&provoking_vertex.provokingVertexMode), nullptr,
+									  [&]() { rs.pNext = &provoking_vertex; },
+									  [&]() { rs.pNext = &provoking_vertex; }});
+
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_DEPTH_CLIP_NEGATIVE_ONE_TO_ONE_EXT,
+									  &negative_one_to_one.negativeOneToOne, nullptr,
+									  [&]() { vp.pNext = &negative_one_to_one; },
+									  [&]() { vp.pNext = &negative_one_to_one; }});
+
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_SAMPLE_LOCATIONS_EXT,
+									  &sample_locations.sampleLocationsInfo.sampleLocationGridSize.width, nullptr,
+									  [&]() { ms.pNext = &sample_locations; },
+									  [&]() { ms.pNext = &sample_locations; }, true, false});
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_SAMPLE_LOCATIONS_EXT,
+									  &sample_locations.sampleLocationsInfo.sampleLocationGridSize.width, nullptr,
+									  [&]() { ms.pNext = &sample_locations; sample_locations.sampleLocationsEnable = VK_TRUE; },
+									  [&]() { ms.pNext = &sample_locations; sample_locations.sampleLocationsEnable = VK_TRUE; }});
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_SAMPLE_LOCATIONS_ENABLE_EXT,
+									  &sample_locations.sampleLocationsInfo.sampleLocationGridSize.width, nullptr,
+									  [&]() { ms.pNext = &sample_locations; },
+									  [&]() { ms.pNext = &sample_locations; }, true, true});
 
 	for (auto &test : hash_invariance_tests)
 	{
