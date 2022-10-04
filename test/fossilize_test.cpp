@@ -754,6 +754,7 @@ static void record_graphics_pipelines_robustness(StateRecorder &recorder)
 	VkBool32 color_write_enable;
 
 	uint64_t counter = 1000000;
+	uint32_t sample_mask;
 	Hash hash[5];
 
 	const auto reset_state = [&]() {
@@ -792,6 +793,9 @@ static void record_graphics_pipelines_robustness(StateRecorder &recorder)
 		color_write_enable = VK_FALSE;
 		color_write.pColorWriteEnables = &color_write_enable;
 		color_write.attachmentCount = 1;
+		ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+		sample_mask = 0xaaaaaaaa;
+		ms.pSampleMask = &sample_mask;
 	};
 
 	const auto reset_state_set_all = [&]() {
@@ -1186,19 +1190,19 @@ static void record_graphics_pipelines_robustness(StateRecorder &recorder)
 	                                  [&]() { blend.pNext = &color_write; }});
 
 	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_LINE_STIPPLE_EXT, &line.lineStippleFactor, nullptr,
-									  [&]() { rs.pNext = &line; line.stippledLineEnable = VK_TRUE; },
-									  [&]() { rs.pNext = &line; line.stippledLineEnable = VK_TRUE; }});
+	                                  [&]() { rs.pNext = &line; line.stippledLineEnable = VK_TRUE; },
+	                                  [&]() { rs.pNext = &line; line.stippledLineEnable = VK_TRUE; }});
 	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_LINE_STIPPLE_EXT, &line.lineStippleFactor, nullptr,
-									  [&]() { rs.pNext = &line; },
-									  [&]() { rs.pNext = &line; }, true, false});
+	                                  [&]() { rs.pNext = &line; },
+	                                  [&]() { rs.pNext = &line; }, true, false});
 	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_LINE_STIPPLE_ENABLE_EXT, &line.lineStippleFactor, nullptr,
-									  [&]() { rs.pNext = &line; },
-									  [&]() { rs.pNext = &line; }, true, true});
+	                                  [&]() { rs.pNext = &line; },
+	                                  [&]() { rs.pNext = &line; }, true, true});
 
 	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_LINE_RASTERIZATION_MODE_EXT,
-									  reinterpret_cast<uint32_t *>(&line.lineRasterizationMode), nullptr,
-									  [&]() { rs.pNext = &line; },
-									  [&]() { rs.pNext = &line; }});
+	                                  reinterpret_cast<uint32_t *>(&line.lineRasterizationMode), nullptr,
+	                                  [&]() { rs.pNext = &line; },
+	                                  [&]() { rs.pNext = &line; }});
 
 	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_TESSELLATION_DOMAIN_ORIGIN_EXT,
 	                                  reinterpret_cast<uint32_t *>(&domain_info.domainOrigin), nullptr,
@@ -1229,35 +1233,35 @@ static void record_graphics_pipelines_robustness(StateRecorder &recorder)
 	                                  {}, {}, true, true});
 
 	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_COLOR_BLEND_ENABLE_EXT,
-									  &blend_attachment.blendEnable, nullptr,
-									  set_blend_factor_invariant, set_blend_factor_invariant });
+	                                  &blend_attachment.blendEnable, nullptr,
+	                                  set_blend_factor_invariant, set_blend_factor_invariant });
 	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_COLOR_BLEND_ENABLE_EXT,
 	                                  reinterpret_cast<uint32_t *>(&blend_attachment.alphaBlendOp),
 	                                  nullptr,
-									  set_blend_factor_invariant, set_blend_factor_invariant, true, true });
+	                                  set_blend_factor_invariant, set_blend_factor_invariant, true, true });
 
 	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_COLOR_BLEND_EQUATION_EXT,
-									  reinterpret_cast<uint32_t *>(&blend_attachment.alphaBlendOp), nullptr,
-									  set_blend_factor,
-									  set_blend_factor});
+	                                  reinterpret_cast<uint32_t *>(&blend_attachment.alphaBlendOp), nullptr,
+	                                  set_blend_factor,
+	                                  set_blend_factor});
 
 	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_COLOR_BLEND_ADVANCED_EXT,
-									  reinterpret_cast<uint32_t *>(&blend_attachment.colorBlendOp), nullptr,
-									  set_blend_factor,
-									  set_blend_factor});
+	                                  reinterpret_cast<uint32_t *>(&blend_attachment.colorBlendOp), nullptr,
+	                                  set_blend_factor,
+	                                  set_blend_factor});
 	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_COLOR_BLEND_ADVANCED_EXT,
 	                                  &color_blend_advanced.dstPremultiplied, nullptr,
 	                                  [&]() { set_blend_factor(); blend.pNext = &color_blend_advanced; },
 	                                  [&]() { set_blend_factor(); blend.pNext = &color_blend_advanced; }});
 
 	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_COLOR_WRITE_MASK_EXT,
-									  &blend_attachment.colorWriteMask, nullptr,
-									  set_blend_factor, set_blend_factor });
+	                                  &blend_attachment.colorWriteMask, nullptr,
+	                                  set_blend_factor, set_blend_factor });
 
 	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_RASTERIZATION_STREAM_EXT,
-									  &stream_info.rasterizationStream, nullptr,
-									  [&]() { rs.pNext = &stream_info; },
-									  [&]() { rs.pNext = &stream_info; }});
+	                                  &stream_info.rasterizationStream, nullptr,
+	                                  [&]() { rs.pNext = &stream_info; },
+	                                  [&]() { rs.pNext = &stream_info; }});
 
 	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_CONSERVATIVE_RASTERIZATION_MODE_EXT,
 	                                  reinterpret_cast<uint32_t *>(&conservative_info.conservativeRasterizationMode),
@@ -1272,32 +1276,39 @@ static void record_graphics_pipelines_robustness(StateRecorder &recorder)
 	                                  [&]() { rs.pNext = &conservative_info; }});
 
 	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_DEPTH_CLIP_ENABLE_EXT,
-									  &depth_clip.depthClipEnable, nullptr,
-									  [&]() { rs.pNext = &depth_clip; },
-									  [&]() { rs.pNext = &depth_clip; }});
+	                                  &depth_clip.depthClipEnable, nullptr,
+	                                  [&]() { rs.pNext = &depth_clip; },
+	                                  [&]() { rs.pNext = &depth_clip; }});
 
 	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_PROVOKING_VERTEX_MODE_EXT,
-									  reinterpret_cast<uint32_t *>(&provoking_vertex.provokingVertexMode), nullptr,
-									  [&]() { rs.pNext = &provoking_vertex; },
-									  [&]() { rs.pNext = &provoking_vertex; }});
+	                                  reinterpret_cast<uint32_t *>(&provoking_vertex.provokingVertexMode), nullptr,
+	                                  [&]() { rs.pNext = &provoking_vertex; },
+	                                  [&]() { rs.pNext = &provoking_vertex; }});
 
 	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_DEPTH_CLIP_NEGATIVE_ONE_TO_ONE_EXT,
-									  &negative_one_to_one.negativeOneToOne, nullptr,
-									  [&]() { vp.pNext = &negative_one_to_one; },
-									  [&]() { vp.pNext = &negative_one_to_one; }});
+	                                  &negative_one_to_one.negativeOneToOne, nullptr,
+	                                  [&]() { vp.pNext = &negative_one_to_one; },
+	                                  [&]() { vp.pNext = &negative_one_to_one; }});
 
 	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_SAMPLE_LOCATIONS_EXT,
-									  &sample_locations.sampleLocationsInfo.sampleLocationGridSize.width, nullptr,
-									  [&]() { ms.pNext = &sample_locations; },
-									  [&]() { ms.pNext = &sample_locations; }, true, false});
+	                                  &sample_locations.sampleLocationsInfo.sampleLocationGridSize.width, nullptr,
+	                                  [&]() { ms.pNext = &sample_locations; },
+	                                  [&]() { ms.pNext = &sample_locations; }, true, false});
 	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_SAMPLE_LOCATIONS_EXT,
-									  &sample_locations.sampleLocationsInfo.sampleLocationGridSize.width, nullptr,
-									  [&]() { ms.pNext = &sample_locations; sample_locations.sampleLocationsEnable = VK_TRUE; },
-									  [&]() { ms.pNext = &sample_locations; sample_locations.sampleLocationsEnable = VK_TRUE; }});
+	                                  &sample_locations.sampleLocationsInfo.sampleLocationGridSize.width, nullptr,
+	                                  [&]() { ms.pNext = &sample_locations; sample_locations.sampleLocationsEnable = VK_TRUE; },
+	                                  [&]() { ms.pNext = &sample_locations; sample_locations.sampleLocationsEnable = VK_TRUE; }});
 	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_SAMPLE_LOCATIONS_ENABLE_EXT,
-									  &sample_locations.sampleLocationsInfo.sampleLocationGridSize.width, nullptr,
-									  [&]() { ms.pNext = &sample_locations; },
-									  [&]() { ms.pNext = &sample_locations; }, true, true});
+	                                  &sample_locations.sampleLocationsInfo.sampleLocationGridSize.width, nullptr,
+	                                  [&]() { ms.pNext = &sample_locations; },
+	                                  [&]() { ms.pNext = &sample_locations; }, true, true});
+
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_RASTERIZATION_SAMPLES_EXT,
+	                                  reinterpret_cast<uint32_t *>(&ms.rasterizationSamples), nullptr,
+	                                  {}, [&]() { ms.rasterizationSamples = static_cast<VkSampleCountFlagBits>(100000000); }});
+	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_SAMPLE_MASK_EXT,
+	                                  &sample_mask, nullptr,
+	                                  {}, [&]() { ms.rasterizationSamples = VK_SAMPLE_COUNT_64_BIT; set_invalid_pointer(ms.pSampleMask); }});
 
 	for (auto &test : hash_invariance_tests)
 	{
