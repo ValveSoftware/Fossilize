@@ -56,6 +56,7 @@ FE(LINE_RASTERIZATION, line_rasterization, EXT);
 FE(SUBGROUP_SIZE_CONTROL, subgroup_size_control, EXT);
 FE(EXTENDED_DYNAMIC_STATE, extended_dynamic_state, EXT);
 FE(EXTENDED_DYNAMIC_STATE_2, extended_dynamic_state2, EXT);
+FE(EXTENDED_DYNAMIC_STATE_3, extended_dynamic_state3, EXT);
 FE(COLOR_WRITE_ENABLE, color_write_enable, EXT);
 FE(VERTEX_INPUT_DYNAMIC_STATE, vertex_input_dynamic_state, EXT);
 FE(SHADER_IMAGE_ATOMIC_INT64, shader_image_atomic_int64, EXT);

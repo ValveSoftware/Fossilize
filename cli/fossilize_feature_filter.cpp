@@ -2199,6 +2199,45 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 					return false;
 				break;
 
+#define DYN_STATE3(state, member) case VK_DYNAMIC_STATE_##state: \
+	if (!enabled_extensions.count(VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME) || \
+			features.extended_dynamic_state3.extendedDynamicState3##member == VK_FALSE) \
+		return false; \
+	break
+
+			DYN_STATE3(TESSELLATION_DOMAIN_ORIGIN_EXT, TessellationDomainOrigin);
+			DYN_STATE3(DEPTH_CLAMP_ENABLE_EXT, DepthClampEnable);
+			DYN_STATE3(POLYGON_MODE_EXT, PolygonMode);
+			DYN_STATE3(RASTERIZATION_SAMPLES_EXT, RasterizationSamples);
+			DYN_STATE3(SAMPLE_MASK_EXT, SampleMask);
+			DYN_STATE3(ALPHA_TO_COVERAGE_ENABLE_EXT, AlphaToCoverageEnable);
+			DYN_STATE3(ALPHA_TO_ONE_ENABLE_EXT, AlphaToOneEnable);
+			DYN_STATE3(LOGIC_OP_ENABLE_EXT, LogicOpEnable);
+			DYN_STATE3(COLOR_BLEND_ENABLE_EXT, ColorBlendEnable);
+			DYN_STATE3(COLOR_BLEND_EQUATION_EXT, ColorBlendEquation);
+			DYN_STATE3(COLOR_WRITE_MASK_EXT, ColorWriteMask);
+			DYN_STATE3(RASTERIZATION_STREAM_EXT, RasterizationStream);
+			DYN_STATE3(CONSERVATIVE_RASTERIZATION_MODE_EXT, ConservativeRasterizationMode);
+			DYN_STATE3(EXTRA_PRIMITIVE_OVERESTIMATION_SIZE_EXT, ExtraPrimitiveOverestimationSize);
+			DYN_STATE3(DEPTH_CLIP_ENABLE_EXT, DepthClipEnable);
+			DYN_STATE3(SAMPLE_LOCATIONS_ENABLE_EXT, SampleLocationsEnable);
+			DYN_STATE3(COLOR_BLEND_ADVANCED_EXT, ColorBlendAdvanced);
+			DYN_STATE3(PROVOKING_VERTEX_MODE_EXT, ProvokingVertexMode);
+			DYN_STATE3(LINE_RASTERIZATION_MODE_EXT, LineRasterizationMode);
+			DYN_STATE3(LINE_STIPPLE_ENABLE_EXT, LineStippleEnable);
+			DYN_STATE3(DEPTH_CLIP_NEGATIVE_ONE_TO_ONE_EXT, DepthClipNegativeOneToOne);
+			DYN_STATE3(VIEWPORT_W_SCALING_ENABLE_NV, ViewportWScalingEnable);
+			DYN_STATE3(VIEWPORT_SWIZZLE_NV, ViewportSwizzle);
+			DYN_STATE3(COVERAGE_TO_COLOR_ENABLE_NV, CoverageToColorEnable);
+			DYN_STATE3(COVERAGE_TO_COLOR_LOCATION_NV, CoverageToColorLocation);
+			DYN_STATE3(COVERAGE_MODULATION_MODE_NV, CoverageModulationMode);
+			DYN_STATE3(COVERAGE_MODULATION_TABLE_ENABLE_NV, CoverageModulationTableEnable);
+			DYN_STATE3(COVERAGE_MODULATION_TABLE_NV, CoverageModulationTable);
+			DYN_STATE3(SHADING_RATE_IMAGE_ENABLE_NV, ShadingRateImageEnable);
+			DYN_STATE3(REPRESENTATIVE_FRAGMENT_TEST_ENABLE_NV, RepresentativeFragmentTestEnable);
+			DYN_STATE3(COVERAGE_REDUCTION_MODE_NV, CoverageReductionMode);
+#undef DYN_STATE3
+
 			case VK_DYNAMIC_STATE_VIEWPORT:
 			case VK_DYNAMIC_STATE_SCISSOR:
 			case VK_DYNAMIC_STATE_LINE_WIDTH:
