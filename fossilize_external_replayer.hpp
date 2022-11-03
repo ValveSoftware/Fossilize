@@ -129,6 +129,9 @@ public:
 		// Enable full validation layers.
 		bool enable_validation;
 
+		// Disable crash signal handler (for debugging and obtaining coredumps).
+		bool disable_signal_handler;
+
 		// Ignores derived pipelines, reduces memory consumption when replaying.
 		// Only useful if the driver in question ignores use of derived pipelines when hashing pipelines internally.
 		// OBSOLETE. This option is only kept for backwards compat.

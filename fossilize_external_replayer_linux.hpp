@@ -684,6 +684,9 @@ void ExternalReplayer::Impl::start_replayer_process(const ExternalReplayer::Opti
 	if (options.enable_validation)
 		argv.push_back("--enable-validation");
 
+	if (options.disable_signal_handler)
+		argv.push_back("--disable-signal-handler");
+
 	if (options.null_device)
 		argv.push_back("--null-device");
 
