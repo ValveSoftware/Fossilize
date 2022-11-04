@@ -65,11 +65,13 @@ static ApplicationInfoFilter *getApplicationInfoFilter()
 
 	if (filterPath)
 	{
-		globalInfoFilter.reset(new ApplicationInfoFilter);
-		globalInfoFilter->set_environment_resolver([](const char *env, void *) -> const char * {
-			return getenv(env);
-		}, nullptr);
-		globalInfoFilter->parse_async(filterPath);
+		globalInfoFilter.reset(ApplicationInfoFilter::parse(
+				filterPath,
+				[](const char *env, void *) -> const char * { return getenv(env); },
+				nullptr));
+
+		if (!globalInfoFilter)
+			LOGE_LEVEL("Failed to parse ApplicationInfoFilter, letting recording go through.\n");
 	}
 
 	globalInfoFilterDone = true;
@@ -366,7 +368,7 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDevicePropert
 	                                                                          DatabaseMode::Append,
 	                                                                          extraPaths));
 
-	if (needs_bucket)
+	if (needs_bucket && infoFilter)
 	{
 		char bucketPath[17];
 		Hash bucketHash = infoFilter->get_bucket_hash(props, appInfo, device_pnext);

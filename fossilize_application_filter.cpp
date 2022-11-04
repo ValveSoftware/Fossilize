@@ -24,7 +24,6 @@
 #include "fossilize_hasher.hpp"
 #include "layer/utils.hpp"
 #include "vulkan.h"
-#include <future>
 #include <vector>
 #include <unordered_set>
 #include <unordered_map>
@@ -107,22 +106,15 @@ struct AppInfo
 
 struct ApplicationInfoFilter::Impl
 {
-	~Impl();
 	std::unordered_set<std::string> blacklisted_application_names;
 	std::unordered_set<std::string> blacklisted_engine_names;
 	std::unordered_map<std::string, AppInfo> application_infos;
 	std::unordered_map<std::string, AppInfo> engine_infos;
 	std::vector<VariantDependency> default_variant_dependencies;
 
-	bool parsing_done = false;
-	bool parsing_success = false;
-	std::future<void> task;
-
-	void parse_async(const char *path);
+	bool parse(const char *path);
 	bool test_application_info(const VkApplicationInfo *info);
 	bool filter_env_info(const EnvInfo &info) const;
-	bool parse(const std::string &path);
-	bool check_success();
 	bool should_record_immutable_samplers(const VkApplicationInfo *info);
 
 	bool needs_buckets(const VkApplicationInfo *info);
@@ -134,20 +126,8 @@ struct ApplicationInfoFilter::Impl
 	void *getenv_userdata = nullptr;
 };
 
-bool ApplicationInfoFilter::Impl::check_success()
-{
-	if (task.valid())
-		task.wait();
-	return parsing_success;
-}
-
 bool ApplicationInfoFilter::Impl::should_record_immutable_samplers(const VkApplicationInfo *info)
 {
-	if (task.valid())
-		task.wait();
-	if (!parsing_success)
-		return true;
-
 	if (info && info->pApplicationName)
 	{
 		auto itr = application_infos.find(info->pApplicationName);
@@ -186,11 +166,6 @@ bool ApplicationInfoFilter::Impl::filter_env_info(const EnvInfo &info) const
 
 bool ApplicationInfoFilter::Impl::needs_buckets(const VkApplicationInfo *info)
 {
-	if (task.valid())
-		task.wait();
-	if (!parsing_success)
-		return false;
-
 	if (info && info->pApplicationName)
 	{
 		auto itr = application_infos.find(info->pApplicationName);
@@ -348,11 +323,6 @@ Hash ApplicationInfoFilter::Impl::get_bucket_hash(const VkPhysicalDeviceProperti
                                                   const VkApplicationInfo *info,
                                                   const void *device_pnext)
 {
-	if (task.valid())
-		task.wait();
-	if (!parsing_success)
-		return 0;
-
 	Hasher h;
 	bool use_default_variant = true;
 
@@ -392,15 +362,6 @@ bool ApplicationInfoFilter::Impl::test_application_info(const VkApplicationInfo 
 	// No app info, just assume true.
 	if (!info)
 		return true;
-
-	if (task.valid())
-		task.wait();
-
-	if (!parsing_success)
-	{
-		LOGE("Failed to parse ApplicationInfoFilter, letting recording go through.\n");
-		return true;
-	}
 
 	// First, check for blacklists.
 	if (info->pApplicationName && blacklisted_application_names.count(info->pApplicationName))
@@ -702,9 +663,9 @@ static bool add_application_filters(std::unordered_map<std::string, AppInfo> &ou
 	return true;
 }
 
-bool ApplicationInfoFilter::Impl::parse(const std::string &path)
+bool ApplicationInfoFilter::Impl::parse(const char *path)
 {
-	auto buffer = read_file(path.c_str());
+	auto buffer = read_file(path);
 
 	Document doc;
 	doc.Parse(buffer.data(), buffer.size());
@@ -746,30 +707,28 @@ bool ApplicationInfoFilter::Impl::parse(const std::string &path)
 	return true;
 }
 
-void ApplicationInfoFilter::Impl::parse_async(const char *path_)
-{
-	std::string path = path_;
-	task = std::async(std::launch::async, [this, path]() {
-		bool ret = parse(path);
-		parsing_success = ret;
-		parsing_done = true;
-	});
-}
-
-ApplicationInfoFilter::Impl::~Impl()
-{
-	if (task.valid())
-		task.wait();
-}
-
 ApplicationInfoFilter::ApplicationInfoFilter()
 {
 	impl = new Impl;
 }
 
-void ApplicationInfoFilter::parse_async(const char *path)
+ApplicationInfoFilter *ApplicationInfoFilter::parse(
+		const char *path,
+		const char *(*getenv_wrapper)(const char *, void *),
+		void *userdata)
 {
-	impl->parse_async(path);
+	auto *filter = new ApplicationInfoFilter;
+
+	filter->impl->getenv_wrapper = getenv_wrapper;
+	filter->impl->getenv_userdata = userdata;
+
+	if (!filter->impl->parse(path))
+	{
+		delete filter;
+		return nullptr;
+	}
+
+	return filter;
 }
 
 bool ApplicationInfoFilter::test_application_info(const VkApplicationInfo *info)
@@ -789,20 +748,9 @@ Hash ApplicationInfoFilter::get_bucket_hash(const VkPhysicalDeviceProperties2 *p
 	return impl->get_bucket_hash(props, info, device_pnext);
 }
 
-bool ApplicationInfoFilter::check_success()
-{
-	return impl->check_success();
-}
-
 bool ApplicationInfoFilter::should_record_immutable_samplers(const VkApplicationInfo *info)
 {
 	return impl->should_record_immutable_samplers(info);
-}
-
-void ApplicationInfoFilter::set_environment_resolver(const char *(*getenv_wrapper)(const char *, void *), void *userdata)
-{
-	impl->getenv_wrapper = getenv_wrapper;
-	impl->getenv_userdata = userdata;
 }
 
 ApplicationInfoFilter::~ApplicationInfoFilter()

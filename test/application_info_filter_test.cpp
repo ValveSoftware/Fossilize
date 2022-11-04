@@ -26,6 +26,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <memory>
 
 static bool write_string_to_file(const char *path, const char *str)
 {
@@ -97,14 +98,32 @@ R"delim(
 	if (!write_string_to_file(".__test_appinfo.json", test_json))
 		return EXIT_FAILURE;
 
-	Fossilize::ApplicationInfoFilter filter;
-	filter.parse_async(".__test_appinfo.json");
+	struct UserData
+	{
+		const char *env = nullptr;
+		const char *data = nullptr;
+	} data = {};
 
-	if (!filter.check_success())
+	const auto getenv_wrapper = +[](const char *env, void *userdata) -> const char *
+	{
+		auto *env_data = static_cast<const UserData *>(userdata);
+		if (env_data->env && strcmp(env_data->env, env) == 0)
+			return env_data->data;
+		else
+			return nullptr;
+	};
+
+	std::unique_ptr<Fossilize::ApplicationInfoFilter> filter_handle;
+	filter_handle.reset(Fossilize::ApplicationInfoFilter::parse(".__test_appinfo.json",
+																getenv_wrapper, &data));
+
+	if (!filter_handle)
 	{
 		LOGE("Parsing did not complete successfully.\n");
 		return EXIT_FAILURE;
 	}
+
+	auto &filter = *filter_handle;
 
 	VkApplicationInfo appinfo = { VK_STRUCTURE_TYPE_APPLICATION_INFO };
 
@@ -182,6 +201,8 @@ R"delim(
 
 	for (unsigned i = 0; i < 2; i++)
 	{
+		data = {};
+
 		// Test env blacklisting (application)
 		if (i == 0)
 		{
@@ -194,22 +215,6 @@ R"delim(
 			appinfo.pApplicationName = nullptr;
 		}
 
-		struct UserData
-		{
-			const char *env = nullptr;
-			const char *data = nullptr;
-		} data = {};
-
-		const auto getenv_wrapper = +[](const char *env, void *userdata) -> const char *
-		{
-			auto *env_data = static_cast<const UserData *>(userdata);
-			if (env_data->env && strcmp(env_data->env, env) == 0)
-				return env_data->data;
-			else
-				return nullptr;
-		};
-
-		filter.set_environment_resolver(getenv_wrapper, &data);
 		if (!filter.test_application_info(&appinfo))
 			return EXIT_FAILURE;
 

@@ -33,21 +33,15 @@ namespace Fossilize
 class ApplicationInfoFilter
 {
 public:
-	ApplicationInfoFilter();
 	~ApplicationInfoFilter();
 	void operator=(const ApplicationInfoFilter &) = delete;
 	ApplicationInfoFilter(const ApplicationInfoFilter &) = delete;
 
-	// Wrapper for getenv() basically, useful for mocking in test suite.
-	void set_environment_resolver(const char *(*getenv_wrapper)(const char *, void *), void *userdata);
-
-	// Path to a JSON file. This is done async to avoid stalling main thread.
-	// Any further query will block.
+	// Path to a JSON file.
 	// Called by layer when an instance is created.
-	void parse_async(const char *path);
-
-	// Checks if we were successful in parsing the JSON file.
-	bool check_success();
+	static ApplicationInfoFilter *parse(const char *path,
+	                                    const char *(*getenv_wrapper)(const char *, void *),
+	                                    void *userdata);
 
 	// Tests if application should be recorded.
 	// Blocks until parsing is complete. Called by recording thread when preparing for recording.
@@ -60,6 +54,7 @@ public:
 	bool should_record_immutable_samplers(const VkApplicationInfo *info);
 
 private:
+	ApplicationInfoFilter();
 	struct Impl;
 	Impl *impl;
 };
