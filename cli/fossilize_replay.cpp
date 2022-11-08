@@ -222,6 +222,9 @@ struct ThreadedReplayer : StateCreatorInterface
 	{
 		bool spirv_validate = false;
 		bool pipeline_stats = false;
+#ifndef WIN32
+		bool disable_signal_handler = false;
+#endif
 		string on_disk_pipeline_cache_path;
 		string on_disk_validation_cache_path;
 		string on_disk_validation_whitelist_path;
@@ -2975,6 +2978,9 @@ static void print_help()
 	     "\t[--timeout-seconds]\n"
 	     "\t[--implicit-whitelist <index>]\n"
 	     "\t[--replayer-cache <path>]\n"
+#ifndef WIN32
+	     "\t[--disable-signal-handler]\n"
+#endif
 	     EXTRA_OPTIONS
 	     "\t<Database>\n");
 }
@@ -3119,6 +3125,7 @@ static int run_progress_process(const VulkanDevice::Options &device_opts,
 	opts.spirv_validate = replayer_opts.spirv_validate;
 	opts.device_index = device_opts.device_index;
 	opts.enable_validation = device_opts.enable_validation;
+	opts.disable_signal_handler = replayer_opts.disable_signal_handler;
 	opts.ignore_derived_pipelines = true;
 	opts.null_device = device_opts.null_device;
 	opts.start_graphics_index = replayer_opts.start_graphics_index;
@@ -3925,6 +3932,9 @@ int main(int argc, char *argv[])
 	cbs.add("--replayer-cache", [&](CLIParser &parser) {
 		replayer_opts.replayer_cache_path = parser.next_string();
 	});
+#ifndef WIN32
+	cbs.add("--disable-signal-handler", [&](CLIParser &) { replayer_opts.disable_signal_handler = true; });
+#endif
 
 	cbs.error_handler = [] { print_help(); };
 
@@ -4012,7 +4022,8 @@ int main(int argc, char *argv[])
 	{
 		ThreadedReplayer replayer(opts, replayer_opts);
 #ifndef NO_ROBUST_REPLAYER
-		install_trivial_crash_handlers(replayer);
+		if (!replayer_opts.disable_signal_handler)
+			install_trivial_crash_handlers(replayer);
 #endif
 		ret = run_normal_process(replayer, databases,
 		                         whitelist_path, whitelist_mask,

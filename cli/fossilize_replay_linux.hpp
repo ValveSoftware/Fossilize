@@ -1467,25 +1467,28 @@ static int run_slave_process(const VulkanDevice::Options &opts,
 
 	global_replayer = &replayer;
 
-	// Install the signal handlers.
-	// It's very important that this runs in a single thread,
-	// so we cannot have some rogue thread overriding these handlers.
-	struct sigaction act;
-	memset(&act, 0, sizeof(act));
-	sigemptyset(&act.sa_mask);
-	act.sa_handler = crash_handler;
-	act.sa_flags = SA_RESETHAND | SA_ONSTACK;
+	if (!replayer_opts.disable_signal_handler)
+	{
+		// Install the signal handlers.
+		// It's very important that this runs in a single thread,
+		// so we cannot have some rogue thread overriding these handlers.
+		struct sigaction act;
+		memset(&act, 0, sizeof(act));
+		sigemptyset(&act.sa_mask);
+		act.sa_handler = crash_handler;
+		act.sa_flags = SA_RESETHAND | SA_ONSTACK;
 
-	if (sigaction(SIGSEGV, &act, nullptr) < 0)
-		return EXIT_FAILURE;
-	if (sigaction(SIGFPE, &act, nullptr) < 0)
-		return EXIT_FAILURE;
-	if (sigaction(SIGILL, &act, nullptr) < 0)
-		return EXIT_FAILURE;
-	if (sigaction(SIGBUS, &act, nullptr) < 0)
-		return EXIT_FAILURE;
-	if (sigaction(SIGABRT, &act, nullptr) < 0)
-		return EXIT_FAILURE;
+		if (sigaction(SIGSEGV, &act, nullptr) < 0)
+			return EXIT_FAILURE;
+		if (sigaction(SIGFPE, &act, nullptr) < 0)
+			return EXIT_FAILURE;
+		if (sigaction(SIGILL, &act, nullptr) < 0)
+			return EXIT_FAILURE;
+		if (sigaction(SIGBUS, &act, nullptr) < 0)
+			return EXIT_FAILURE;
+		if (sigaction(SIGABRT, &act, nullptr) < 0)
+			return EXIT_FAILURE;
+	}
 
 	// Don't allow the main thread to handle abort signals.
 	sigset_t mask;
@@ -1498,12 +1501,15 @@ static int run_slave_process(const VulkanDevice::Options &opts,
 	int ret = run_normal_process(replayer, databases, nullptr, 0, Global::metadata_fd);
 	global_replayer = nullptr;
 
-	// Cannot reliably handle these signals if they occur during teardown of the process.
-	signal(SIGSEGV, SIG_DFL);
-	signal(SIGFPE, SIG_DFL);
-	signal(SIGILL, SIG_DFL);
-	signal(SIGBUS, SIG_DFL);
-	signal(SIGABRT, SIG_DFL);
+	if (!replayer_opts.disable_signal_handler)
+	{
+		// Cannot reliably handle these signals if they occur during teardown of the process.
+		signal(SIGSEGV, SIG_DFL);
+		signal(SIGFPE, SIG_DFL);
+		signal(SIGILL, SIG_DFL);
+		signal(SIGBUS, SIG_DFL);
+		signal(SIGABRT, SIG_DFL);
+	}
 	pthread_sigmask(SIG_SETMASK, &old_mask, nullptr);
 
 	free(alt_stack.ss_sp);
