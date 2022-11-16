@@ -177,6 +177,51 @@ static void filter_feature_enablement(
 			features.fragment_shading_rate.primitiveFragmentShadingRate = VK_FALSE;
 			features.fragment_shading_rate.attachmentFragmentShadingRate = VK_FALSE;
 		}
+
+		const auto *mesh_shader = find_pnext<VkPhysicalDeviceMeshShaderFeaturesEXT>(
+				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT,
+				target_features->pNext);
+
+		if (mesh_shader)
+		{
+			features.mesh_shader.taskShader =
+					features.mesh_shader.taskShader && mesh_shader->taskShader;
+			features.mesh_shader.meshShader =
+					features.mesh_shader.meshShader && mesh_shader->meshShader;
+			features.mesh_shader.multiviewMeshShader =
+					features.mesh_shader.multiviewMeshShader && mesh_shader->multiviewMeshShader;
+			features.mesh_shader.meshShaderQueries =
+					features.mesh_shader.meshShaderQueries && mesh_shader->meshShaderQueries;
+			features.mesh_shader.primitiveFragmentShadingRateMeshShader =
+					features.mesh_shader.primitiveFragmentShadingRateMeshShader &&
+					features.fragment_shading_rate.primitiveFragmentShadingRate &&
+					mesh_shader->primitiveFragmentShadingRateMeshShader;
+		}
+		else
+		{
+			features.mesh_shader.taskShader = VK_FALSE;
+			features.mesh_shader.meshShader = VK_FALSE;
+			features.mesh_shader.multiviewMeshShader = VK_FALSE;
+			features.mesh_shader.primitiveFragmentShadingRateMeshShader = VK_FALSE;
+			features.mesh_shader.meshShaderQueries = VK_FALSE;
+		}
+
+		const auto *mesh_shader_nv = find_pnext<VkPhysicalDeviceMeshShaderFeaturesNV>(
+				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_NV,
+				target_features->pNext);
+
+		if (mesh_shader_nv)
+		{
+			features.mesh_shader_nv.taskShader =
+					features.mesh_shader_nv.taskShader && mesh_shader->taskShader;
+			features.mesh_shader_nv.meshShader =
+					features.mesh_shader_nv.meshShader && mesh_shader->meshShader;
+		}
+		else
+		{
+			features.mesh_shader_nv.taskShader = VK_FALSE;
+			features.mesh_shader_nv.meshShader = VK_FALSE;
+		}
 	}
 	else
 	{
@@ -191,6 +236,13 @@ static void filter_feature_enablement(
 		features.fragment_shading_rate.pipelineFragmentShadingRate = VK_FALSE;
 		features.fragment_shading_rate.primitiveFragmentShadingRate = VK_FALSE;
 		features.fragment_shading_rate.attachmentFragmentShadingRate = VK_FALSE;
+		features.mesh_shader.taskShader = VK_FALSE;
+		features.mesh_shader.meshShader = VK_FALSE;
+		features.mesh_shader.multiviewMeshShader = VK_FALSE;
+		features.mesh_shader.primitiveFragmentShadingRateMeshShader = VK_FALSE;
+		features.mesh_shader.meshShaderQueries = VK_FALSE;
+		features.mesh_shader_nv.taskShader = VK_FALSE;
+		features.mesh_shader_nv.meshShader = VK_FALSE;
 	}
 }
 
@@ -274,6 +326,33 @@ static void filter_active_extensions(VkPhysicalDeviceFeatures2 &pdf,
 			if (feature->robustImageAccess == VK_FALSE)
 			{
 				remove_extension(active_extensions, out_extension_count, VK_EXT_IMAGE_ROBUSTNESS_EXTENSION_NAME);
+				accept = false;
+			}
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT:
+		{
+			auto *feature = reinterpret_cast<VkPhysicalDeviceMeshShaderFeaturesEXT *>(s);
+			if (feature->meshShader == VK_FALSE &&
+			    feature->taskShader == VK_FALSE &&
+			    feature->multiviewMeshShader == VK_FALSE &&
+			    feature->primitiveFragmentShadingRateMeshShader == VK_FALSE &&
+			    feature->meshShaderQueries == VK_FALSE)
+			{
+				remove_extension(active_extensions, out_extension_count, VK_EXT_MESH_SHADER_EXTENSION_NAME);
+				accept = false;
+			}
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_NV:
+		{
+			auto *feature = reinterpret_cast<VkPhysicalDeviceMeshShaderFeaturesNV *>(s);
+			if (feature->meshShader == VK_FALSE &&
+			    feature->taskShader == VK_FALSE)
+			{
+				remove_extension(active_extensions, out_extension_count, VK_NV_MESH_SHADER_EXTENSION_NAME);
 				accept = false;
 			}
 			break;

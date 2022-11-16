@@ -319,6 +319,8 @@ struct StateReplayer::Impl
 	bool parse_image_robustness_features(const Value &state, VkPhysicalDeviceImageRobustnessFeaturesEXT **out_features) FOSSILIZE_WARN_UNUSED;
 	bool parse_fragment_shading_rate_enums_features(const Value &state, VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV **out_features) FOSSILIZE_WARN_UNUSED;
 	bool parse_fragment_shading_rate_features(const Value &state, VkPhysicalDeviceFragmentShadingRateFeaturesKHR **out_features) FOSSILIZE_WARN_UNUSED;
+	bool parse_mesh_shader_features(const Value &state, VkPhysicalDeviceMeshShaderFeaturesEXT **out_features) FOSSILIZE_WARN_UNUSED;
+	bool parse_mesh_shader_features_nv(const Value &state, VkPhysicalDeviceMeshShaderFeaturesNV **out_features) FOSSILIZE_WARN_UNUSED;
 
 	bool parse_color_write(const Value &state, VkPipelineColorWriteCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_sample_locations(const Value &state, VkPipelineSampleLocationsStateCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
@@ -480,6 +482,10 @@ struct StateRecorder::Impl
 	void *copy_pnext_struct(const VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPhysicalDeviceFragmentShadingRateFeaturesKHR *create_info,
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkPhysicalDeviceMeshShaderFeaturesNV *create_info,
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkPhysicalDeviceMeshShaderFeaturesEXT *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPipelineColorWriteCreateInfoEXT *create_info,
 	                        ScratchAllocator &alloc,
@@ -656,6 +662,25 @@ static void hash_pnext_struct(const StateRecorder *,
 	h.u32(info.attachmentFragmentShadingRate);
 }
 
+static void hash_pnext_struct(const StateRecorder *,
+                              Hasher &h,
+                              const VkPhysicalDeviceMeshShaderFeaturesNV &info)
+{
+	h.u32(info.taskShader);
+	h.u32(info.meshShader);
+}
+
+static void hash_pnext_struct(const StateRecorder *,
+                              Hasher &h,
+                              const VkPhysicalDeviceMeshShaderFeaturesEXT &info)
+{
+	h.u32(info.taskShader);
+	h.u32(info.meshShader);
+	h.u32(info.multiviewMeshShader);
+	h.u32(info.primitiveFragmentShadingRateMeshShader);
+	h.u32(info.meshShaderQueries);
+}
+
 static bool hash_pnext_chain_pdf2(const StateRecorder *recorder, Hasher &h, const void *pNext)
 {
 	while ((pNext = pnext_chain_pdf2_skip_ignored_entries(pNext)) != nullptr)
@@ -680,6 +705,14 @@ static bool hash_pnext_chain_pdf2(const StateRecorder *recorder, Hasher &h, cons
 
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR:
 			hash_pnext_struct(recorder, h, *static_cast<const VkPhysicalDeviceFragmentShadingRateFeaturesKHR *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT:
+			hash_pnext_struct(recorder, h, *static_cast<const VkPhysicalDeviceMeshShaderFeaturesEXT *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_NV:
+			hash_pnext_struct(recorder, h, *static_cast<const VkPhysicalDeviceMeshShaderFeaturesNV *>(pNext));
 			break;
 
 		default:
@@ -4849,6 +4882,33 @@ bool StateReplayer::Impl::parse_fragment_shading_rate_features(
 	return true;
 }
 
+bool StateReplayer::Impl::parse_mesh_shader_features(
+		const Value &state,
+		VkPhysicalDeviceMeshShaderFeaturesEXT **out_features)
+{
+	auto *features = allocator.allocate_cleared<VkPhysicalDeviceMeshShaderFeaturesEXT>();
+	*out_features = features;
+
+	features->taskShader = state["taskShader"].GetUint();
+	features->meshShader = state["meshShader"].GetUint();
+	features->multiviewMeshShader = state["multiviewMeshShader"].GetUint();
+	features->primitiveFragmentShadingRateMeshShader = state["primitiveFragmentShadingRateMeshShader"].GetUint();
+	features->meshShaderQueries = state["meshShaderQueries"].GetUint();
+	return true;
+}
+
+bool StateReplayer::Impl::parse_mesh_shader_features_nv(
+		const Value &state,
+		VkPhysicalDeviceMeshShaderFeaturesNV **out_features)
+{
+	auto *features = allocator.allocate_cleared<VkPhysicalDeviceMeshShaderFeaturesNV>();
+	*out_features = features;
+
+	features->taskShader = state["taskShader"].GetUint();
+	features->meshShader = state["meshShader"].GetUint();
+	return true;
+}
+
 bool StateReplayer::Impl::parse_pnext_chain_pdf2(const Value &pnext, void **outpNext)
 {
 	VkBaseInStructure *ret = nullptr;
@@ -4895,6 +4955,24 @@ bool StateReplayer::Impl::parse_pnext_chain_pdf2(const Value &pnext, void **outp
 			if (!parse_fragment_shading_rate_features(next, &fragment_shading_rate))
 				return false;
 			new_struct = reinterpret_cast<VkBaseInStructure *>(fragment_shading_rate);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT:
+		{
+			VkPhysicalDeviceMeshShaderFeaturesEXT *mesh_shader = nullptr;
+			if (!parse_mesh_shader_features(next, &mesh_shader))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(mesh_shader);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_NV:
+		{
+			VkPhysicalDeviceMeshShaderFeaturesNV *mesh_shader = nullptr;
+			if (!parse_mesh_shader_features_nv(next, &mesh_shader))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(mesh_shader);
 			break;
 		}
 
@@ -6335,6 +6413,20 @@ void *StateRecorder::Impl::copy_pnext_struct(
 	return copy(create_info, 1, alloc);
 }
 
+void *StateRecorder::Impl::copy_pnext_struct(
+		const VkPhysicalDeviceMeshShaderFeaturesEXT *create_info,
+		ScratchAllocator &alloc)
+{
+	return copy(create_info, 1, alloc);
+}
+
+void *StateRecorder::Impl::copy_pnext_struct(
+		const VkPhysicalDeviceMeshShaderFeaturesNV *create_info,
+		ScratchAllocator &alloc)
+{
+	return copy(create_info, 1, alloc);
+}
+
 bool StateRecorder::Impl::copy_pnext_chain_pdf2(const void *pNext, ScratchAllocator &alloc, void **out_pnext)
 {
 	VkBaseInStructure new_pnext = {};
@@ -6370,6 +6462,20 @@ bool StateRecorder::Impl::copy_pnext_chain_pdf2(const void *pNext, ScratchAlloca
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR:
 		{
 			auto *ci = static_cast<const VkPhysicalDeviceFragmentShadingRateFeaturesKHR *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_NV:
+		{
+			auto *ci = static_cast<const VkPhysicalDeviceMeshShaderFeaturesNV *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT:
+		{
+			auto *ci = static_cast<const VkPhysicalDeviceMeshShaderFeaturesEXT *>(pNext);
 			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
 			break;
 		}
@@ -9479,6 +9585,31 @@ static bool json_value(const VkPhysicalDeviceFragmentShadingRateFeaturesKHR &cre
 }
 
 template <typename Allocator>
+static bool json_value(const VkPhysicalDeviceMeshShaderFeaturesEXT &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("taskShader", uint32_t(create_info.taskShader), alloc);
+	value.AddMember("meshShader", uint32_t(create_info.meshShader), alloc);
+	value.AddMember("multiviewMeshShader", uint32_t(create_info.multiviewMeshShader), alloc);
+	value.AddMember("primitiveFragmentShadingRateMeshShader", uint32_t(create_info.primitiveFragmentShadingRateMeshShader), alloc);
+	value.AddMember("meshShaderQueries", uint32_t(create_info.meshShaderQueries), alloc);
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
+static bool json_value(const VkPhysicalDeviceMeshShaderFeaturesNV &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("taskShader", uint32_t(create_info.taskShader), alloc);
+	value.AddMember("meshShader", uint32_t(create_info.meshShader), alloc);
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
 static bool pnext_chain_pdf2_json_value(const void *pNext, Allocator &alloc, Value *out_value)
 {
 	Value nexts(kArrayType);
@@ -9506,6 +9637,16 @@ static bool pnext_chain_pdf2_json_value(const void *pNext, Allocator &alloc, Val
 
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR:
 			if (!json_value(*static_cast<const VkPhysicalDeviceFragmentShadingRateFeaturesKHR *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT:
+			if (!json_value(*static_cast<const VkPhysicalDeviceMeshShaderFeaturesEXT *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_NV:
+			if (!json_value(*static_cast<const VkPhysicalDeviceMeshShaderFeaturesNV *>(pNext), alloc, &next))
 				return false;
 			break;
 
@@ -10094,10 +10235,16 @@ static const void *pnext_chain_pdf2_skip_ignored_entries(const void *pNext)
 
 		switch (base->sType)
 		{
+		// Robustness tends to affect shader compilation.
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT:
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_ROBUSTNESS_FEATURES_EXT:
+		// Affects compilation on NV.
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_ENUMS_FEATURES_NV:
+		// Affects compilation on RADV.
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR:
+		// Workaround: Affects compilation on NV and is causing some awkward cache corruption on some drivers.
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_NV:
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT:
 			ignored = false;
 			break;
 
