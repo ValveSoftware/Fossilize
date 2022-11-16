@@ -76,6 +76,47 @@ void *build_pnext_chain(VulkanFeatures &features, uint32_t api_version,
 	return pNext;
 }
 
+static void reset_features(VkPhysicalDeviceMeshShaderFeaturesEXT &features)
+{
+	features.taskShader = VK_FALSE;
+	features.meshShader = VK_FALSE;
+	features.multiviewMeshShader = VK_FALSE;
+	features.primitiveFragmentShadingRateMeshShader = VK_FALSE;
+	features.meshShaderQueries = VK_FALSE;
+}
+
+static void reset_features(VkPhysicalDeviceMeshShaderFeaturesNV &features)
+{
+	features.taskShader = VK_FALSE;
+	features.meshShader = VK_FALSE;
+}
+
+static void reset_features(VkPhysicalDeviceRobustness2FeaturesEXT &features)
+{
+	features.nullDescriptor = VK_FALSE;
+	features.robustBufferAccess2 = VK_FALSE;
+	features.robustImageAccess2 = VK_FALSE;
+}
+
+static void reset_features(VkPhysicalDeviceImageRobustnessFeaturesEXT &features)
+{
+	features.robustImageAccess = VK_FALSE;
+}
+
+static void reset_features(VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV &features)
+{
+	features.fragmentShadingRateEnums = VK_FALSE;
+	features.noInvocationFragmentShadingRates = VK_FALSE;
+	features.supersampleFragmentShadingRates = VK_FALSE;
+}
+
+static void reset_features(VkPhysicalDeviceFragmentShadingRateFeaturesKHR &features)
+{
+	features.pipelineFragmentShadingRate = VK_FALSE;
+	features.primitiveFragmentShadingRate = VK_FALSE;
+	features.attachmentFragmentShadingRate = VK_FALSE;
+}
+
 static void filter_feature_enablement(
 		VkPhysicalDeviceFeatures2 &pdf, VulkanFeatures &features,
 		const VkPhysicalDeviceFeatures2 *target_features)
@@ -111,9 +152,7 @@ static void filter_feature_enablement(
 		}
 		else
 		{
-			features.robustness2.robustBufferAccess2 = VK_FALSE;
-			features.robustness2.robustImageAccess2 = VK_FALSE;
-			features.robustness2.nullDescriptor = VK_FALSE;
+			reset_features(features.robustness2);
 		}
 
 		const auto *image_robustness = find_pnext<VkPhysicalDeviceImageRobustnessFeaturesEXT>(
@@ -127,7 +166,7 @@ static void filter_feature_enablement(
 		}
 		else
 		{
-			features.image_robustness.robustImageAccess = VK_FALSE;
+			reset_features(features.image_robustness);
 		}
 
 		const auto *fragment_shading_rate_enums = find_pnext<VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV>(
@@ -150,9 +189,7 @@ static void filter_feature_enablement(
 		}
 		else
 		{
-			features.fragment_shading_rate_enums.fragmentShadingRateEnums = VK_FALSE;
-			features.fragment_shading_rate_enums.noInvocationFragmentShadingRates = VK_FALSE;
-			features.fragment_shading_rate_enums.supersampleFragmentShadingRates = VK_FALSE;
+			reset_features(features.fragment_shading_rate_enums);
 		}
 
 		const auto *fragment_shading_rate = find_pnext<VkPhysicalDeviceFragmentShadingRateFeaturesKHR>(
@@ -173,9 +210,7 @@ static void filter_feature_enablement(
 		}
 		else
 		{
-			features.fragment_shading_rate.pipelineFragmentShadingRate = VK_FALSE;
-			features.fragment_shading_rate.primitiveFragmentShadingRate = VK_FALSE;
-			features.fragment_shading_rate.attachmentFragmentShadingRate = VK_FALSE;
+			reset_features(features.fragment_shading_rate);
 		}
 
 		const auto *mesh_shader = find_pnext<VkPhysicalDeviceMeshShaderFeaturesEXT>(
@@ -199,11 +234,7 @@ static void filter_feature_enablement(
 		}
 		else
 		{
-			features.mesh_shader.taskShader = VK_FALSE;
-			features.mesh_shader.meshShader = VK_FALSE;
-			features.mesh_shader.multiviewMeshShader = VK_FALSE;
-			features.mesh_shader.primitiveFragmentShadingRateMeshShader = VK_FALSE;
-			features.mesh_shader.meshShaderQueries = VK_FALSE;
+			reset_features(features.mesh_shader);
 		}
 
 		const auto *mesh_shader_nv = find_pnext<VkPhysicalDeviceMeshShaderFeaturesNV>(
@@ -219,30 +250,18 @@ static void filter_feature_enablement(
 		}
 		else
 		{
-			features.mesh_shader_nv.taskShader = VK_FALSE;
-			features.mesh_shader_nv.meshShader = VK_FALSE;
+			reset_features(features.mesh_shader_nv);
 		}
 	}
 	else
 	{
 		pdf.features.robustBufferAccess = VK_FALSE;
-		features.robustness2.nullDescriptor = VK_FALSE;
-		features.robustness2.robustBufferAccess2 = VK_FALSE;
-		features.robustness2.robustImageAccess2 = VK_FALSE;
-		features.image_robustness.robustImageAccess = VK_FALSE;
-		features.fragment_shading_rate_enums.fragmentShadingRateEnums = VK_FALSE;
-		features.fragment_shading_rate_enums.noInvocationFragmentShadingRates = VK_FALSE;
-		features.fragment_shading_rate_enums.supersampleFragmentShadingRates = VK_FALSE;
-		features.fragment_shading_rate.pipelineFragmentShadingRate = VK_FALSE;
-		features.fragment_shading_rate.primitiveFragmentShadingRate = VK_FALSE;
-		features.fragment_shading_rate.attachmentFragmentShadingRate = VK_FALSE;
-		features.mesh_shader.taskShader = VK_FALSE;
-		features.mesh_shader.meshShader = VK_FALSE;
-		features.mesh_shader.multiviewMeshShader = VK_FALSE;
-		features.mesh_shader.primitiveFragmentShadingRateMeshShader = VK_FALSE;
-		features.mesh_shader.meshShaderQueries = VK_FALSE;
-		features.mesh_shader_nv.taskShader = VK_FALSE;
-		features.mesh_shader_nv.meshShader = VK_FALSE;
+		reset_features(features.robustness2);
+		reset_features(features.image_robustness);
+		reset_features(features.fragment_shading_rate_enums);
+		reset_features(features.fragment_shading_rate);
+		reset_features(features.mesh_shader);
+		reset_features(features.mesh_shader_nv);
 	}
 }
 
