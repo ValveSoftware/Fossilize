@@ -96,7 +96,9 @@ void *build_pnext_chain(VulkanFeatures &features, uint32_t api_version,
 void filter_feature_enablement(
 		VkPhysicalDeviceFeatures2 &pdf2,
 		VulkanFeatures &features,
-		const VkPhysicalDeviceFeatures2 *target_features);
+		const VkPhysicalDeviceFeatures2 *target_features,
+		const char **extensions,
+		size_t *extension_count);
 
 struct VulkanProperties
 {

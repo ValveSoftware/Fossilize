@@ -76,9 +76,9 @@ void *build_pnext_chain(VulkanFeatures &features, uint32_t api_version,
 	return pNext;
 }
 
-void filter_feature_enablement(VkPhysicalDeviceFeatures2 &pdf,
-                               VulkanFeatures &features,
-                               const VkPhysicalDeviceFeatures2 *target_features)
+static void filter_feature_enablement(
+		VkPhysicalDeviceFeatures2 &pdf, VulkanFeatures &features,
+		const VkPhysicalDeviceFeatures2 *target_features)
 {
 	// These feature bits conflict according to validation layers.
 	if (features.fragment_shading_rate.pipelineFragmentShadingRate == VK_TRUE ||
@@ -192,6 +192,113 @@ void filter_feature_enablement(VkPhysicalDeviceFeatures2 &pdf,
 		features.fragment_shading_rate.primitiveFragmentShadingRate = VK_FALSE;
 		features.fragment_shading_rate.attachmentFragmentShadingRate = VK_FALSE;
 	}
+}
+
+static void remove_extension(const char **active_extensions, size_t *out_extension_count, const char *ext)
+{
+	size_t count = *out_extension_count;
+	for (size_t i = 0; i < count; i++)
+	{
+		if (strcmp(active_extensions[i], ext) == 0)
+		{
+			active_extensions[i] = active_extensions[--count];
+			break;
+		}
+	}
+
+	*out_extension_count = count;
+}
+
+static void filter_active_extensions(VkPhysicalDeviceFeatures2 &pdf,
+                                     const char **active_extensions, size_t *out_extension_count)
+{
+	// If we end up disabling features deliberately, we should remove the extension enablement as well,
+	// and remove the feature pNext.
+	// Some implementations will end up changing their PSO keys even though no features are actually enabled.
+	auto *pNext = static_cast<VkBaseOutStructure *>(pdf.pNext);
+
+	pdf.pNext = nullptr;
+	void **ppNext = &pdf.pNext;
+
+	while (pNext)
+	{
+		bool accept = true;
+		auto *s = pNext;
+		pNext = s->pNext;
+
+		switch (s->sType)
+		{
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_ENUMS_FEATURES_NV:
+		{
+			auto *feature = reinterpret_cast<VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV *>(s);
+			if (feature->fragmentShadingRateEnums == VK_FALSE &&
+			    feature->noInvocationFragmentShadingRates == VK_FALSE &&
+			    feature->supersampleFragmentShadingRates == VK_FALSE)
+			{
+				remove_extension(active_extensions, out_extension_count,
+				                 VK_NV_FRAGMENT_SHADING_RATE_ENUMS_EXTENSION_NAME);
+				accept = false;
+			}
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR:
+		{
+			auto *feature = reinterpret_cast<VkPhysicalDeviceFragmentShadingRateFeaturesKHR *>(s);
+			if (feature->attachmentFragmentShadingRate == VK_FALSE &&
+			    feature->pipelineFragmentShadingRate == VK_FALSE &&
+			    feature->primitiveFragmentShadingRate == VK_FALSE)
+			{
+				remove_extension(active_extensions, out_extension_count, VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME);
+				accept = false;
+			}
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT:
+		{
+			auto *feature = reinterpret_cast<VkPhysicalDeviceRobustness2FeaturesEXT *>(s);
+			if (feature->nullDescriptor == VK_FALSE &&
+			    feature->robustBufferAccess2 == VK_FALSE &&
+			    feature->robustImageAccess2 == VK_FALSE)
+			{
+				remove_extension(active_extensions, out_extension_count, VK_EXT_ROBUSTNESS_2_EXTENSION_NAME);
+				accept = false;
+			}
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_ROBUSTNESS_FEATURES_EXT:
+		{
+			auto *feature = reinterpret_cast<VkPhysicalDeviceImageRobustnessFeaturesEXT *>(s);
+			if (feature->robustImageAccess == VK_FALSE)
+			{
+				remove_extension(active_extensions, out_extension_count, VK_EXT_IMAGE_ROBUSTNESS_EXTENSION_NAME);
+				accept = false;
+			}
+			break;
+		}
+
+		default:
+			break;
+		}
+
+		if (accept)
+		{
+			*ppNext = s;
+			ppNext = reinterpret_cast<void **>(&s->pNext);
+			*ppNext = nullptr;
+		}
+	}
+}
+
+void filter_feature_enablement(VkPhysicalDeviceFeatures2 &pdf,
+                               VulkanFeatures &features,
+                               const VkPhysicalDeviceFeatures2 *target_features,
+							   const char **active_extensions, size_t *out_extension_count)
+{
+	filter_feature_enablement(pdf, features, target_features);
+	filter_active_extensions(pdf, active_extensions, out_extension_count);
 }
 
 void *build_pnext_chain(VulkanProperties &props, uint32_t api_version,

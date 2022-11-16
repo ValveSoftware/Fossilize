@@ -425,7 +425,10 @@ bool VulkanDevice::init_device(const Options &opts)
 		}
 	}
 
-	filter_feature_enablement(gpu_features2, features, requested_pdf2);
+	size_t active_extension_count = active_device_extensions.size();
+	filter_feature_enablement(gpu_features2, features, requested_pdf2,
+	                          active_device_extensions.data(), &active_extension_count);
+	active_device_extensions.resize(active_extension_count);
 
 	// Just pick one graphics queue.
 	// FIXME: Does shader compilation depend on which queues we have enabled?
