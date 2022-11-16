@@ -403,6 +403,18 @@ bool VulkanDevice::init_device(const Options &opts)
 	VkPhysicalDeviceFragmentShadingRateFeaturesKHR replacement_fragment_shading_rate;
 	VkPhysicalDeviceMeshShaderFeaturesEXT replacement_mesh_shader;
 
+	const auto begin_replacement = [&](void *pnext) {
+		if (&replacement_pdf2 != requested_pdf2)
+		{
+			replacement_pdf2 = *requested_pdf2;
+			requested_pdf2 = &replacement_pdf2;
+		}
+
+		static_cast<VkBaseOutStructure *>(pnext)->pNext =
+				static_cast<VkBaseOutStructure *>(replacement_pdf2.pNext);
+		replacement_pdf2.pNext = pnext;
+	};
+
 	if (opts.features)
 	{
 		if (application_info_promote_robustness2(opts.application_info) &&
@@ -411,16 +423,11 @@ bool VulkanDevice::init_device(const Options &opts)
 				    opts.features->pNext) == nullptr)
 		{
 			replacement_robustness2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT };
-
-			replacement_pdf2 = *requested_pdf2;
-			replacement_pdf2.pNext = &replacement_robustness2;
-			replacement_robustness2.pNext = requested_pdf2->pNext;
+			begin_replacement(&replacement_robustness2);
 
 			replacement_robustness2.robustBufferAccess2 = opts.features->features.robustBufferAccess;
 			replacement_robustness2.robustImageAccess2 = opts.features->features.robustBufferAccess;
 			replacement_robustness2.nullDescriptor = VK_TRUE;
-
-			requested_pdf2 = &replacement_pdf2;
 		}
 
 		if (application_info_promote_fragment_shading_rate(opts.application_info) &&
@@ -429,16 +436,8 @@ bool VulkanDevice::init_device(const Options &opts)
 				    opts.features->pNext) == nullptr)
 		{
 			replacement_fragment_shading_rate = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR };
-
-			replacement_pdf2 = *requested_pdf2;
-			replacement_fragment_shading_rate.pNext = requested_pdf2->pNext;
-			replacement_pdf2.pNext = &replacement_fragment_shading_rate;
-
-			replacement_fragment_shading_rate.pipelineFragmentShadingRate = VK_TRUE;
-			replacement_fragment_shading_rate.primitiveFragmentShadingRate = VK_TRUE;
-			replacement_fragment_shading_rate.attachmentFragmentShadingRate = VK_TRUE;
-
-			requested_pdf2 = &replacement_pdf2;
+			begin_replacement(&replacement_fragment_shading_rate);
+			reset_features(replacement_fragment_shading_rate, VK_TRUE);
 		}
 
 		if (application_info_promote_mesh_shader(opts.application_info) &&
@@ -447,18 +446,8 @@ bool VulkanDevice::init_device(const Options &opts)
 				    opts.features->pNext) == nullptr)
 		{
 			replacement_mesh_shader = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT };
-
-			replacement_pdf2 = *requested_pdf2;
-			replacement_mesh_shader.pNext = requested_pdf2->pNext;
-			replacement_pdf2.pNext = &replacement_mesh_shader;
-
-			replacement_mesh_shader.meshShader = VK_TRUE;
-			replacement_mesh_shader.taskShader = VK_TRUE;
-			replacement_mesh_shader.multiviewMeshShader = VK_TRUE;
-			replacement_mesh_shader.primitiveFragmentShadingRateMeshShader = VK_TRUE;
-			replacement_mesh_shader.meshShaderQueries = VK_TRUE;
-
-			requested_pdf2 = &replacement_pdf2;
+			begin_replacement(&replacement_mesh_shader);
+			reset_features(replacement_mesh_shader, VK_TRUE);
 		}
 	}
 
