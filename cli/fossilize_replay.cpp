@@ -222,7 +222,7 @@ struct ThreadedReplayer : StateCreatorInterface
 	{
 		bool spirv_validate = false;
 		bool pipeline_stats = false;
-#ifndef WIN32
+#ifndef _WIN32
 		bool disable_signal_handler = false;
 #endif
 		string on_disk_pipeline_cache_path;
@@ -2948,7 +2948,8 @@ static void print_help()
 	"\t[--progress]\n" \
 	"\t[--quiet-slave]\n" \
 	"\t[--shmem-fd <fd>]\n" \
-	"\t[--control-fd <fd>]\n"
+	"\t[--control-fd <fd>]\n" \
+	"\t[--disable-signal-handler]\n"
 #endif
 #else
 #define EXTRA_OPTIONS ""
@@ -2978,9 +2979,6 @@ static void print_help()
 	     "\t[--timeout-seconds]\n"
 	     "\t[--implicit-whitelist <index>]\n"
 	     "\t[--replayer-cache <path>]\n"
-#ifndef WIN32
-	     "\t[--disable-signal-handler]\n"
-#endif
 	     EXTRA_OPTIONS
 	     "\t<Database>\n");
 }
@@ -3934,7 +3932,7 @@ int main(int argc, char *argv[])
 	cbs.add("--replayer-cache", [&](CLIParser &parser) {
 		replayer_opts.replayer_cache_path = parser.next_string();
 	});
-#ifndef WIN32
+#ifndef _WIN32
 	cbs.add("--disable-signal-handler", [&](CLIParser &) { replayer_opts.disable_signal_handler = true; });
 #endif
 
