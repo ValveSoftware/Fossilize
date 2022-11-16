@@ -180,4 +180,45 @@ static inline const T *find_pnext(VkStructureType type, const void *pNext)
 
 	return nullptr;
 }
+
+static inline void reset_features(VkPhysicalDeviceMeshShaderFeaturesEXT &features, VkBool32 state)
+{
+	features.taskShader = state;
+	features.meshShader = state;
+	features.multiviewMeshShader = state;
+	features.primitiveFragmentShadingRateMeshShader = state;
+	features.meshShaderQueries = state;
+}
+
+static inline void reset_features(VkPhysicalDeviceMeshShaderFeaturesNV &features, VkBool32 state)
+{
+	features.taskShader = state;
+	features.meshShader = state;
+}
+
+static inline void reset_features(VkPhysicalDeviceRobustness2FeaturesEXT &features, VkBool32 state)
+{
+	features.nullDescriptor = state;
+	features.robustBufferAccess2 = state;
+	features.robustImageAccess2 = state;
+}
+
+static inline void reset_features(VkPhysicalDeviceImageRobustnessFeaturesEXT &features, VkBool32 state)
+{
+	features.robustImageAccess = state;
+}
+
+static inline void reset_features(VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV &features, VkBool32 state)
+{
+	features.fragmentShadingRateEnums = state;
+	features.noInvocationFragmentShadingRates = state;
+	features.supersampleFragmentShadingRates = state;
+}
+
+static inline void reset_features(VkPhysicalDeviceFragmentShadingRateFeaturesKHR &features, VkBool32 state)
+{
+	features.pipelineFragmentShadingRate = state;
+	features.primitiveFragmentShadingRate = state;
+	features.attachmentFragmentShadingRate = state;
+}
 }
