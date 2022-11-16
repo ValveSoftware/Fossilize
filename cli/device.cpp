@@ -100,6 +100,11 @@ static bool filter_extension(const char *ext, bool want_amd_shader_info,
 		// Don't want to enable both NV and KHR extensions together.
 		return false;
 	}
+	else if (strcmp(ext, VK_NV_RAY_TRACING_EXTENSION_NAME) == 0)
+	{
+		// We never enable the features, and it is known to cause some shenanigans with pipeline replay.
+		return false;
+	}
 	else if (strcmp(ext, VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME) == 0 &&
 	         find_extension(all_exts, VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME))
 	{
