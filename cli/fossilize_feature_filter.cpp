@@ -76,9 +76,9 @@ void *build_pnext_chain(VulkanFeatures &features, uint32_t api_version,
 	return pNext;
 }
 
-void filter_feature_enablement(VkPhysicalDeviceFeatures2 &pdf,
-                               VulkanFeatures &features,
-                               const VkPhysicalDeviceFeatures2 *target_features)
+static void filter_feature_enablement(
+		VkPhysicalDeviceFeatures2 &pdf, VulkanFeatures &features,
+		const VkPhysicalDeviceFeatures2 *target_features)
 {
 	// These feature bits conflict according to validation layers.
 	if (features.fragment_shading_rate.pipelineFragmentShadingRate == VK_TRUE ||
@@ -111,9 +111,7 @@ void filter_feature_enablement(VkPhysicalDeviceFeatures2 &pdf,
 		}
 		else
 		{
-			features.robustness2.robustBufferAccess2 = VK_FALSE;
-			features.robustness2.robustImageAccess2 = VK_FALSE;
-			features.robustness2.nullDescriptor = VK_FALSE;
+			reset_features(features.robustness2, VK_FALSE);
 		}
 
 		const auto *image_robustness = find_pnext<VkPhysicalDeviceImageRobustnessFeaturesEXT>(
@@ -127,7 +125,7 @@ void filter_feature_enablement(VkPhysicalDeviceFeatures2 &pdf,
 		}
 		else
 		{
-			features.image_robustness.robustImageAccess = VK_FALSE;
+			reset_features(features.image_robustness, VK_FALSE);
 		}
 
 		const auto *fragment_shading_rate_enums = find_pnext<VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV>(
@@ -150,9 +148,7 @@ void filter_feature_enablement(VkPhysicalDeviceFeatures2 &pdf,
 		}
 		else
 		{
-			features.fragment_shading_rate_enums.fragmentShadingRateEnums = VK_FALSE;
-			features.fragment_shading_rate_enums.noInvocationFragmentShadingRates = VK_FALSE;
-			features.fragment_shading_rate_enums.supersampleFragmentShadingRates = VK_FALSE;
+			reset_features(features.fragment_shading_rate_enums, VK_FALSE);
 		}
 
 		const auto *fragment_shading_rate = find_pnext<VkPhysicalDeviceFragmentShadingRateFeaturesKHR>(
@@ -173,25 +169,193 @@ void filter_feature_enablement(VkPhysicalDeviceFeatures2 &pdf,
 		}
 		else
 		{
-			features.fragment_shading_rate.pipelineFragmentShadingRate = VK_FALSE;
-			features.fragment_shading_rate.primitiveFragmentShadingRate = VK_FALSE;
-			features.fragment_shading_rate.attachmentFragmentShadingRate = VK_FALSE;
+			reset_features(features.fragment_shading_rate, VK_FALSE);
+		}
+
+		const auto *mesh_shader = find_pnext<VkPhysicalDeviceMeshShaderFeaturesEXT>(
+				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT,
+				target_features->pNext);
+
+		if (mesh_shader)
+		{
+			features.mesh_shader.taskShader =
+					features.mesh_shader.taskShader && mesh_shader->taskShader;
+			features.mesh_shader.meshShader =
+					features.mesh_shader.meshShader && mesh_shader->meshShader;
+			features.mesh_shader.multiviewMeshShader =
+					features.mesh_shader.multiviewMeshShader && mesh_shader->multiviewMeshShader;
+			features.mesh_shader.meshShaderQueries =
+					features.mesh_shader.meshShaderQueries && mesh_shader->meshShaderQueries;
+			features.mesh_shader.primitiveFragmentShadingRateMeshShader =
+					features.mesh_shader.primitiveFragmentShadingRateMeshShader &&
+					features.fragment_shading_rate.primitiveFragmentShadingRate &&
+					mesh_shader->primitiveFragmentShadingRateMeshShader;
+		}
+		else
+		{
+			reset_features(features.mesh_shader, VK_FALSE);
+		}
+
+		const auto *mesh_shader_nv = find_pnext<VkPhysicalDeviceMeshShaderFeaturesNV>(
+				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_NV,
+				target_features->pNext);
+
+		if (mesh_shader_nv)
+		{
+			features.mesh_shader_nv.taskShader =
+					features.mesh_shader_nv.taskShader && mesh_shader->taskShader;
+			features.mesh_shader_nv.meshShader =
+					features.mesh_shader_nv.meshShader && mesh_shader->meshShader;
+		}
+		else
+		{
+			reset_features(features.mesh_shader_nv, VK_FALSE);
 		}
 	}
 	else
 	{
 		pdf.features.robustBufferAccess = VK_FALSE;
-		features.robustness2.nullDescriptor = VK_FALSE;
-		features.robustness2.robustBufferAccess2 = VK_FALSE;
-		features.robustness2.robustImageAccess2 = VK_FALSE;
-		features.image_robustness.robustImageAccess = VK_FALSE;
-		features.fragment_shading_rate_enums.fragmentShadingRateEnums = VK_FALSE;
-		features.fragment_shading_rate_enums.noInvocationFragmentShadingRates = VK_FALSE;
-		features.fragment_shading_rate_enums.supersampleFragmentShadingRates = VK_FALSE;
-		features.fragment_shading_rate.pipelineFragmentShadingRate = VK_FALSE;
-		features.fragment_shading_rate.primitiveFragmentShadingRate = VK_FALSE;
-		features.fragment_shading_rate.attachmentFragmentShadingRate = VK_FALSE;
+		reset_features(features.robustness2, VK_FALSE);
+		reset_features(features.image_robustness, VK_FALSE);
+		reset_features(features.fragment_shading_rate_enums, VK_FALSE);
+		reset_features(features.fragment_shading_rate, VK_FALSE);
+		reset_features(features.mesh_shader, VK_FALSE);
+		reset_features(features.mesh_shader_nv, VK_FALSE);
 	}
+}
+
+static void remove_extension(const char **active_extensions, size_t *out_extension_count, const char *ext)
+{
+	size_t count = *out_extension_count;
+	for (size_t i = 0; i < count; i++)
+	{
+		if (strcmp(active_extensions[i], ext) == 0)
+		{
+			active_extensions[i] = active_extensions[--count];
+			break;
+		}
+	}
+
+	*out_extension_count = count;
+}
+
+static void filter_active_extensions(VkPhysicalDeviceFeatures2 &pdf,
+                                     const char **active_extensions, size_t *out_extension_count)
+{
+	// If we end up disabling features deliberately, we should remove the extension enablement as well,
+	// and remove the feature pNext.
+	// Some implementations will end up changing their PSO keys even though no features are actually enabled.
+	auto *pNext = static_cast<VkBaseOutStructure *>(pdf.pNext);
+
+	pdf.pNext = nullptr;
+	void **ppNext = &pdf.pNext;
+
+	while (pNext)
+	{
+		bool accept = true;
+		auto *s = pNext;
+		pNext = s->pNext;
+
+		switch (s->sType)
+		{
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_ENUMS_FEATURES_NV:
+		{
+			auto *feature = reinterpret_cast<VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV *>(s);
+			if (feature->fragmentShadingRateEnums == VK_FALSE &&
+			    feature->noInvocationFragmentShadingRates == VK_FALSE &&
+			    feature->supersampleFragmentShadingRates == VK_FALSE)
+			{
+				remove_extension(active_extensions, out_extension_count,
+				                 VK_NV_FRAGMENT_SHADING_RATE_ENUMS_EXTENSION_NAME);
+				accept = false;
+			}
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR:
+		{
+			auto *feature = reinterpret_cast<VkPhysicalDeviceFragmentShadingRateFeaturesKHR *>(s);
+			if (feature->attachmentFragmentShadingRate == VK_FALSE &&
+			    feature->pipelineFragmentShadingRate == VK_FALSE &&
+			    feature->primitiveFragmentShadingRate == VK_FALSE)
+			{
+				remove_extension(active_extensions, out_extension_count, VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME);
+				accept = false;
+			}
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT:
+		{
+			auto *feature = reinterpret_cast<VkPhysicalDeviceRobustness2FeaturesEXT *>(s);
+			if (feature->nullDescriptor == VK_FALSE &&
+			    feature->robustBufferAccess2 == VK_FALSE &&
+			    feature->robustImageAccess2 == VK_FALSE)
+			{
+				remove_extension(active_extensions, out_extension_count, VK_EXT_ROBUSTNESS_2_EXTENSION_NAME);
+				accept = false;
+			}
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_ROBUSTNESS_FEATURES_EXT:
+		{
+			auto *feature = reinterpret_cast<VkPhysicalDeviceImageRobustnessFeaturesEXT *>(s);
+			if (feature->robustImageAccess == VK_FALSE)
+			{
+				remove_extension(active_extensions, out_extension_count, VK_EXT_IMAGE_ROBUSTNESS_EXTENSION_NAME);
+				accept = false;
+			}
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT:
+		{
+			auto *feature = reinterpret_cast<VkPhysicalDeviceMeshShaderFeaturesEXT *>(s);
+			if (feature->meshShader == VK_FALSE &&
+			    feature->taskShader == VK_FALSE &&
+			    feature->multiviewMeshShader == VK_FALSE &&
+			    feature->primitiveFragmentShadingRateMeshShader == VK_FALSE &&
+			    feature->meshShaderQueries == VK_FALSE)
+			{
+				remove_extension(active_extensions, out_extension_count, VK_EXT_MESH_SHADER_EXTENSION_NAME);
+				accept = false;
+			}
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_NV:
+		{
+			auto *feature = reinterpret_cast<VkPhysicalDeviceMeshShaderFeaturesNV *>(s);
+			if (feature->meshShader == VK_FALSE &&
+			    feature->taskShader == VK_FALSE)
+			{
+				remove_extension(active_extensions, out_extension_count, VK_NV_MESH_SHADER_EXTENSION_NAME);
+				accept = false;
+			}
+			break;
+		}
+
+		default:
+			break;
+		}
+
+		if (accept)
+		{
+			*ppNext = s;
+			ppNext = reinterpret_cast<void **>(&s->pNext);
+			*ppNext = nullptr;
+		}
+	}
+}
+
+void filter_feature_enablement(VkPhysicalDeviceFeatures2 &pdf,
+                               VulkanFeatures &features,
+                               const VkPhysicalDeviceFeatures2 *target_features,
+							   const char **active_extensions, size_t *out_extension_count)
+{
+	filter_feature_enablement(pdf, features, target_features);
+	filter_active_extensions(pdf, active_extensions, out_extension_count);
 }
 
 void *build_pnext_chain(VulkanProperties &props, uint32_t api_version,

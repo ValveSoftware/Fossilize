@@ -73,8 +73,8 @@ static bool filter_extension(const char *ext, bool want_amd_shader_info,
 		VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
 		VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
 		VK_KHR_RAY_QUERY_EXTENSION_NAME,
-		"VK_KHR_maintenance4",
-		"VK_KHR_shader_subgroup_uniform_control_flow",
+		VK_KHR_MAINTENANCE_4_EXTENSION_NAME,
+		VK_KHR_SHADER_SUBGROUP_UNIFORM_CONTROL_FLOW_EXTENSION_NAME,
 		VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME,
 		VK_NV_SHADER_SM_BUILTINS_EXTENSION_NAME,
 		VK_NV_SHADER_SUBGROUP_PARTITIONED_EXTENSION_NAME,
@@ -98,6 +98,11 @@ static bool filter_extension(const char *ext, bool want_amd_shader_info,
 		// NV_fragment_shader: Various enum conflicts,
 		// not considered important enough to work around a vendor extension for this.
 		// Don't want to enable both NV and KHR extensions together.
+		return false;
+	}
+	else if (strcmp(ext, VK_NV_RAY_TRACING_EXTENSION_NAME) == 0)
+	{
+		// We never enable the features, and it is known to cause some shenanigans with pipeline replay.
 		return false;
 	}
 	else if (strcmp(ext, VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME) == 0 &&
@@ -163,6 +168,18 @@ static bool application_info_promote_fragment_shading_rate(const VkApplicationIn
 		return false;
 
 	if (strcmp("vkd3d", app_info->pEngineName) == 0)
+		return true;
+
+	return false;
+}
+
+static bool application_info_promote_mesh_shader(const VkApplicationInfo *app_info)
+{
+	if (!app_info || !app_info->pEngineName)
+		return false;
+
+	if (strcmp("vkd3d", app_info->pEngineName) == 0 &&
+	    app_info->engineVersion >= VK_MAKE_VERSION(2, 7, 0))
 		return true;
 
 	return false;
@@ -384,6 +401,19 @@ bool VulkanDevice::init_device(const Options &opts)
 	VkPhysicalDeviceFeatures2 replacement_pdf2;
 	VkPhysicalDeviceRobustness2FeaturesEXT replacement_robustness2;
 	VkPhysicalDeviceFragmentShadingRateFeaturesKHR replacement_fragment_shading_rate;
+	VkPhysicalDeviceMeshShaderFeaturesEXT replacement_mesh_shader;
+
+	const auto begin_replacement = [&](void *pnext) {
+		if (&replacement_pdf2 != requested_pdf2)
+		{
+			replacement_pdf2 = *requested_pdf2;
+			requested_pdf2 = &replacement_pdf2;
+		}
+
+		static_cast<VkBaseOutStructure *>(pnext)->pNext =
+				static_cast<VkBaseOutStructure *>(replacement_pdf2.pNext);
+		replacement_pdf2.pNext = pnext;
+	};
 
 	if (opts.features)
 	{
@@ -393,14 +423,11 @@ bool VulkanDevice::init_device(const Options &opts)
 				    opts.features->pNext) == nullptr)
 		{
 			replacement_robustness2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT };
-			replacement_pdf2 = *requested_pdf2;
-			replacement_pdf2.pNext = &replacement_robustness2;
-			replacement_robustness2.pNext = requested_pdf2->pNext;
+			begin_replacement(&replacement_robustness2);
+
 			replacement_robustness2.robustBufferAccess2 = opts.features->features.robustBufferAccess;
 			replacement_robustness2.robustImageAccess2 = opts.features->features.robustBufferAccess;
 			replacement_robustness2.nullDescriptor = VK_TRUE;
-
-			requested_pdf2 = &replacement_pdf2;
 		}
 
 		if (application_info_promote_fragment_shading_rate(opts.application_info) &&
@@ -409,18 +436,25 @@ bool VulkanDevice::init_device(const Options &opts)
 				    opts.features->pNext) == nullptr)
 		{
 			replacement_fragment_shading_rate = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR };
-			replacement_pdf2 = *requested_pdf2;
-			replacement_fragment_shading_rate.pNext = requested_pdf2->pNext;
-			replacement_pdf2.pNext = &replacement_fragment_shading_rate;
-			replacement_fragment_shading_rate.pipelineFragmentShadingRate = VK_TRUE;
-			replacement_fragment_shading_rate.primitiveFragmentShadingRate = VK_TRUE;
-			replacement_fragment_shading_rate.attachmentFragmentShadingRate = VK_TRUE;
+			begin_replacement(&replacement_fragment_shading_rate);
+			reset_features(replacement_fragment_shading_rate, VK_TRUE);
+		}
 
-			requested_pdf2 = &replacement_pdf2;
+		if (application_info_promote_mesh_shader(opts.application_info) &&
+		    find_pnext<VkPhysicalDeviceMeshShaderFeaturesEXT>(
+				    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT,
+				    opts.features->pNext) == nullptr)
+		{
+			replacement_mesh_shader = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT };
+			begin_replacement(&replacement_mesh_shader);
+			reset_features(replacement_mesh_shader, VK_TRUE);
 		}
 	}
 
-	filter_feature_enablement(gpu_features2, features, requested_pdf2);
+	size_t active_extension_count = active_device_extensions.size();
+	filter_feature_enablement(gpu_features2, features, requested_pdf2,
+	                          active_device_extensions.data(), &active_extension_count);
+	active_device_extensions.resize(active_extension_count);
 
 	// Just pick one graphics queue.
 	// FIXME: Does shader compilation depend on which queues we have enabled?

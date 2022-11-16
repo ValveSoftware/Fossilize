@@ -3514,6 +3514,10 @@ static bool test_pdf_recording()
 			VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_ENUMS_FEATURES_NV, nullptr, 5, 6, 7 };
 	VkPhysicalDeviceFragmentShadingRateFeaturesKHR shading_rate = {
 			VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR, nullptr, 8, 9, 10 };
+	VkPhysicalDeviceMeshShaderFeaturesEXT mesh = {
+			VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT, nullptr, 10, 20, 30, 40, 50 };
+	VkPhysicalDeviceMeshShaderFeaturesNV mesh_nv = {
+			VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_NV, nullptr, 80, 90 };
 
 	// Expect to fail here.
 	if (test_pdf_recording(&dummy, h))
@@ -3543,7 +3547,7 @@ static bool test_pdf_recording()
 	}
 
 	{
-		Hash h0, h1, h2, h3, h4;
+		Hash h0, h1, h2, h3, h4, h5, h6;
 		pdf2.pNext = nullptr;
 		if (!test_pdf_recording(&pdf2, h0))
 			return false;
@@ -3559,18 +3563,24 @@ static bool test_pdf_recording()
 		shading_rate_enums.pNext = &shading_rate;
 		if (!test_pdf_recording(&pdf2, h4))
 			return false;
+		shading_rate.pNext = &mesh;
+		if (!test_pdf_recording(&pdf2, h5))
+			return false;
+		mesh.pNext = &mesh_nv;
+		if (!test_pdf_recording(&pdf2, h6))
+			return false;
 
 		// Make sure all of these are serialized.
-		if (h0 == h1 || h1 == h2 || h2 == h3 || h3 == h4)
+		if (h0 == h1 || h1 == h2 || h2 == h3 || h3 == h4 || h4 == h5 || h5 == h6)
 			return false;
 
 		// If we move PDF2 last, hash should still be invariant.
-		shading_rate.pNext = &pdf2;
+		mesh_nv.pNext = &pdf2;
 		pdf2.pNext = nullptr;
 		if (!test_pdf_recording(&robustness2, h0))
 			return false;
 
-		if (h0 != h4)
+		if (h0 != h6)
 			return false;
 	}
 
