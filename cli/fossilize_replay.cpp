@@ -3125,7 +3125,9 @@ static int run_progress_process(const VulkanDevice::Options &device_opts,
 	opts.spirv_validate = replayer_opts.spirv_validate;
 	opts.device_index = device_opts.device_index;
 	opts.enable_validation = device_opts.enable_validation;
+#ifndef _WIN32
 	opts.disable_signal_handler = replayer_opts.disable_signal_handler;
+#endif
 	opts.ignore_derived_pipelines = true;
 	opts.null_device = device_opts.null_device;
 	opts.start_graphics_index = replayer_opts.start_graphics_index;
@@ -4022,8 +4024,12 @@ int main(int argc, char *argv[])
 	{
 		ThreadedReplayer replayer(opts, replayer_opts);
 #ifndef NO_ROBUST_REPLAYER
+#ifndef _WIN32
 		if (!replayer_opts.disable_signal_handler)
+#endif
+		{
 			install_trivial_crash_handlers(replayer);
+		}
 #endif
 		ret = run_normal_process(replayer, databases,
 		                         whitelist_path, whitelist_mask,
