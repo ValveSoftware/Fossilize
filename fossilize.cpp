@@ -321,6 +321,7 @@ struct StateReplayer::Impl
 	bool parse_fragment_shading_rate_features(const Value &state, VkPhysicalDeviceFragmentShadingRateFeaturesKHR **out_features) FOSSILIZE_WARN_UNUSED;
 	bool parse_mesh_shader_features(const Value &state, VkPhysicalDeviceMeshShaderFeaturesEXT **out_features) FOSSILIZE_WARN_UNUSED;
 	bool parse_mesh_shader_features_nv(const Value &state, VkPhysicalDeviceMeshShaderFeaturesNV **out_features) FOSSILIZE_WARN_UNUSED;
+	bool parse_descriptor_buffer_features(const Value &state, VkPhysicalDeviceDescriptorBufferFeaturesEXT **out_features) FOSSILIZE_WARN_UNUSED;
 
 	bool parse_color_write(const Value &state, VkPipelineColorWriteCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_sample_locations(const Value &state, VkPipelineSampleLocationsStateCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
@@ -486,6 +487,8 @@ struct StateRecorder::Impl
 	void *copy_pnext_struct(const VkPhysicalDeviceMeshShaderFeaturesNV *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPhysicalDeviceMeshShaderFeaturesEXT *create_info,
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkPhysicalDeviceDescriptorBufferFeaturesEXT *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPipelineColorWriteCreateInfoEXT *create_info,
 	                        ScratchAllocator &alloc,
@@ -681,6 +684,16 @@ static void hash_pnext_struct(const StateRecorder *,
 	h.u32(info.meshShaderQueries);
 }
 
+static void hash_pnext_struct(const StateRecorder *,
+                              Hasher &h,
+                              const VkPhysicalDeviceDescriptorBufferFeaturesEXT &info)
+{
+	h.u32(info.descriptorBuffer);
+	h.u32(info.descriptorBufferCaptureReplay);
+	h.u32(info.descriptorBufferImageLayoutIgnored);
+	h.u32(info.descriptorBufferPushDescriptors);
+}
+
 static bool hash_pnext_chain_pdf2(const StateRecorder *recorder, Hasher &h, const void *pNext)
 {
 	while ((pNext = pnext_chain_pdf2_skip_ignored_entries(pNext)) != nullptr)
@@ -713,6 +726,10 @@ static bool hash_pnext_chain_pdf2(const StateRecorder *recorder, Hasher &h, cons
 
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_NV:
 			hash_pnext_struct(recorder, h, *static_cast<const VkPhysicalDeviceMeshShaderFeaturesNV *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT:
+			hash_pnext_struct(recorder, h, *static_cast<const VkPhysicalDeviceDescriptorBufferFeaturesEXT *>(pNext));
 			break;
 
 		default:
@@ -4909,6 +4926,20 @@ bool StateReplayer::Impl::parse_mesh_shader_features_nv(
 	return true;
 }
 
+bool StateReplayer::Impl::parse_descriptor_buffer_features(
+		const Value &state,
+		VkPhysicalDeviceDescriptorBufferFeaturesEXT **out_features)
+{
+	auto *features = allocator.allocate_cleared<VkPhysicalDeviceDescriptorBufferFeaturesEXT>();
+	*out_features = features;
+
+	features->descriptorBuffer = state["descriptorBuffer"].GetUint();
+	features->descriptorBufferCaptureReplay = state["descriptorBufferCaptureReplay"].GetUint();
+	features->descriptorBufferImageLayoutIgnored = state["descriptorBufferImageLayoutIgnored"].GetUint();
+	features->descriptorBufferPushDescriptors = state["descriptorBufferPushDescriptors"].GetUint();
+	return true;
+}
+
 bool StateReplayer::Impl::parse_pnext_chain_pdf2(const Value &pnext, void **outpNext)
 {
 	VkBaseInStructure *ret = nullptr;
@@ -4973,6 +5004,15 @@ bool StateReplayer::Impl::parse_pnext_chain_pdf2(const Value &pnext, void **outp
 			if (!parse_mesh_shader_features_nv(next, &mesh_shader))
 				return false;
 			new_struct = reinterpret_cast<VkBaseInStructure *>(mesh_shader);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT:
+		{
+			VkPhysicalDeviceDescriptorBufferFeaturesEXT *descriptor_buffer = nullptr;
+			if (!parse_descriptor_buffer_features(next, &descriptor_buffer))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(descriptor_buffer);
 			break;
 		}
 
@@ -6427,6 +6467,13 @@ void *StateRecorder::Impl::copy_pnext_struct(
 	return copy(create_info, 1, alloc);
 }
 
+void *StateRecorder::Impl::copy_pnext_struct(
+		const VkPhysicalDeviceDescriptorBufferFeaturesEXT *create_info,
+		ScratchAllocator &alloc)
+{
+	return copy(create_info, 1, alloc);
+}
+
 bool StateRecorder::Impl::copy_pnext_chain_pdf2(const void *pNext, ScratchAllocator &alloc, void **out_pnext)
 {
 	VkBaseInStructure new_pnext = {};
@@ -6476,6 +6523,13 @@ bool StateRecorder::Impl::copy_pnext_chain_pdf2(const void *pNext, ScratchAlloca
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT:
 		{
 			auto *ci = static_cast<const VkPhysicalDeviceMeshShaderFeaturesEXT *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT:
+		{
+			auto *ci = static_cast<const VkPhysicalDeviceDescriptorBufferFeaturesEXT *>(pNext);
 			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
 			break;
 		}
@@ -9610,6 +9664,19 @@ static bool json_value(const VkPhysicalDeviceMeshShaderFeaturesNV &create_info, 
 }
 
 template <typename Allocator>
+static bool json_value(const VkPhysicalDeviceDescriptorBufferFeaturesEXT &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("descriptorBuffer", uint32_t(create_info.descriptorBuffer), alloc);
+	value.AddMember("descriptorBufferCaptureReplay", uint32_t(create_info.descriptorBufferCaptureReplay), alloc);
+	value.AddMember("descriptorBufferImageLayoutIgnored", uint32_t(create_info.descriptorBufferImageLayoutIgnored), alloc);
+	value.AddMember("descriptorBufferPushDescriptors", uint32_t(create_info.descriptorBufferPushDescriptors), alloc);
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
 static bool pnext_chain_pdf2_json_value(const void *pNext, Allocator &alloc, Value *out_value)
 {
 	Value nexts(kArrayType);
@@ -9647,6 +9714,11 @@ static bool pnext_chain_pdf2_json_value(const void *pNext, Allocator &alloc, Val
 
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_NV:
 			if (!json_value(*static_cast<const VkPhysicalDeviceMeshShaderFeaturesNV *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT:
+			if (!json_value(*static_cast<const VkPhysicalDeviceDescriptorBufferFeaturesEXT *>(pNext), alloc, &next))
 				return false;
 			break;
 
@@ -10245,6 +10317,8 @@ static const void *pnext_chain_pdf2_skip_ignored_entries(const void *pNext)
 		// Workaround: Affects compilation on NV and is causing some awkward cache corruption on some drivers.
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_NV:
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT:
+		// RADV: Might want to turn off FMASK at some point based on this.
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT:
 			ignored = false;
 			break;
 

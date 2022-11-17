@@ -211,6 +211,30 @@ static void filter_feature_enablement(
 		{
 			reset_features(features.mesh_shader_nv, VK_FALSE);
 		}
+
+		const auto *descriptor_buffer = find_pnext<VkPhysicalDeviceDescriptorBufferFeaturesEXT>(
+				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT,
+				target_features->pNext);
+
+		if (descriptor_buffer)
+		{
+			features.descriptor_buffer.descriptorBuffer =
+					features.descriptor_buffer.descriptorBuffer &&
+					descriptor_buffer->descriptorBuffer;
+			features.descriptor_buffer.descriptorBufferCaptureReplay =
+					features.descriptor_buffer.descriptorBufferCaptureReplay &&
+					descriptor_buffer->descriptorBufferCaptureReplay;
+			features.descriptor_buffer.descriptorBufferImageLayoutIgnored =
+					features.descriptor_buffer.descriptorBufferImageLayoutIgnored &&
+					descriptor_buffer->descriptorBufferImageLayoutIgnored;
+			features.descriptor_buffer.descriptorBufferPushDescriptors =
+					features.descriptor_buffer.descriptorBufferPushDescriptors &&
+					descriptor_buffer->descriptorBufferPushDescriptors;
+		}
+		else
+		{
+			reset_features(features.descriptor_buffer, VK_FALSE);
+		}
 	}
 	else
 	{
@@ -221,6 +245,7 @@ static void filter_feature_enablement(
 		reset_features(features.fragment_shading_rate, VK_FALSE);
 		reset_features(features.mesh_shader, VK_FALSE);
 		reset_features(features.mesh_shader_nv, VK_FALSE);
+		reset_features(features.descriptor_buffer, VK_FALSE);
 	}
 }
 
@@ -331,6 +356,20 @@ static void filter_active_extensions(VkPhysicalDeviceFeatures2 &pdf,
 			    feature->taskShader == VK_FALSE)
 			{
 				remove_extension(active_extensions, out_extension_count, VK_NV_MESH_SHADER_EXTENSION_NAME);
+				accept = false;
+			}
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT:
+		{
+			auto *feature = reinterpret_cast<VkPhysicalDeviceDescriptorBufferFeaturesEXT *>(s);
+			if (feature->descriptorBuffer == VK_FALSE &&
+			    feature->descriptorBufferCaptureReplay == VK_FALSE &&
+			    feature->descriptorBufferImageLayoutIgnored == VK_FALSE &&
+			    feature->descriptorBufferPushDescriptors == VK_FALSE)
+			{
+				remove_extension(active_extensions, out_extension_count, VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME);
 				accept = false;
 			}
 			break;

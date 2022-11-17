@@ -89,6 +89,7 @@ struct VulkanFeatures
 	VkPhysicalDeviceDepthClipControlFeaturesEXT depth_clip_control;
 	VkPhysicalDeviceMeshShaderFeaturesNV mesh_shader_nv;
 	VkPhysicalDeviceMeshShaderFeaturesEXT mesh_shader;
+	VkPhysicalDeviceDescriptorBufferFeaturesEXT descriptor_buffer;
 };
 
 void *build_pnext_chain(VulkanFeatures &features, uint32_t api_version,
@@ -220,5 +221,13 @@ static inline void reset_features(VkPhysicalDeviceFragmentShadingRateFeaturesKHR
 	features.pipelineFragmentShadingRate = state;
 	features.primitiveFragmentShadingRate = state;
 	features.attachmentFragmentShadingRate = state;
+}
+
+static inline void reset_features(VkPhysicalDeviceDescriptorBufferFeaturesEXT &features, VkBool32 state)
+{
+	features.descriptorBuffer = state;
+	features.descriptorBufferCaptureReplay = state;
+	features.descriptorBufferImageLayoutIgnored = state;
+	features.descriptorBufferPushDescriptors = state;
 }
 }
