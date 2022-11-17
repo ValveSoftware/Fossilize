@@ -65,7 +65,8 @@ enum class VariantDependency
 	ApplicationName,
 	EngineName,
 	FragmentShadingRate,
-	DynamicRendering
+	DynamicRendering,
+	DescriptorBuffer
 };
 
 struct VariantDependencyMap
@@ -91,6 +92,7 @@ static const VariantDependencyMap variant_dependency_map[] = {
 	DEF(EngineName),
 	DEF(FragmentShadingRate),
 	DEF(DynamicRendering),
+	DEF(DescriptorBuffer),
 };
 #undef DEF
 
@@ -270,6 +272,16 @@ static void hash_variant(Hasher &h, VariantDependency dep,
 				device_pnext);
 		bool enabled = (indexing && indexing->descriptorBindingUniformBufferUpdateAfterBind) ||
 		               (features12 && features12->descriptorBindingUniformBufferUpdateAfterBind);
+		h.u32(uint32_t(enabled));
+		break;
+	}
+
+	case VariantDependency::DescriptorBuffer:
+	{
+		auto *descriptor_buffer = find_pnext<VkPhysicalDeviceDescriptorBufferFeaturesEXT>(
+				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT,
+				device_pnext);
+		bool enabled = descriptor_buffer && descriptor_buffer->descriptorBuffer;
 		h.u32(uint32_t(enabled));
 		break;
 	}
