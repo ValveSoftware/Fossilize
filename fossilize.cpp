@@ -809,7 +809,10 @@ bool compute_hash_sampler(const VkSamplerCreateInfo &sampler, Hash *out_hash)
 {
 	Hasher h;
 
-	h.u32(sampler.flags);
+	constexpr VkSamplerCreateFlagBits ignore_capture_replay_flags =
+			VK_SAMPLER_CREATE_DESCRIPTOR_BUFFER_CAPTURE_REPLAY_BIT_EXT;
+
+	h.u32(sampler.flags & ~ignore_capture_replay_flags);
 	h.f32(sampler.maxAnisotropy);
 	h.f32(sampler.mipLodBias);
 	h.f32(sampler.minLod);
@@ -6404,6 +6407,10 @@ bool StateRecorder::Impl::copy_sampler(const VkSamplerCreateInfo *create_info, S
                                        VkSamplerCreateInfo **out_create_info)
 {
 	auto *info = copy(create_info, 1, alloc);
+
+	constexpr VkSamplerCreateFlagBits ignore_capture_replay_flags =
+			VK_SAMPLER_CREATE_DESCRIPTOR_BUFFER_CAPTURE_REPLAY_BIT_EXT;
+	info->flags &= ~ignore_capture_replay_flags;
 
 	if (!copy_pnext_chain(info->pNext, alloc, &info->pNext, nullptr))
 		return false;
