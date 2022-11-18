@@ -211,6 +211,30 @@ static void filter_feature_enablement(
 		{
 			reset_features(features.mesh_shader_nv, VK_FALSE);
 		}
+
+		const auto *descriptor_buffer = find_pnext<VkPhysicalDeviceDescriptorBufferFeaturesEXT>(
+				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT,
+				target_features->pNext);
+
+		if (descriptor_buffer)
+		{
+			features.descriptor_buffer.descriptorBuffer =
+					features.descriptor_buffer.descriptorBuffer &&
+					descriptor_buffer->descriptorBuffer;
+			features.descriptor_buffer.descriptorBufferCaptureReplay =
+					features.descriptor_buffer.descriptorBufferCaptureReplay &&
+					descriptor_buffer->descriptorBufferCaptureReplay;
+			features.descriptor_buffer.descriptorBufferImageLayoutIgnored =
+					features.descriptor_buffer.descriptorBufferImageLayoutIgnored &&
+					descriptor_buffer->descriptorBufferImageLayoutIgnored;
+			features.descriptor_buffer.descriptorBufferPushDescriptors =
+					features.descriptor_buffer.descriptorBufferPushDescriptors &&
+					descriptor_buffer->descriptorBufferPushDescriptors;
+		}
+		else
+		{
+			reset_features(features.descriptor_buffer, VK_FALSE);
+		}
 	}
 	else
 	{
@@ -221,6 +245,7 @@ static void filter_feature_enablement(
 		reset_features(features.fragment_shading_rate, VK_FALSE);
 		reset_features(features.mesh_shader, VK_FALSE);
 		reset_features(features.mesh_shader_nv, VK_FALSE);
+		reset_features(features.descriptor_buffer, VK_FALSE);
 	}
 }
 
@@ -331,6 +356,20 @@ static void filter_active_extensions(VkPhysicalDeviceFeatures2 &pdf,
 			    feature->taskShader == VK_FALSE)
 			{
 				remove_extension(active_extensions, out_extension_count, VK_NV_MESH_SHADER_EXTENSION_NAME);
+				accept = false;
+			}
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT:
+		{
+			auto *feature = reinterpret_cast<VkPhysicalDeviceDescriptorBufferFeaturesEXT *>(s);
+			if (feature->descriptorBuffer == VK_FALSE &&
+			    feature->descriptorBufferCaptureReplay == VK_FALSE &&
+			    feature->descriptorBufferImageLayoutIgnored == VK_FALSE &&
+			    feature->descriptorBufferPushDescriptors == VK_FALSE)
+			{
+				remove_extension(active_extensions, out_extension_count, VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME);
 				accept = false;
 			}
 			break;
@@ -1090,7 +1129,9 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 	// Only allow flags we recognize and validate.
 	constexpr VkDescriptorSetLayoutCreateFlags supported_flags =
 			VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR |
-			VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
+			VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT |
+			VK_DESCRIPTOR_SET_LAYOUT_CREATE_DESCRIPTOR_BUFFER_BIT_EXT |
+			VK_DESCRIPTOR_SET_LAYOUT_CREATE_EMBEDDED_IMMUTABLE_SAMPLERS_BIT_EXT;
 
 	if ((info->flags & ~supported_flags) != 0)
 		return false;
@@ -1110,6 +1151,22 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 		// For specific descriptor types, we check the individual features.
 		if (enabled_extensions.count(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME) == 0)
 			return false;
+	}
+
+	if ((info->flags & (VK_DESCRIPTOR_SET_LAYOUT_CREATE_EMBEDDED_IMMUTABLE_SAMPLERS_BIT_EXT |
+	                    VK_DESCRIPTOR_SET_LAYOUT_CREATE_DESCRIPTOR_BUFFER_BIT_EXT)) != 0)
+	{
+		if (!features.descriptor_buffer.descriptorBuffer)
+			return false;
+
+		if (info->flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR)
+		{
+			if (!features.descriptor_buffer.descriptorBufferPushDescriptors ||
+			    enabled_extensions.count(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME) == 0)
+			{
+				return false;
+			}
+		}
 	}
 
 	struct DescriptorCounts
@@ -2185,7 +2242,8 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 			VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR |
 			VK_PIPELINE_CREATE_LIBRARY_BIT_KHR |
 			VK_PIPELINE_CREATE_LINK_TIME_OPTIMIZATION_BIT_EXT |
-			VK_PIPELINE_CREATE_RETAIN_LINK_TIME_OPTIMIZATION_INFO_BIT_EXT;
+			VK_PIPELINE_CREATE_RETAIN_LINK_TIME_OPTIMIZATION_INFO_BIT_EXT |
+			VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT;
 
 	if ((info->flags & ~supported_flags) != 0)
 		return false;
@@ -2221,6 +2279,10 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 	{
 		return false;
 	}
+
+	if ((info->flags & VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT) != 0)
+		if (!features.descriptor_buffer.descriptorBuffer)
+			return false;
 
 	if (info->pColorBlendState && !pnext_chain_is_supported(info->pColorBlendState->pNext))
 		return false;
@@ -2475,13 +2537,18 @@ bool FeatureFilter::Impl::compute_pipeline_is_supported(const VkComputePipelineC
 			VK_PIPELINE_CREATE_DERIVATIVE_BIT |
 			VK_PIPELINE_CREATE_DISPATCH_BASE_BIT |
 			VK_PIPELINE_CREATE_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR |
-			VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR;
+			VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR |
+			VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT;
 
 	if ((info->flags & ~supported_flags) != 0)
 		return false;
 
 	if (null_device)
 		return true;
+
+	if ((info->flags & VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT) != 0)
+		if (!features.descriptor_buffer.descriptorBuffer)
+			return false;
 
 	if ((info->flags & VK_PIPELINE_CREATE_DISPATCH_BASE_BIT) != 0 &&
 	    api_version < VK_API_VERSION_1_1)
@@ -2510,7 +2577,8 @@ bool FeatureFilter::Impl::raytracing_pipeline_is_supported(const VkRayTracingPip
 			VK_PIPELINE_CREATE_RAY_TRACING_SKIP_TRIANGLES_BIT_KHR |
 			VK_PIPELINE_CREATE_LIBRARY_BIT_KHR |
 			VK_PIPELINE_CREATE_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR |
-			VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR;
+			VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR |
+			VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT;
 
 	if ((info->flags & ~supported_flags) != 0)
 		return false;
@@ -2530,6 +2598,10 @@ bool FeatureFilter::Impl::raytracing_pipeline_is_supported(const VkRayTracingPip
 	{
 		return false;
 	}
+
+	if ((info->flags & VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT) != 0)
+		if (!features.descriptor_buffer.descriptorBuffer)
+			return false;
 
 	if (features.ray_tracing_pipeline.rayTracingPipeline == VK_FALSE)
 		return false;

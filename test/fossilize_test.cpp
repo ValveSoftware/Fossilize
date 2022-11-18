@@ -3518,6 +3518,8 @@ static bool test_pdf_recording()
 			VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT, nullptr, 10, 20, 30, 40, 50 };
 	VkPhysicalDeviceMeshShaderFeaturesNV mesh_nv = {
 			VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_NV, nullptr, 80, 90 };
+	VkPhysicalDeviceDescriptorBufferFeaturesEXT descriptor_buffer = {
+			VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT, nullptr, 100, 200, 300, 400 };
 
 	// Expect to fail here.
 	if (test_pdf_recording(&dummy, h))
@@ -3547,40 +3549,46 @@ static bool test_pdf_recording()
 	}
 
 	{
-		Hash h0, h1, h2, h3, h4, h5, h6;
+		constexpr size_t hash_count = 8;
+		Hash hashes[hash_count] = {};
+
 		pdf2.pNext = nullptr;
-		if (!test_pdf_recording(&pdf2, h0))
+		if (!test_pdf_recording(&pdf2, hashes[0]))
 			return false;
 		pdf2.pNext = &robustness2;
-		if (!test_pdf_recording(&pdf2, h1))
+		if (!test_pdf_recording(&pdf2, hashes[1]))
 			return false;
 		robustness2.pNext = &image_robustness;
-		if (!test_pdf_recording(&pdf2, h2))
+		if (!test_pdf_recording(&pdf2, hashes[2]))
 			return false;
 		image_robustness.pNext = &shading_rate_enums;
-		if (!test_pdf_recording(&pdf2, h3))
+		if (!test_pdf_recording(&pdf2, hashes[3]))
 			return false;
 		shading_rate_enums.pNext = &shading_rate;
-		if (!test_pdf_recording(&pdf2, h4))
+		if (!test_pdf_recording(&pdf2, hashes[4]))
 			return false;
 		shading_rate.pNext = &mesh;
-		if (!test_pdf_recording(&pdf2, h5))
+		if (!test_pdf_recording(&pdf2, hashes[5]))
 			return false;
 		mesh.pNext = &mesh_nv;
-		if (!test_pdf_recording(&pdf2, h6))
+		if (!test_pdf_recording(&pdf2, hashes[6]))
+			return false;
+		mesh_nv.pNext = &descriptor_buffer;
+		if (!test_pdf_recording(&pdf2, hashes[7]))
 			return false;
 
 		// Make sure all of these are serialized.
-		if (h0 == h1 || h1 == h2 || h2 == h3 || h3 == h4 || h4 == h5 || h5 == h6)
-			return false;
+		for (unsigned i = 1; i < hash_count; i++)
+			if (hashes[i] == hashes[i - 1])
+				return false;
 
 		// If we move PDF2 last, hash should still be invariant.
-		mesh_nv.pNext = &pdf2;
+		descriptor_buffer.pNext = &pdf2;
 		pdf2.pNext = nullptr;
-		if (!test_pdf_recording(&robustness2, h0))
+		if (!test_pdf_recording(&robustness2, hashes[0]))
 			return false;
 
-		if (h0 != h6)
+		if (hashes[0] != hashes[hash_count - 1])
 			return false;
 	}
 

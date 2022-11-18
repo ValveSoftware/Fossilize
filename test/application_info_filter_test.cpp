@@ -76,6 +76,21 @@ R"delim(
 				"DynamicRendering"
 			]
 		},
+		"variance" : {
+			"bucketVariantDependencies" : [ "VendorID" ]
+		},
+		"variance2" : {
+			"bucketVariantDependencies" : [ "VendorID" ],
+			"bucketVariantFeatureDependencies" : [
+				"BindlessUBO",
+				"MutableDescriptorType",
+				"BufferDeviceAddress",
+				"DummyIgnored",
+				"FragmentShadingRate",
+				"DynamicRendering",
+				"DescriptorBuffer"
+			]
+		},
 		"test2" : { "minimumEngineVersion" : 10, "minimumApplicationVersion" : 1000 },
 		"test3" : { "minimumApiVersion" : 50 },
 		"test4" : {
@@ -91,6 +106,9 @@ R"delim(
 	"defaultBucketVariantDependencies" : [
 		"ApplicationName",
 		"EngineName"
+	],
+	"defaultBucketVariantFeatureDependencies" : [
+		"DescriptorBuffer"
 	]
 }
 )delim";
@@ -379,6 +397,115 @@ R"delim(
 		auto hash17 = filter.get_bucket_hash(&props2, &appinfo, &features2);
 		auto hash18 = filter.get_bucket_hash(&props2, &appinfo, nullptr);
 		if (hash17 != hash18)
+			return EXIT_FAILURE;
+	}
+
+	// Test that feature hashing works as intended.
+	{
+		VkPhysicalDeviceProperties2 props2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
+		VkPhysicalDeviceFeatures2 features2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+		VkPhysicalDeviceBufferDeviceAddressFeatures bda_features =
+				{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES };
+		VkPhysicalDeviceVulkan12Features vulkan12_features =
+				{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
+		VkPhysicalDeviceVulkan13Features vulkan13_features =
+				{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
+		VkPhysicalDeviceDescriptorIndexingFeatures indexing_features =
+				{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES };
+		VkPhysicalDeviceMutableDescriptorTypeFeaturesEXT mutable_features =
+				{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MUTABLE_DESCRIPTOR_TYPE_FEATURES_EXT };
+		VkPhysicalDeviceFragmentShadingRateFeaturesKHR vrs_features =
+				{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR };
+		VkPhysicalDeviceDescriptorBufferFeaturesEXT descriptor_buffer_features =
+				{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT };
+
+		props2.properties.vendorID = 1;
+		appinfo.pEngineName = "variance";
+		appinfo.pApplicationName = nullptr;
+
+		auto hash0 = filter.get_bucket_hash(&props2, &appinfo, &features2);
+		appinfo.pEngineName = "variance2";
+		auto hash1 = filter.get_bucket_hash(&props2, &appinfo, &features2);
+
+		if (hash0 != hash1)
+			return EXIT_FAILURE;
+
+		// Ensure that hashing disabled structs does not change anything either.
+		features2.pNext = &descriptor_buffer_features;
+		if (filter.get_bucket_hash(&props2, &appinfo, &features2) != hash1)
+			return EXIT_FAILURE;
+
+		features2.pNext = &bda_features;
+		if (filter.get_bucket_hash(&props2, &appinfo, &features2) != hash1)
+			return EXIT_FAILURE;
+
+		features2.pNext = &vulkan12_features;
+		if (filter.get_bucket_hash(&props2, &appinfo, &features2) != hash1)
+			return EXIT_FAILURE;
+
+		features2.pNext = &vulkan13_features;
+		if (filter.get_bucket_hash(&props2, &appinfo, &features2) != hash1)
+			return EXIT_FAILURE;
+
+		features2.pNext = &indexing_features;
+		if (filter.get_bucket_hash(&props2, &appinfo, &features2) != hash1)
+			return EXIT_FAILURE;
+
+		features2.pNext = &mutable_features;
+		if (filter.get_bucket_hash(&props2, &appinfo, &features2) != hash1)
+			return EXIT_FAILURE;
+
+		features2.pNext = &vrs_features;
+		if (filter.get_bucket_hash(&props2, &appinfo, &features2) != hash1)
+			return EXIT_FAILURE;
+
+		features2.pNext = &descriptor_buffer_features;
+		descriptor_buffer_features.descriptorBuffer = VK_TRUE;
+		auto hash2 = filter.get_bucket_hash(&props2, &appinfo, &features2);
+		descriptor_buffer_features.descriptorBufferPushDescriptors = VK_TRUE;
+		auto hash3 = filter.get_bucket_hash(&props2, &appinfo, &features2);
+		if (hash1 == hash2 || hash2 == hash3)
+			return EXIT_FAILURE;
+
+		features2.pNext = &bda_features;
+		bda_features.bufferDeviceAddress = VK_TRUE;
+		hash2 = filter.get_bucket_hash(&props2, &appinfo, &features2);
+		if (hash1 == hash2)
+			return EXIT_FAILURE;
+		features2.pNext = &vulkan12_features;
+		vulkan12_features.bufferDeviceAddress = VK_TRUE;
+		hash3 = filter.get_bucket_hash(&props2, &appinfo, &features2);
+		if (hash2 != hash3)
+			return EXIT_FAILURE;
+	}
+
+	// Test that we can pick up defaultFeatureVariantFilter.
+	{
+		VkPhysicalDeviceProperties2 props2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
+		VkPhysicalDeviceFeatures2 features2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+		VkPhysicalDeviceBufferDeviceAddressFeatures bda_features =
+				{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES };
+		VkPhysicalDeviceDescriptorBufferFeaturesEXT descriptor_buffer_features =
+				{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT };
+
+		props2.properties.vendorID = 1;
+		appinfo.pEngineName = nullptr;
+		appinfo.pApplicationName = nullptr;
+
+		auto hash0 = filter.get_bucket_hash(&props2, &appinfo, &features2);
+		features2.pNext = &bda_features;
+		bda_features.bufferDeviceAddress = VK_TRUE;
+		auto hash1 = filter.get_bucket_hash(&props2, &appinfo, &features2);
+		features2.pNext = &descriptor_buffer_features;
+		auto hash2 = filter.get_bucket_hash(&props2, &appinfo, &features2);
+		descriptor_buffer_features.descriptorBuffer = VK_TRUE;
+		auto hash3 = filter.get_bucket_hash(&props2, &appinfo, &features2);
+		descriptor_buffer_features.descriptorBufferPushDescriptors = VK_TRUE;
+		auto hash4 = filter.get_bucket_hash(&props2, &appinfo, &features2);
+
+		if (hash0 != hash1 || hash1 != hash2)
+			return EXIT_FAILURE;
+		if (hash2 == hash3 || hash3 == hash4)
 			return EXIT_FAILURE;
 	}
 

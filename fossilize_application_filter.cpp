@@ -65,7 +65,8 @@ enum class VariantDependency
 	ApplicationName,
 	EngineName,
 	FragmentShadingRate,
-	DynamicRendering
+	DynamicRendering,
+	DescriptorBuffer
 };
 
 struct VariantDependencyMap
@@ -91,6 +92,7 @@ static const VariantDependencyMap variant_dependency_map[] = {
 	DEF(EngineName),
 	DEF(FragmentShadingRate),
 	DEF(DynamicRendering),
+	DEF(DescriptorBuffer),
 };
 #undef DEF
 
@@ -101,7 +103,16 @@ struct AppInfo
 	uint32_t minimum_engine_version = 0;
 	bool record_immutable_samplers = true;
 	std::vector<EnvInfo> env_infos;
+
+	// Having two arrays of variant dependencies is not very useful.
+	// The main point to keep these two around is backwards compatibility with older buckets.
+	// With the old bucket hash system, adding a new feature to hash would modify the hash for everyone.
+	// E.g. if our variants were set up as [ "FeatureA", "FeatureB", "FeatureC" ], then if we make an updated one:
+	// [ "FeatureA", "FeatureB", "FeatureC", "FeatureD" ], then even if feature D is disabled, the hash changes.
+	// To combat this, we can state that FeatureD is conditionally hashed with { sType, feature } instead.
+	// For future uses of the feature filter, feature hashing is ideally placed in the feature variant list.
 	std::vector<VariantDependency> variant_dependencies;
+	std::vector<VariantDependency> variant_dependencies_feature;
 };
 
 struct ApplicationInfoFilter::Impl
@@ -111,6 +122,7 @@ struct ApplicationInfoFilter::Impl
 	std::unordered_map<std::string, AppInfo> application_infos;
 	std::unordered_map<std::string, AppInfo> engine_infos;
 	std::vector<VariantDependency> default_variant_dependencies;
+	std::vector<VariantDependency> default_variant_dependencies_feature;
 
 	bool parse(const char *path);
 	bool test_application_info(const VkApplicationInfo *info);
@@ -169,18 +181,20 @@ bool ApplicationInfoFilter::Impl::needs_buckets(const VkApplicationInfo *info)
 	if (info && info->pApplicationName)
 	{
 		auto itr = application_infos.find(info->pApplicationName);
-		if (itr != application_infos.end() && !itr->second.variant_dependencies.empty())
-			return true;
+		if (itr != application_infos.end())
+			if (!itr->second.variant_dependencies.empty() || !itr->second.variant_dependencies_feature.empty())
+				return true;
 	}
 
 	if (info && info->pEngineName)
 	{
 		auto itr = engine_infos.find(info->pEngineName);
-		if (itr != engine_infos.end() && !itr->second.variant_dependencies.empty())
-			return true;
+		if (itr != engine_infos.end())
+			if (!itr->second.variant_dependencies.empty() || !itr->second.variant_dependencies_feature.empty())
+				return true;
 	}
 
-	return !default_variant_dependencies.empty();
+	return !default_variant_dependencies.empty() || !default_variant_dependencies_feature.empty();
 }
 
 template <typename T>
@@ -201,9 +215,12 @@ static inline const T *find_pnext(VkStructureType type, const void *pNext)
 static void hash_variant(Hasher &h, VariantDependency dep,
                          const VkPhysicalDeviceProperties2 *props,
                          const VkApplicationInfo *info,
-                         const void *device_pnext)
+                         const void *device_pnext,
+                         bool feature_hash)
 {
 	const VkApplicationInfo default_app_info = { VK_STRUCTURE_TYPE_APPLICATION_INFO };
+	bool hash_enabled = true;
+
 	if (!info)
 		info = &default_app_info;
 
@@ -218,7 +235,18 @@ static void hash_variant(Hasher &h, VariantDependency dep,
 		auto *mut = find_pnext<VkPhysicalDeviceMutableDescriptorTypeFeaturesEXT>(
 				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MUTABLE_DESCRIPTOR_TYPE_FEATURES_EXT,
 				device_pnext);
-		h.u32(uint32_t(mut && mut->mutableDescriptorType));
+
+		bool enabled = mut && mut->mutableDescriptorType;
+
+		if (feature_hash)
+		{
+			hash_enabled = enabled;
+			if (enabled)
+				h.u32(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MUTABLE_DESCRIPTOR_TYPE_FEATURES_EXT);
+		}
+
+		if (hash_enabled)
+			h.u32(uint32_t(enabled));
 		break;
 	}
 
@@ -233,7 +261,16 @@ static void hash_variant(Hasher &h, VariantDependency dep,
 
 		bool enabled = (bda && bda->bufferDeviceAddress) ||
 		               (features12 && features12->bufferDeviceAddress);
-		h.u32(uint32_t(enabled));
+
+		if (feature_hash)
+		{
+			hash_enabled = enabled;
+			if (enabled)
+				h.u32(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES);
+		}
+
+		if (hash_enabled)
+			h.u32(uint32_t(enabled));
 		break;
 	}
 
@@ -242,9 +279,23 @@ static void hash_variant(Hasher &h, VariantDependency dep,
 		auto *vrs = find_pnext<VkPhysicalDeviceFragmentShadingRateFeaturesKHR>(
 				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR, device_pnext);
 
-		h.u32(uint32_t(vrs && vrs->attachmentFragmentShadingRate));
-		h.u32(uint32_t(vrs && vrs->pipelineFragmentShadingRate));
-		h.u32(uint32_t(vrs && vrs->primitiveFragmentShadingRate));
+		bool enabled = vrs && (vrs->attachmentFragmentShadingRate ||
+		                       vrs->pipelineFragmentShadingRate ||
+		                       vrs->primitiveFragmentShadingRate);
+
+		if (feature_hash)
+		{
+			hash_enabled = enabled;
+			if (enabled)
+				h.u32(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR);
+		}
+
+		if (hash_enabled)
+		{
+			h.u32(uint32_t(vrs && vrs->attachmentFragmentShadingRate));
+			h.u32(uint32_t(vrs && vrs->pipelineFragmentShadingRate));
+			h.u32(uint32_t(vrs && vrs->primitiveFragmentShadingRate));
+		}
 		break;
 	}
 
@@ -256,7 +307,16 @@ static void hash_variant(Hasher &h, VariantDependency dep,
 				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES, device_pnext);
 		bool enabled = (dynamic_rendering && dynamic_rendering->dynamicRendering) ||
 		               (features13 && features13->dynamicRendering);
-		h.u32(uint32_t(enabled));
+
+		if (feature_hash)
+		{
+			hash_enabled = enabled;
+			if (enabled)
+				h.u32(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES);
+		}
+
+		if (hash_enabled)
+			h.u32(uint32_t(enabled));
 		break;
 	}
 
@@ -270,7 +330,47 @@ static void hash_variant(Hasher &h, VariantDependency dep,
 				device_pnext);
 		bool enabled = (indexing && indexing->descriptorBindingUniformBufferUpdateAfterBind) ||
 		               (features12 && features12->descriptorBindingUniformBufferUpdateAfterBind);
-		h.u32(uint32_t(enabled));
+
+		if (feature_hash)
+		{
+			hash_enabled = enabled;
+			if (enabled)
+			{
+				h.u32(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES);
+				// 10th feature element.
+				// Just arbitrary to distinguish potential hashing on different
+				// sub-features of this struct at some other point.
+				h.u32(10);
+			}
+		}
+
+		if (hash_enabled)
+			h.u32(uint32_t(enabled));
+		break;
+	}
+
+	case VariantDependency::DescriptorBuffer:
+	{
+		auto *descriptor_buffer = find_pnext<VkPhysicalDeviceDescriptorBufferFeaturesEXT>(
+				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT,
+				device_pnext);
+		bool enabled = descriptor_buffer && (descriptor_buffer->descriptorBuffer ||
+		                                     descriptor_buffer->descriptorBufferPushDescriptors);
+
+		if (feature_hash)
+		{
+			hash_enabled = enabled;
+			if (enabled)
+				h.u32(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT);
+		}
+
+		if (hash_enabled)
+		{
+			h.u32(uint32_t(descriptor_buffer && descriptor_buffer->descriptorBuffer));
+			h.u32(uint32_t(descriptor_buffer && descriptor_buffer->descriptorBufferPushDescriptors));
+			// The other feature bits are highly unlikely to ever affect
+			// pipeline construction in application in any meaningful way.
+		}
 		break;
 	}
 
@@ -334,7 +434,9 @@ Hash ApplicationInfoFilter::Impl::get_bucket_hash(const VkPhysicalDeviceProperti
 		{
 			use_default_variant = false;
 			for (auto &dep : itr->second.variant_dependencies)
-				hash_variant(h, dep, props, info, device_pnext);
+				hash_variant(h, dep, props, info, device_pnext, false);
+			for (auto &dep : itr->second.variant_dependencies_feature)
+				hash_variant(h, dep, props, info, device_pnext, true);
 		}
 	}
 
@@ -346,13 +448,19 @@ Hash ApplicationInfoFilter::Impl::get_bucket_hash(const VkPhysicalDeviceProperti
 		{
 			use_default_variant = false;
 			for (auto &dep : itr->second.variant_dependencies)
-				hash_variant(h, dep, props, info, device_pnext);
+				hash_variant(h, dep, props, info, device_pnext, false);
+			for (auto &dep : itr->second.variant_dependencies_feature)
+				hash_variant(h, dep, props, info, device_pnext, true);
 		}
 	}
 
 	if (use_default_variant)
+	{
 		for (auto &dep : default_variant_dependencies)
-			hash_variant(h, dep, props, info, device_pnext);
+			hash_variant(h, dep, props, info, device_pnext, false);
+		for (auto &dep : default_variant_dependencies_feature)
+			hash_variant(h, dep, props, info, device_pnext, true);
+	}
 
 	return h.get();
 }
@@ -657,6 +765,9 @@ static bool add_application_filters(std::unordered_map<std::string, AppInfo> &ou
 		if (value.HasMember("bucketVariantDependencies"))
 			if (!parse_bucket_variant_dependencies(value["bucketVariantDependencies"], info.variant_dependencies))
 				return false;
+		if (value.HasMember("bucketVariantFeatureDependencies"))
+			if (!parse_bucket_variant_dependencies(value["bucketVariantFeatureDependencies"], info.variant_dependencies_feature))
+				return false;
 		output[itr->name.GetString()] = std::move(info);
 	}
 
@@ -702,6 +813,11 @@ bool ApplicationInfoFilter::Impl::parse(const char *path)
 	auto *default_variants = maybe_get_member(doc, "defaultBucketVariantDependencies");
 	if (default_variants)
 		if (!parse_bucket_variant_dependencies(*default_variants, default_variant_dependencies))
+			return false;
+
+	auto *default_feature_variants = maybe_get_member(doc, "defaultBucketVariantFeatureDependencies");
+	if (default_feature_variants)
+		if (!parse_bucket_variant_dependencies(*default_feature_variants, default_variant_dependencies_feature))
 			return false;
 
 	return true;
