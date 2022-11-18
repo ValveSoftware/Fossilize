@@ -90,6 +90,8 @@ struct VulkanFeatures
 	VkPhysicalDeviceMeshShaderFeaturesNV mesh_shader_nv;
 	VkPhysicalDeviceMeshShaderFeaturesEXT mesh_shader;
 	VkPhysicalDeviceDescriptorBufferFeaturesEXT descriptor_buffer;
+	VkPhysicalDeviceNonSeamlessCubeMapFeaturesEXT non_seamless_cube_map;
+	VkPhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT attachment_feedback_loop_layout;
 };
 
 void *build_pnext_chain(VulkanFeatures &features, uint32_t api_version,

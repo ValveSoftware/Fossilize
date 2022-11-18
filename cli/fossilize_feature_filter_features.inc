@@ -80,3 +80,5 @@ FE(DEPTH_CLIP_CONTROL, depth_clip_control, EXT);
 FE(MESH_SHADER, mesh_shader_nv, NV);
 FE(MESH_SHADER, mesh_shader, EXT);
 FE(DESCRIPTOR_BUFFER, descriptor_buffer, EXT);
+FE(NON_SEAMLESS_CUBE_MAP, non_seamless_cube_map, EXT);
+FE(ATTACHMENT_FEEDBACK_LOOP_LAYOUT, attachment_feedback_loop_layout, EXT);
