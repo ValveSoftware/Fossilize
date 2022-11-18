@@ -464,6 +464,7 @@ struct FeatureFilter::Impl
 	bool subpass_description2_is_supported(const VkSubpassDescription2 &sub) const;
 	bool subpass_dependency_is_supported(const VkSubpassDependency &dep) const;
 	bool subpass_dependency2_is_supported(const VkSubpassDependency2 &dep) const;
+	bool dependency_flags_is_supported(VkDependencyFlags deps) const;
 
 	bool subgroup_size_control_is_supported(const VkPipelineShaderStageCreateInfo &stage) const;
 
@@ -1112,12 +1113,16 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 bool FeatureFilter::Impl::sampler_is_supported(const VkSamplerCreateInfo *info) const
 {
 	// Only allow flags we recognize and validate.
-	constexpr VkSamplerCreateFlags supported_flags = 0;
+	constexpr VkSamplerCreateFlags supported_flags = VK_SAMPLER_CREATE_NON_SEAMLESS_CUBE_MAP_BIT_EXT;
 	if ((info->flags & ~supported_flags) != 0)
 		return false;
 
 	if (null_device)
 		return true;
+
+	if ((info->flags & VK_SAMPLER_CREATE_NON_SEAMLESS_CUBE_MAP_BIT_EXT) != 0)
+		if (!features.non_seamless_cube_map.nonSeamlessCubeMap)
+			return false;
 
 	return pnext_chain_is_supported(info->pNext);
 }
@@ -1991,6 +1996,9 @@ bool FeatureFilter::Impl::image_layout_is_supported(VkImageLayout layout) const
 	case VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL_KHR:
 		return features.synchronization2.synchronization2 == VK_TRUE;
 
+	case VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT:
+		return features.attachment_feedback_loop_layout.attachmentFeedbackLoopLayout == VK_TRUE;
+
 	default:
 		return false;
 	}
@@ -2088,13 +2096,37 @@ bool FeatureFilter::Impl::subpass_description2_is_supported(const VkSubpassDescr
 	return true;
 }
 
-bool FeatureFilter::Impl::subpass_dependency_is_supported(const VkSubpassDependency &) const
+bool FeatureFilter::Impl::dependency_flags_is_supported(VkDependencyFlags deps) const
 {
+	constexpr VkDependencyFlags supported_flags = VK_DEPENDENCY_BY_REGION_BIT |
+	                                              VK_DEPENDENCY_FEEDBACK_LOOP_BIT_EXT |
+	                                              VK_DEPENDENCY_VIEW_LOCAL_BIT;
+
+	if ((deps & ~supported_flags) != 0)
+		return false;
+
+	if ((deps & VK_DEPENDENCY_FEEDBACK_LOOP_BIT_EXT) != 0)
+		if (!features.attachment_feedback_loop_layout.attachmentFeedbackLoopLayout)
+			return false;
+
+	if ((deps & VK_DEPENDENCY_VIEW_LOCAL_BIT) != 0)
+		if (!features.multiview.multiview)
+			return false;
+
+	return true;
+}
+
+bool FeatureFilter::Impl::subpass_dependency_is_supported(const VkSubpassDependency &dep) const
+{
+	if (!dependency_flags_is_supported(dep.dependencyFlags))
+		return false;
 	return true;
 }
 
 bool FeatureFilter::Impl::subpass_dependency2_is_supported(const VkSubpassDependency2 &dep) const
 {
+	if (!dependency_flags_is_supported(dep.dependencyFlags))
+		return false;
 	if (!pnext_chain_is_supported(dep.pNext))
 		return false;
 
@@ -2243,7 +2275,9 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 			VK_PIPELINE_CREATE_LIBRARY_BIT_KHR |
 			VK_PIPELINE_CREATE_LINK_TIME_OPTIMIZATION_BIT_EXT |
 			VK_PIPELINE_CREATE_RETAIN_LINK_TIME_OPTIMIZATION_INFO_BIT_EXT |
-			VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT;
+			VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT |
+			VK_PIPELINE_CREATE_COLOR_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT |
+			VK_PIPELINE_CREATE_DEPTH_STENCIL_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT;
 
 	if ((info->flags & ~supported_flags) != 0)
 		return false;
@@ -2283,6 +2317,13 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 	if ((info->flags & VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT) != 0)
 		if (!features.descriptor_buffer.descriptorBuffer)
 			return false;
+
+	if ((info->flags & (VK_PIPELINE_CREATE_COLOR_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT |
+	                    VK_PIPELINE_CREATE_DEPTH_STENCIL_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT)) != 0)
+	{
+		if (!features.attachment_feedback_loop_layout.attachmentFeedbackLoopLayout)
+			return false;
+	}
 
 	if (info->pColorBlendState && !pnext_chain_is_supported(info->pColorBlendState->pNext))
 		return false;
