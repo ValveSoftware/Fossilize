@@ -339,7 +339,7 @@ intptr_t DatabaseInterface::export_metadata_to_os_handle(const char *name)
 
 	UnmapViewOfFile(mapped);
 	return reinterpret_cast<intptr_t>(mapping_handle);
-#else
+#elif !defined(ANDROID)
 	int fd = shm_open(name, O_RDWR | O_CREAT | O_EXCL, 0600);
 	if (fd < 0)
 	{
@@ -379,6 +379,8 @@ intptr_t DatabaseInterface::export_metadata_to_os_handle(const char *name)
 
 	munmap(mapped, size);
 	return intptr_t(fd);
+#else
+	return invalid_metadata_handle();
 #endif
 }
 
