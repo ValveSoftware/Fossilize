@@ -201,6 +201,7 @@ public:
 	// Call before init_recording_thread.
 	void set_database_enable_compression(bool enable);
 	void set_database_enable_checksum(bool enable);
+	void set_database_enable_application_feature_links(bool enable);
 
 	// These methods should only be called at the very beginning of the application lifetime.
 	// It will affect the hash of all create info structures.

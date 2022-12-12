@@ -573,6 +573,7 @@ struct StateRecorder::Impl
 
 	bool compression = false;
 	bool checksum = false;
+	bool application_feature_links = true;
 
 	void record_task(StateRecorder *recorder, bool looping);
 	void pump_synchronized_recording(StateRecorder *recorder);
@@ -5866,6 +5867,11 @@ void StateRecorder::set_database_enable_compression(bool enable)
 	impl->compression = enable;
 }
 
+void StateRecorder::set_database_enable_application_feature_links(bool enable)
+{
+	impl->application_feature_links = enable;
+}
+
 bool StateRecorder::record_application_info(const VkApplicationInfo &info)
 {
 	if (info.pNext)
@@ -9798,6 +9804,9 @@ Hash StateRecorder::Impl::get_application_link_hash(ResourceTag tag, Hash hash) 
 
 bool StateRecorder::Impl::register_application_link_hash(ResourceTag tag, Hash hash, vector<uint8_t> &blob) const
 {
+	if (!application_feature_links)
+		return false;
+
 	PayloadWriteFlags payload_flags = 0;
 	if (checksum)
 		payload_flags |= PAYLOAD_WRITE_COMPUTE_CHECKSUM_BIT;
