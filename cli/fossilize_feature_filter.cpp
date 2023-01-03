@@ -1047,8 +1047,10 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 			// YcbcrConversionCreateInfo is inlined into a VkSamplerCreateInfo when replaying from a Fossilize archive.
 			// Normally, it's not a pNext, but we pretend it is to make capture and replay
 			// a bit more sane.
-			if (!enabled_extensions.count(VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME) ||
-			    !features.ycbcr_conversion.samplerYcbcrConversion)
+			bool enabled = api_version >= VK_API_VERSION_1_1 ||
+			               enabled_extensions.count(VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME);
+
+			if (!enabled || !features.ycbcr_conversion.samplerYcbcrConversion)
 				return false;
 
 			break;
