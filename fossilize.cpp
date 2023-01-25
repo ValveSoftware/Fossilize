@@ -6903,7 +6903,8 @@ bool StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateI
 	if (info->pColorBlendState)
 	{
 		auto &blend = const_cast<VkPipelineColorBlendStateCreateInfo &>(*info->pColorBlendState);
-		blend.pAttachments = copy(blend.pAttachments, blend.attachmentCount, alloc);
+		if (!dynamic_info.color_blend_enable || !dynamic_info.color_blend_equation || !dynamic_info.color_write_mask)
+			blend.pAttachments = copy(blend.pAttachments, blend.attachmentCount, alloc);
 	}
 
 	if (info->pVertexInputState)
@@ -9463,7 +9464,7 @@ static bool json_value(const VkGraphicsPipelineCreateInfo &pipe,
 
 		bool need_blend_constants = false;
 
-		for (uint32_t i = 0; i < pipe.pColorBlendState->attachmentCount; i++)
+		for (uint32_t i = 0; pipe.pColorBlendState->pAttachments && i < pipe.pColorBlendState->attachmentCount; i++)
 		{
 			if (pipe.pColorBlendState->pAttachments[i].blendEnable &&
 			    (pipe.pColorBlendState->pAttachments[i].dstAlphaBlendFactor == VK_BLEND_FACTOR_CONSTANT_ALPHA ||
@@ -9484,7 +9485,7 @@ static bool json_value(const VkGraphicsPipelineCreateInfo &pipe,
 			blend_constants.PushBack(dynamic_info.blend_constants || !need_blend_constants ? 0.0f : c, alloc);
 		cb.AddMember("blendConstants", blend_constants, alloc);
 		Value attachments(kArrayType);
-		for (uint32_t i = 0; i < pipe.pColorBlendState->attachmentCount; i++)
+		for (uint32_t i = 0; pipe.pColorBlendState->pAttachments && i < pipe.pColorBlendState->attachmentCount; i++)
 		{
 			auto &a = pipe.pColorBlendState->pAttachments[i];
 			Value att(kObjectType);
