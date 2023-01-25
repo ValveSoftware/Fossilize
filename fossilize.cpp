@@ -475,7 +475,7 @@ struct StateRecorder::Impl
 	void *copy_pnext_struct(const VkFragmentShadingRateAttachmentInfoKHR *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPipelineRenderingCreateInfoKHR *create_info,
-	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	                        ScratchAllocator &alloc, bool have_fragment_out_stage) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPhysicalDeviceRobustness2FeaturesEXT *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPhysicalDeviceImageRobustnessFeaturesEXT *create_info,
@@ -581,7 +581,7 @@ struct StateRecorder::Impl
 	template <typename T>
 	T *copy(const T *src, size_t count, ScratchAllocator &alloc);
 	bool copy_pnext_chain(const void *pNext, ScratchAllocator &alloc, const void **out_pnext,
-	                      const DynamicStateInfo *dynamic_state_info) FOSSILIZE_WARN_UNUSED;
+	                      const DynamicStateInfo *dynamic_state_info, bool have_fragment_out_stage=true) FOSSILIZE_WARN_UNUSED;
 	template <typename T>
 	bool copy_pnext_chains(const T *ts, uint32_t count, ScratchAllocator &alloc,
 	                       const DynamicStateInfo *dynamic_state_info) FOSSILIZE_WARN_UNUSED;
@@ -5357,10 +5357,20 @@ void *StateRecorder::Impl::copy_pnext_struct(const VkFragmentShadingRateAttachme
 }
 
 void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineRenderingCreateInfoKHR *create_info,
-                                             ScratchAllocator &alloc)
+                                             ScratchAllocator &alloc, bool have_fragment_out_stage)
 {
 	auto *rendering = copy(create_info, 1, alloc);
-	rendering->pColorAttachmentFormats = copy(rendering->pColorAttachmentFormats, rendering->colorAttachmentCount, alloc);
+	if (have_fragment_out_stage)
+	{
+		rendering->pColorAttachmentFormats = copy(rendering->pColorAttachmentFormats, rendering->colorAttachmentCount, alloc);
+	}
+	else
+	{
+		rendering->colorAttachmentCount = 0;
+		rendering->pColorAttachmentFormats = nullptr;
+		rendering->depthAttachmentFormat = VK_FORMAT_UNDEFINED;
+		rendering->stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
+	}
 	return rendering;
 }
 
@@ -5498,7 +5508,7 @@ bool StateRecorder::Impl::copy_pnext_chains(const T *ts, uint32_t count, Scratch
 }
 
 bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &alloc, const void **out_pnext,
-                                           const DynamicStateInfo *dynamic_state_info)
+                                           const DynamicStateInfo *dynamic_state_info, bool have_fragment_out_stage)
 {
 	VkBaseInStructure new_pnext = {};
 	const VkBaseInStructure **ppNext = &new_pnext.pNext;
@@ -5623,7 +5633,7 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 		case VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR:
 		{
 			auto *ci = static_cast<const VkPipelineRenderingCreateInfoKHR *>(pNext);
-			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc, have_fragment_out_stage));
 			break;
 		}
 
@@ -6939,7 +6949,7 @@ bool StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateI
 			ms.pSampleMask = copy(ms.pSampleMask, (ms.rasterizationSamples + 31) / 32, alloc);
 	}
 
-	if (!copy_pnext_chain(info->pNext, alloc, &info->pNext, &dynamic_info))
+	if (!copy_pnext_chain(info->pNext, alloc, &info->pNext, &dynamic_info, global_info.color_blend_state))
 		return false;
 
 	*out_create_info = info;
