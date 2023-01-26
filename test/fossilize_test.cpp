@@ -1305,7 +1305,7 @@ static void record_graphics_pipelines_robustness(StateRecorder &recorder)
 
 	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_RASTERIZATION_SAMPLES_EXT,
 	                                  reinterpret_cast<uint32_t *>(&ms.rasterizationSamples), nullptr,
-	                                  {}, [&]() { ms.rasterizationSamples = static_cast<VkSampleCountFlagBits>(100000000); }});
+	                                  {}, [&]() { ms.rasterizationSamples = static_cast<VkSampleCountFlagBits>(16); }});
 	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_SAMPLE_MASK_EXT,
 	                                  &sample_mask, nullptr,
 	                                  {}, [&]() { ms.rasterizationSamples = VK_SAMPLE_COUNT_64_BIT; set_invalid_pointer(ms.pSampleMask); }});
