@@ -442,7 +442,8 @@ struct StateRecorder::Impl
 
 	template <typename SubCreateInfo>
 	bool copy_sub_create_info(const SubCreateInfo *&info, ScratchAllocator &alloc,
-	                          const DynamicStateInfo *dynamic_state_info) FOSSILIZE_WARN_UNUSED;
+	                          const DynamicStateInfo *dynamic_state_info,
+	                          VkGraphicsPipelineLibraryFlagsEXT state_flags) FOSSILIZE_WARN_UNUSED;
 
 	void *copy_pnext_struct(const VkPipelineTessellationDomainOriginStateCreateInfo *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
@@ -475,7 +476,8 @@ struct StateRecorder::Impl
 	void *copy_pnext_struct(const VkFragmentShadingRateAttachmentInfoKHR *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPipelineRenderingCreateInfoKHR *create_info,
-	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	                        ScratchAllocator &alloc,
+	                        VkGraphicsPipelineLibraryFlagsEXT state_flags) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPhysicalDeviceRobustness2FeaturesEXT *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPhysicalDeviceImageRobustnessFeaturesEXT *create_info,
@@ -581,10 +583,12 @@ struct StateRecorder::Impl
 	template <typename T>
 	T *copy(const T *src, size_t count, ScratchAllocator &alloc);
 	bool copy_pnext_chain(const void *pNext, ScratchAllocator &alloc, const void **out_pnext,
-	                      const DynamicStateInfo *dynamic_state_info) FOSSILIZE_WARN_UNUSED;
+	                      const DynamicStateInfo *dynamic_state_info,
+	                      VkGraphicsPipelineLibraryFlagsEXT state_flags) FOSSILIZE_WARN_UNUSED;
 	template <typename T>
 	bool copy_pnext_chains(const T *ts, uint32_t count, ScratchAllocator &alloc,
-	                       const DynamicStateInfo *dynamic_state_info) FOSSILIZE_WARN_UNUSED;
+	                       const DynamicStateInfo *dynamic_state_info,
+	                       VkGraphicsPipelineLibraryFlagsEXT state_flags) FOSSILIZE_WARN_UNUSED;
 
 	bool copy_pnext_chain_pdf2(const void *pNext, ScratchAllocator &alloc, void **out_pnext) FOSSILIZE_WARN_UNUSED;
 
@@ -804,7 +808,8 @@ static Hash compute_hash_application_info_link(Hash app_hash, ResourceTag tag, H
 }
 
 static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const void *pNext,
-                             const DynamicStateInfo *dynamic_state_info) FOSSILIZE_WARN_UNUSED;
+                             const DynamicStateInfo *dynamic_state_info,
+                             VkGraphicsPipelineLibraryFlagsEXT state_flags) FOSSILIZE_WARN_UNUSED;
 
 bool compute_hash_sampler(const VkSamplerCreateInfo &sampler, Hash *out_hash)
 {
@@ -830,7 +835,7 @@ bool compute_hash_sampler(const VkSamplerCreateInfo &sampler, Hash *out_hash)
 	h.u32(sampler.borderColor);
 	h.u32(sampler.unnormalizedCoordinates);
 
-	if (!hash_pnext_chain(nullptr, h, sampler.pNext, nullptr))
+	if (!hash_pnext_chain(nullptr, h, sampler.pNext, nullptr, 0))
 		return false;
 
 	*out_hash = h.get();
@@ -879,7 +884,7 @@ bool compute_hash_descriptor_set_layout(const StateRecorder &recorder, const VkD
 		}
 	}
 
-	if (!hash_pnext_chain(&recorder, h, layout.pNext, nullptr))
+	if (!hash_pnext_chain(&recorder, h, layout.pNext, nullptr, 0))
 		return false;
 
 	*out_hash = h.get();
@@ -1115,7 +1120,7 @@ static bool hash_pnext_struct(const StateRecorder *recorder,
 		const VkStructureType expected = VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_STENCIL_LAYOUT;
 		if (!validate_pnext_chain(info.pDepthStencilResolveAttachment->pNext, &expected, 1))
 			return false;
-		if (!hash_pnext_chain(recorder, h, info.pDepthStencilResolveAttachment->pNext, nullptr))
+		if (!hash_pnext_chain(recorder, h, info.pDepthStencilResolveAttachment->pNext, nullptr, 0))
 			return false;
 	}
 	else
@@ -1133,14 +1138,29 @@ static void hash_pnext_struct(const StateRecorder *,
 
 static void hash_pnext_struct(const StateRecorder *,
                               Hasher &h,
-                              const VkPipelineRenderingCreateInfoKHR &info)
+                              const VkPipelineRenderingCreateInfoKHR &info,
+                              VkGraphicsPipelineLibraryFlagsEXT state_flags)
 {
-	h.u32(info.colorAttachmentCount);
-	h.u32(info.viewMask);
-	for (uint32_t i = 0; i < info.colorAttachmentCount; i++)
-		h.u32(info.pColorAttachmentFormats[i]);
-	h.u32(info.depthAttachmentFormat);
-	h.u32(info.stencilAttachmentFormat);
+	bool format_sensitive = (state_flags & VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_OUTPUT_INTERFACE_BIT_EXT) != 0;
+	bool view_mask_sensitive = (state_flags & (VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_OUTPUT_INTERFACE_BIT_EXT |
+	                                           VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT |
+	                                           VK_GRAPHICS_PIPELINE_LIBRARY_PRE_RASTERIZATION_SHADERS_BIT_EXT)) != 0;
+
+	// Keep hash order for hash compat.
+
+	if (format_sensitive)
+		h.u32(info.colorAttachmentCount);
+
+	if (view_mask_sensitive)
+		h.u32(info.viewMask);
+
+	if (format_sensitive)
+	{
+		for (uint32_t i = 0; i < info.colorAttachmentCount; i++)
+			h.u32(info.pColorAttachmentFormats[i]);
+		h.u32(info.depthAttachmentFormat);
+		h.u32(info.stencilAttachmentFormat);
+	}
 }
 
 static void hash_pnext_struct(const StateRecorder *,
@@ -1316,7 +1336,8 @@ static void hash_pnext_struct(const StateRecorder *,
 }
 
 static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const void *pNext,
-                             const DynamicStateInfo *dynamic_state_info)
+                             const DynamicStateInfo *dynamic_state_info,
+                             VkGraphicsPipelineLibraryFlagsEXT state_flags)
 {
 	while ((pNext = pnext_chain_skip_ignored_entries(pNext)) != nullptr)
 	{
@@ -1395,7 +1416,7 @@ static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const voi
 			break;
 
 		case VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR:
-			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineRenderingCreateInfoKHR *>(pNext));
+			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineRenderingCreateInfoKHR *>(pNext), state_flags);
 			break;
 
 		case VK_STRUCTURE_TYPE_PIPELINE_COLOR_WRITE_CREATE_INFO_EXT:
@@ -1493,7 +1514,7 @@ static bool compute_hash_stage(const StateRecorder &recorder, Hasher &h, const V
 	else
 		h.u32(0);
 
-	if (!hash_pnext_chain(&recorder, h, stage.pNext, nullptr))
+	if (!hash_pnext_chain(&recorder, h, stage.pNext, nullptr, 0))
 		return false;
 
 	return true;
@@ -1751,7 +1772,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 		h.u32(state.flags);
 		for (uint32_t i = 0; i < state.dynamicStateCount; i++)
 			h.u32(state.pDynamicStates[i]);
-		if (!hash_pnext_chain(&recorder, h, state.pNext, &dynamic_info))
+		if (!hash_pnext_chain(&recorder, h, state.pNext, &dynamic_info, state_flags))
 			return false;
 	}
 	else
@@ -1802,7 +1823,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 			}
 		}
 
-		if (!hash_pnext_chain(&recorder, h, ds.pNext, &dynamic_info))
+		if (!hash_pnext_chain(&recorder, h, ds.pNext, &dynamic_info, state_flags))
 			return false;
 	}
 	else
@@ -1816,7 +1837,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 		// Dynamic 3 makes this fully ignored, but it depends on a property. For sanity's sake we need to hash this.
 		h.u32(ia.topology);
 
-		if (!hash_pnext_chain(&recorder, h, ia.pNext, &dynamic_info))
+		if (!hash_pnext_chain(&recorder, h, ia.pNext, &dynamic_info, state_flags))
 			return false;
 	}
 	else
@@ -1843,7 +1864,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 		if (!dynamic_info.line_width)
 			h.f32(rs.lineWidth);
 
-		if (!hash_pnext_chain(&recorder, h, rs.pNext, &dynamic_info))
+		if (!hash_pnext_chain(&recorder, h, rs.pNext, &dynamic_info, state_flags))
 			return false;
 	}
 	else
@@ -1867,7 +1888,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 		else
 			h.u32(0);
 
-		if (!hash_pnext_chain(&recorder, h, ms.pNext, &dynamic_info))
+		if (!hash_pnext_chain(&recorder, h, ms.pNext, &dynamic_info, state_flags))
 			return false;
 	}
 
@@ -1902,7 +1923,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 			}
 		}
 
-		if (!hash_pnext_chain(&recorder, h, vp.pNext, &dynamic_info))
+		if (!hash_pnext_chain(&recorder, h, vp.pNext, &dynamic_info, state_flags))
 			return false;
 	}
 	else
@@ -1930,7 +1951,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 			h.u32(dynamic_info.vertex_input_binding_stride ? 0 : vi.pVertexBindingDescriptions[i].stride);
 		}
 
-		if (!hash_pnext_chain(&recorder, h, vi.pNext, &dynamic_info))
+		if (!hash_pnext_chain(&recorder, h, vi.pNext, &dynamic_info, state_flags))
 			return false;
 	}
 	else
@@ -1985,7 +2006,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 			for (auto &blend_const : b.blendConstants)
 				h.f32(blend_const);
 
-		if (!hash_pnext_chain(&recorder, h, b.pNext, &dynamic_info))
+		if (!hash_pnext_chain(&recorder, h, b.pNext, &dynamic_info, state_flags))
 			return false;
 	}
 	else
@@ -1997,7 +2018,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 		h.u32(tess.flags);
 		h.u32(dynamic_info.patch_control_points ? 0 : tess.patchControlPoints);
 
-		if (!hash_pnext_chain(&recorder, h, tess.pNext, &dynamic_info))
+		if (!hash_pnext_chain(&recorder, h, tess.pNext, &dynamic_info, state_flags))
 			return false;
 	}
 	else
@@ -2013,7 +2034,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 		}
 	}
 
-	if (!hash_pnext_chain(&recorder, h, create_info.pNext, &dynamic_info))
+	if (!hash_pnext_chain(&recorder, h, create_info.pNext, &dynamic_info, state_flags))
 		return false;
 
 	*out_hash = h.get();
@@ -2075,10 +2096,10 @@ bool compute_hash_compute_pipeline(const StateRecorder &recorder, const VkComput
 	else
 		h.u32(0);
 
-	if (!hash_pnext_chain(&recorder, h, create_info.stage.pNext, nullptr))
+	if (!hash_pnext_chain(&recorder, h, create_info.stage.pNext, nullptr, 0))
 		return false;
 
-	if (!hash_pnext_chain(&recorder, h, create_info.pNext, nullptr))
+	if (!hash_pnext_chain(&recorder, h, create_info.pNext, nullptr, 0))
 		return false;
 
 	*out_hash = h.get();
@@ -2127,7 +2148,7 @@ bool compute_hash_raytracing_pipeline(const StateRecorder &recorder,
 	{
 		h.u32(create_info.pLibraryInterface->maxPipelineRayHitAttributeSize);
 		h.u32(create_info.pLibraryInterface->maxPipelineRayPayloadSize);
-		if (!hash_pnext_chain(&recorder, h, create_info.pLibraryInterface->pNext, nullptr))
+		if (!hash_pnext_chain(&recorder, h, create_info.pLibraryInterface->pNext, nullptr, 0))
 			return false;
 	}
 	else
@@ -2139,7 +2160,7 @@ bool compute_hash_raytracing_pipeline(const StateRecorder &recorder,
 		h.u32(create_info.pDynamicState->flags);
 		for (uint32_t i = 0; i < create_info.pDynamicState->dynamicStateCount; i++)
 			h.u32(create_info.pDynamicState->pDynamicStates[i]);
-		if (!hash_pnext_chain(&recorder, h, create_info.pDynamicState->pNext, nullptr))
+		if (!hash_pnext_chain(&recorder, h, create_info.pDynamicState->pNext, nullptr, 0))
 			return false;
 	}
 	else
@@ -2154,7 +2175,7 @@ bool compute_hash_raytracing_pipeline(const StateRecorder &recorder,
 		h.u32(group.closestHitShader);
 		h.u32(group.generalShader);
 		h.u32(group.intersectionShader);
-		if (!hash_pnext_chain(&recorder, h, group.pNext, nullptr))
+		if (!hash_pnext_chain(&recorder, h, group.pNext, nullptr, 0))
 			return false;
 	}
 
@@ -2162,13 +2183,13 @@ bool compute_hash_raytracing_pipeline(const StateRecorder &recorder,
 	{
 		if (!hash_pnext_struct(&recorder, h, *create_info.pLibraryInfo))
 			return false;
-		if (!hash_pnext_chain(&recorder, h, create_info.pLibraryInfo->pNext, nullptr))
+		if (!hash_pnext_chain(&recorder, h, create_info.pLibraryInfo->pNext, nullptr, 0))
 			return false;
 	}
 	else
 		h.u32(0);
 
-	if (!hash_pnext_chain(&recorder, h, create_info.pNext, nullptr))
+	if (!hash_pnext_chain(&recorder, h, create_info.pNext, nullptr, 0))
 		return false;
 
 	*out_hash = h.get();
@@ -2197,7 +2218,7 @@ static void hash_attachment(Hasher &h, const VkAttachmentDescription &att)
 static bool hash_attachment2(Hasher &h, const VkAttachmentDescription2 &att)
 {
 	hash_attachment_base(h, att);
-	return hash_pnext_chain(nullptr, h, att.pNext, nullptr);
+	return hash_pnext_chain(nullptr, h, att.pNext, nullptr, 0);
 }
 
 template <typename Dep>
@@ -2221,7 +2242,7 @@ static bool hash_dependency2(Hasher &h, const VkSubpassDependency2 &dep)
 {
 	hash_dependency_base(h, dep);
 	h.s32(dep.viewOffset);
-	return hash_pnext_chain(nullptr, h, dep.pNext, nullptr);
+	return hash_pnext_chain(nullptr, h, dep.pNext, nullptr, 0);
 }
 
 static bool hash_reference_base(Hasher &h, const VkAttachmentReference &ref)
@@ -2236,7 +2257,7 @@ static bool hash_reference_base(Hasher &h, const VkAttachmentReference2 &ref)
 	h.u32(ref.attachment);
 	h.u32(ref.layout);
 	h.u32(ref.aspectMask);
-	return hash_pnext_chain(nullptr, h, ref.pNext, nullptr);
+	return hash_pnext_chain(nullptr, h, ref.pNext, nullptr, 0);
 }
 
 template <typename Subpass>
@@ -2284,7 +2305,7 @@ static bool hash_subpass2(Hasher &h, const VkSubpassDescription2 &subpass)
 	if (!hash_subpass_base(h, subpass))
 		return false;
 	h.u32(subpass.viewMask);
-	return hash_pnext_chain(nullptr, h, subpass.pNext, nullptr);
+	return hash_pnext_chain(nullptr, h, subpass.pNext, nullptr, 0);
 }
 
 bool compute_hash_render_pass(const VkRenderPassCreateInfo &create_info, Hash *out_hash)
@@ -2317,7 +2338,7 @@ bool compute_hash_render_pass(const VkRenderPassCreateInfo &create_info, Hash *o
 		hash_subpass(h, subpass);
 	}
 
-	if (!hash_pnext_chain(nullptr, h, create_info.pNext, nullptr))
+	if (!hash_pnext_chain(nullptr, h, create_info.pNext, nullptr, 0))
 		return false;
 
 	*out_hash = h.get();
@@ -2359,7 +2380,7 @@ bool compute_hash_render_pass2(const VkRenderPassCreateInfo2 &create_info, Hash 
 	for (uint32_t i = 0; i < create_info.correlatedViewMaskCount; i++)
 		h.u32(create_info.pCorrelatedViewMasks[i]);
 
-	if (!hash_pnext_chain(nullptr, h, create_info.pNext, nullptr))
+	if (!hash_pnext_chain(nullptr, h, create_info.pNext, nullptr, 0))
 		return false;
 
 	*out_hash = h.get();
@@ -5326,7 +5347,7 @@ void *StateRecorder::Impl::copy_pnext_struct(const VkSubpassDescriptionDepthSten
 	if (resolve->pDepthStencilResolveAttachment)
 	{
 		auto *att = copy(resolve->pDepthStencilResolveAttachment, 1, alloc);
-		if (!copy_pnext_chain(att->pNext, alloc, &att->pNext, nullptr))
+		if (!copy_pnext_chain(att->pNext, alloc, &att->pNext, nullptr, 0))
 			return nullptr;
 		resolve->pDepthStencilResolveAttachment = att;
 	}
@@ -5341,7 +5362,7 @@ void *StateRecorder::Impl::copy_pnext_struct(const VkFragmentShadingRateAttachme
 	if (resolve->pFragmentShadingRateAttachment)
 	{
 		auto *att = copy(resolve->pFragmentShadingRateAttachment, 1, alloc);
-		if (!copy_pnext_chain(att->pNext, alloc, &att->pNext, nullptr))
+		if (!copy_pnext_chain(att->pNext, alloc, &att->pNext, nullptr, 0))
 			return nullptr;
 		resolve->pFragmentShadingRateAttachment = att;
 	}
@@ -5350,10 +5371,31 @@ void *StateRecorder::Impl::copy_pnext_struct(const VkFragmentShadingRateAttachme
 }
 
 void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineRenderingCreateInfoKHR *create_info,
-                                             ScratchAllocator &alloc)
+                                             ScratchAllocator &alloc,
+                                             VkGraphicsPipelineLibraryFlagsEXT state_flags)
 {
 	auto *rendering = copy(create_info, 1, alloc);
-	rendering->pColorAttachmentFormats = copy(rendering->pColorAttachmentFormats, rendering->colorAttachmentCount, alloc);
+
+	bool view_mask_sensitive = (state_flags & (VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_OUTPUT_INTERFACE_BIT_EXT |
+	                                           VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT |
+	                                           VK_GRAPHICS_PIPELINE_LIBRARY_PRE_RASTERIZATION_SHADERS_BIT_EXT)) != 0;
+	bool format_sensitive = (state_flags & VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_OUTPUT_INTERFACE_BIT_EXT) != 0;
+
+	if (format_sensitive)
+	{
+		rendering->pColorAttachmentFormats =
+				copy(rendering->pColorAttachmentFormats, rendering->colorAttachmentCount, alloc);
+	}
+	else
+	{
+		rendering->colorAttachmentCount = 0;
+		rendering->pColorAttachmentFormats = nullptr;
+		rendering->depthAttachmentFormat = VK_FORMAT_UNDEFINED;
+		rendering->stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
+		if (!view_mask_sensitive)
+			rendering->viewMask = 0;
+	}
+
 	return rendering;
 }
 
@@ -5482,16 +5524,18 @@ void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineViewportDepthClipCo
 
 template <typename T>
 bool StateRecorder::Impl::copy_pnext_chains(const T *ts, uint32_t count, ScratchAllocator &alloc,
-                                            const DynamicStateInfo *dynamic_state_info)
+                                            const DynamicStateInfo *dynamic_state_info,
+                                            VkGraphicsPipelineLibraryFlagsEXT state_flags)
 {
 	for (uint32_t i = 0; i < count; i++)
-		if (!copy_pnext_chain(ts[i].pNext, alloc, &const_cast<T&>(ts[i]).pNext, dynamic_state_info))
+		if (!copy_pnext_chain(ts[i].pNext, alloc, &const_cast<T&>(ts[i]).pNext, dynamic_state_info, state_flags))
 			return false;
 	return true;
 }
 
 bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &alloc, const void **out_pnext,
-                                           const DynamicStateInfo *dynamic_state_info)
+                                           const DynamicStateInfo *dynamic_state_info,
+                                           VkGraphicsPipelineLibraryFlagsEXT state_flags)
 {
 	VkBaseInStructure new_pnext = {};
 	const VkBaseInStructure **ppNext = &new_pnext.pNext;
@@ -5616,7 +5660,7 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 		case VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR:
 		{
 			auto *ci = static_cast<const VkPipelineRenderingCreateInfoKHR *>(pNext);
-			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc, state_flags));
 			break;
 		}
 
@@ -6393,7 +6437,7 @@ bool StateRecorder::Impl::copy_shader_module(const VkShaderModuleCreateInfo *cre
 
 	if (ignore_pnext)
 		info->pNext = nullptr;
-	else if (!copy_pnext_chain(info->pNext, alloc, &info->pNext, nullptr))
+	else if (!copy_pnext_chain(info->pNext, alloc, &info->pNext, nullptr, 0))
 		return false;
 
 	info->pCode = copy(info->pCode, info->codeSize / sizeof(uint32_t), alloc);
@@ -6411,7 +6455,7 @@ bool StateRecorder::Impl::copy_sampler(const VkSamplerCreateInfo *create_info, S
 			VK_SAMPLER_CREATE_DESCRIPTOR_BUFFER_CAPTURE_REPLAY_BIT_EXT;
 	info->flags &= ~ignore_capture_replay_flags;
 
-	if (!copy_pnext_chain(info->pNext, alloc, &info->pNext, nullptr))
+	if (!copy_pnext_chain(info->pNext, alloc, &info->pNext, nullptr, 0))
 		return false;
 
 	*out_create_info = info;
@@ -6612,7 +6656,7 @@ bool StateRecorder::Impl::copy_descriptor_set_layout(
 		}
 	}
 
-	if (!copy_pnext_chain(create_info->pNext, alloc, &info->pNext, nullptr))
+	if (!copy_pnext_chain(create_info->pNext, alloc, &info->pNext, nullptr, 0))
 		return false;
 
 	*out_create_info = info;
@@ -6692,7 +6736,7 @@ bool StateRecorder::Impl::copy_stages(CreateInfo *info, ScratchAllocator &alloc,
 				return false;
 
 		const void *pNext = nullptr;
-		if (!copy_pnext_chain(stage.pNext, alloc, &pNext, dynamic_state_info))
+		if (!copy_pnext_chain(stage.pNext, alloc, &pNext, dynamic_state_info, 0))
 			return false;
 		stage.pNext = pNext;
 	}
@@ -6726,13 +6770,14 @@ bool StateRecorder::Impl::copy_dynamic_state(CreateInfo *info, ScratchAllocator 
 
 template <typename SubCreateInfo>
 bool StateRecorder::Impl::copy_sub_create_info(const SubCreateInfo *&sub_info, ScratchAllocator &alloc,
-                                               const DynamicStateInfo *dynamic_state_info)
+                                               const DynamicStateInfo *dynamic_state_info,
+                                               VkGraphicsPipelineLibraryFlagsEXT state_flags)
 {
 	if (sub_info)
 	{
 		sub_info = copy(sub_info, 1, alloc);
 		const void *pNext = nullptr;
-		if (!copy_pnext_chain(sub_info->pNext, alloc, &pNext, dynamic_state_info))
+		if (!copy_pnext_chain(sub_info->pNext, alloc, &pNext, dynamic_state_info, state_flags))
 			return false;
 		const_cast<SubCreateInfo *>(sub_info)->pNext = pNext;
 	}
@@ -6756,10 +6801,10 @@ bool StateRecorder::Impl::copy_compute_pipeline(const VkComputePipelineCreateInf
 
 	info->stage.pName = copy(info->stage.pName, strlen(info->stage.pName) + 1, alloc);
 
-	if (!copy_pnext_chain(info->stage.pNext, alloc, &info->stage.pNext, nullptr))
+	if (!copy_pnext_chain(info->stage.pNext, alloc, &info->stage.pNext, nullptr, 0))
 		return false;
 
-	if (!copy_pnext_chain(info->pNext, alloc, &info->pNext, nullptr))
+	if (!copy_pnext_chain(info->pNext, alloc, &info->pNext, nullptr, 0))
 		return false;
 
 	*out_create_info = info;
@@ -6782,9 +6827,9 @@ bool StateRecorder::Impl::copy_raytracing_pipeline(const VkRayTracingPipelineCre
 	if (!copy_dynamic_state(info, alloc, nullptr))
 		return false;
 
-	if (!copy_sub_create_info(info->pLibraryInfo, alloc, nullptr))
+	if (!copy_sub_create_info(info->pLibraryInfo, alloc, nullptr, 0))
 		return false;
-	if (!copy_sub_create_info(info->pLibraryInterface, alloc, nullptr))
+	if (!copy_sub_create_info(info->pLibraryInterface, alloc, nullptr, 0))
 		return false;
 
 	if (info->pLibraryInfo)
@@ -6798,13 +6843,13 @@ bool StateRecorder::Impl::copy_raytracing_pipeline(const VkRayTracingPipelineCre
 	{
 		auto &group = const_cast<VkRayTracingShaderGroupCreateInfoKHR &>(info->pGroups[i]);
 		const void *pNext = nullptr;
-		if (!copy_pnext_chain(group.pNext, alloc, &pNext, nullptr))
+		if (!copy_pnext_chain(group.pNext, alloc, &pNext, nullptr, 0))
 			return false;
 		group.pNext = pNext;
 		group.pShaderGroupCaptureReplayHandle = nullptr;
 	}
 
-	if (!copy_pnext_chain(info->pNext, alloc, &info->pNext, nullptr))
+	if (!copy_pnext_chain(info->pNext, alloc, &info->pNext, nullptr, 0))
 		return false;
 
 	*out_info = info;
@@ -6828,6 +6873,7 @@ bool StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateI
 	if (create_info->pDynamicState)
 		dynamic_info = Hashing::parse_dynamic_state_info(*create_info->pDynamicState);
 	GlobalStateInfo global_info = Hashing::parse_global_state_info(*create_info, dynamic_info, subpass_meta);
+	auto state_flags = graphics_pipeline_get_effective_state_flags(*info);
 
 	// Remove pointers which a driver must ignore depending on other state.
 	if (!global_info.input_assembly)
@@ -6862,21 +6908,21 @@ bool StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateI
 	if (!update_derived_pipeline(info, base_pipelines, base_pipeline_count))
 		return false;
 
-	if (!copy_sub_create_info(info->pTessellationState, alloc, &dynamic_info))
+	if (!copy_sub_create_info(info->pTessellationState, alloc, &dynamic_info, state_flags))
 		return false;
-	if (!copy_sub_create_info(info->pColorBlendState, alloc, &dynamic_info))
+	if (!copy_sub_create_info(info->pColorBlendState, alloc, &dynamic_info, state_flags))
 		return false;
-	if (!copy_sub_create_info(info->pVertexInputState, alloc, &dynamic_info))
+	if (!copy_sub_create_info(info->pVertexInputState, alloc, &dynamic_info, state_flags))
 		return false;
-	if (!copy_sub_create_info(info->pMultisampleState, alloc, &dynamic_info))
+	if (!copy_sub_create_info(info->pMultisampleState, alloc, &dynamic_info, state_flags))
 		return false;
-	if (!copy_sub_create_info(info->pViewportState, alloc, &dynamic_info))
+	if (!copy_sub_create_info(info->pViewportState, alloc, &dynamic_info, state_flags))
 		return false;
-	if (!copy_sub_create_info(info->pInputAssemblyState, alloc, &dynamic_info))
+	if (!copy_sub_create_info(info->pInputAssemblyState, alloc, &dynamic_info, state_flags))
 		return false;
-	if (!copy_sub_create_info(info->pDepthStencilState, alloc, &dynamic_info))
+	if (!copy_sub_create_info(info->pDepthStencilState, alloc, &dynamic_info, state_flags))
 		return false;
-	if (!copy_sub_create_info(info->pRasterizationState, alloc, &dynamic_info))
+	if (!copy_sub_create_info(info->pRasterizationState, alloc, &dynamic_info, state_flags))
 		return false;
 
 	if (global_info.module_state)
@@ -6927,7 +6973,7 @@ bool StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateI
 			ms.pSampleMask = copy(ms.pSampleMask, (ms.rasterizationSamples + 31) / 32, alloc);
 	}
 
-	if (!copy_pnext_chain(info->pNext, alloc, &info->pNext, &dynamic_info))
+	if (!copy_pnext_chain(info->pNext, alloc, &info->pNext, &dynamic_info, state_flags))
 		return false;
 
 	*out_create_info = info;
@@ -6957,7 +7003,7 @@ bool StateRecorder::Impl::copy_render_pass(const VkRenderPassCreateInfo *create_
 			sub.pPreserveAttachments = copy(sub.pPreserveAttachments, sub.preserveAttachmentCount, alloc);
 	}
 
-	if (!copy_pnext_chain(create_info->pNext, alloc, &info->pNext, nullptr))
+	if (!copy_pnext_chain(create_info->pNext, alloc, &info->pNext, nullptr, 0))
 		return false;
 
 	*out_create_info = info;
@@ -6973,11 +7019,11 @@ bool StateRecorder::Impl::copy_render_pass2(const VkRenderPassCreateInfo2 *creat
 	info->pDependencies = copy(info->pDependencies, info->dependencyCount, alloc);
 	info->pCorrelatedViewMasks = copy(info->pCorrelatedViewMasks, info->correlatedViewMaskCount, alloc);
 
-	if (info->pAttachments && !copy_pnext_chains(info->pAttachments, info->attachmentCount, alloc, nullptr))
+	if (info->pAttachments && !copy_pnext_chains(info->pAttachments, info->attachmentCount, alloc, nullptr, 0))
 		return false;
-	if (info->pSubpasses && !copy_pnext_chains(info->pSubpasses, info->subpassCount, alloc, nullptr))
+	if (info->pSubpasses && !copy_pnext_chains(info->pSubpasses, info->subpassCount, alloc, nullptr, 0))
 		return false;
-	if (info->pDependencies && !copy_pnext_chains(info->pDependencies, info->dependencyCount, alloc, nullptr))
+	if (info->pDependencies && !copy_pnext_chains(info->pDependencies, info->dependencyCount, alloc, nullptr, 0))
 		return false;
 
 	for (uint32_t i = 0; i < info->subpassCount; i++)
@@ -6994,17 +7040,17 @@ bool StateRecorder::Impl::copy_render_pass2(const VkRenderPassCreateInfo2 *creat
 		if (sub.pPreserveAttachments)
 			sub.pPreserveAttachments = copy(sub.pPreserveAttachments, sub.preserveAttachmentCount, alloc);
 
-		if (sub.pColorAttachments && !copy_pnext_chains(sub.pColorAttachments, sub.colorAttachmentCount, alloc, nullptr))
+		if (sub.pColorAttachments && !copy_pnext_chains(sub.pColorAttachments, sub.colorAttachmentCount, alloc, nullptr, 0))
 			return false;
-		if (sub.pInputAttachments && !copy_pnext_chains(sub.pInputAttachments, sub.inputAttachmentCount, alloc, nullptr))
+		if (sub.pInputAttachments && !copy_pnext_chains(sub.pInputAttachments, sub.inputAttachmentCount, alloc, nullptr, 0))
 			return false;
-		if (sub.pResolveAttachments && !copy_pnext_chains(sub.pResolveAttachments, sub.colorAttachmentCount, alloc, nullptr))
+		if (sub.pResolveAttachments && !copy_pnext_chains(sub.pResolveAttachments, sub.colorAttachmentCount, alloc, nullptr, 0))
 			return false;
-		if (sub.pDepthStencilAttachment && !copy_pnext_chains(sub.pDepthStencilAttachment, 1, alloc, nullptr))
+		if (sub.pDepthStencilAttachment && !copy_pnext_chains(sub.pDepthStencilAttachment, 1, alloc, nullptr, 0))
 			return false;
 	}
 
-	if (!copy_pnext_chain(create_info->pNext, alloc, &info->pNext, nullptr))
+	if (!copy_pnext_chain(create_info->pNext, alloc, &info->pNext, nullptr, 0))
 		return false;
 
 	*out_create_info = info;
