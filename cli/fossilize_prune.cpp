@@ -59,6 +59,21 @@ static inline T fake_handle(uint64_t v)
 	return (T)v;
 }
 
+template <typename T>
+static inline const T *find_pnext(VkStructureType type, const void *pNext)
+{
+	while (pNext != nullptr)
+	{
+		auto *sin = static_cast<const VkBaseInStructure *>(pNext);
+		if (sin->sType == type)
+			return static_cast<const T*>(pNext);
+
+		pNext = sin->pNext;
+	}
+
+	return nullptr;
+}
+
 struct PruneReplayer : StateCreatorInterface
 {
 	unordered_set<Hash> accessed_samplers;
@@ -81,7 +96,9 @@ struct PruneReplayer : StateCreatorInterface
 	unordered_map<Hash, const VkDescriptorSetLayoutCreateInfo *> descriptor_sets;
 	unordered_map<Hash, const VkPipelineLayoutCreateInfo *> pipeline_layouts;
 	unordered_map<Hash, const VkRayTracingPipelineCreateInfoKHR *> raytracing_pipelines;
+	unordered_map<Hash, const VkGraphicsPipelineCreateInfo *> graphics_pipelines;
 	unordered_map<Hash, const VkRayTracingPipelineCreateInfoKHR *> library_raytracing_pipelines;
+	unordered_map<Hash, const VkGraphicsPipelineCreateInfo *> library_graphics_pipelines;
 
 	unordered_set<Hash> filtered_blob_hashes[RESOURCE_COUNT];
 
@@ -270,10 +287,10 @@ struct PruneReplayer : StateCreatorInterface
 	bool enqueue_create_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
 		*pipeline = fake_handle<VkPipeline>(hash);
+		bool allow_pipeline = false;
 
 		if (filter_object(RESOURCE_GRAPHICS_PIPELINE, hash))
 		{
-			bool allow_pipeline = false;
 			for (uint32_t i = 0; i < create_info->stageCount; i++)
 			{
 				if (filter_shader_module((Hash) create_info->pStages[i].module))
@@ -282,6 +299,9 @@ struct PruneReplayer : StateCreatorInterface
 					break;
 				}
 			}
+
+			if (create_info->stageCount == 0)
+				allow_pipeline = true;
 
 			// Need to test this as well, if there is at least one banned module used, we don't allow the pipeline.
 			for (uint32_t i = 0; i < create_info->stageCount; i++)
@@ -293,17 +313,58 @@ struct PruneReplayer : StateCreatorInterface
 				}
 			}
 
-			if (allow_pipeline)
+			auto *library_info =
+					find_pnext<VkPipelineLibraryCreateInfoKHR>(VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR,
+					                                           create_info->pNext);
+
+			if (library_info)
 			{
-				access_pipeline_layout((Hash) create_info->layout);
-				if (create_info->renderPass != VK_NULL_HANDLE)
-					accessed_render_passes.insert((Hash) create_info->renderPass);
-				for (uint32_t stage = 0; stage < create_info->stageCount; stage++)
-					accessed_shader_modules.insert((Hash) create_info->pStages[stage].module);
-				accessed_graphics_pipelines.insert(hash);
+				for (uint32_t i = 0; i < library_info->libraryCount; i++)
+				{
+					if (banned_graphics.count((Hash) library_info->pLibraries[i]))
+					{
+						allow_pipeline = false;
+						break;
+					}
+				}
 			}
 		}
+
+		// Need to defer this since we need to access pipeline libraries.
+		if (allow_pipeline)
+			graphics_pipelines[hash] = create_info;
+		else if ((create_info->flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0)
+			library_graphics_pipelines[hash] = create_info;
+
 		return true;
+	}
+
+	void access_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo *create_info)
+	{
+		if (accessed_graphics_pipelines.count(hash))
+			return;
+		accessed_graphics_pipelines.insert(hash);
+
+		access_pipeline_layout((Hash) create_info->layout);
+		if (create_info->renderPass != VK_NULL_HANDLE)
+			accessed_render_passes.insert((Hash) create_info->renderPass);
+		for (uint32_t stage = 0; stage < create_info->stageCount; stage++)
+			accessed_shader_modules.insert((Hash) create_info->pStages[stage].module);
+
+		auto *library_info =
+				find_pnext<VkPipelineLibraryCreateInfoKHR>(VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR,
+				                                           create_info->pNext);
+
+		if (library_info)
+		{
+			for (uint32_t i = 0; i < library_info->libraryCount; i++)
+			{
+				// Only need to recurse if a pipeline was only allowed due to having CREATE_LIBRARY_KHR flag.
+				auto lib_itr = library_graphics_pipelines.find((Hash) library_info->pLibraries[i]);
+				if (lib_itr != library_graphics_pipelines.end())
+					access_graphics_pipeline(lib_itr->first, lib_itr->second);
+			}
+		}
 	}
 
 	void access_raytracing_pipeline(Hash hash, const VkRayTracingPipelineCreateInfoKHR *create_info)
@@ -328,6 +389,12 @@ struct PruneReplayer : StateCreatorInterface
 		}
 	}
 
+	void access_graphics_pipelines()
+	{
+		for (auto &pipe : graphics_pipelines)
+			access_graphics_pipeline(pipe.first, pipe.second);
+	}
+
 	void access_raytracing_pipelines()
 	{
 		for (auto &pipe : raytracing_pipelines)
@@ -349,6 +416,9 @@ struct PruneReplayer : StateCreatorInterface
 					break;
 				}
 			}
+
+			if (create_info->stageCount == 0)
+				allow_pipeline = true;
 
 			// Need to test this as well, if there is at least one banned module used, we don't allow the pipeline.
 			for (uint32_t i = 0; i < create_info->stageCount; i++)
@@ -641,7 +711,9 @@ int main(int argc, char *argv[])
 			}
 		}
 
-		if (tag == RESOURCE_RAYTRACING_PIPELINE)
+		if (tag == RESOURCE_GRAPHICS_PIPELINE)
+			prune_replayer.access_graphics_pipelines();
+		else if (tag == RESOURCE_RAYTRACING_PIPELINE)
 			prune_replayer.access_raytracing_pipelines();
 	}
 
