@@ -749,6 +749,7 @@ static void record_graphics_pipelines_robustness(StateRecorder &recorder)
 	VkPipelineRasterizationProvokingVertexStateCreateInfoEXT provoking_vertex;
 	VkPipelineViewportDepthClipControlCreateInfoEXT negative_one_to_one;
 	VkPipelineSampleLocationsStateCreateInfoEXT sample_locations;
+	VkGraphicsPipelineLibraryCreateInfoEXT gpl;
 	VkViewport viewports[2] = {};
 	VkRect2D scissors[2] = {};
 	VkBool32 color_write_enable;
@@ -767,6 +768,7 @@ static void record_graphics_pipelines_robustness(StateRecorder &recorder)
 		pipe.pInputAssemblyState = nullptr;
 		pipe.pVertexInputState = nullptr;
 		pipe.pTessellationState = nullptr;
+		pipe.flags = 0;
 		pipe.subpass = 0;
 		pipe.pNext = nullptr;
 		vi = { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
@@ -789,6 +791,7 @@ static void record_graphics_pipelines_robustness(StateRecorder &recorder)
 		negative_one_to_one = { VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_DEPTH_CLIP_CONTROL_CREATE_INFO_EXT };
 		sample_locations = { VK_STRUCTURE_TYPE_PIPELINE_SAMPLE_LOCATIONS_STATE_CREATE_INFO_EXT };
 		sample_locations.sampleLocationsInfo = { VK_STRUCTURE_TYPE_SAMPLE_LOCATIONS_INFO_EXT };
+		gpl = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT };
 		pipe.renderPass = fake_handle<VkRenderPass>(90);
 		color_write_enable = VK_FALSE;
 		color_write.pColorWriteEnables = &color_write_enable;
@@ -1068,6 +1071,56 @@ static void record_graphics_pipelines_robustness(StateRecorder &recorder)
 			abort();
 	}
 
+	// If only vertex input stage is, verify that formats and such do not contribute.
+	{
+		reset_state();
+		pipe.renderPass = VK_NULL_HANDLE;
+		pipe.pNext = &rendering_create_info;
+		rendering_create_info = { VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR };
+		rendering_create_info.pNext = &gpl;
+		gpl.flags = VK_GRAPHICS_PIPELINE_LIBRARY_VERTEX_INPUT_INTERFACE_BIT_EXT;
+		pipe.flags |= VK_PIPELINE_CREATE_LIBRARY_BIT_KHR;
+		hash_and_record(0);
+		rendering_create_info.viewMask = 3;
+		hash_and_record(1);
+		rendering_create_info.depthAttachmentFormat = VK_FORMAT_D32_SFLOAT;
+		rendering_create_info.colorAttachmentCount = 10;
+		hash_and_record(2);
+		if (hash[0] != hash[1] || hash[1] != hash[2])
+			abort();
+
+		// Now view mask is significant, but not formats.
+		gpl.flags |= VK_GRAPHICS_PIPELINE_LIBRARY_PRE_RASTERIZATION_SHADERS_BIT_EXT |
+		             VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT;
+		rendering_create_info.viewMask = 0;
+		rendering_create_info.depthAttachmentFormat = VK_FORMAT_UNDEFINED;
+		rendering_create_info.colorAttachmentCount = 0;
+		hash_and_record(0);
+		rendering_create_info.viewMask = 3;
+		hash_and_record(1);
+		rendering_create_info.depthAttachmentFormat = VK_FORMAT_D32_SFLOAT;
+		rendering_create_info.colorAttachmentCount = 10;
+		// Test that we ignore NULL pColorAttachmentFormats here.
+		hash_and_record(2);
+		if (hash[0] == hash[1] || hash[1] != hash[2])
+			abort();
+
+		// Now everything is significant.
+		gpl.flags = VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_OUTPUT_INTERFACE_BIT_EXT;
+		rendering_create_info.viewMask = 0;
+		rendering_create_info.depthAttachmentFormat = VK_FORMAT_UNDEFINED;
+		rendering_create_info.colorAttachmentCount = 0;
+		hash_and_record(0);
+		rendering_create_info.viewMask = 3;
+		hash_and_record(1);
+		rendering_create_info.depthAttachmentFormat = VK_FORMAT_D32_SFLOAT;
+		rendering_create_info.colorAttachmentCount = 1;
+		rendering_create_info.pColorAttachmentFormats = &rendering_create_info.depthAttachmentFormat;
+		hash_and_record(2);
+		if (hash[0] == hash[1] || hash[1] == hash[2])
+			abort();
+	}
+
 	// If dynamic color write is used, verify that pColorWriteEnable is ignored.
 	{
 		reset_state();
@@ -1080,6 +1133,26 @@ static void record_graphics_pipelines_robustness(StateRecorder &recorder)
 
 		hash_and_record(0);
 		set_invalid_pointer(color_write.pColorWriteEnables);
+		hash_and_record(1);
+		if (hash[0] != hash[1])
+			abort();
+	}
+
+	// If multiple EDS3 states are used together, verify that pAttachments in blend state is ignored.
+	{
+		reset_state();
+		const VkDynamicState states[] = { VK_DYNAMIC_STATE_COLOR_BLEND_ENABLE_EXT,
+		                                  VK_DYNAMIC_STATE_COLOR_BLEND_EQUATION_EXT,
+		                                  VK_DYNAMIC_STATE_COLOR_WRITE_MASK_EXT };
+		dyn.pDynamicStates = states;
+		dyn.dynamicStateCount = 3;
+		pipe.pDynamicState = &dyn;
+		pipe.pColorBlendState = &blend;
+		blend.attachmentCount = 4;
+
+		blend.pAttachments = nullptr;
+		hash_and_record(0);
+		set_invalid_pointer(blend.pAttachments);
 		hash_and_record(1);
 		if (hash[0] != hash[1])
 			abort();
@@ -1305,7 +1378,7 @@ static void record_graphics_pipelines_robustness(StateRecorder &recorder)
 
 	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_RASTERIZATION_SAMPLES_EXT,
 	                                  reinterpret_cast<uint32_t *>(&ms.rasterizationSamples), nullptr,
-	                                  {}, [&]() { ms.rasterizationSamples = static_cast<VkSampleCountFlagBits>(100000000); }});
+	                                  {}, [&]() { ms.rasterizationSamples = static_cast<VkSampleCountFlagBits>(16); }});
 	hash_invariance_tests.push_back({ VK_DYNAMIC_STATE_SAMPLE_MASK_EXT,
 	                                  &sample_mask, nullptr,
 	                                  {}, [&]() { ms.rasterizationSamples = VK_SAMPLE_COUNT_64_BIT; set_invalid_pointer(ms.pSampleMask); }});
