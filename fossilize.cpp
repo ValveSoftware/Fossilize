@@ -1861,13 +1861,6 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 		if (!dynamic_info.sample_mask && ms.pSampleMask)
 		{
 			uint32_t elems = (ms.rasterizationSamples + 31) / 32;
-
-			// FIXME: This is a weird corner of the spec.
-			// It should not be possible to use dynamic sample count and non-dynamic mask.
-			// We have to assume no implementations supports more than 32x MSAA.
-			if (dynamic_info.rasterization_samples)
-				elems = 1;
-
 			for (uint32_t i = 0; i < elems; i++)
 				h.u32(ms.pSampleMask[i]);
 		}
@@ -6928,12 +6921,8 @@ bool StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateI
 		if (dynamic_info.sample_mask)
 			ms.pSampleMask = nullptr;
 
-		// FIXME: This is a weird corner of the spec.
-		// It should not be possible to use dynamic sample count and non-dynamic mask.
-		// We have to assume no implementations supports more than 32x MSAA.
-		if (dynamic_info.rasterization_samples)
-			ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-
+		// If rasterizationSamples is dynamic, but not sample mask,
+		// rasterizationSamples still provides the size of the sample mask array.
 		if (ms.pSampleMask)
 			ms.pSampleMask = copy(ms.pSampleMask, (ms.rasterizationSamples + 31) / 32, alloc);
 	}
