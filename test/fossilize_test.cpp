@@ -1138,6 +1138,26 @@ static void record_graphics_pipelines_robustness(StateRecorder &recorder)
 			abort();
 	}
 
+	// If multiple EDS3 states are used together, verify that pAttachments in blend state is ignored.
+	{
+		reset_state();
+		const VkDynamicState states[] = { VK_DYNAMIC_STATE_COLOR_BLEND_ENABLE_EXT,
+		                                  VK_DYNAMIC_STATE_COLOR_BLEND_EQUATION_EXT,
+		                                  VK_DYNAMIC_STATE_COLOR_WRITE_MASK_EXT };
+		dyn.pDynamicStates = states;
+		dyn.dynamicStateCount = 3;
+		pipe.pDynamicState = &dyn;
+		pipe.pColorBlendState = &blend;
+		blend.attachmentCount = 4;
+
+		blend.pAttachments = nullptr;
+		hash_and_record(0);
+		set_invalid_pointer(blend.pAttachments);
+		hash_and_record(1);
+		if (hash[0] != hash[1])
+			abort();
+	}
+
 	struct HashInvarianceTest
 	{
 		VkDynamicState state;

@@ -1967,7 +1967,20 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 
 		bool need_blend_constants = false;
 
-		for (uint32_t i = 0; i < b.attachmentCount; i++)
+		// Special EDS3 rule. If all of these are set, we must ignore the pAttachments pointer.
+		const bool dynamic_attachments = dynamic_info.color_blend_enable &&
+		                                 dynamic_info.color_write_mask &&
+		                                 dynamic_info.color_blend_equation;
+
+		// If we have dynamic equation, but not dynamic blend constants, we can dynamically set blend constant
+		// as input, so we might need to know those constants to hash the PSO.
+		if (dynamic_info.color_blend_equation)
+			need_blend_constants = true;
+
+		if (dynamic_attachments)
+			h.u32(0);
+
+		for (uint32_t i = 0; !dynamic_attachments && i < b.attachmentCount; i++)
 		{
 			h.u32(dynamic_info.color_blend_enable ? 0 : b.pAttachments[i].blendEnable);
 			h.u32(dynamic_info.color_write_mask ? 0 : b.pAttachments[i].colorWriteMask);
@@ -1985,8 +1998,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 				else
 					h.u32(0);
 
-				if (dynamic_info.color_blend_equation ||
-				    b.pAttachments[i].dstAlphaBlendFactor == VK_BLEND_FACTOR_CONSTANT_ALPHA ||
+				if (b.pAttachments[i].dstAlphaBlendFactor == VK_BLEND_FACTOR_CONSTANT_ALPHA ||
 				    b.pAttachments[i].dstAlphaBlendFactor == VK_BLEND_FACTOR_CONSTANT_COLOR ||
 				    b.pAttachments[i].srcAlphaBlendFactor == VK_BLEND_FACTOR_CONSTANT_ALPHA ||
 				    b.pAttachments[i].srcAlphaBlendFactor == VK_BLEND_FACTOR_CONSTANT_COLOR ||
@@ -6942,7 +6954,16 @@ bool StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateI
 	if (info->pColorBlendState)
 	{
 		auto &blend = const_cast<VkPipelineColorBlendStateCreateInfo &>(*info->pColorBlendState);
-		blend.pAttachments = copy(blend.pAttachments, blend.attachmentCount, alloc);
+
+		// Special EDS3 rule. If all of these are set, we must ignore the pAttachments pointer.
+		const bool dynamic_attachments = dynamic_info.color_blend_enable &&
+		                                 dynamic_info.color_write_mask &&
+		                                 dynamic_info.color_blend_equation;
+
+		if (dynamic_attachments)
+			blend.pAttachments = nullptr;
+		else
+			blend.pAttachments = copy(blend.pAttachments, blend.attachmentCount, alloc);
 	}
 
 	if (info->pVertexInputState)
@@ -9497,22 +9518,37 @@ static bool json_value(const VkGraphicsPipelineCreateInfo &pipe,
 		cb.AddMember("logicOpEnable", pipe.pColorBlendState->logicOpEnable, alloc);
 
 		bool need_blend_constants = false;
+		// Special EDS3 rule. If all of these are set, we must ignore the pAttachments pointer.
+		const bool dynamic_attachments = dynamic_info.color_blend_enable &&
+		                                 dynamic_info.color_write_mask &&
+		                                 dynamic_info.color_blend_equation;
 
-		for (uint32_t i = 0; i < pipe.pColorBlendState->attachmentCount; i++)
+		if (dynamic_attachments)
 		{
-			if (pipe.pColorBlendState->pAttachments[i].blendEnable &&
-			    (pipe.pColorBlendState->pAttachments[i].dstAlphaBlendFactor == VK_BLEND_FACTOR_CONSTANT_ALPHA ||
-			     pipe.pColorBlendState->pAttachments[i].dstAlphaBlendFactor == VK_BLEND_FACTOR_CONSTANT_COLOR ||
-			     pipe.pColorBlendState->pAttachments[i].srcAlphaBlendFactor == VK_BLEND_FACTOR_CONSTANT_ALPHA ||
-			     pipe.pColorBlendState->pAttachments[i].srcAlphaBlendFactor == VK_BLEND_FACTOR_CONSTANT_COLOR ||
-			     pipe.pColorBlendState->pAttachments[i].dstColorBlendFactor == VK_BLEND_FACTOR_CONSTANT_ALPHA ||
-			     pipe.pColorBlendState->pAttachments[i].dstColorBlendFactor == VK_BLEND_FACTOR_CONSTANT_COLOR ||
-			     pipe.pColorBlendState->pAttachments[i].srcColorBlendFactor == VK_BLEND_FACTOR_CONSTANT_ALPHA ||
-			     pipe.pColorBlendState->pAttachments[i].srcColorBlendFactor == VK_BLEND_FACTOR_CONSTANT_COLOR))
+			need_blend_constants = true;
+		}
+		else
+		{
+			for (uint32_t i = 0; i < pipe.pColorBlendState->attachmentCount; i++)
 			{
-				need_blend_constants = true;
+				auto &a = pipe.pColorBlendState->pAttachments[i];
+
+				if (a.blendEnable &&
+				    (a.dstAlphaBlendFactor == VK_BLEND_FACTOR_CONSTANT_ALPHA ||
+				     a.dstAlphaBlendFactor == VK_BLEND_FACTOR_CONSTANT_COLOR ||
+				     a.srcAlphaBlendFactor == VK_BLEND_FACTOR_CONSTANT_ALPHA ||
+				     a.srcAlphaBlendFactor == VK_BLEND_FACTOR_CONSTANT_COLOR ||
+				     a.dstColorBlendFactor == VK_BLEND_FACTOR_CONSTANT_ALPHA ||
+				     a.dstColorBlendFactor == VK_BLEND_FACTOR_CONSTANT_COLOR ||
+				     a.srcColorBlendFactor == VK_BLEND_FACTOR_CONSTANT_ALPHA ||
+				     a.srcColorBlendFactor == VK_BLEND_FACTOR_CONSTANT_COLOR))
+				{
+					need_blend_constants = true;
+				}
 			}
 		}
+
+		const VkPipelineColorBlendAttachmentState blank_attachment = {};
 
 		Value blend_constants(kArrayType);
 		for (auto &c : pipe.pColorBlendState->blendConstants)
@@ -9521,7 +9557,10 @@ static bool json_value(const VkGraphicsPipelineCreateInfo &pipe,
 		Value attachments(kArrayType);
 		for (uint32_t i = 0; i < pipe.pColorBlendState->attachmentCount; i++)
 		{
-			auto &a = pipe.pColorBlendState->pAttachments[i];
+			// We cannot completely decouple pAttachments from attachmentCount.
+			// Just serialize dummy entries.
+
+			auto &a = dynamic_attachments ? blank_attachment : pipe.pColorBlendState->pAttachments[i];
 			Value att(kObjectType);
 			att.AddMember("dstAlphaBlendFactor", a.dstAlphaBlendFactor, alloc);
 			att.AddMember("srcAlphaBlendFactor", a.srcAlphaBlendFactor, alloc);
