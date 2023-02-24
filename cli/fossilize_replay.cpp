@@ -216,6 +216,113 @@ static void on_validation_error(void *userdata);
 static void timeout_handler();
 #endif
 
+struct PipelineWorkItem
+{
+	Hash hash = 0;
+	ResourceTag tag = RESOURCE_COUNT;
+	unsigned index = 0;
+	unsigned memory_context_index = 0;
+	bool parse_only = false;
+	bool force_outside_range = false;
+
+	union
+	{
+		const VkGraphicsPipelineCreateInfo *graphics_create_info;
+		const VkComputePipelineCreateInfo *compute_create_info;
+		const VkRayTracingPipelineCreateInfoKHR *raytracing_create_info;
+		const VkShaderModuleCreateInfo *shader_module_create_info;
+	} create_info = {};
+
+	union
+	{
+		VkPipeline *pipeline;
+		VkShaderModule *shader_module;
+	} output = {};
+
+	union
+	{
+		VkPipeline *pipeline;
+		VkShaderModule *shader_module;
+	} hash_map_entry = {};
+};
+
+struct PipelineFeedback
+{
+	enum { MAX_STAGES = 8 };
+	VkPipelineCreationFeedbackEXT feedbacks[MAX_STAGES] = {};
+	VkPipelineCreationFeedbackEXT primary_feedback = {};
+	VkPipelineCreationFeedbackCreateInfoEXT feedback = { VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO_EXT };
+	VkShaderStageFlagBits stages[MAX_STAGES] = {};
+
+	inline PipelineFeedback()
+	{
+		feedback.pPipelineStageCreationFeedbacks = feedbacks;
+		feedback.pPipelineCreationFeedback = &primary_feedback;
+	}
+
+	inline uint64_t get_per_stage_duration(VkShaderStageFlags active_stages) const
+	{
+		uint64_t duration = 0;
+		for (uint32_t i = 0; i < feedback.pipelineStageCreationFeedbackCount; i++)
+		{
+			if ((stages[i] & active_stages) != 0 &&
+				(feedbacks[i].flags & VK_PIPELINE_CREATION_FEEDBACK_VALID_BIT_EXT) != 0)
+			{
+				duration += feedbacks[i].duration;
+			}
+		}
+
+		return duration;
+	}
+
+	inline void setup_pnext(const PipelineWorkItem &work_item)
+	{
+		switch (work_item.tag)
+		{
+		case RESOURCE_GRAPHICS_PIPELINE:
+		{
+			auto *info = const_cast<VkGraphicsPipelineCreateInfo *>(work_item.create_info.graphics_create_info);
+
+			feedback.pipelineStageCreationFeedbackCount = info->stageCount;
+			if (feedback.pipelineStageCreationFeedbackCount > MAX_STAGES)
+				feedback.pipelineStageCreationFeedbackCount = MAX_STAGES;
+
+			feedback.pNext = info->pNext;
+			info->pNext = &feedback;
+
+			for (uint32_t i = 0; i < feedback.pipelineStageCreationFeedbackCount; i++)
+				stages[i] = info->pStages[i].stage;
+			break;
+		}
+
+		case RESOURCE_COMPUTE_PIPELINE:
+		{
+			feedback.pipelineStageCreationFeedbackCount = 1;
+			auto *info = const_cast<VkComputePipelineCreateInfo *>(work_item.create_info.compute_create_info);
+
+			feedback.pNext = info->pNext;
+			info->pNext = &feedback;
+
+			stages[0] = VK_SHADER_STAGE_COMPUTE_BIT;
+			break;
+		}
+
+		case RESOURCE_RAYTRACING_PIPELINE:
+		{
+			// Is there anything meaningful we can do here with per-stage feedback?
+			auto *info = const_cast<VkRayTracingPipelineCreateInfoKHR *>(work_item.create_info.raytracing_create_info);
+			feedback.pipelineStageCreationFeedbackCount = 0;
+			feedback.pNext = info->pNext;
+			info->pNext = &feedback;
+			break;
+		}
+
+		default:
+			break;
+		}
+	}
+};
+
 struct ThreadedReplayer : StateCreatorInterface
 {
 	struct Options
@@ -290,36 +397,6 @@ struct ThreadedReplayer : StateCreatorInterface
 		unsigned index;
 
 		static ResourceTag get_tag() { return RESOURCE_RAYTRACING_PIPELINE; }
-	};
-
-	struct PipelineWorkItem
-	{
-		Hash hash = 0;
-		ResourceTag tag = RESOURCE_COUNT;
-		unsigned index = 0;
-		unsigned memory_context_index = 0;
-		bool parse_only = false;
-		bool force_outside_range = false;
-
-		union
-		{
-			const VkGraphicsPipelineCreateInfo *graphics_create_info;
-			const VkComputePipelineCreateInfo *compute_create_info;
-			const VkRayTracingPipelineCreateInfoKHR *raytracing_create_info;
-			const VkShaderModuleCreateInfo *shader_module_create_info;
-		} create_info = {};
-
-		union
-		{
-			VkPipeline *pipeline;
-			VkShaderModule *shader_module;
-		} output = {};
-
-		union
-		{
-			VkPipeline *pipeline;
-			VkShaderModule *shader_module;
-		} hash_map_entry = {};
 	};
 
 	struct PerThreadData
@@ -673,7 +750,8 @@ struct ThreadedReplayer : StateCreatorInterface
 		return true;
 	}
 
-	void get_pipeline_stats(ResourceTag tag, Hash hash, VkPipeline pipeline)
+	void get_pipeline_stats(ResourceTag tag, Hash hash, VkPipeline pipeline,
+	                        const PipelineFeedback &feedback, uint64_t time_ns)
 	{
 		VkPipelineInfoKHR pipeline_info = { VK_STRUCTURE_TYPE_PIPELINE_INFO_KHR };
 		pipeline_info.pipeline = pipeline;
@@ -696,9 +774,17 @@ struct ThreadedReplayer : StateCreatorInterface
 			doc.AddMember("db_path", db_path, alloc);
 			doc.AddMember("pipeline", std::string(hash_str), alloc);
 			doc.AddMember("pipeline_type", std::string(tag == RESOURCE_GRAPHICS_PIPELINE ? "GRAPHICS" : "COMPUTE"), alloc);
+			doc.AddMember("pso_wall_duration_ns", time_ns, alloc);
+
+			uint64_t feedback_duration =
+					(feedback.primary_feedback.flags & VK_PIPELINE_CREATION_FEEDBACK_VALID_BIT_EXT) != 0 ?
+					feedback.primary_feedback.duration : 0;
+			doc.AddMember("pso_duration_ns", feedback_duration, alloc);
 
 			rapidjson::Value execs(rapidjson::kArrayType);
 			vector<VkPipelineExecutablePropertiesKHR> pipe_executables(pe_count);
+			for (auto &exec : pipe_executables)
+				exec.sType = VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_PROPERTIES_KHR;
 			if (vkGetPipelineExecutablePropertiesKHR(device->get_device(), &pipeline_info, &pe_count, pipe_executables.data()) != VK_SUCCESS)
 				return;
 
@@ -707,6 +793,8 @@ struct ThreadedReplayer : StateCreatorInterface
 				rapidjson::Value pe(rapidjson::kObjectType);
 				pe.AddMember("executable_name", rapidjson::StringRef(pipe_executables[exec].name), alloc);
 				pe.AddMember("subgroup_size", pipe_executables[exec].subgroupSize, alloc);
+				uint64_t stage_time_ns = feedback.get_per_stage_duration(pipe_executables[exec].stages);
+				pe.AddMember("stage_duration_ns", stage_time_ns, alloc);
 
 				rapidjson::Value pe_stats(rapidjson::kArrayType);
 
@@ -721,6 +809,9 @@ struct ThreadedReplayer : StateCreatorInterface
 				if (stat_count > 0)
 				{
 					vector<VkPipelineExecutableStatisticKHR> stats(stat_count);
+					for (auto &stat : stats)
+						stat.sType = VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_STATISTIC_KHR;
+
 					if (vkGetPipelineExecutableStatisticsKHR(device->get_device(), &exec_info, &stat_count, stats.data()) != VK_SUCCESS)
 						continue;
 
@@ -1050,52 +1141,6 @@ struct ThreadedReplayer : StateCreatorInterface
 		}
 	}
 
-	struct PipelineFeedback
-	{
-		enum { MAX_STAGES = 8 };
-		VkPipelineCreationFeedbackEXT feedbacks[MAX_STAGES] = {};
-		VkPipelineCreationFeedbackEXT primary_feedback = {};
-		VkPipelineCreationFeedbackCreateInfoEXT feedback = { VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO_EXT };
-
-		inline PipelineFeedback()
-		{
-			feedback.pPipelineStageCreationFeedbacks = feedbacks;
-			feedback.pPipelineCreationFeedback = &primary_feedback;
-		}
-
-		inline void setup_pnext(const PipelineWorkItem &work_item)
-		{
-			switch (work_item.tag)
-			{
-			case RESOURCE_GRAPHICS_PIPELINE:
-				feedback.pipelineStageCreationFeedbackCount =
-						work_item.create_info.graphics_create_info->stageCount;
-				const_cast<VkGraphicsPipelineCreateInfo *>(work_item.create_info.graphics_create_info)->pNext =
-						&feedback;
-				break;
-
-			case RESOURCE_COMPUTE_PIPELINE:
-				feedback.pipelineStageCreationFeedbackCount = 1;
-				const_cast<VkComputePipelineCreateInfo *>(work_item.create_info.compute_create_info)->pNext =
-						&feedback;
-				break;
-
-			case RESOURCE_RAYTRACING_PIPELINE:
-				// Is there anything meaningful we can do here?
-				feedback.pipelineStageCreationFeedbackCount = 0;
-				const_cast<VkRayTracingPipelineCreateInfoKHR *>(work_item.create_info.raytracing_create_info)->pNext =
-						&feedback;
-				break;
-
-			default:
-				break;
-			}
-
-			if (feedback.pipelineStageCreationFeedbackCount > MAX_STAGES)
-				feedback.pipelineStageCreationFeedbackCount = MAX_STAGES;
-		}
-	};
-
 	void check_pipeline_cache_feedback(const PipelineFeedback &feedback)
 	{
 		if (disk_pipeline_cache && (feedback.primary_feedback.flags & VK_PIPELINE_CREATION_FEEDBACK_VALID_BIT_EXT) != 0)
@@ -1133,7 +1178,7 @@ struct ThreadedReplayer : StateCreatorInterface
 #endif
 
 		PipelineFeedback feedback;
-		if (disk_pipeline_cache && device->pipeline_feedback_enabled())
+		if ((disk_pipeline_cache || opts.pipeline_stats) && device->pipeline_feedback_enabled())
 			feedback.setup_pnext(work_item);
 
 		if (vkCreateGraphicsPipelines(device->get_device(), cache, 1, work_item.create_info.graphics_create_info,
@@ -1148,7 +1193,7 @@ struct ThreadedReplayer : StateCreatorInterface
 			if (primary)
 			{
 				if (opts.pipeline_stats)
-					get_pipeline_stats(work_item.tag, work_item.hash, *work_item.output.pipeline);
+					get_pipeline_stats(work_item.tag, work_item.hash, *work_item.output.pipeline, feedback, duration_ns);
 				if (opts.control_block)
 					opts.control_block->successful_graphics.fetch_add(1, std::memory_order_relaxed);
 				check_pipeline_cache_feedback(feedback);
@@ -1179,7 +1224,7 @@ struct ThreadedReplayer : StateCreatorInterface
 		spurious_crash();
 #endif
 		PipelineFeedback feedback;
-		if (disk_pipeline_cache && device->pipeline_feedback_enabled())
+		if ((disk_pipeline_cache || opts.pipeline_stats) && device->pipeline_feedback_enabled())
 			feedback.setup_pnext(work_item);
 
 		if (vkCreateComputePipelines(device->get_device(), cache, 1,
@@ -1195,7 +1240,7 @@ struct ThreadedReplayer : StateCreatorInterface
 			if (primary)
 			{
 				if (opts.pipeline_stats)
-					get_pipeline_stats(work_item.tag, work_item.hash, *work_item.output.pipeline);
+					get_pipeline_stats(work_item.tag, work_item.hash, *work_item.output.pipeline, feedback, duration_ns);
 				if (opts.control_block)
 					opts.control_block->successful_compute.fetch_add(1, std::memory_order_relaxed);
 				check_pipeline_cache_feedback(feedback);
@@ -1226,7 +1271,7 @@ struct ThreadedReplayer : StateCreatorInterface
 		spurious_crash();
 #endif
 		PipelineFeedback feedback;
-		if (disk_pipeline_cache && device->pipeline_feedback_enabled())
+		if ((disk_pipeline_cache || opts.pipeline_stats) && device->pipeline_feedback_enabled())
 			feedback.setup_pnext(work_item);
 
 		if (vkCreateRayTracingPipelinesKHR(device->get_device(), VK_NULL_HANDLE, cache, 1,
@@ -1242,7 +1287,7 @@ struct ThreadedReplayer : StateCreatorInterface
 			if (primary)
 			{
 				if (opts.pipeline_stats)
-					get_pipeline_stats(work_item.tag, work_item.hash, *work_item.output.pipeline);
+					get_pipeline_stats(work_item.tag, work_item.hash, *work_item.output.pipeline, feedback, duration_ns);
 				if (opts.control_block)
 					opts.control_block->successful_raytracing.fetch_add(1, std::memory_order_relaxed);
 				check_pipeline_cache_feedback(feedback);
@@ -2561,7 +2606,7 @@ struct ThreadedReplayer : StateCreatorInterface
 					                 {
 						                 // We are going to free all existing parent pipelines, so we cannot reuse
 						                 // any pipeline that was already compiled.
-						                 ThreadedReplayer::PipelineWorkItem work_item;
+						                 PipelineWorkItem work_item;
 						                 work_item.hash = hashes[index];
 						                 work_item.tag = DerivedInfo::get_tag();
 						                 work_item.parse_only = true;
@@ -3275,11 +3320,14 @@ static void stats_to_csv(const std::string &stats_path, rapidjson::Document &doc
 	std::unordered_map<std::string, size_t> columns;
 	std::vector<std::map<size_t, std::string>> rows;
 
-	header.push_back("Database");
-	header.push_back("Pipeline type");
-	header.push_back("Pipeline hash");
-	header.push_back("Executable name");
-	header.push_back("Subgroup size");
+	header.emplace_back("Database");
+	header.emplace_back("Pipeline type");
+	header.emplace_back("Pipeline hash");
+	header.emplace_back("PSO wall duration (ns)");
+	header.emplace_back("PSO duration (ns)");
+	header.emplace_back("Stage duration (ns)");
+	header.emplace_back("Executable name");
+	header.emplace_back("Subgroup size");
 
 	for (auto itr = doc.Begin(); itr != doc.End(); itr++)
 	{
@@ -3287,29 +3335,40 @@ static void stats_to_csv(const std::string &stats_path, rapidjson::Document &doc
 
 		auto &st = *itr;
 
-		if (!st.HasMember("db_path") || !st.HasMember("pipeline_type") || !st.HasMember("pipeline") || !st.HasMember("executables"))
+		if (!st.HasMember("db_path") ||
+		    !st.HasMember("pipeline_type") ||
+		    !st.HasMember("pipeline") ||
+		    !st.HasMember("executables") ||
+		    !st.HasMember("pso_wall_duration_ns") ||
+		    !st.HasMember("pso_duration_ns"))
 		{
-			LOGE("db_path, pipeline_type, pipeline and executable members expected, but not found. Stale stats FOZ file?\n");
+			LOGE("db_path, pipeline_type, pso_wall_duration_ns, pso_duration_ns, pipeline and executable members expected, but not found. Stale stats FOZ file?\n");
 			return;
 		}
 
 		row[0] = st["db_path"].GetString();
 		row[1] = st["pipeline_type"].GetString();
 		row[2] = st["pipeline"].GetString();
+		row[3] = std::to_string(st["pso_wall_duration_ns"].GetUint64());
+		row[4] = std::to_string(st["pso_duration_ns"].GetUint64());
 		auto &execs = st["executables"];
 
 		for (auto e_itr = execs.Begin(); e_itr != execs.End(); e_itr++)
 		{
 			auto &exec = *e_itr;
 
-			if (!exec.HasMember("executable_name") || !exec.HasMember("subgroup_size") || !exec.HasMember("stats"))
+			if (!exec.HasMember("executable_name") ||
+			    !exec.HasMember("subgroup_size") ||
+			    !exec.HasMember("stats") ||
+			    !exec.HasMember("stage_duration_ns"))
 			{
-				LOGE("Expected executable_name, subgroup_size and stats members, but not found. Stale stats file?\n");
+				LOGE("Expected executable_name, subgroup_size, stage_duration_ns and stats members, but not found. Stale stats file?\n");
 				return;
 			}
 
-			row[3] = exec["executable_name"].GetString();
-			row[4] = std::to_string(exec["subgroup_size"].GetUint());
+			row[5] = std::to_string(exec["stage_duration_ns"].GetUint64());
+			row[6] = exec["executable_name"].GetString();
+			row[7] = std::to_string(exec["subgroup_size"].GetUint());
 
 			for (auto st_itr = exec["stats"].Begin(); st_itr != exec["stats"].End(); st_itr++)
 			{
