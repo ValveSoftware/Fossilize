@@ -416,6 +416,9 @@ struct ThreadedReplayer : StateCreatorInterface
 
 		bool force_outside_range = false;
 		bool triggered_validation_error = false;
+
+		ResourceTag expected_tag = RESOURCE_COUNT;
+		Hash expected_hash = 0;
 	};
 
 	ThreadedReplayer(const VulkanDevice::Options &device_opts_, const Options &opts_)
@@ -687,6 +690,11 @@ struct ThreadedReplayer : StateCreatorInterface
 		per_thread.current_parse_index = work_item.index;
 		per_thread.force_outside_range = work_item.force_outside_range;
 		per_thread.memory_context_index = work_item.memory_context_index;
+
+		// If the archive is somehow corrupt, we really do not want to parse entries which are of a different type
+		// or otherwise are not what we expect.
+		per_thread.expected_tag = work_item.tag;
+		per_thread.expected_hash = work_item.hash;
 
 		if (!replayer.parse(*this, global_database, buffer.data(), buffer.size()))
 		{
@@ -1864,6 +1872,13 @@ struct ThreadedReplayer : StateCreatorInterface
 			return true;
 		}
 
+		auto &per_thread = get_per_thread_data();
+		if (per_thread.expected_hash != hash || per_thread.expected_tag != RESOURCE_SHADER_MODULE)
+		{
+			LOGE("Unexpected resource type or hash in blob, ignoring.\n");
+			return false;
+		}
+
 #ifdef FOSSILIZE_REPLAYER_SPIRV_VAL
 		if (opts.spirv_validate && !has_resource_in_whitelist(RESOURCE_SHADER_MODULE, hash))
 		{
@@ -1925,7 +1940,6 @@ struct ThreadedReplayer : StateCreatorInterface
 			return true;
 		}
 
-		auto &per_thread = get_per_thread_data();
 		per_thread.triggered_validation_error = false;
 
 		for (unsigned i = 0; i < loop_count; i++)
@@ -2009,6 +2023,12 @@ struct ThreadedReplayer : StateCreatorInterface
 		unsigned memory_index = per_thread.memory_context_index;
 		bool force_outside_range = per_thread.force_outside_range;
 
+		if (per_thread.expected_hash != hash || per_thread.expected_tag != RESOURCE_COMPUTE_PIPELINE)
+		{
+			LOGE("Unexpected resource type or hash in blob, ignoring.\n");
+			return false;
+		}
+
 		if (!force_outside_range && index < deferred_compute[memory_index].size())
 		{
 			deferred_compute[memory_index][index] = {
@@ -2059,6 +2079,12 @@ struct ThreadedReplayer : StateCreatorInterface
 		unsigned memory_index = per_thread.memory_context_index;
 		bool force_outside_range = per_thread.force_outside_range;
 
+		if (per_thread.expected_hash != hash || per_thread.expected_tag != RESOURCE_GRAPHICS_PIPELINE)
+		{
+			LOGE("Unexpected resource type or hash in blob, ignoring.\n");
+			return false;
+		}
+
 		if (!force_outside_range)
 		{
 			assert(index < deferred_graphics[memory_index].size());
@@ -2107,6 +2133,12 @@ struct ThreadedReplayer : StateCreatorInterface
 		unsigned index = per_thread.current_parse_index;
 		unsigned memory_index = per_thread.memory_context_index;
 		bool force_outside_range = per_thread.force_outside_range;
+
+		if (per_thread.expected_hash != hash || per_thread.expected_tag != RESOURCE_RAYTRACING_PIPELINE)
+		{
+			LOGE("Unexpected resource type or hash in blob, ignoring.\n");
+			return false;
+		}
 
 		if (!force_outside_range)
 		{
