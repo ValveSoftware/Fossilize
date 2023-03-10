@@ -419,6 +419,7 @@ struct ThreadedReplayer : StateCreatorInterface
 
 		ResourceTag expected_tag = RESOURCE_COUNT;
 		Hash expected_hash = 0;
+		bool acknowledge_parsing_work = false;
 	};
 
 	ThreadedReplayer(const VulkanDevice::Options &device_opts_, const Options &opts_)
@@ -696,7 +697,11 @@ struct ThreadedReplayer : StateCreatorInterface
 		per_thread.expected_tag = work_item.tag;
 		per_thread.expected_hash = work_item.hash;
 
-		if (!replayer.parse(*this, global_database, buffer.data(), buffer.size()))
+		// It's also possible that nothing happened while parsing. That should count as a fail as well.
+		per_thread.acknowledge_parsing_work = false;
+
+		if (!replayer.parse(*this, global_database, buffer.data(), buffer.size()) ||
+		    !per_thread.acknowledge_parsing_work)
 		{
 			LOGW("Did not replay blob (tag: %d, hash: 0x%016" PRIx64 "). See previous logs for context.\n",
 			     work_item.tag, work_item.hash);
@@ -1618,6 +1623,8 @@ struct ThreadedReplayer : StateCreatorInterface
 	void set_application_info(Hash, const VkApplicationInfo *app, const VkPhysicalDeviceFeatures2 *features) override
 	{
 		// TODO: Could use this to create multiple VkDevices for replay as necessary if app changes.
+		if (get_per_thread_data().expected_tag != RESOURCE_APPLICATION_INFO)
+			return;
 
 		if (!device_was_init)
 		{
@@ -1771,6 +1778,14 @@ struct ThreadedReplayer : StateCreatorInterface
 
 	bool enqueue_create_sampler(Hash index, const VkSamplerCreateInfo *create_info, VkSampler *sampler) override
 	{
+		auto &per_thread = get_per_thread_data();
+		if (per_thread.expected_tag != RESOURCE_SAMPLER &&
+		    per_thread.expected_tag != RESOURCE_DESCRIPTOR_SET_LAYOUT &&
+		    per_thread.expected_tag != RESOURCE_PIPELINE_LAYOUT)
+		{
+			return false;
+		}
+
 		if (!device->get_feature_filter().sampler_is_supported(create_info))
 		{
 			LOGW("Sampler %016" PRIx64 " is not supported. Skipping.\n", index);
@@ -1789,6 +1804,13 @@ struct ThreadedReplayer : StateCreatorInterface
 
 	bool enqueue_create_descriptor_set_layout(Hash index, const VkDescriptorSetLayoutCreateInfo *create_info, VkDescriptorSetLayout *layout) override
 	{
+		auto &per_thread = get_per_thread_data();
+		if (per_thread.expected_tag != RESOURCE_DESCRIPTOR_SET_LAYOUT &&
+		    per_thread.expected_tag != RESOURCE_PIPELINE_LAYOUT)
+		{
+			return false;
+		}
+
 		if (!device->get_feature_filter().descriptor_set_layout_is_supported(create_info))
 		{
 			LOGW("Descriptor set layout %016" PRIx64 " is not supported. Skipping.\n", index);
@@ -1807,6 +1829,9 @@ struct ThreadedReplayer : StateCreatorInterface
 
 	bool enqueue_create_pipeline_layout(Hash index, const VkPipelineLayoutCreateInfo *create_info, VkPipelineLayout *layout) override
 	{
+		if (get_per_thread_data().expected_tag != RESOURCE_PIPELINE_LAYOUT)
+			return false;
+
 		if (!device->get_feature_filter().pipeline_layout_is_supported(create_info))
 		{
 			LOGW("Pipeline layout %016" PRIx64 " is not supported. Skipping.\n", index);
@@ -1825,6 +1850,9 @@ struct ThreadedReplayer : StateCreatorInterface
 
 	bool enqueue_create_render_pass(Hash index, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass) override
 	{
+		if (get_per_thread_data().expected_tag != RESOURCE_RENDER_PASS)
+			return false;
+
 		if (!device->get_feature_filter().render_pass_is_supported(create_info))
 		{
 			LOGW("Render pass %016" PRIx64 " is not supported. Skipping.\n", index);
@@ -1843,6 +1871,9 @@ struct ThreadedReplayer : StateCreatorInterface
 
 	bool enqueue_create_render_pass2(Hash index, const VkRenderPassCreateInfo2 *create_info, VkRenderPass *render_pass) override
 	{
+		if (get_per_thread_data().expected_tag != RESOURCE_RENDER_PASS)
+			return false;
+
 		if (!device->get_feature_filter().render_pass2_is_supported(create_info))
 		{
 			LOGW("Render pass (version 2) %016" PRIx64 " is not supported. Skipping.\n", index);
@@ -1862,6 +1893,16 @@ struct ThreadedReplayer : StateCreatorInterface
 	bool enqueue_create_shader_module(Hash hash, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module) override
 	{
 		*module = VK_NULL_HANDLE;
+
+		auto &per_thread = get_per_thread_data();
+		if (per_thread.expected_hash != hash || per_thread.expected_tag != RESOURCE_SHADER_MODULE)
+		{
+			LOGE("Unexpected resource type or hash in blob, ignoring.\n");
+			return false;
+		}
+
+		per_thread.acknowledge_parsing_work = true;
+
 		if (masked_shader_modules.count(hash) || resource_is_blacklisted(RESOURCE_SHADER_MODULE, hash))
 		{
 			lock_guard<mutex> lock(internal_enqueue_mutex);
@@ -1870,13 +1911,6 @@ struct ThreadedReplayer : StateCreatorInterface
 			if (opts.control_block)
 				opts.control_block->banned_modules.fetch_add(1, std::memory_order_relaxed);
 			return true;
-		}
-
-		auto &per_thread = get_per_thread_data();
-		if (per_thread.expected_hash != hash || per_thread.expected_tag != RESOURCE_SHADER_MODULE)
-		{
-			LOGE("Unexpected resource type or hash in blob, ignoring.\n");
-			return false;
 		}
 
 #ifdef FOSSILIZE_REPLAYER_SPIRV_VAL
@@ -2029,6 +2063,8 @@ struct ThreadedReplayer : StateCreatorInterface
 			return false;
 		}
 
+		per_thread.acknowledge_parsing_work = true;
+
 		if (!force_outside_range && index < deferred_compute[memory_index].size())
 		{
 			deferred_compute[memory_index][index] = {
@@ -2085,6 +2121,8 @@ struct ThreadedReplayer : StateCreatorInterface
 			return false;
 		}
 
+		per_thread.acknowledge_parsing_work = true;
+
 		if (!force_outside_range)
 		{
 			assert(index < deferred_graphics[memory_index].size());
@@ -2139,6 +2177,8 @@ struct ThreadedReplayer : StateCreatorInterface
 			LOGE("Unexpected resource type or hash in blob, ignoring.\n");
 			return false;
 		}
+
+		per_thread.acknowledge_parsing_work = true;
 
 		if (!force_outside_range)
 		{
@@ -3597,6 +3637,9 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 			LOGE("Failed to get list of resource hashes.\n");
 			return EXIT_FAILURE;
 		}
+
+		auto &per_thread_data = replayer.get_per_thread_data();
+		per_thread_data.expected_tag = tag;
 
 		for (auto &hash : resource_hashes)
 		{
