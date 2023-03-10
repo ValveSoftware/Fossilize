@@ -834,6 +834,43 @@ static void handle_control_commands(std::vector<ProcessProgress> &child_processe
 	}
 }
 
+static bool poll_children_process_states(vector<ProcessProgress> &child_processes)
+{
+	// We'll only receive one SIGCHLD signal, even if multiple processes
+	// completed at the same time.
+	// Use the typical waitpid loop to reap every process.
+	pid_t pid = 0;
+	int wstatus = 0;
+
+	while ((pid = waitpid(-1, &wstatus, WNOHANG)) > 0)
+	{
+		auto itr = find_if(begin(child_processes), end(child_processes),
+		                   [&](const ProcessProgress &progress)
+		                   {
+			                   return progress.pid == pid;
+		                   });
+
+		// Child process can receive SIGCONT/SIGSTOP which is benign.
+		// This should normally only happen when the process is being debugged.
+		if (!WIFEXITED(wstatus) && !WIFSIGNALED(wstatus))
+			continue;
+
+		if (itr != end(child_processes))
+		{
+			if (itr->process_shutdown(wstatus) && !itr->start_child_process(child_processes))
+			{
+				LOGE("Failed to start child process.\n");
+				return false;
+			}
+			update_target_running_processes(child_processes);
+		}
+		else
+			LOGE("Got SIGCHLD from unknown process PID %d.\n", pid);
+	}
+
+	return true;
+}
+
 static int run_master_process(const VulkanDevice::Options &opts,
                               const ThreadedReplayer::Options &replayer_opts,
                               const vector<const char *> &databases,
@@ -1176,37 +1213,8 @@ static int run_master_process(const VulkanDevice::Options &opts,
 
 					if (info.ssi_signo == SIGCHLD)
 					{
-						// We'll only receive one SIGCHLD signal, even if multiple processes
-						// completed at the same time.
-						// Use the typical waitpid loop to reap every process.
-						pid_t pid = 0;
-						int wstatus = 0;
-
-						while ((pid = waitpid(-1, &wstatus, WNOHANG)) > 0)
-						{
-							auto itr = find_if(begin(child_processes), end(child_processes),
-							                   [&](const ProcessProgress &progress)
-							                   {
-								                   return progress.pid == pid;
-							                   });
-
-							// Child process can receive SIGCONT/SIGSTOP which is benign.
-							// This should normally only happen when the process is being debugged.
-							if (!WIFEXITED(wstatus) && !WIFSIGNALED(wstatus))
-								continue;
-
-							if (itr != end(child_processes))
-							{
-								if (itr->process_shutdown(wstatus) && !itr->start_child_process(child_processes))
-								{
-									LOGE("Failed to start child process.\n");
-									return EXIT_FAILURE;
-								}
-								update_target_running_processes(child_processes);
-							}
-							else
-								LOGE("Got SIGCHLD from unknown process PID %d.\n", pid);
-						}
+						if (!poll_children_process_states(child_processes))
+							return EXIT_FAILURE;
 					}
 					else if (info.ssi_signo == SIGINT || info.ssi_signo == SIGTERM)
 					{
@@ -1231,6 +1239,11 @@ static int run_master_process(const VulkanDevice::Options &opts,
 					uint64_t v;
 					if (read(Global::timer_fd, &v, sizeof(v)) >= 0)
 					{
+						// SIGCHLD should take care of it, but we have observed weird situations
+						// with lingering zombies, so to be robust against lost signals, poll this as well.
+						if (!poll_children_process_states(child_processes))
+							return EXIT_FAILURE;
+
 						StallState new_stall_state;
 						if (use_stall_state && poll_stall_information(new_stall_state))
 							manage_thrashing_behavior(child_processes, stall_state, new_stall_state);
