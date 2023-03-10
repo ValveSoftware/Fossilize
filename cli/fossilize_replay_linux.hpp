@@ -1302,18 +1302,29 @@ static void crash_handler(ThreadedReplayer &replayer, ThreadedReplayer::PerThrea
 			_exit(2);
 	}
 
-	// Report where we stopped, so we can continue.
-	sprintf(buffer, "GRAPHICS %d %" PRIx64 "\n", per_thread.current_graphics_index, per_thread.current_graphics_pipeline);
-	if (!write_all(crash_fd, buffer))
-		_exit(2);
+	// If we crashed outside the domain of compiling pipelines we are kind of screwed,
+	// so treat it as a dirty crash, don't report anything. We have no way to ensure forward progress
+	// if we try to restart.
+	if (per_thread.current_graphics_pipeline ||
+	    per_thread.current_compute_pipeline ||
+	    per_thread.current_raytracing_pipeline)
+	{
+		// Report where we stopped, so we can continue.
+		sprintf(buffer, "GRAPHICS %d %" PRIx64 "\n", per_thread.current_graphics_index,
+		        per_thread.current_graphics_pipeline);
+		if (!write_all(crash_fd, buffer))
+			_exit(2);
 
-	sprintf(buffer, "COMPUTE %d %" PRIx64 "\n", per_thread.current_compute_index, per_thread.current_compute_pipeline);
-	if (!write_all(crash_fd, buffer))
-		_exit(2);
+		sprintf(buffer, "COMPUTE %d %" PRIx64 "\n", per_thread.current_compute_index,
+		        per_thread.current_compute_pipeline);
+		if (!write_all(crash_fd, buffer))
+			_exit(2);
 
-	sprintf(buffer, "RAYTRACE %d %" PRIx64 "\n", per_thread.current_raytracing_index, per_thread.current_raytracing_pipeline);
-	if (!write_all(crash_fd, buffer))
-		_exit(2);
+		sprintf(buffer, "RAYTRACE %d %" PRIx64 "\n", per_thread.current_raytracing_index,
+		        per_thread.current_raytracing_pipeline);
+		if (!write_all(crash_fd, buffer))
+			_exit(2);
+	}
 
 	replayer.emergency_teardown();
 }
