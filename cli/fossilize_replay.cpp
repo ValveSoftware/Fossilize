@@ -70,6 +70,10 @@ using namespace std;
 #define FOSSILIZE_REPLAY_WRAPPER_ORIGINAL_APP_ENV "FOSSILIZE_REPLAY_WRAPPER_ORIGINAL_APP"
 #endif
 
+#ifndef FOSSILIZE_DISABLE_RATE_LIMITER_ENV
+#define FOSSILIZE_DISABLE_RATE_LIMITER_ENV "FOSSILIZE_DISABLE_RATE_LIMITER"
+#endif
+
 //#define SIMULATE_UNSTABLE_DRIVER
 //#define SIMULATE_SPURIOUS_DEADLOCK
 
@@ -331,6 +335,7 @@ struct ThreadedReplayer : StateCreatorInterface
 		bool pipeline_stats = false;
 #ifndef _WIN32
 		bool disable_signal_handler = false;
+		bool disable_rate_limiter = false;
 #endif
 		string on_disk_pipeline_cache_path;
 		string on_disk_validation_cache_path;
@@ -3047,7 +3052,8 @@ static void print_help()
 	"\t[--quiet-slave]\n" \
 	"\t[--shmem-fd <fd>]\n" \
 	"\t[--control-fd <fd>]\n" \
-	"\t[--disable-signal-handler]\n"
+	"\t[--disable-signal-handler]\n" \
+	"\t[--disable-rate-limiter]\n"
 #endif
 #else
 #define EXTRA_OPTIONS ""
@@ -3223,6 +3229,7 @@ static int run_progress_process(const VulkanDevice::Options &device_opts,
 	opts.enable_validation = device_opts.enable_validation;
 #ifndef _WIN32
 	opts.disable_signal_handler = replayer_opts.disable_signal_handler;
+	opts.disable_rate_limiter = replayer_opts.disable_rate_limiter;
 #endif
 	opts.ignore_derived_pipelines = true;
 	opts.null_device = device_opts.null_device;
@@ -4049,6 +4056,7 @@ int main(int argc, char *argv[])
 	});
 #ifndef _WIN32
 	cbs.add("--disable-signal-handler", [&](CLIParser &) { replayer_opts.disable_signal_handler = true; });
+	cbs.add("--disable-rate-limiter", [&](CLIParser &) { replayer_opts.disable_rate_limiter = true; });
 #endif
 
 	cbs.error_handler = [] { print_help(); };
@@ -4058,6 +4066,13 @@ int main(int argc, char *argv[])
 		return EXIT_FAILURE;
 	if (parser.is_ended_state())
 		return EXIT_SUCCESS;
+
+#ifndef _WIN32
+	// Can be handy to sideband this information in some scenarios.
+	const char *rate_limit = getenv(FOSSILIZE_DISABLE_RATE_LIMITER_ENV);
+	if (rate_limit && *rate_limit)
+		replayer_opts.disable_rate_limiter = true;
+#endif
 
 	if (databases.empty())
 	{

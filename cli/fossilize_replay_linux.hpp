@@ -981,7 +981,7 @@ static int run_master_process(const VulkanDevice::Options &opts,
 
 	Global::active_processes = 0;
 	StallState stall_state;
-	bool use_stall_state = poll_stall_information(stall_state);
+	bool use_stall_state = !replayer_opts.disable_rate_limiter && poll_stall_information(stall_state);
 
 	// We might have inherited awkward signal state from parent process, which will interfere
 	// with the signalfd loop. Reset the dispositions to their default state.

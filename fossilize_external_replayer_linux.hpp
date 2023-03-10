@@ -686,6 +686,8 @@ void ExternalReplayer::Impl::start_replayer_process(const ExternalReplayer::Opti
 
 	if (options.disable_signal_handler)
 		argv.push_back("--disable-signal-handler");
+	if (options.disable_rate_limiter)
+		argv.push_back("--disable-rate-limiter");
 
 	if (options.null_device)
 		argv.push_back("--null-device");
@@ -759,8 +761,12 @@ void ExternalReplayer::Impl::start_replayer_process(const ExternalReplayer::Opti
 	// Replayer should have idle priority.
 	// nice() can return -1 in valid scenarios, need to check errno.
 	errno = 0;
-	if (nice(19) == -1 && errno != 0)
-		LOGE("Failed to set nice value for external replayer!\n");
+
+	if (!options.disable_rate_limiter)
+	{
+		if (nice(19) == -1 && errno != 0)
+			LOGE("Failed to set nice value for external replayer!\n");
+	}
 
 #ifdef __linux__
 	// Replayer crunches a lot of numbers, hint the scheduler.
@@ -775,19 +781,25 @@ void ExternalReplayer::Impl::start_replayer_process(const ExternalReplayer::Opti
 			LOGE("Failed to set scheduling policy for external replayer!\n");
 	}
 
-	// Hint the IO scheduler that we don't want a fair share of the disk
-	// bandwidth.
-	// https://www.kernel.org/doc/html/latest/block/ioprio.html
-	if (ioprio_set(IOPRIO_WHO_PROCESS, 0, IOPRIO_PRIO_VALUE(IOPRIO_CLASS_IDLE, 0)) < 0)
-		LOGE("Failed to set IO priority for external replayer!\n");
+	if (!options.disable_rate_limiter)
+	{
+		// Hint the IO scheduler that we don't want a fair share of the disk
+		// bandwidth.
+		// https://www.kernel.org/doc/html/latest/block/ioprio.html
+		if (ioprio_set(IOPRIO_WHO_PROCESS, 0, IOPRIO_PRIO_VALUE(IOPRIO_CLASS_IDLE, 0)) < 0)
+			LOGE("Failed to set IO priority for external replayer!\n");
+	}
 #endif
 
 #ifdef __APPLE__
-	// Hint the IO scheduler that we don't want to impact foreground
-	// latency.
-	// https://www.unix.com/man-page/osx/3/setiopolicy_np/
-	if (setiopolicy_np(IOPOL_TYPE_DISK, IOPOL_SCOPE_PROCESS, IOPOL_UTILITY) < 0)
-		LOGE("Failed to set IO policy for external replayer!\n");
+	if (!options.disable_rate_limiter)
+	{
+		// Hint the IO scheduler that we don't want to impact foreground
+		// latency.
+		// https://www.unix.com/man-page/osx/3/setiopolicy_np/
+		if (setiopolicy_np(IOPOL_TYPE_DISK, IOPOL_SCOPE_PROCESS, IOPOL_UTILITY) < 0)
+			LOGE("Failed to set IO policy for external replayer!\n");
+	}
 #endif
 
 	// We're now in the child process, so it's safe to override environment here.
