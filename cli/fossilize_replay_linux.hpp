@@ -476,11 +476,6 @@ bool ProcessProgress::start_child_process(vector<ProcessProgress> &siblings)
 	}
 	else if (new_pid == 0)
 	{
-		// We're the child process.
-		// Unblock the signal mask.
-		if (pthread_sigmask(SIG_SETMASK, &Global::old_mask, nullptr) < 0)
-			return EXIT_FAILURE;
-
 		// Close various FDs we won't use.
 		close(Global::signal_fd);
 		close(Global::epoll_fd);
@@ -489,6 +484,11 @@ bool ProcessProgress::start_child_process(vector<ProcessProgress> &siblings)
 		close(input_fds[1]);
 		if (Global::control_fd >= 0)
 			close(Global::control_fd);
+
+		// We're the child process.
+		// Unblock the signal mask.
+		if (pthread_sigmask(SIG_SETMASK, &Global::old_mask, nullptr) != 0)
+			return EXIT_FAILURE;
 
 		// Make sure we don't hold unrelated epoll sensitive FDs open.
 		for (auto &sibling : siblings)
