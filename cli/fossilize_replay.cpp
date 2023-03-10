@@ -371,30 +371,30 @@ struct ThreadedReplayer : StateCreatorInterface
 
 	struct DeferredGraphicsInfo
 	{
-		VkGraphicsPipelineCreateInfo *info;
-		Hash hash;
-		VkPipeline *pipeline;
-		unsigned index;
+		VkGraphicsPipelineCreateInfo *info = nullptr;
+		Hash hash = 0;
+		VkPipeline *pipeline = nullptr;
+		unsigned index = 0;
 
 		static ResourceTag get_tag() { return RESOURCE_GRAPHICS_PIPELINE; }
 	};
 
 	struct DeferredComputeInfo
 	{
-		VkComputePipelineCreateInfo *info;
-		Hash hash;
-		VkPipeline *pipeline;
-		unsigned index;
+		VkComputePipelineCreateInfo *info = nullptr;
+		Hash hash = 0;
+		VkPipeline *pipeline = nullptr;
+		unsigned index = 0;
 
 		static ResourceTag get_tag() { return RESOURCE_COMPUTE_PIPELINE; }
 	};
 
 	struct DeferredRayTracingInfo
 	{
-		VkRayTracingPipelineCreateInfoKHR *info;
-		Hash hash;
-		VkPipeline *pipeline;
-		unsigned index;
+		VkRayTracingPipelineCreateInfoKHR *info = nullptr;
+		Hash hash = 0;
+		VkPipeline *pipeline = nullptr;
+		unsigned index = 0;
 
 		static ResourceTag get_tag() { return RESOURCE_RAYTRACING_PIPELINE; }
 	};
@@ -709,29 +709,6 @@ struct ThreadedReplayer : StateCreatorInterface
 				{
 					opts.control_block->parsed_raytracing_failures.fetch_add(1, std::memory_order_relaxed);
 					opts.control_block->skipped_raytracing.fetch_add(1, std::memory_order_relaxed);
-				}
-			}
-
-			// If we failed to parse, we need to at least clear out the state to something sensible.
-			unsigned index = per_thread.current_parse_index;
-			unsigned memory_index = per_thread.memory_context_index;
-			bool force_outside_range = per_thread.force_outside_range;
-			if (!force_outside_range)
-			{
-				if (work_item.tag == RESOURCE_GRAPHICS_PIPELINE)
-				{
-					assert(index < deferred_graphics[memory_index].size());
-					deferred_graphics[memory_index][index] = {};
-				}
-				else if (work_item.tag == RESOURCE_COMPUTE_PIPELINE)
-				{
-					assert(index < deferred_compute[memory_index].size());
-					deferred_compute[memory_index][index] = {};
-				}
-				else if (work_item.tag == RESOURCE_RAYTRACING_PIPELINE)
-				{
-					assert(index < deferred_raytracing[memory_index].size());
-					deferred_raytracing[memory_index][index] = {};
 				}
 			}
 		}
@@ -2572,7 +2549,12 @@ struct ThreadedReplayer : StateCreatorInterface
 					                 }
 				                 }
 
+				                 // Important that memory is cleared here since we yoinked away the memory
+				                 // when resetting allocators.
+				                 deferred[memory_index].clear();
+
 				                 deferred[memory_index].resize(to_submit);
+
 				                 for (unsigned index = hash_offset; index < hash_offset + to_submit; index++)
 				                 {
 					                 auto tag = DerivedInfo::get_tag();
@@ -2582,7 +2564,6 @@ struct ThreadedReplayer : StateCreatorInterface
 						                 // Need to check here which is not optimal, since we need to maintain a stable pipeline index
 						                 // for the robust replayer mechanism.
 						                 // TODO: Consider pre-parsing various databases and emit a SHM block for child replayer processes.
-						                 deferred[memory_index][index - hash_offset] = {};
 						                 if (opts.control_block)
 						                 {
 							                 if (tag == RESOURCE_GRAPHICS_PIPELINE)
