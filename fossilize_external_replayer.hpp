@@ -132,6 +132,11 @@ public:
 		// Disable crash signal handler (for debugging and obtaining coredumps).
 		bool disable_signal_handler;
 
+		// Disable rate limiter (e.g. Linux PSI monitoring).
+		// Intended for when running Fossilize dumps off-line on dedicated hardware.
+		// Also disables any deliberate lowering of priorities for the process group.
+		bool disable_rate_limiter;
+
 		// Ignores derived pipelines, reduces memory consumption when replaying.
 		// Only useful if the driver in question ignores use of derived pipelines when hashing pipelines internally.
 		// OBSOLETE. This option is only kept for backwards compat.

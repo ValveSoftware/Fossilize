@@ -70,6 +70,10 @@ using namespace std;
 #define FOSSILIZE_REPLAY_WRAPPER_ORIGINAL_APP_ENV "FOSSILIZE_REPLAY_WRAPPER_ORIGINAL_APP"
 #endif
 
+#ifndef FOSSILIZE_DISABLE_RATE_LIMITER_ENV
+#define FOSSILIZE_DISABLE_RATE_LIMITER_ENV "FOSSILIZE_DISABLE_RATE_LIMITER"
+#endif
+
 //#define SIMULATE_UNSTABLE_DRIVER
 //#define SIMULATE_SPURIOUS_DEADLOCK
 
@@ -331,6 +335,7 @@ struct ThreadedReplayer : StateCreatorInterface
 		bool pipeline_stats = false;
 #ifndef _WIN32
 		bool disable_signal_handler = false;
+		bool disable_rate_limiter = false;
 #endif
 		string on_disk_pipeline_cache_path;
 		string on_disk_validation_cache_path;
@@ -371,30 +376,30 @@ struct ThreadedReplayer : StateCreatorInterface
 
 	struct DeferredGraphicsInfo
 	{
-		VkGraphicsPipelineCreateInfo *info;
-		Hash hash;
-		VkPipeline *pipeline;
-		unsigned index;
+		VkGraphicsPipelineCreateInfo *info = nullptr;
+		Hash hash = 0;
+		VkPipeline *pipeline = nullptr;
+		unsigned index = 0;
 
 		static ResourceTag get_tag() { return RESOURCE_GRAPHICS_PIPELINE; }
 	};
 
 	struct DeferredComputeInfo
 	{
-		VkComputePipelineCreateInfo *info;
-		Hash hash;
-		VkPipeline *pipeline;
-		unsigned index;
+		VkComputePipelineCreateInfo *info = nullptr;
+		Hash hash = 0;
+		VkPipeline *pipeline = nullptr;
+		unsigned index = 0;
 
 		static ResourceTag get_tag() { return RESOURCE_COMPUTE_PIPELINE; }
 	};
 
 	struct DeferredRayTracingInfo
 	{
-		VkRayTracingPipelineCreateInfoKHR *info;
-		Hash hash;
-		VkPipeline *pipeline;
-		unsigned index;
+		VkRayTracingPipelineCreateInfoKHR *info = nullptr;
+		Hash hash = 0;
+		VkPipeline *pipeline = nullptr;
+		unsigned index = 0;
 
 		static ResourceTag get_tag() { return RESOURCE_RAYTRACING_PIPELINE; }
 	};
@@ -416,6 +421,10 @@ struct ThreadedReplayer : StateCreatorInterface
 
 		bool force_outside_range = false;
 		bool triggered_validation_error = false;
+
+		ResourceTag expected_tag = RESOURCE_COUNT;
+		Hash expected_hash = 0;
+		bool acknowledge_parsing_work = false;
 	};
 
 	ThreadedReplayer(const VulkanDevice::Options &device_opts_, const Options &opts_)
@@ -688,7 +697,16 @@ struct ThreadedReplayer : StateCreatorInterface
 		per_thread.force_outside_range = work_item.force_outside_range;
 		per_thread.memory_context_index = work_item.memory_context_index;
 
-		if (!replayer.parse(*this, global_database, buffer.data(), buffer.size()))
+		// If the archive is somehow corrupt, we really do not want to parse entries which are of a different type
+		// or otherwise are not what we expect.
+		per_thread.expected_tag = work_item.tag;
+		per_thread.expected_hash = work_item.hash;
+
+		// It's also possible that nothing happened while parsing. That should count as a fail as well.
+		per_thread.acknowledge_parsing_work = false;
+
+		if (!replayer.parse(*this, global_database, buffer.data(), buffer.size()) ||
+		    !per_thread.acknowledge_parsing_work)
 		{
 			LOGW("Did not replay blob (tag: %d, hash: 0x%016" PRIx64 "). See previous logs for context.\n",
 			     work_item.tag, work_item.hash);
@@ -709,29 +727,6 @@ struct ThreadedReplayer : StateCreatorInterface
 				{
 					opts.control_block->parsed_raytracing_failures.fetch_add(1, std::memory_order_relaxed);
 					opts.control_block->skipped_raytracing.fetch_add(1, std::memory_order_relaxed);
-				}
-			}
-
-			// If we failed to parse, we need to at least clear out the state to something sensible.
-			unsigned index = per_thread.current_parse_index;
-			unsigned memory_index = per_thread.memory_context_index;
-			bool force_outside_range = per_thread.force_outside_range;
-			if (!force_outside_range)
-			{
-				if (work_item.tag == RESOURCE_GRAPHICS_PIPELINE)
-				{
-					assert(index < deferred_graphics[memory_index].size());
-					deferred_graphics[memory_index][index] = {};
-				}
-				else if (work_item.tag == RESOURCE_COMPUTE_PIPELINE)
-				{
-					assert(index < deferred_compute[memory_index].size());
-					deferred_compute[memory_index][index] = {};
-				}
-				else if (work_item.tag == RESOURCE_RAYTRACING_PIPELINE)
-				{
-					assert(index < deferred_raytracing[memory_index].size());
-					deferred_raytracing[memory_index][index] = {};
 				}
 			}
 		}
@@ -1633,6 +1628,8 @@ struct ThreadedReplayer : StateCreatorInterface
 	void set_application_info(Hash, const VkApplicationInfo *app, const VkPhysicalDeviceFeatures2 *features) override
 	{
 		// TODO: Could use this to create multiple VkDevices for replay as necessary if app changes.
+		if (get_per_thread_data().expected_tag != RESOURCE_APPLICATION_INFO)
+			return;
 
 		if (!device_was_init)
 		{
@@ -1786,6 +1783,14 @@ struct ThreadedReplayer : StateCreatorInterface
 
 	bool enqueue_create_sampler(Hash index, const VkSamplerCreateInfo *create_info, VkSampler *sampler) override
 	{
+		auto &per_thread = get_per_thread_data();
+		if (per_thread.expected_tag != RESOURCE_SAMPLER &&
+		    per_thread.expected_tag != RESOURCE_DESCRIPTOR_SET_LAYOUT &&
+		    per_thread.expected_tag != RESOURCE_PIPELINE_LAYOUT)
+		{
+			return false;
+		}
+
 		if (!device->get_feature_filter().sampler_is_supported(create_info))
 		{
 			LOGW("Sampler %016" PRIx64 " is not supported. Skipping.\n", index);
@@ -1804,6 +1809,13 @@ struct ThreadedReplayer : StateCreatorInterface
 
 	bool enqueue_create_descriptor_set_layout(Hash index, const VkDescriptorSetLayoutCreateInfo *create_info, VkDescriptorSetLayout *layout) override
 	{
+		auto &per_thread = get_per_thread_data();
+		if (per_thread.expected_tag != RESOURCE_DESCRIPTOR_SET_LAYOUT &&
+		    per_thread.expected_tag != RESOURCE_PIPELINE_LAYOUT)
+		{
+			return false;
+		}
+
 		if (!device->get_feature_filter().descriptor_set_layout_is_supported(create_info))
 		{
 			LOGW("Descriptor set layout %016" PRIx64 " is not supported. Skipping.\n", index);
@@ -1822,6 +1834,9 @@ struct ThreadedReplayer : StateCreatorInterface
 
 	bool enqueue_create_pipeline_layout(Hash index, const VkPipelineLayoutCreateInfo *create_info, VkPipelineLayout *layout) override
 	{
+		if (get_per_thread_data().expected_tag != RESOURCE_PIPELINE_LAYOUT)
+			return false;
+
 		if (!device->get_feature_filter().pipeline_layout_is_supported(create_info))
 		{
 			LOGW("Pipeline layout %016" PRIx64 " is not supported. Skipping.\n", index);
@@ -1840,6 +1855,9 @@ struct ThreadedReplayer : StateCreatorInterface
 
 	bool enqueue_create_render_pass(Hash index, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass) override
 	{
+		if (get_per_thread_data().expected_tag != RESOURCE_RENDER_PASS)
+			return false;
+
 		if (!device->get_feature_filter().render_pass_is_supported(create_info))
 		{
 			LOGW("Render pass %016" PRIx64 " is not supported. Skipping.\n", index);
@@ -1858,6 +1876,9 @@ struct ThreadedReplayer : StateCreatorInterface
 
 	bool enqueue_create_render_pass2(Hash index, const VkRenderPassCreateInfo2 *create_info, VkRenderPass *render_pass) override
 	{
+		if (get_per_thread_data().expected_tag != RESOURCE_RENDER_PASS)
+			return false;
+
 		if (!device->get_feature_filter().render_pass2_is_supported(create_info))
 		{
 			LOGW("Render pass (version 2) %016" PRIx64 " is not supported. Skipping.\n", index);
@@ -1877,6 +1898,16 @@ struct ThreadedReplayer : StateCreatorInterface
 	bool enqueue_create_shader_module(Hash hash, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module) override
 	{
 		*module = VK_NULL_HANDLE;
+
+		auto &per_thread = get_per_thread_data();
+		if (per_thread.expected_hash != hash || per_thread.expected_tag != RESOURCE_SHADER_MODULE)
+		{
+			LOGE("Unexpected resource type or hash in blob, ignoring.\n");
+			return false;
+		}
+
+		per_thread.acknowledge_parsing_work = true;
+
 		if (masked_shader_modules.count(hash) || resource_is_blacklisted(RESOURCE_SHADER_MODULE, hash))
 		{
 			lock_guard<mutex> lock(internal_enqueue_mutex);
@@ -1948,7 +1979,6 @@ struct ThreadedReplayer : StateCreatorInterface
 			return true;
 		}
 
-		auto &per_thread = get_per_thread_data();
 		per_thread.triggered_validation_error = false;
 
 		for (unsigned i = 0; i < loop_count; i++)
@@ -2032,6 +2062,14 @@ struct ThreadedReplayer : StateCreatorInterface
 		unsigned memory_index = per_thread.memory_context_index;
 		bool force_outside_range = per_thread.force_outside_range;
 
+		if (per_thread.expected_hash != hash || per_thread.expected_tag != RESOURCE_COMPUTE_PIPELINE)
+		{
+			LOGE("Unexpected resource type or hash in blob, ignoring.\n");
+			return false;
+		}
+
+		per_thread.acknowledge_parsing_work = true;
+
 		if (!force_outside_range && index < deferred_compute[memory_index].size())
 		{
 			deferred_compute[memory_index][index] = {
@@ -2082,6 +2120,14 @@ struct ThreadedReplayer : StateCreatorInterface
 		unsigned memory_index = per_thread.memory_context_index;
 		bool force_outside_range = per_thread.force_outside_range;
 
+		if (per_thread.expected_hash != hash || per_thread.expected_tag != RESOURCE_GRAPHICS_PIPELINE)
+		{
+			LOGE("Unexpected resource type or hash in blob, ignoring.\n");
+			return false;
+		}
+
+		per_thread.acknowledge_parsing_work = true;
+
 		if (!force_outside_range)
 		{
 			assert(index < deferred_graphics[memory_index].size());
@@ -2130,6 +2176,14 @@ struct ThreadedReplayer : StateCreatorInterface
 		unsigned index = per_thread.current_parse_index;
 		unsigned memory_index = per_thread.memory_context_index;
 		bool force_outside_range = per_thread.force_outside_range;
+
+		if (per_thread.expected_hash != hash || per_thread.expected_tag != RESOURCE_RAYTRACING_PIPELINE)
+		{
+			LOGE("Unexpected resource type or hash in blob, ignoring.\n");
+			return false;
+		}
+
+		per_thread.acknowledge_parsing_work = true;
 
 		if (!force_outside_range)
 		{
@@ -2572,7 +2626,12 @@ struct ThreadedReplayer : StateCreatorInterface
 					                 }
 				                 }
 
+				                 // Important that memory is cleared here since we yoinked away the memory
+				                 // when resetting allocators.
+				                 deferred[memory_index].clear();
+
 				                 deferred[memory_index].resize(to_submit);
+
 				                 for (unsigned index = hash_offset; index < hash_offset + to_submit; index++)
 				                 {
 					                 auto tag = DerivedInfo::get_tag();
@@ -2582,7 +2641,6 @@ struct ThreadedReplayer : StateCreatorInterface
 						                 // Need to check here which is not optimal, since we need to maintain a stable pipeline index
 						                 // for the robust replayer mechanism.
 						                 // TODO: Consider pre-parsing various databases and emit a SHM block for child replayer processes.
-						                 deferred[memory_index][index - hash_offset] = {};
 						                 if (opts.control_block)
 						                 {
 							                 if (tag == RESOURCE_GRAPHICS_PIPELINE)
@@ -2994,7 +3052,8 @@ static void print_help()
 	"\t[--quiet-slave]\n" \
 	"\t[--shmem-fd <fd>]\n" \
 	"\t[--control-fd <fd>]\n" \
-	"\t[--disable-signal-handler]\n"
+	"\t[--disable-signal-handler]\n" \
+	"\t[--disable-rate-limiter]\n"
 #endif
 #else
 #define EXTRA_OPTIONS ""
@@ -3170,6 +3229,7 @@ static int run_progress_process(const VulkanDevice::Options &device_opts,
 	opts.enable_validation = device_opts.enable_validation;
 #ifndef _WIN32
 	opts.disable_signal_handler = replayer_opts.disable_signal_handler;
+	opts.disable_rate_limiter = replayer_opts.disable_rate_limiter;
 #endif
 	opts.ignore_derived_pipelines = true;
 	opts.null_device = device_opts.null_device;
@@ -3585,6 +3645,9 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 			return EXIT_FAILURE;
 		}
 
+		auto &per_thread_data = replayer.get_per_thread_data();
+		per_thread_data.expected_tag = tag;
+
 		for (auto &hash : resource_hashes)
 		{
 			size_t state_json_size = 0;
@@ -3993,6 +4056,7 @@ int main(int argc, char *argv[])
 	});
 #ifndef _WIN32
 	cbs.add("--disable-signal-handler", [&](CLIParser &) { replayer_opts.disable_signal_handler = true; });
+	cbs.add("--disable-rate-limiter", [&](CLIParser &) { replayer_opts.disable_rate_limiter = true; });
 #endif
 
 	cbs.error_handler = [] { print_help(); };
@@ -4002,6 +4066,13 @@ int main(int argc, char *argv[])
 		return EXIT_FAILURE;
 	if (parser.is_ended_state())
 		return EXIT_SUCCESS;
+
+#ifndef _WIN32
+	// Can be handy to sideband this information in some scenarios.
+	const char *rate_limit = getenv(FOSSILIZE_DISABLE_RATE_LIMITER_ENV);
+	if (rate_limit && *rate_limit)
+		replayer_opts.disable_rate_limiter = true;
+#endif
 
 	if (databases.empty())
 	{
