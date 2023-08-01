@@ -2150,8 +2150,13 @@ bool FeatureFilter::Impl::subgroup_size_control_is_supported(const VkPipelineSha
 		return false;
 	}
 
+	bool is_compute_like_stage =
+			stage.stage == VK_SHADER_STAGE_MESH_BIT_EXT ||
+			stage.stage == VK_SHADER_STAGE_TASK_BIT_EXT ||
+			stage.stage == VK_SHADER_STAGE_COMPUTE_BIT;
+
 	if ((stage.flags & VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT_EXT) != 0 &&
-	    (stage.stage != VK_SHADER_STAGE_COMPUTE_BIT ||
+	    (!is_compute_like_stage ||
 	     features.subgroup_size_control.computeFullSubgroups == VK_FALSE ||
 	     features.subgroup_size_control.subgroupSizeControl == VK_FALSE))
 	{
