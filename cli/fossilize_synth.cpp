@@ -37,6 +37,8 @@ static void print_help()
 {
 	LOGE("Usage: fossilize-synth\n"
 	     "\t[--vert shader.spv]\n"
+	     "\t[--task shader.spv]\n"
+	     "\t[--mesh shader.spv]\n"
 	     "\t[--tesc shader.spv]\n"
 	     "\t[--tese shader.spv]\n"
 	     "\t[--geom shader.spv]\n"
@@ -50,12 +52,25 @@ static void print_help()
 enum ShaderStage
 {
 	STAGE_VERT = 0,
+	STAGE_TASK,
+	STAGE_MESH,
 	STAGE_TESC,
 	STAGE_TESE,
 	STAGE_GEOM,
 	STAGE_FRAG,
 	STAGE_COMP,
 	STAGE_COUNT
+};
+
+static const VkShaderStageFlagBits to_vk_shader_stage[STAGE_COUNT] = {
+	VK_SHADER_STAGE_VERTEX_BIT,
+	VK_SHADER_STAGE_TASK_BIT_EXT,
+	VK_SHADER_STAGE_MESH_BIT_EXT,
+	VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT,
+	VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT,
+	VK_SHADER_STAGE_GEOMETRY_BIT,
+	VK_SHADER_STAGE_FRAGMENT_BIT,
+	VK_SHADER_STAGE_COMPUTE_BIT,
 };
 
 struct SpecConstant
@@ -696,7 +711,7 @@ static VkPipeline synthesize_graphics_pipeline(StateRecorder &recorder,
 			VkPipelineShaderStageCreateInfo stage = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
 			stage.module = (VkShaderModule)uint64_t(1 + i);
 			stage.pName = "main";
-			stage.stage = VkShaderStageFlagBits(1u << i);
+			stage.stage = to_vk_shader_stage[i];
 			if (spec_info.dataSize != 0)
 				stage.pSpecializationInfo = &spec_info;
 			stages.push_back(stage);
@@ -752,11 +767,12 @@ static VkPipeline synthesize_graphics_pipeline(StateRecorder &recorder,
 	std::vector<VkVertexInputAttributeDescription> attributes;
 	VkVertexInputBindingDescription vertex_binding = {};
 
-	if (!append_attributes(compilers[STAGE_VERT], attributes, vertex_binding.stride))
-		return VK_NULL_HANDLE;
-
 	VkPipelineVertexInputStateCreateInfo vi = { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+	if (compilers[STAGE_VERT])
 	{
+		if (!append_attributes(compilers[STAGE_VERT], attributes, vertex_binding.stride))
+			return VK_NULL_HANDLE;
+
 		vi.vertexBindingDescriptionCount = 1;
 		vi.pVertexBindingDescriptions = &vertex_binding;
 		vi.vertexAttributeDescriptionCount = uint32_t(attributes.size());
@@ -765,6 +781,7 @@ static VkPipeline synthesize_graphics_pipeline(StateRecorder &recorder,
 	}
 
 	VkPipelineInputAssemblyStateCreateInfo ia = { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
+	if (compilers[STAGE_VERT])
 	{
 		ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 		info.pInputAssemblyState = &ia;
@@ -812,6 +829,8 @@ int main(int argc, char *argv[])
 	cbs.add("--geom", [&](CLIParser &parser) { spv_paths[STAGE_GEOM] = parser.next_string(); });
 	cbs.add("--frag", [&](CLIParser &parser) { spv_paths[STAGE_FRAG] = parser.next_string(); });
 	cbs.add("--comp", [&](CLIParser &parser) { spv_paths[STAGE_COMP] = parser.next_string(); });
+	cbs.add("--task", [&](CLIParser &parser) { spv_paths[STAGE_TASK] = parser.next_string(); });
+	cbs.add("--mesh", [&](CLIParser &parser) { spv_paths[STAGE_MESH] = parser.next_string(); });
 	cbs.add("--output", [&](CLIParser &parser) { output_path = parser.next_string(); });
 	cbs.add("--help", [&](CLIParser &parser) { parser.end(); });
 	cbs.add("--spec", [&](CLIParser &parser) {
