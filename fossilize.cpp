@@ -53,6 +53,31 @@ using CustomWriter = PrettyWriter<StringBuffer>;
 using CustomWriter = Writer<StringBuffer>;
 #endif
 
+static inline bool operator==(const VkShaderModuleIdentifierEXT &a, const VkShaderModuleIdentifierEXT &b)
+{
+	return a.identifierSize == b.identifierSize &&
+	       memcmp(a.identifier, b.identifier, a.identifierSize) == 0;
+}
+
+static inline bool operator!=(const VkShaderModuleIdentifierEXT &a, const VkShaderModuleIdentifierEXT &b)
+{
+	return !(a == b);
+}
+
+namespace std
+{
+template <> struct hash<VkShaderModuleIdentifierEXT>
+{
+	size_t operator()(const VkShaderModuleIdentifierEXT &i) const
+	{
+		Fossilize::Hasher h;
+		h.u32(i.identifierSize);
+		h.data(i.identifier, i.identifierSize);
+		return h.get();
+	}
+};
+}
+
 using namespace std;
 
 namespace Fossilize
@@ -403,6 +428,8 @@ struct StateRecorder::Impl
 	std::unordered_map<Hash, SubpassMetaStorage> render_pass_hash_to_subpass_meta;
 	template <typename CreateInfo>
 	static SubpassMetaStorage analyze_subpass_meta_storage(const CreateInfo &render_pass_create_info);
+
+	std::unordered_map<VkShaderModuleIdentifierEXT, VkShaderModule> identifier_to_module;
 
 	VkApplicationInfo *application_info = nullptr;
 	VkPhysicalDeviceFeatures2 *physical_device_features = nullptr;
@@ -7352,6 +7379,19 @@ bool StateRecorder::Impl::remap_shader_module_handles(CreateInfo *info)
 			record_item.create_info = const_cast<VkShaderModuleCreateInfo *>(module);
 			Hash h = record_shader_module(record_item, true);
 			stage.module = api_object_cast<VkShaderModule>(h);
+		}
+		else if (const auto *identifier = find_pnext<VkPipelineShaderStageModuleIdentifierCreateInfoEXT>(
+				VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_MODULE_IDENTIFIER_CREATE_INFO_EXT, stage.pNext))
+		{
+			VkShaderModuleIdentifierEXT ident = { VK_STRUCTURE_TYPE_SHADER_MODULE_IDENTIFIER_EXT };
+			ident.identifierSize = identifier->identifierSize;
+			memcpy(ident.identifier, identifier->pIdentifier, ident.identifierSize);
+
+			auto itr = identifier_to_module.find(ident);
+			if (itr == identifier_to_module.end())
+				stage.module = itr->second;
+			else
+				return false;
 		}
 		else
 			return false;
