@@ -579,6 +579,7 @@ struct StateRecorder::Impl
 	bool remap_render_pass_ci(VkRenderPassCreateInfo *create_info) FOSSILIZE_WARN_UNUSED;
 	template <typename CreateInfo>
 	bool remap_shader_module_handles(CreateInfo *info) FOSSILIZE_WARN_UNUSED;
+	bool remap_shader_module_handle(VkPipelineShaderStageCreateInfo &info) FOSSILIZE_WARN_UNUSED;
 
 	bool get_subpass_meta_for_render_pass_hash(Hash render_pass_hash,
 	                                           uint32_t subpass,
@@ -7360,40 +7361,47 @@ bool StateRecorder::Impl::remap_shader_module_ci(VkShaderModuleCreateInfo *)
 	return true;
 }
 
+bool StateRecorder::Impl::remap_shader_module_handle(VkPipelineShaderStageCreateInfo &info)
+{
+	if (info.module != VK_NULL_HANDLE)
+	{
+		if (!remap_shader_module_handle(info.module, &info.module))
+			return false;
+	}
+	else if (const auto *module = find_pnext<VkShaderModuleCreateInfo>(
+			VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, info.pNext))
+	{
+		WorkItem record_item = {};
+		record_item.create_info = const_cast<VkShaderModuleCreateInfo *>(module);
+		Hash h = record_shader_module(record_item, true);
+		info.module = api_object_cast<VkShaderModule>(h);
+	}
+	else if (const auto *identifier = find_pnext<VkPipelineShaderStageModuleIdentifierCreateInfoEXT>(
+			VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_MODULE_IDENTIFIER_CREATE_INFO_EXT, info.pNext))
+	{
+		VkShaderModuleIdentifierEXT ident = { VK_STRUCTURE_TYPE_SHADER_MODULE_IDENTIFIER_EXT };
+		ident.identifierSize = identifier->identifierSize;
+		memcpy(ident.identifier, identifier->pIdentifier, ident.identifierSize);
+
+		auto itr = identifier_to_module.find(ident);
+		if (itr == identifier_to_module.end())
+			info.module = itr->second;
+		else
+			return false;
+	}
+	else
+		return false;
+
+	return true;
+}
+
 template <typename CreateInfo>
 bool StateRecorder::Impl::remap_shader_module_handles(CreateInfo *info)
 {
 	for (uint32_t i = 0; i < info->stageCount; i++)
 	{
 		auto &stage = const_cast<VkPipelineShaderStageCreateInfo &>(info->pStages[i]);
-
-		if (stage.module != VK_NULL_HANDLE)
-		{
-			if (!remap_shader_module_handle(stage.module, &stage.module))
-				return false;
-		}
-		else if (const auto *module = find_pnext<VkShaderModuleCreateInfo>(
-				VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, stage.pNext))
-		{
-			WorkItem record_item = {};
-			record_item.create_info = const_cast<VkShaderModuleCreateInfo *>(module);
-			Hash h = record_shader_module(record_item, true);
-			stage.module = api_object_cast<VkShaderModule>(h);
-		}
-		else if (const auto *identifier = find_pnext<VkPipelineShaderStageModuleIdentifierCreateInfoEXT>(
-				VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_MODULE_IDENTIFIER_CREATE_INFO_EXT, stage.pNext))
-		{
-			VkShaderModuleIdentifierEXT ident = { VK_STRUCTURE_TYPE_SHADER_MODULE_IDENTIFIER_EXT };
-			ident.identifierSize = identifier->identifierSize;
-			memcpy(ident.identifier, identifier->pIdentifier, ident.identifierSize);
-
-			auto itr = identifier_to_module.find(ident);
-			if (itr == identifier_to_module.end())
-				stage.module = itr->second;
-			else
-				return false;
-		}
-		else
+		if (!remap_shader_module_handle(stage))
 			return false;
 	}
 
@@ -7429,20 +7437,7 @@ bool StateRecorder::Impl::remap_graphics_pipeline_ci(VkGraphicsPipelineCreateInf
 
 bool StateRecorder::Impl::remap_compute_pipeline_ci(VkComputePipelineCreateInfo *info)
 {
-	if (info->stage.module != VK_NULL_HANDLE)
-	{
-		if (!remap_shader_module_handle(info->stage.module, &info->stage.module))
-			return false;
-	}
-	else if (const auto *module = find_pnext<VkShaderModuleCreateInfo>(
-			VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, info->stage.pNext))
-	{
-		WorkItem record_item = {};
-		record_item.create_info = const_cast<VkShaderModuleCreateInfo *>(module);
-		Hash h = record_shader_module(record_item, true);
-		info->stage.module = api_object_cast<VkShaderModule>(h);
-	}
-	else
+	if (!remap_shader_module_handle(info->stage))
 		return false;
 
 	if (info->basePipelineHandle != VK_NULL_HANDLE)
