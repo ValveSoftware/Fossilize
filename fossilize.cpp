@@ -370,6 +370,7 @@ struct StateRecorder::Impl
 	ScratchAllocator temp_allocator;
 	ScratchAllocator ycbcr_temp_allocator;
 	DatabaseInterface *database_iface = nullptr;
+	DatabaseInterface *module_identifier_database_iface = nullptr;
 	ApplicationInfoFilter *application_info_filter = nullptr;
 
 	std::unordered_map<Hash, VkDescriptorSetLayoutCreateInfo *> descriptor_sets;
@@ -413,12 +414,15 @@ struct StateRecorder::Impl
 	                        bool ignore_pnext, VkShaderModuleCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
 	bool copy_graphics_pipeline(const VkGraphicsPipelineCreateInfo *create_info, ScratchAllocator &alloc,
 	                            const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
+	                            VkDevice device, PFN_vkGetShaderModuleCreateInfoIdentifierEXT gsmcii,
 	                            VkGraphicsPipelineCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
 	bool copy_compute_pipeline(const VkComputePipelineCreateInfo *create_info, ScratchAllocator &alloc,
 	                           const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
+	                           VkDevice device, PFN_vkGetShaderModuleCreateInfoIdentifierEXT gsmcii,
 	                           VkComputePipelineCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
 	bool copy_raytracing_pipeline(const VkRayTracingPipelineCreateInfoKHR *create_info, ScratchAllocator &alloc,
 	                              const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
+	                              VkDevice device, PFN_vkGetShaderModuleCreateInfoIdentifierEXT gsmcii,
 	                              VkRayTracingPipelineCreateInfoKHR **out_info) FOSSILIZE_WARN_UNUSED;
 	bool copy_sampler(const VkSamplerCreateInfo *create_info, ScratchAllocator &alloc,
 	                  VkSamplerCreateInfo **out_info) FOSSILIZE_WARN_UNUSED;
@@ -435,7 +439,12 @@ struct StateRecorder::Impl
 
 	template <typename CreateInfo>
 	bool copy_stages(CreateInfo *info, ScratchAllocator &alloc,
+	                 VkDevice device, PFN_vkGetShaderModuleCreateInfoIdentifierEXT gsmcii,
 	                 const DynamicStateInfo *dynamic_state_info) FOSSILIZE_WARN_UNUSED;
+
+	static bool add_module_identifier(VkPipelineShaderStageCreateInfo *info, ScratchAllocator &alloc,
+	                                  VkDevice device, PFN_vkGetShaderModuleCreateInfoIdentifierEXT gsmcii);
+
 	template <typename CreateInfo>
 	bool copy_dynamic_state(CreateInfo *info, ScratchAllocator &alloc,
 	                        const DynamicStateInfo *dynamic_state_info) FOSSILIZE_WARN_UNUSED;
@@ -520,6 +529,8 @@ struct StateRecorder::Impl
 	void *copy_pnext_struct(const VkPipelineLibraryCreateInfoKHR *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPipelineViewportDepthClipControlCreateInfoEXT *create_info,
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkPipelineShaderStageModuleIdentifierCreateInfoEXT *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 
 	bool remap_sampler_handle(VkSampler sampler, VkSampler *out_sampler) const FOSSILIZE_WARN_UNUSED;
@@ -5534,6 +5545,14 @@ void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineViewportDepthClipCo
 	return clip;
 }
 
+void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineShaderStageModuleIdentifierCreateInfoEXT *create_info,
+                                             ScratchAllocator &alloc)
+{
+	auto *identifier = copy(create_info, 1, alloc);
+	identifier->pIdentifier = copy(identifier->pIdentifier, identifier->identifierSize, alloc);
+	return identifier;
+}
+
 template <typename T>
 bool StateRecorder::Impl::copy_pnext_chains(const T *ts, uint32_t count, ScratchAllocator &alloc,
                                             const DynamicStateInfo *dynamic_state_info,
@@ -5790,6 +5809,13 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 		case VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_DEPTH_CLIP_CONTROL_CREATE_INFO_EXT:
 		{
 			auto *ci = static_cast<const VkPipelineViewportDepthClipControlCreateInfoEXT *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_MODULE_IDENTIFIER_CREATE_INFO_EXT:
+		{
+			auto *ci = static_cast<const VkPipelineShaderStageModuleIdentifierCreateInfoEXT *>(pNext);
 			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
 			break;
 		}
@@ -6084,7 +6110,9 @@ bool StateRecorder::record_pipeline_layout(VkPipelineLayout pipeline_layout, con
 
 bool StateRecorder::record_graphics_pipeline(VkPipeline pipeline, const VkGraphicsPipelineCreateInfo &create_info,
                                              const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
-                                             Hash custom_hash)
+                                             Hash custom_hash,
+                                             VkDevice device,
+                                             PFN_vkGetShaderModuleCreateInfoIdentifierEXT gsmcii)
 {
 	// Ignore pipelines that cannot result in meaningful replay.
 	// We are not allowed to look at pStages unless we're emitting pre-raster / fragment shader interface.
@@ -6107,7 +6135,10 @@ bool StateRecorder::record_graphics_pipeline(VkPipeline pipeline, const VkGraphi
 		std::lock_guard<std::mutex> lock(impl->record_lock);
 
 		VkGraphicsPipelineCreateInfo *new_info = nullptr;
-		if (!impl->copy_graphics_pipeline(&create_info, impl->temp_allocator, base_pipelines, base_pipeline_count, &new_info))
+		if (!impl->copy_graphics_pipeline(&create_info, impl->temp_allocator,
+		                                  base_pipelines, base_pipeline_count,
+		                                  device, gsmcii,
+		                                  &new_info))
 		{
 			// Have to forget any reference if this API handle is recycled.
 			impl->push_unregister_locked(VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, pipeline);
@@ -6124,7 +6155,9 @@ bool StateRecorder::record_graphics_pipeline(VkPipeline pipeline, const VkGraphi
 
 bool StateRecorder::record_compute_pipeline(VkPipeline pipeline, const VkComputePipelineCreateInfo &create_info,
                                             const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
-                                            Hash custom_hash)
+                                            Hash custom_hash,
+                                            VkDevice device,
+                                            PFN_vkGetShaderModuleCreateInfoIdentifierEXT gsmcii)
 {
 	// Ignore pipelines that cannot result in meaningful replay.
 	if (shader_stage_is_identifier_only(create_info.stage))
@@ -6139,7 +6172,10 @@ bool StateRecorder::record_compute_pipeline(VkPipeline pipeline, const VkCompute
 		std::lock_guard<std::mutex> lock(impl->record_lock);
 
 		VkComputePipelineCreateInfo *new_info = nullptr;
-		if (!impl->copy_compute_pipeline(&create_info, impl->temp_allocator, base_pipelines, base_pipeline_count, &new_info))
+		if (!impl->copy_compute_pipeline(&create_info, impl->temp_allocator,
+		                                 base_pipelines, base_pipeline_count,
+		                                 device, gsmcii,
+		                                 &new_info))
 		{
 			// Have to forget any reference if this API handle is recycled.
 			impl->push_unregister_locked(VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO, pipeline);
@@ -6157,7 +6193,9 @@ bool StateRecorder::record_compute_pipeline(VkPipeline pipeline, const VkCompute
 bool StateRecorder::record_raytracing_pipeline(
 		VkPipeline pipeline, const VkRayTracingPipelineCreateInfoKHR &create_info,
 		const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
-		Hash custom_hash)
+		Hash custom_hash,
+		VkDevice device,
+		PFN_vkGetShaderModuleCreateInfoIdentifierEXT gsmcii)
 {
 	// Ignore pipelines that cannot result in meaningful replay.
 	for (uint32_t i = 0; i < create_info.stageCount; i++)
@@ -6176,7 +6214,9 @@ bool StateRecorder::record_raytracing_pipeline(
 
 		VkRayTracingPipelineCreateInfoKHR *new_info = nullptr;
 		if (!impl->copy_raytracing_pipeline(&create_info, impl->temp_allocator,
-		                                    base_pipelines, base_pipeline_count, &new_info))
+		                                    base_pipelines, base_pipeline_count,
+		                                    device, gsmcii,
+		                                    &new_info))
 		{
 			// Have to forget any reference if this API handle is recycled.
 			impl->push_unregister_locked(VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR, pipeline);
@@ -6242,14 +6282,6 @@ bool StateRecorder::record_shader_module(VkShaderModule module, const VkShaderMo
 {
 	{
 		std::lock_guard<std::mutex> lock(impl->record_lock);
-
-		if (create_info.pNext)
-		{
-			log_error_pnext_chain("pNext in VkShaderModuleCreateInfo not supported.", create_info.pNext);
-			// Have to forget any reference if this API handle is recycled.
-			impl->push_unregister_locked(VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, module);
-			return false;
-		}
 
 		VkShaderModuleCreateInfo *new_info = nullptr;
 		if (!impl->copy_shader_module(&create_info, impl->temp_allocator, false, &new_info))
@@ -6732,6 +6764,7 @@ static bool update_derived_pipeline(CreateInfo *info, const VkPipeline *base_pip
 
 template <typename CreateInfo>
 bool StateRecorder::Impl::copy_stages(CreateInfo *info, ScratchAllocator &alloc,
+                                      VkDevice device, PFN_vkGetShaderModuleCreateInfoIdentifierEXT gsmcii,
                                       const DynamicStateInfo *dynamic_state_info)
 {
 	info->pStages = copy(info->pStages, info->stageCount, alloc);
@@ -6750,7 +6783,39 @@ bool StateRecorder::Impl::copy_stages(CreateInfo *info, ScratchAllocator &alloc,
 		const void *pNext = nullptr;
 		if (!copy_pnext_chain(stage.pNext, alloc, &pNext, dynamic_state_info, 0))
 			return false;
+
+		if (!add_module_identifier(&stage, alloc, device, gsmcii))
+			return false;
+
 		stage.pNext = pNext;
+	}
+
+	return true;
+}
+
+bool StateRecorder::Impl::add_module_identifier(
+		VkPipelineShaderStageCreateInfo *info, ScratchAllocator &alloc,
+		VkDevice device, PFN_vkGetShaderModuleCreateInfoIdentifierEXT gsmcii)
+{
+	if (!device || !gsmcii)
+		return true;
+
+	if (auto *module_info = find_pnext<VkShaderModuleCreateInfo>(VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+	                                                             info->pNext))
+	{
+		VkShaderModuleIdentifierEXT ident = { VK_STRUCTURE_TYPE_SHADER_MODULE_IDENTIFIER_EXT };
+		gsmcii(device, module_info, &ident);
+
+		auto *identifier_create_info = alloc.allocate_cleared<VkPipelineShaderStageModuleIdentifierCreateInfoEXT>();
+		if (!identifier_create_info)
+			return false;
+
+		identifier_create_info->sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_MODULE_IDENTIFIER_CREATE_INFO_EXT;
+		identifier_create_info->pIdentifier = ident.identifier;
+		identifier_create_info->identifierSize = ident.identifierSize;
+
+		identifier_create_info->pNext = info->pNext;
+		info->pNext = identifier_create_info;
 	}
 
 	return true;
@@ -6799,6 +6864,7 @@ bool StateRecorder::Impl::copy_sub_create_info(const SubCreateInfo *&sub_info, S
 
 bool StateRecorder::Impl::copy_compute_pipeline(const VkComputePipelineCreateInfo *create_info, ScratchAllocator &alloc,
                                                 const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
+                                                VkDevice device, PFN_vkGetShaderModuleCreateInfoIdentifierEXT gsmcii,
                                                 VkComputePipelineCreateInfo **out_create_info)
 {
 	auto *info = copy(create_info, 1, alloc);
@@ -6816,6 +6882,9 @@ bool StateRecorder::Impl::copy_compute_pipeline(const VkComputePipelineCreateInf
 	if (!copy_pnext_chain(info->stage.pNext, alloc, &info->stage.pNext, nullptr, 0))
 		return false;
 
+	if (!add_module_identifier(&info->stage, alloc, device, gsmcii))
+		return false;
+
 	if (!copy_pnext_chain(info->pNext, alloc, &info->pNext, nullptr, 0))
 		return false;
 
@@ -6826,6 +6895,7 @@ bool StateRecorder::Impl::copy_compute_pipeline(const VkComputePipelineCreateInf
 bool StateRecorder::Impl::copy_raytracing_pipeline(const VkRayTracingPipelineCreateInfoKHR *create_info,
                                                    ScratchAllocator &alloc, const VkPipeline *base_pipelines,
                                                    uint32_t base_pipeline_count,
+                                                   VkDevice device, PFN_vkGetShaderModuleCreateInfoIdentifierEXT gsmcii,
                                                    VkRayTracingPipelineCreateInfoKHR **out_info)
 {
 	auto *info = copy(create_info, 1, alloc);
@@ -6834,7 +6904,7 @@ bool StateRecorder::Impl::copy_raytracing_pipeline(const VkRayTracingPipelineCre
 	if (!update_derived_pipeline(info, base_pipelines, base_pipeline_count))
 		return false;
 
-	if (!copy_stages(info, alloc, nullptr))
+	if (!copy_stages(info, alloc, device, gsmcii, nullptr))
 		return false;
 	if (!copy_dynamic_state(info, alloc, nullptr))
 		return false;
@@ -6870,6 +6940,7 @@ bool StateRecorder::Impl::copy_raytracing_pipeline(const VkRayTracingPipelineCre
 
 bool StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateInfo *create_info, ScratchAllocator &alloc,
                                                  const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
+                                                 VkDevice device, PFN_vkGetShaderModuleCreateInfoIdentifierEXT gsmcii,
                                                  VkGraphicsPipelineCreateInfo **out_create_info)
 {
 	auto *info = copy(create_info, 1, alloc);
@@ -6939,7 +7010,7 @@ bool StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateI
 
 	if (global_info.module_state)
 	{
-		if (!copy_stages(info, alloc, &dynamic_info))
+		if (!copy_stages(info, alloc, device, gsmcii, &dynamic_info))
 			return false;
 	}
 	else
@@ -7572,6 +7643,12 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 			else
 				LOGE_LEVEL("Failed to serialize application info.\n");
 		}
+
+		if (module_identifier_database_iface && !module_identifier_database_iface->prepare())
+		{
+			LOGE_LEVEL("Failed to prepare module identifier database, will not dump identifiers.\n");
+			module_identifier_database_iface = nullptr;
+		}
 	}
 
 	record_data.need_prepare = false;
@@ -7891,7 +7968,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 			}
 
 			VkRayTracingPipelineCreateInfoKHR *create_info_copy = nullptr;
-			if (!copy_raytracing_pipeline(create_info, allocator, nullptr, 0, &create_info_copy) ||
+			if (!copy_raytracing_pipeline(create_info, allocator, nullptr, 0, nullptr, nullptr, &create_info_copy) ||
 			    !remap_raytracing_pipeline_ci(create_info_copy))
 			{
 				raytracing_pipeline_to_hash.erase(vk_object);
@@ -7947,7 +8024,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 			}
 
 			VkGraphicsPipelineCreateInfo *create_info_copy = nullptr;
-			if (!copy_graphics_pipeline(create_info, allocator, nullptr, 0, &create_info_copy) ||
+			if (!copy_graphics_pipeline(create_info, allocator, nullptr, 0, nullptr, nullptr, &create_info_copy) ||
 			    !remap_graphics_pipeline_ci(create_info_copy))
 			{
 				graphics_pipeline_to_hash.erase(vk_object);
@@ -8002,7 +8079,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 			}
 
 			VkComputePipelineCreateInfo *create_info_copy = nullptr;
-			if (!copy_compute_pipeline(create_info, allocator, nullptr, 0, &create_info_copy) ||
+			if (!copy_compute_pipeline(create_info, allocator, nullptr, 0, nullptr, nullptr, &create_info_copy) ||
 			    !remap_compute_pipeline_ci(create_info_copy))
 			{
 				compute_pipeline_to_hash.erase(vk_object);
@@ -8049,15 +8126,20 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 	{
 		if (database_iface)
 			database_iface->flush();
+		if (module_identifier_database_iface)
+			module_identifier_database_iface->flush();
 
 		// We no longer need a reference to this.
 		// This should allow us to call init_recording_thread again if we want,
 		// or emit some final single threaded recording tasks.
 		database_iface = nullptr;
+		module_identifier_database_iface = nullptr;
 	}
 	else if (database_iface)
 	{
 		database_iface->flush();
+		if (module_identifier_database_iface)
+			module_identifier_database_iface->flush();
 	}
 }
 
@@ -10306,6 +10388,11 @@ void StateRecorder::free_serialized(uint8_t *serialized)
 	delete[] serialized;
 }
 
+void StateRecorder::set_module_identifier_database_interface(DatabaseInterface *iface)
+{
+	impl->module_identifier_database_iface = iface;
+}
+
 void StateRecorder::init_recording_thread(DatabaseInterface *iface)
 {
 	impl->database_iface = iface;
@@ -10347,6 +10434,7 @@ static bool pnext_chain_stype_is_hash_invariant(VkStructureType sType)
 	switch (sType)
 	{
 	case VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO:
+	case VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_MODULE_IDENTIFIER_CREATE_INFO_EXT:
 		// This is purely used for copying purposes.
 		// For hashing purposes, this must be ignored.
 		return true;

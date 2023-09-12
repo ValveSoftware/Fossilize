@@ -40,9 +40,33 @@ void Device::init(VkPhysicalDevice gpu_, VkDevice device_, Instance *pInstance_,
 	pInstanceTable = pInstance->getTable();
 	pTable = pTable_;
 
-	// For now, we're only sensitive to vendorID.
+	// Need to know the UUID hash, so we can write module identifiers to appropriate path.
+	auto *identifier =
+			static_cast<const VkPhysicalDeviceShaderModuleIdentifierFeaturesEXT *>(
+					findpNext(device_pnext,
+					          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_MODULE_IDENTIFIER_FEATURES_EXT));
+
 	VkPhysicalDeviceProperties2 props2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
-	pInstanceTable->GetPhysicalDeviceProperties(gpu, &props2.properties);
+	VkPhysicalDeviceShaderModuleIdentifierPropertiesEXT identifierProps =
+			{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_MODULE_IDENTIFIER_PROPERTIES_EXT };
+
+	// Only bother if the application is actually using shader module identifiers.
+	if (identifier && identifier->shaderModuleIdentifier)
+	{
+		props2.pNext = &identifierProps;
+		if (pInstanceTable->GetPhysicalDeviceProperties2)
+			pInstanceTable->GetPhysicalDeviceProperties2(gpu, &props2);
+		else if (pInstanceTable->GetPhysicalDeviceProperties2KHR)
+			pInstanceTable->GetPhysicalDeviceProperties2KHR(gpu, &props2);
+		else
+			pInstanceTable->GetPhysicalDeviceProperties(gpu, &props2.properties);
+
+		usesModuleIdentifiers = true;
+	}
+	else
+	{
+		pInstanceTable->GetPhysicalDeviceProperties(gpu, &props2.properties);
+	}
 
 	recorder = pInstance->getStateRecorderForDevice(&props2, pInstance->getApplicationInfo(), device_pnext);
 }

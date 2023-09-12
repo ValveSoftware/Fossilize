@@ -116,6 +116,7 @@ static std::mutex recorderLock;
 struct Recorder
 {
 	std::unique_ptr<DatabaseInterface> interface;
+	std::unique_ptr<DatabaseInterface> module_identifier_interface;
 	std::unique_ptr<StateRecorder> recorder;
 };
 static std::unordered_map<Hash, Recorder> globalRecorders;
@@ -157,6 +158,10 @@ static std::string getSystemProperty(const char *key)
 
 #ifndef FOSSILIZE_DUMP_SYNC_ENV
 #define FOSSILIZE_DUMP_SYNC_ENV "FOSSILIZE_DUMP_SYNC"
+#endif
+
+#ifndef FOSSILIZE_IDENTIFIER_DUMP_PATH_ENV
+#define FOSSILIZE_IDENTIFIER_DUMP_PATH_ENV "FOSSILIZE_IDENTIFIER_DUMP_PATH"
 #endif
 
 #ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
@@ -383,6 +388,35 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDevicePropert
 		entry.interface->set_bucket_path(bucketPath, prefix.c_str());
 	}
 
+	const char *identifierPath = getenv(FOSSILIZE_IDENTIFIER_DUMP_PATH_ENV);
+	if (identifierPath)
+	{
+		// If the application is using shader module identifiers, we need to save those as well as sideband information.
+		// This allows us to resolve identifiers later.
+		auto *identifier =
+				static_cast<const VkPhysicalDeviceShaderModuleIdentifierFeaturesEXT *>(
+						findpNext(device_pnext,
+						          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_MODULE_IDENTIFIER_FEATURES_EXT));
+
+		auto *identifierProps =
+				static_cast<const VkPhysicalDeviceShaderModuleIdentifierPropertiesEXT *>(
+						findpNext(props, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_MODULE_IDENTIFIER_PROPERTIES_EXT));
+
+		if (identifier && identifierProps && identifier->shaderModuleIdentifier)
+		{
+			char uuidString[VK_UUID_SIZE + 1];
+			for (unsigned i = 0; i < VK_UUID_SIZE; i++)
+				sprintf(uuidString + 2 * i, "%02x", identifierProps->shaderModuleIdentifierAlgorithmUUID[i]);
+
+			std::string identifierDatabasePath = identifierPath;
+			identifierDatabasePath += uuidString;
+
+			entry.module_identifier_interface.reset(
+					create_concurrent_database_with_encoded_extra_paths(identifierDatabasePath.c_str(),
+					                                                    DatabaseMode::Append, nullptr));
+		}
+	}
+
 	entry.recorder.reset(new StateRecorder);
 	auto *recorder = entry.recorder.get();
 	recorder->set_database_enable_compression(true);
@@ -394,6 +428,8 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDevicePropert
 	if (device_pnext)
 		if (!recorder->record_physical_device_features(device_pnext))
 			LOGE_LEVEL("Failed to record physical device features.\n");
+
+	recorder->set_module_identifier_database_interface(entry.module_identifier_interface.get());
 
 	if (synchronized)
 		recorder->init_recording_synchronized(entry.interface.get());

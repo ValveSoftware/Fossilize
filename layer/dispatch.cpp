@@ -554,6 +554,24 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateShaderModule(VkDevice device, const 
 
 	if (res == VK_SUCCESS)
 	{
+		// Pass along the module identifier for later reference.
+		VkPipelineShaderStageModuleIdentifierCreateInfoEXT identifierCreateInfo =
+				{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_MODULE_IDENTIFIER_CREATE_INFO_EXT };
+		VkShaderModuleIdentifierEXT identifier =
+				{ VK_STRUCTURE_TYPE_SHADER_MODULE_IDENTIFIER_EXT };
+		VkShaderModuleCreateInfo tmpCreateInfo;
+
+		if (layer->requiresModuleIdentifiers())
+		{
+			layer->getTable()->GetShaderModuleIdentifierEXT(device, *pShaderModule, &identifier);
+			identifierCreateInfo.pIdentifier = identifier.identifier;
+			identifierCreateInfo.identifierSize = identifier.identifierSize;
+			tmpCreateInfo = *pCreateInfo;
+			identifierCreateInfo.pNext = tmpCreateInfo.pNext;
+			tmpCreateInfo.pNext = &identifierCreateInfo;
+			pCreateInfo = &tmpCreateInfo;
+		}
+
 		if (!layer->getRecorder().record_shader_module(*pShaderModule, *pCreateInfo))
 			LOGW_LEVEL("Failed to record shader module, usually caused by unsupported pNext.\n");
 	}

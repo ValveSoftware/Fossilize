@@ -56,6 +56,11 @@ public:
 		return pInstance;
 	}
 
+	bool requiresModuleIdentifiers() const
+	{
+		return usesModuleIdentifiers;
+	}
+
 private:
 	VkPhysicalDevice gpu = VK_NULL_HANDLE;
 	VkDevice device = VK_NULL_HANDLE;
@@ -63,5 +68,6 @@ private:
 	VkLayerDispatchTable *pTable = nullptr;
 	StateRecorder *recorder = nullptr;
 	Instance *pInstance = nullptr;
+	bool usesModuleIdentifiers = false;
 };
 }
