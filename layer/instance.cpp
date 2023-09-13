@@ -354,17 +354,17 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDevicePropert
 	extraPaths = getenv(FOSSILIZE_DUMP_PATH_READ_ONLY_ENV);
 #endif
 
-	bool needs_bucket = infoFilter && infoFilter->needs_buckets(appInfo);
+	bool needsBucket = infoFilter && infoFilter->needs_buckets(appInfo);
 	shouldRecordImmutableSamplers = !infoFilter || infoFilter->should_record_immutable_samplers(appInfo);
 
 	// Don't write a bucket if we're going to filter out the application.
-	if (needs_bucket && appInfo && infoFilter && !infoFilter->test_application_info(appInfo))
-		needs_bucket = false;
+	if (needsBucket && appInfo && infoFilter && !infoFilter->test_application_info(appInfo))
+		needsBucket = false;
 
 	char hashString[17];
 
 	sprintf(hashString, "%016" PRIx64, hash);
-	if (!serializationPath.empty() && !needs_bucket)
+	if (!serializationPath.empty() && !needsBucket)
 	{
 		serializationPath += ".";
 		serializationPath += hashString;
@@ -373,7 +373,7 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDevicePropert
 	                                                                          DatabaseMode::Append,
 	                                                                          extraPaths));
 
-	if (needs_bucket && infoFilter)
+	if (needsBucket && infoFilter)
 	{
 		char bucketPath[17];
 		Hash bucketHash = infoFilter->get_bucket_hash(props, appInfo, device_pnext);
@@ -387,6 +387,8 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDevicePropert
 
 		entry.interface->set_bucket_path(bucketPath, prefix.c_str());
 	}
+	else
+		needsBucket = false;
 
 	const char *identifierPath = getenv(FOSSILIZE_IDENTIFIER_DUMP_PATH_ENV);
 	if (identifierPath)
@@ -423,6 +425,11 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDevicePropert
 	recorder->set_database_enable_compression(true);
 	recorder->set_database_enable_checksum(true);
 	recorder->set_application_info_filter(infoFilter);
+
+	// Feature links are somewhat irrelevant if we're using bucket mechanism.
+	if (needsBucket)
+		recorder->set_database_enable_application_feature_links(false);
+
 	if (appInfo)
 		if (!recorder->record_application_info(*appInfo))
 			LOGE_LEVEL("Failed to record application info.\n");
