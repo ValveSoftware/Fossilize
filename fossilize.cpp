@@ -399,6 +399,7 @@ struct StateRecorder::Impl
 	DatabaseInterface *module_identifier_database_iface = nullptr;
 	DatabaseInterface *on_use_database_iface = nullptr;
 	ApplicationInfoFilter *application_info_filter = nullptr;
+	bool should_record_identifier_only = false;
 
 	std::unordered_map<Hash, VkDescriptorSetLayoutCreateInfo *> descriptor_sets;
 	std::unordered_map<Hash, VkPipelineLayoutCreateInfo *> pipeline_layouts;
@@ -6151,12 +6152,14 @@ bool StateRecorder::record_graphics_pipeline(VkPipeline pipeline, const VkGraphi
 {
 	// Ignore pipelines that cannot result in meaningful replay.
 	// We are not allowed to look at pStages unless we're emitting pre-raster / fragment shader interface.
+	// If we are using module identifier data + on use, we need to push it for record.
 	auto state_flags = graphics_pipeline_get_effective_state_flags(create_info);
 	if (graphics_pipeline_library_state_flags_have_module_state(state_flags))
 	{
 		for (uint32_t i = 0; i < create_info.stageCount; i++)
 		{
-			if (shader_stage_is_identifier_only(create_info.pStages[i]))
+			if (shader_stage_is_identifier_only(create_info.pStages[i]) &&
+			    !impl->should_record_identifier_only)
 			{
 				// Have to forget any reference if this API handle is recycled.
 				std::lock_guard<std::mutex> lock(impl->record_lock);
@@ -6195,7 +6198,9 @@ bool StateRecorder::record_compute_pipeline(VkPipeline pipeline, const VkCompute
                                             PFN_vkGetShaderModuleCreateInfoIdentifierEXT gsmcii)
 {
 	// Ignore pipelines that cannot result in meaningful replay.
-	if (shader_stage_is_identifier_only(create_info.stage))
+	// If we are using module identifier data + on use, we need to push it for record.
+	if (shader_stage_is_identifier_only(create_info.stage) &&
+	    !impl->should_record_identifier_only)
 	{
 		std::lock_guard<std::mutex> lock(impl->record_lock);
 		// Have to forget any reference if this API handle is recycled.
@@ -6233,9 +6238,11 @@ bool StateRecorder::record_raytracing_pipeline(
 		PFN_vkGetShaderModuleCreateInfoIdentifierEXT gsmcii)
 {
 	// Ignore pipelines that cannot result in meaningful replay.
+	// If we are using module identifier data + on use, we need to push it for record.
 	for (uint32_t i = 0; i < create_info.stageCount; i++)
 	{
-		if (shader_stage_is_identifier_only(create_info.pStages[i]))
+		if (shader_stage_is_identifier_only(create_info.pStages[i]) &&
+		    !impl->should_record_identifier_only)
 		{
 			std::lock_guard<std::mutex> lock(impl->record_lock);
 			// Have to forget any reference if this API handle is recycled.
@@ -7686,7 +7693,7 @@ Hash StateRecorder::Impl::record_shader_module(const WorkItem &record_item, bool
 		auto *identifier = find_pnext<VkPipelineShaderStageModuleIdentifierCreateInfoEXT>(
 				VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_MODULE_IDENTIFIER_CREATE_INFO_EXT, create_info->pNext);
 		if (identifier)
-			register_module_identifier((VkShaderModule)hash, *identifier);
+			register_module_identifier(api_object_cast<VkShaderModule>(hash), *identifier);
 	}
 
 	return hash;
@@ -7767,7 +7774,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 							RESOURCE_SHADER_MODULE, hash, &size, m.identifier, PAYLOAD_READ_NO_FLAGS))
 					{
 						m.identifierSize = uint32_t(size);
-						identifier_to_module[m] = (VkShaderModule)hash;
+						identifier_to_module[m] = api_object_cast<VkShaderModule>(hash);
 					}
 				}
 			}
@@ -10544,6 +10551,8 @@ void StateRecorder::init_recording_thread(DatabaseInterface *iface)
 {
 	impl->database_iface = iface;
 	impl->record_data = {};
+	impl->should_record_identifier_only =
+			impl->module_identifier_database_iface && impl->on_use_database_iface;
 
 	auto level = get_thread_log_level();
 	auto cb = Internal::get_thread_log_callback();
@@ -10559,6 +10568,8 @@ void StateRecorder::init_recording_synchronized(DatabaseInterface *iface)
 {
 	impl->database_iface = iface;
 	impl->record_data = {};
+	impl->should_record_identifier_only =
+			impl->module_identifier_database_iface && impl->on_use_database_iface;
 }
 
 void StateRecorder::tear_down_recording_thread()
