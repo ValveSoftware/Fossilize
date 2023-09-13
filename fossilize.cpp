@@ -1549,8 +1549,15 @@ static bool compute_hash_stage(const StateRecorder &recorder, Hasher &h, const V
 		if (!compute_hash_shader_module(*module, &hash))
 			return false;
 	}
+	else if (const auto *identifier = find_pnext<VkPipelineShaderStageModuleIdentifierCreateInfoEXT>(
+			VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_MODULE_IDENTIFIER_CREATE_INFO_EXT, stage.pNext))
+	{
+		if (!recorder.get_hash_for_shader_module(identifier, &hash))
+			return false;
+	}
 	else
 		return false;
+
 	h.u64(hash);
 
 	if (stage.pSpecializationInfo)
@@ -1757,12 +1764,6 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 {
 	// Ignore pipelines that cannot result in meaningful replay.
 	auto state_flags = graphics_pipeline_get_effective_state_flags(create_info);
-	if (graphics_pipeline_library_state_flags_have_module_state(state_flags))
-	{
-		for (uint32_t i = 0; i < create_info.stageCount; i++)
-			if (shader_stage_is_identifier_only(create_info.pStages[i]))
-				return false;
-	}
 
 	Hasher h;
 	Hash hash;
@@ -2100,8 +2101,6 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 bool compute_hash_compute_pipeline(const StateRecorder &recorder, const VkComputePipelineCreateInfo &create_info, Hash *out_hash)
 {
 	// Ignore pipelines that cannot result in meaningful replay.
-	if (shader_stage_is_identifier_only(create_info.stage))
-		return false;
 	if (!create_info.stage.pName)
 		return false;
 
@@ -2138,6 +2137,12 @@ bool compute_hash_compute_pipeline(const StateRecorder &recorder, const VkComput
 		if (!compute_hash_shader_module(*module, &hash))
 			return false;
 	}
+	else if (const auto *identifier = find_pnext<VkPipelineShaderStageModuleIdentifierCreateInfoEXT>(
+			VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_MODULE_IDENTIFIER_CREATE_INFO_EXT, create_info.stage.pNext))
+	{
+		if (!recorder.get_hash_for_shader_module(identifier, &hash))
+			return false;
+	}
 	else
 		return false;
 
@@ -2166,11 +2171,6 @@ bool compute_hash_raytracing_pipeline(const StateRecorder &recorder,
                                       const VkRayTracingPipelineCreateInfoKHR &create_info,
                                       Hash *out_hash)
 {
-	// Ignore pipelines that cannot result in meaningful replay.
-	for (uint32_t i = 0; i < create_info.stageCount; i++)
-		if (shader_stage_is_identifier_only(create_info.pStages[i]))
-			return false;
-
 	Hasher h;
 	Hash hash;
 
@@ -6439,6 +6439,25 @@ bool StateRecorder::get_hash_for_shader_module(VkShaderModule module, Hash *hash
 	else
 	{
 		*hash = itr->second;
+		return true;
+	}
+}
+
+bool StateRecorder::get_hash_for_shader_module(
+		const VkPipelineShaderStageModuleIdentifierCreateInfoEXT *info, Hash *hash) const
+{
+	VkShaderModuleIdentifierEXT ident = { VK_STRUCTURE_TYPE_SHADER_MODULE_IDENTIFIER_EXT };
+	ident.identifierSize = std::min<uint32_t>(info->identifierSize, VK_MAX_SHADER_MODULE_IDENTIFIER_SIZE_EXT);
+	memcpy(ident.identifier, info->pIdentifier, ident.identifierSize);
+	auto itr = impl->identifier_to_module.find(ident);
+
+	if (itr == impl->identifier_to_module.end())
+	{
+		return false;
+	}
+	else
+	{
+		*hash = api_object_cast<Hash>(itr->second);
 		return true;
 	}
 }

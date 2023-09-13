@@ -165,8 +165,8 @@ static std::string getSystemProperty(const char *key)
 #define FOSSILIZE_IDENTIFIER_DUMP_PATH_ENV "FOSSILIZE_IDENTIFIER_DUMP_PATH"
 #endif
 
-#ifndef FOSSILIZE_LAST_USE_SUFFIX_ENV
-#define FOSSILIZE_LAST_USE_SUFFIX_ENV "FOSSILIZE_LAST_USE_SUFFIX"
+#ifndef FOSSILIZE_LAST_USE_TAG_ENV
+#define FOSSILIZE_LAST_USE_TAG_ENV "FOSSILIZE_LAST_USE_TAG"
 #endif
 
 #ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
@@ -360,7 +360,7 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDevicePropert
 	extraPaths = getenv(FOSSILIZE_DUMP_PATH_READ_ONLY_ENV);
 #endif
 
-	const char *lastUseSuffix = getenv(FOSSILIZE_LAST_USE_SUFFIX_ENV);
+	const char *lastUseTag = getenv(FOSSILIZE_LAST_USE_TAG_ENV);
 
 	bool needsBucket = infoFilter && infoFilter->needs_buckets(appInfo);
 	shouldRecordImmutableSamplers = !infoFilter || infoFilter->should_record_immutable_samplers(appInfo);
@@ -380,9 +380,9 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDevicePropert
 	//  Write part: path.$bucket/path.$suffix.$feature-hash.$counter.foz
 	//  Read part: path.$bucket/path.$suffix.$feature-hash.foz
 
-	if (lastUseSuffix && !serializationPath.empty() && !needsBucket)
+	if (lastUseTag && !serializationPath.empty() && !needsBucket)
 	{
-		lastUsePath = serializationPath + '.' + lastUseSuffix;
+		lastUsePath = serializationPath + '.' + lastUseTag;
 		lastUsePath += '.';
 		lastUsePath += hashString;
 	}
@@ -397,7 +397,7 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDevicePropert
 	                                                                          DatabaseMode::Append,
 	                                                                          extraPaths));
 
-	if (lastUseSuffix)
+	if (lastUseTag)
 	{
 		entry.last_use_interface.reset(create_concurrent_database(
 				lastUsePath.empty() ? serializationPath.c_str() : lastUsePath.c_str(),
@@ -425,7 +425,7 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDevicePropert
 			if (!prefix.empty())
 			{
 				prefix += '.';
-				prefix += lastUseSuffix;
+				prefix += lastUseTag;
 				prefix += '.';
 			}
 			prefix += hashString;
