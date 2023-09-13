@@ -281,6 +281,7 @@ public:
 	// For this to work, a shader module create info needs to include a ShaderModuleIdentifierCreateInfoEXT struct,
 	// alongside the normal VkShaderModule.
 	void set_module_identifier_database_interface(DatabaseInterface *iface);
+	void set_on_use_database_interface(DatabaseInterface *iface);
 
 	// If database is non-null, serialize cannot be called later, as the implementation will not retain
 	// memory for the create info structs, but rather rely on the database interface to make objects persist.

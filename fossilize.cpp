@@ -39,6 +39,7 @@
 #include "fossilize_errors.hpp"
 #include "fossilize_application_filter.hpp"
 #include "fossilize_hasher.hpp"
+#include <time.h>
 
 #define RAPIDJSON_HAS_STDSTRING 1
 #include "rapidjson/document.h"
@@ -396,6 +397,7 @@ struct StateRecorder::Impl
 	ScratchAllocator ycbcr_temp_allocator;
 	DatabaseInterface *database_iface = nullptr;
 	DatabaseInterface *module_identifier_database_iface = nullptr;
+	DatabaseInterface *on_use_database_iface = nullptr;
 	ApplicationInfoFilter *application_info_filter = nullptr;
 
 	std::unordered_map<Hash, VkDescriptorSetLayoutCreateInfo *> descriptor_sets;
@@ -581,6 +583,7 @@ struct StateRecorder::Impl
 	bool remap_shader_module_handles(CreateInfo *info) FOSSILIZE_WARN_UNUSED;
 	bool remap_shader_module_handle(VkPipelineShaderStageCreateInfo &info) FOSSILIZE_WARN_UNUSED;
 	void register_module_identifier(VkShaderModule module, const VkPipelineShaderStageModuleIdentifierCreateInfoEXT &ident);
+	void register_on_use(ResourceTag tag, Hash hash);
 
 	bool get_subpass_meta_for_render_pass_hash(Hash render_pass_hash,
 	                                           uint32_t subpass,
@@ -7365,11 +7368,23 @@ bool StateRecorder::Impl::remap_shader_module_ci(VkShaderModuleCreateInfo *)
 	return true;
 }
 
+void StateRecorder::Impl::register_on_use(ResourceTag tag, Hash hash)
+{
+	if (record_data.write_database_entries && on_use_database_iface &&
+	    !on_use_database_iface->has_entry(tag, hash))
+	{
+		uint64_t t = time(nullptr);
+		on_use_database_iface->write_entry(tag, hash, &t, sizeof(t), PAYLOAD_WRITE_COMPUTE_CHECKSUM_BIT);
+	}
+}
+
 void StateRecorder::Impl::register_module_identifier(
 		VkShaderModule module, const VkPipelineShaderStageModuleIdentifierCreateInfoEXT &ident)
 {
 	auto hash = (uint64_t)module;
-	if (ident.identifierSize && !module_identifier_database_iface->has_entry(RESOURCE_SHADER_MODULE, hash))
+	if (record_data.write_database_entries &&
+	    module_identifier_database_iface &&
+	    ident.identifierSize && !module_identifier_database_iface->has_entry(RESOURCE_SHADER_MODULE, hash))
 	{
 		module_identifier_database_iface->write_entry(
 				RESOURCE_SHADER_MODULE, hash, ident.pIdentifier, ident.identifierSize,
@@ -7623,6 +7638,9 @@ Hash StateRecorder::Impl::record_shader_module(const WorkItem &record_item, bool
 		}
 	}
 
+	if (hash)
+		register_on_use(RESOURCE_SHADER_MODULE, hash);
+
 	if (record_item.handle != 0)
 		shader_module_to_hash[vk_object] = hash;
 
@@ -7705,6 +7723,12 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 				record_data.write_database_entries = application_info_filter->test_application_info(application_info);
 		}
 
+		if (on_use_database_iface && !on_use_database_iface->prepare())
+		{
+			LOGE_LEVEL("Failed to prepare on-use database, will not dump those.\n");
+			on_use_database_iface = nullptr;
+		}
+
 		if (database_iface && record_data.write_database_entries)
 		{
 			Hasher h;
@@ -7713,6 +7737,8 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 			{
 				database_iface->write_entry(RESOURCE_APPLICATION_INFO, h.get(), blob.data(), blob.size(),
 											record_data.payload_flags);
+
+				register_on_use(RESOURCE_APPLICATION_INFO, h.get());
 			}
 			else
 				LOGE_LEVEL("Failed to serialize application info.\n");
@@ -7766,7 +7792,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 
 			// If we have written something to the database, wake up to flush whatever files are
 			// necessary. Do not flush after every single write, as that might bog down the file system.
-			// Once no new writes have occured for a second, we flush, and go to deep sleep.
+			// Once no new writes have occurred for a second, we flush, and go to deep sleep.
 			bool has_data;
 			if (record_data.need_flush)
 			{
@@ -7802,14 +7828,17 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 			break;
 
 		auto record_type = record_item.type;
+		ResourceTag tag = RESOURCE_COUNT;
+		Hash hash = 0;
 
 		switch (record_type)
 		{
 		case VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO:
 		{
 			auto *create_info = reinterpret_cast<VkSamplerCreateInfo *>(record_item.create_info);
-			auto hash = record_item.custom_hash;
+			hash = record_item.custom_hash;
 			auto vk_object = api_object_cast<VkSampler>(record_item.handle);
+			tag = RESOURCE_SAMPLER;
 
 			if (hash == 0)
 			{
@@ -7827,14 +7856,14 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 			{
 				if (record_data.write_database_entries)
 				{
-					if (register_application_link_hash(RESOURCE_SAMPLER, hash, blob))
+					if (register_application_link_hash(tag, hash, blob))
 						record_data.need_flush = true;
 
-					if (!database_iface->has_entry(RESOURCE_SAMPLER, hash))
+					if (!database_iface->has_entry(tag, hash))
 					{
 						if (serialize_sampler(hash, *create_info, blob))
 						{
-							database_iface->write_entry(RESOURCE_SAMPLER, hash, blob.data(), blob.size(),
+							database_iface->write_entry(tag, hash, blob.data(), blob.size(),
 														record_data.payload_flags);
 							record_data.need_flush = true;
 						}
@@ -7860,6 +7889,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 			VkRenderPassCreateInfo *create_info = nullptr;
 			VkRenderPassCreateInfo2 *create_info2 = nullptr;
 			SubpassMetaStorage subpass_meta = {};
+			tag = RESOURCE_RENDER_PASS;
 
 			if (record_item.create_info)
 			{
@@ -7876,7 +7906,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 			}
 
 			auto vk_object = api_object_cast<VkRenderPass>(record_item.handle);
-			auto hash = record_item.custom_hash;
+			hash = record_item.custom_hash;
 			if (hash == 0)
 			{
 				if (!record_item.create_info ||
@@ -7895,15 +7925,15 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 			{
 				if (record_data.write_database_entries)
 				{
-					if (register_application_link_hash(RESOURCE_RENDER_PASS, hash, blob))
+					if (register_application_link_hash(tag, hash, blob))
 						record_data.need_flush = true;
 
-					if (!database_iface->has_entry(RESOURCE_RENDER_PASS, hash))
+					if (!database_iface->has_entry(tag, hash))
 					{
 						if ((create_info && serialize_render_pass(hash, *create_info, blob)) ||
 						    (create_info2 && serialize_render_pass2(hash, *create_info2, blob)))
 						{
-							database_iface->write_entry(RESOURCE_RENDER_PASS, hash, blob.data(), blob.size(),
+							database_iface->write_entry(tag, hash, blob.data(), blob.size(),
 														record_data.payload_flags);
 							record_data.need_flush = true;
 						}
@@ -7941,8 +7971,9 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 		case VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO:
 		{
 			auto *create_info = reinterpret_cast<VkDescriptorSetLayoutCreateInfo *>(record_item.create_info);
-			auto hash = record_item.custom_hash;
+			hash = record_item.custom_hash;
 			auto vk_object = api_object_cast<VkDescriptorSetLayout>(record_item.handle);
+			tag = RESOURCE_DESCRIPTOR_SET_LAYOUT;
 
 			if (hash == 0)
 			{
@@ -7967,14 +7998,14 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 			{
 				if (record_data.write_database_entries)
 				{
-					if (register_application_link_hash(RESOURCE_DESCRIPTOR_SET_LAYOUT, hash, blob))
+					if (register_application_link_hash(tag, hash, blob))
 						record_data.need_flush = true;
 
-					if (!database_iface->has_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, hash))
+					if (!database_iface->has_entry(tag, hash))
 					{
 						if (serialize_descriptor_set_layout(hash, *create_info_copy, blob))
 						{
-							database_iface->write_entry(RESOURCE_DESCRIPTOR_SET_LAYOUT, hash, blob.data(), blob.size(),
+							database_iface->write_entry(tag, hash, blob.data(), blob.size(),
 														record_data.payload_flags);
 							record_data.need_flush = true;
 						}
@@ -7997,8 +8028,9 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 		case VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO:
 		{
 			auto *create_info = reinterpret_cast<VkPipelineLayoutCreateInfo *>(record_item.create_info);
-			auto hash = record_item.custom_hash;
+			hash = record_item.custom_hash;
 			auto vk_object = api_object_cast<VkPipelineLayout>(record_item.handle);
+			tag = RESOURCE_PIPELINE_LAYOUT;
 
 			if (hash == 0)
 			{
@@ -8023,14 +8055,14 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 			{
 				if (record_data.write_database_entries)
 				{
-					if (register_application_link_hash(RESOURCE_PIPELINE_LAYOUT, hash, blob))
+					if (register_application_link_hash(tag, hash, blob))
 						record_data.need_flush = true;
 
-					if (!database_iface->has_entry(RESOURCE_PIPELINE_LAYOUT, hash))
+					if (!database_iface->has_entry(tag, hash))
 					{
 						if (serialize_pipeline_layout(hash, *create_info_copy, blob))
 						{
-							database_iface->write_entry(RESOURCE_PIPELINE_LAYOUT, hash, blob.data(), blob.size(),
+							database_iface->write_entry(tag, hash, blob.data(), blob.size(),
 														record_data.payload_flags);
 							record_data.need_flush = true;
 						}
@@ -8052,8 +8084,9 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 		case VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR:
 		{
 			auto *create_info = reinterpret_cast<VkRayTracingPipelineCreateInfoKHR *>(record_item.create_info);
-			auto hash = record_item.custom_hash;
+			hash = record_item.custom_hash;
 			auto vk_object = api_object_cast<VkPipeline>(record_item.handle);
+			tag = RESOURCE_RAYTRACING_PIPELINE;
 
 			if (hash == 0)
 			{
@@ -8078,14 +8111,14 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 			{
 				if (record_data.write_database_entries)
 				{
-					if (register_application_link_hash(RESOURCE_RAYTRACING_PIPELINE, hash, blob))
+					if (register_application_link_hash(tag, hash, blob))
 						record_data.need_flush = true;
 
-					if (!database_iface->has_entry(RESOURCE_RAYTRACING_PIPELINE, hash))
+					if (!database_iface->has_entry(tag, hash))
 					{
 						if (serialize_raytracing_pipeline(hash, *create_info_copy, blob))
 						{
-							database_iface->write_entry(RESOURCE_RAYTRACING_PIPELINE, hash, blob.data(), blob.size(),
+							database_iface->write_entry(tag, hash, blob.data(), blob.size(),
 														record_data.payload_flags);
 							record_data.need_flush = true;
 						}
@@ -8108,8 +8141,9 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 		case VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO:
 		{
 			auto *create_info = reinterpret_cast<VkGraphicsPipelineCreateInfo *>(record_item.create_info);
-			auto hash = record_item.custom_hash;
+			hash = record_item.custom_hash;
 			auto vk_object = api_object_cast<VkPipeline>(record_item.handle);
+			tag = RESOURCE_GRAPHICS_PIPELINE;
 
 			if (hash == 0)
 			{
@@ -8134,14 +8168,14 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 			{
 				if (record_data.write_database_entries)
 				{
-					if (register_application_link_hash(RESOURCE_GRAPHICS_PIPELINE, hash, blob))
+					if (register_application_link_hash(tag, hash, blob))
 						record_data.need_flush = true;
 
-					if (!database_iface->has_entry(RESOURCE_GRAPHICS_PIPELINE, hash))
+					if (!database_iface->has_entry(tag, hash))
 					{
 						if (serialize_graphics_pipeline(hash, *create_info_copy, blob))
 						{
-							database_iface->write_entry(RESOURCE_GRAPHICS_PIPELINE, hash, blob.data(), blob.size(),
+							database_iface->write_entry(tag, hash, blob.data(), blob.size(),
 														record_data.payload_flags);
 							record_data.need_flush = true;
 						}
@@ -8163,8 +8197,9 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 		case VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO:
 		{
 			auto *create_info = reinterpret_cast<VkComputePipelineCreateInfo *>(record_item.create_info);
-			auto hash = record_item.custom_hash;
+			hash = record_item.custom_hash;
 			auto vk_object = api_object_cast<VkPipeline>(record_item.handle);
+			tag = RESOURCE_COMPUTE_PIPELINE;
 
 			if (hash == 0)
 			{
@@ -8189,14 +8224,14 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 			{
 				if (record_data.write_database_entries)
 				{
-					if (register_application_link_hash(RESOURCE_COMPUTE_PIPELINE, hash, blob))
+					if (register_application_link_hash(tag, hash, blob))
 						record_data.need_flush = true;
 
-					if (!database_iface->has_entry(RESOURCE_COMPUTE_PIPELINE, hash))
+					if (!database_iface->has_entry(tag, hash))
 					{
 						if (serialize_compute_pipeline(hash, *create_info_copy, blob))
 						{
-							database_iface->write_entry(RESOURCE_COMPUTE_PIPELINE, hash, blob.data(), blob.size(),
+							database_iface->write_entry(tag, hash, blob.data(), blob.size(),
 														record_data.payload_flags);
 							record_data.need_flush = true;
 						}
@@ -8217,6 +8252,9 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 		default:
 			break;
 		}
+
+		if (hash)
+			register_on_use(tag, hash);
 	}
 
 	if (looping)
@@ -8225,18 +8263,23 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 			database_iface->flush();
 		if (module_identifier_database_iface)
 			module_identifier_database_iface->flush();
+		if (on_use_database_iface)
+			on_use_database_iface->flush();
 
 		// We no longer need a reference to this.
 		// This should allow us to call init_recording_thread again if we want,
 		// or emit some final single threaded recording tasks.
 		database_iface = nullptr;
 		module_identifier_database_iface = nullptr;
+		on_use_database_iface = nullptr;
 	}
 	else if (database_iface)
 	{
 		database_iface->flush();
 		if (module_identifier_database_iface)
 			module_identifier_database_iface->flush();
+		if (on_use_database_iface)
+			on_use_database_iface->flush();
 	}
 }
 
@@ -10489,6 +10532,11 @@ void StateRecorder::free_serialized(uint8_t *serialized)
 void StateRecorder::set_module_identifier_database_interface(DatabaseInterface *iface)
 {
 	impl->module_identifier_database_iface = iface;
+}
+
+void StateRecorder::set_on_use_database_interface(DatabaseInterface *iface)
+{
+	impl->on_use_database_iface = iface;
 }
 
 void StateRecorder::init_recording_thread(DatabaseInterface *iface)
