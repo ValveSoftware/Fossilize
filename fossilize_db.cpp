@@ -614,16 +614,12 @@ struct DumbDirectoryDatabase : DatabaseInterface
 		size_t file_size = size_t(ftell(file));
 		rewind(file);
 
-		if (blob)
+		if (blob && *blob_size < file_size)
 		{
-			if (*blob_size != file_size)
-			{
-				fclose(file);
-				return false;
-			}
+			fclose(file);
+			return false;
 		}
-		else
-			*blob_size = file_size;
+		*blob_size = file_size;
 
 		if (blob)
 		{
@@ -837,13 +833,9 @@ struct ZipDatabase : DatabaseInterface
 		if (!blob_size)
 			return false;
 
-		if (blob)
-		{
-			if (*blob_size != itr->second.size)
-				return false;
-		}
-		else
-			*blob_size = itr->second.size;
+		if (blob && *blob_size < itr->second.size)
+			return false;
+		*blob_size = itr->second.size;
 
 		if (blob)
 		{
@@ -1277,13 +1269,9 @@ struct StreamArchive : DatabaseInterface
 		                    (entry.header.payload_size + sizeof(PayloadHeaderRaw)) :
 		                    entry.header.uncompressed_size;
 
-		if (blob)
-		{
-			if (*blob_size != out_size)
-				return false;
-		}
-		else
-			*blob_size = out_size;
+		if (blob && *blob_size < out_size)
+			return false;
+		*blob_size = out_size;
 
 		if (blob)
 		{
