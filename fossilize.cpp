@@ -580,6 +580,7 @@ struct StateRecorder::Impl
 	template <typename CreateInfo>
 	bool remap_shader_module_handles(CreateInfo *info) FOSSILIZE_WARN_UNUSED;
 	bool remap_shader_module_handle(VkPipelineShaderStageCreateInfo &info) FOSSILIZE_WARN_UNUSED;
+	void register_module_identifier(VkShaderModule module, const VkPipelineShaderStageModuleIdentifierCreateInfoEXT &ident) const;
 
 	bool get_subpass_meta_for_render_pass_hash(Hash render_pass_hash,
 	                                           uint32_t subpass,
@@ -7361,8 +7362,27 @@ bool StateRecorder::Impl::remap_shader_module_ci(VkShaderModuleCreateInfo *)
 	return true;
 }
 
+void StateRecorder::Impl::register_module_identifier(
+		VkShaderModule module, const VkPipelineShaderStageModuleIdentifierCreateInfoEXT &ident) const
+{
+	auto hash = (uint64_t)module;
+	if (ident.identifierSize && !module_identifier_database_iface->has_entry(RESOURCE_SHADER_MODULE, hash))
+	{
+		module_identifier_database_iface->write_entry(
+				RESOURCE_SHADER_MODULE, hash, ident.pIdentifier, ident.identifierSize,
+				PAYLOAD_WRITE_COMPUTE_CHECKSUM_BIT);
+	}
+}
+
 bool StateRecorder::Impl::remap_shader_module_handle(VkPipelineShaderStageCreateInfo &info)
 {
+	const VkPipelineShaderStageModuleIdentifierCreateInfoEXT *identifier = nullptr;
+	if (module_identifier_database_iface)
+	{
+		identifier = find_pnext<VkPipelineShaderStageModuleIdentifierCreateInfoEXT>(
+				VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_MODULE_IDENTIFIER_CREATE_INFO_EXT, info.pNext);
+	}
+
 	if (info.module != VK_NULL_HANDLE)
 	{
 		if (!remap_shader_module_handle(info.module, &info.module))
@@ -7376,8 +7396,7 @@ bool StateRecorder::Impl::remap_shader_module_handle(VkPipelineShaderStageCreate
 		Hash h = record_shader_module(record_item, true);
 		info.module = api_object_cast<VkShaderModule>(h);
 	}
-	else if (const auto *identifier = find_pnext<VkPipelineShaderStageModuleIdentifierCreateInfoEXT>(
-			VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_MODULE_IDENTIFIER_CREATE_INFO_EXT, info.pNext))
+	else if (identifier)
 	{
 		VkShaderModuleIdentifierEXT ident = { VK_STRUCTURE_TYPE_SHADER_MODULE_IDENTIFIER_EXT };
 		ident.identifierSize = identifier->identifierSize;
@@ -7391,6 +7410,9 @@ bool StateRecorder::Impl::remap_shader_module_handle(VkPipelineShaderStageCreate
 	}
 	else
 		return false;
+
+	if (identifier)
+		register_module_identifier(info.module, *identifier);
 
 	return true;
 }
@@ -7630,6 +7652,15 @@ Hash StateRecorder::Impl::record_shader_module(const WorkItem &record_item, bool
 			if (copy_shader_module(create_info, allocator, false, &create_info_copy))
 				shader_modules[hash] = create_info_copy;
 		}
+	}
+
+	// If we're a dependent record, the pipeline remapping logic will ensure to register the module.
+	if (module_identifier_database_iface && !dependent_record)
+	{
+		auto *identifier = find_pnext<VkPipelineShaderStageModuleIdentifierCreateInfoEXT>(
+				VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_MODULE_IDENTIFIER_CREATE_INFO_EXT, create_info->pNext);
+		if (identifier)
+			register_module_identifier((VkShaderModule)hash, *identifier);
 	}
 
 	return hash;
@@ -8900,6 +8931,7 @@ static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *o
 			break;
 
 		case VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO:
+		case VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_MODULE_IDENTIFIER_CREATE_INFO_EXT:
 			// Ignored.
 			ignored = true;
 			break;
@@ -10492,7 +10524,6 @@ static const void *pnext_chain_skip_ignored_entries(const void *pNext)
 		{
 		case VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO_EXT:
 		case VK_STRUCTURE_TYPE_SHADER_MODULE_VALIDATION_CACHE_CREATE_INFO_EXT:
-		case VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_MODULE_IDENTIFIER_CREATE_INFO_EXT:
 			// We need to ignore any pNext struct which represents output information from a pipeline object.
 			ignored = true;
 			break;

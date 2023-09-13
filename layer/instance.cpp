@@ -404,16 +404,16 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDevicePropert
 
 		if (identifier && identifierProps && identifier->shaderModuleIdentifier)
 		{
-			char uuidString[VK_UUID_SIZE + 1];
+			char uuidString[2 * VK_UUID_SIZE + 1];
 			for (unsigned i = 0; i < VK_UUID_SIZE; i++)
 				sprintf(uuidString + 2 * i, "%02x", identifierProps->shaderModuleIdentifierAlgorithmUUID[i]);
 
 			std::string identifierDatabasePath = identifierPath;
+			identifierDatabasePath += '.';
 			identifierDatabasePath += uuidString;
 
 			entry.module_identifier_interface.reset(
-					create_concurrent_database_with_encoded_extra_paths(identifierDatabasePath.c_str(),
-					                                                    DatabaseMode::Append, nullptr));
+					create_concurrent_database(identifierDatabasePath.c_str(), DatabaseMode::Append, nullptr, 0));
 		}
 	}
 
