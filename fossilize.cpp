@@ -583,7 +583,7 @@ struct StateRecorder::Impl
 	bool remap_shader_module_handles(CreateInfo *info) FOSSILIZE_WARN_UNUSED;
 	bool remap_shader_module_handle(VkPipelineShaderStageCreateInfo &info) FOSSILIZE_WARN_UNUSED;
 	void register_module_identifier(VkShaderModule module, const VkPipelineShaderStageModuleIdentifierCreateInfoEXT &ident);
-	void register_on_use(ResourceTag tag, Hash hash);
+	void register_on_use(ResourceTag tag, Hash hash) const;
 
 	bool get_subpass_meta_for_render_pass_hash(Hash render_pass_hash,
 	                                           uint32_t subpass,
@@ -7368,7 +7368,7 @@ bool StateRecorder::Impl::remap_shader_module_ci(VkShaderModuleCreateInfo *)
 	return true;
 }
 
-void StateRecorder::Impl::register_on_use(ResourceTag tag, Hash hash)
+void StateRecorder::Impl::register_on_use(ResourceTag tag, Hash hash) const
 {
 	if (record_data.write_database_entries && on_use_database_iface &&
 	    !on_use_database_iface->has_entry(tag, hash))
@@ -10109,6 +10109,7 @@ bool StateRecorder::Impl::register_application_link_hash(ResourceTag tag, Hash h
 		payload_flags |= PAYLOAD_WRITE_COMPUTE_CHECKSUM_BIT;
 
 	Hash link_hash = get_application_link_hash(tag, hash);
+	register_on_use(RESOURCE_APPLICATION_BLOB_LINK, link_hash);
 	if (!database_iface->has_entry(RESOURCE_APPLICATION_BLOB_LINK, link_hash))
 	{
 		if (!serialize_application_blob_link(hash, tag, blob))
