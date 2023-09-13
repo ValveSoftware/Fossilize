@@ -413,7 +413,8 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDevicePropert
 			identifierDatabasePath += uuidString;
 
 			entry.module_identifier_interface.reset(
-					create_concurrent_database(identifierDatabasePath.c_str(), DatabaseMode::Append, nullptr, 0));
+					create_concurrent_database(identifierDatabasePath.c_str(), DatabaseMode::AppendWithReadOnlyAccess,
+					                           nullptr, 0));
 		}
 	}
 

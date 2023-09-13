@@ -580,7 +580,7 @@ struct StateRecorder::Impl
 	template <typename CreateInfo>
 	bool remap_shader_module_handles(CreateInfo *info) FOSSILIZE_WARN_UNUSED;
 	bool remap_shader_module_handle(VkPipelineShaderStageCreateInfo &info) FOSSILIZE_WARN_UNUSED;
-	void register_module_identifier(VkShaderModule module, const VkPipelineShaderStageModuleIdentifierCreateInfoEXT &ident) const;
+	void register_module_identifier(VkShaderModule module, const VkPipelineShaderStageModuleIdentifierCreateInfoEXT &ident);
 
 	bool get_subpass_meta_for_render_pass_hash(Hash render_pass_hash,
 	                                           uint32_t subpass,
@@ -5578,6 +5578,9 @@ void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineShaderStageModuleId
                                              ScratchAllocator &alloc)
 {
 	auto *identifier = copy(create_info, 1, alloc);
+	// Safeguard since we'll be copying these to stack variables later.
+	identifier->identifierSize =
+			std::min<uint32_t>(identifier->identifierSize, VK_MAX_SHADER_MODULE_IDENTIFIER_SIZE_EXT);
 	identifier->pIdentifier = copy(identifier->pIdentifier, identifier->identifierSize, alloc);
 	return identifier;
 }
@@ -7363,7 +7366,7 @@ bool StateRecorder::Impl::remap_shader_module_ci(VkShaderModuleCreateInfo *)
 }
 
 void StateRecorder::Impl::register_module_identifier(
-		VkShaderModule module, const VkPipelineShaderStageModuleIdentifierCreateInfoEXT &ident) const
+		VkShaderModule module, const VkPipelineShaderStageModuleIdentifierCreateInfoEXT &ident)
 {
 	auto hash = (uint64_t)module;
 	if (ident.identifierSize && !module_identifier_database_iface->has_entry(RESOURCE_SHADER_MODULE, hash))
@@ -7371,6 +7374,11 @@ void StateRecorder::Impl::register_module_identifier(
 		module_identifier_database_iface->write_entry(
 				RESOURCE_SHADER_MODULE, hash, ident.pIdentifier, ident.identifierSize,
 				PAYLOAD_WRITE_COMPUTE_CHECKSUM_BIT);
+
+		VkShaderModuleIdentifierEXT m = { VK_STRUCTURE_TYPE_SHADER_MODULE_IDENTIFIER_EXT };
+		m.identifierSize = ident.identifierSize;
+		memcpy(m.identifier, ident.pIdentifier, ident.identifierSize);
+		identifier_to_module[m] = module;
 	}
 }
 
@@ -7714,6 +7722,29 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 		{
 			LOGE_LEVEL("Failed to prepare module identifier database, will not dump identifiers.\n");
 			module_identifier_database_iface = nullptr;
+		}
+
+		if (module_identifier_database_iface)
+		{
+			size_t num_hashes = 0;
+			module_identifier_database_iface->get_hash_list_for_resource_tag(
+					RESOURCE_SHADER_MODULE, &num_hashes, nullptr);
+			std::vector<Hash> hashes(num_hashes);
+			if (module_identifier_database_iface->get_hash_list_for_resource_tag(
+					RESOURCE_SHADER_MODULE, &num_hashes, hashes.data()))
+			{
+				for (auto hash : hashes)
+				{
+					VkShaderModuleIdentifierEXT m = { VK_STRUCTURE_TYPE_SHADER_MODULE_IDENTIFIER_EXT };
+					size_t size = VK_MAX_SHADER_MODULE_IDENTIFIER_SIZE_EXT;
+					if (module_identifier_database_iface->read_entry(
+							RESOURCE_SHADER_MODULE, hash, &size, m.identifier, PAYLOAD_READ_NO_FLAGS))
+					{
+						m.identifierSize = uint32_t(size);
+						identifier_to_module[m] = (VkShaderModule)hash;
+					}
+				}
+			}
 		}
 	}
 
