@@ -1701,14 +1701,21 @@ struct ConcurrentDatabase : DatabaseInterface
 	                            const char * const *extra_paths, size_t num_extra_paths)
 		: DatabaseInterface(mode_), base_path(base_path_ ? base_path_ : ""), mode(mode_)
 	{
-		if (!base_path.empty())
-		{
-			std::string readonly_path = base_path + ".foz";
-			readonly_interface.reset(create_stream_archive_database(readonly_path.c_str(), DatabaseMode::ReadOnly));
-		}
+		// Normalize this mode. The concurrent database is always "exclusive write".
+		if (mode == DatabaseMode::ExclusiveOverWrite)
+			mode = DatabaseMode::OverWrite;
 
-		for (size_t i = 0; i < num_extra_paths; i++)
-			extra_readonly.emplace_back(create_stream_archive_database(extra_paths[i], DatabaseMode::ReadOnly));
+		if (mode != DatabaseMode::OverWrite)
+		{
+			if (!base_path.empty())
+			{
+				std::string readonly_path = base_path + ".foz";
+				readonly_interface.reset(create_stream_archive_database(readonly_path.c_str(), DatabaseMode::ReadOnly));
+			}
+
+			for (size_t i = 0; i < num_extra_paths; i++)
+				extra_readonly.emplace_back(create_stream_archive_database(extra_paths[i], DatabaseMode::ReadOnly));
+		}
 	}
 
 	void flush() override
@@ -1759,13 +1766,16 @@ struct ConcurrentDatabase : DatabaseInterface
 
 	bool prepare() override
 	{
-		if (mode != DatabaseMode::Append && mode != DatabaseMode::ReadOnly && mode != DatabaseMode::AppendWithReadOnlyAccess)
+		if (mode != DatabaseMode::Append &&
+		    mode != DatabaseMode::ReadOnly &&
+		    mode != DatabaseMode::AppendWithReadOnlyAccess &&
+			mode != DatabaseMode::OverWrite)
 			return false;
 
 		if (mode != DatabaseMode::ReadOnly && !impl->sub_databases_in_whitelist.empty())
 			return false;
 
-		if (mode != DatabaseMode::Append && !bucket_dirname.empty() && !bucket_basename.empty())
+		if (mode == DatabaseMode::ReadOnly && !bucket_dirname.empty() && !bucket_basename.empty())
 			return false;
 
 		if (!bucket_dirname.empty() && !setup_bucket())
@@ -1841,7 +1851,7 @@ struct ConcurrentDatabase : DatabaseInterface
 
 	bool read_entry(ResourceTag tag, Hash hash, size_t *blob_size, void *blob, PayloadReadFlags flags) override
 	{
-		if (mode == DatabaseMode::Append)
+		if (mode == DatabaseMode::Append || mode == DatabaseMode::OverWrite)
 			return false;
 
 		if (readonly_interface && readonly_interface->read_entry(tag, hash, blob_size, blob, flags))
