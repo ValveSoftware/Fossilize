@@ -193,7 +193,7 @@ public:
 	void add_imported_metadata(const ExportedMetadataHeader *header);
 
 	// For bucketization of archives.
-	// This only works with concurrent databases in Append mode.
+	// This only works with concurrent databases in Append or Overwrite mode.
 	// See further comments after create_concurrent_database().
 	virtual bool set_bucket_path(const char *bucket_dirname, const char *bucket_basename);
 
@@ -224,7 +224,7 @@ DatabaseInterface *create_database(const char *path, DatabaseMode mode);
 //
 // The Fossilize layer will make sure access to a single instance of DatabaseInterface is serialized to one thread.
 //
-// Mode can only be ReadOnly or Append. Any other mode will fail.
+// Mode can be ReadOnly, Append, AppendWithReadOnly or Overwrite. Any other mode will fail.
 //
 // It is possible to specify some extra database paths which are treated as read-only.
 // In ReadOnly mode, all entries in these databases are assumed to be part of the read-only database base_path.foz,

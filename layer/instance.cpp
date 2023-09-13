@@ -339,6 +339,7 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDevicePropert
 	auto &entry = globalRecorders[hash];
 
 	std::string serializationPath;
+	std::string lastUsePath;
 	const char *extraPaths = nullptr;
 #ifdef ANDROID
 	serializationPath = "/sdcard/fossilize";
@@ -359,6 +360,8 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDevicePropert
 	extraPaths = getenv(FOSSILIZE_DUMP_PATH_READ_ONLY_ENV);
 #endif
 
+	const char *lastUseSuffix = getenv(FOSSILIZE_LAST_USE_SUFFIX_ENV);
+
 	bool needsBucket = infoFilter && infoFilter->needs_buckets(appInfo);
 	shouldRecordImmutableSamplers = !infoFilter || infoFilter->should_record_immutable_samplers(appInfo);
 
@@ -367,22 +370,38 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDevicePropert
 		needsBucket = false;
 
 	char hashString[17];
-
 	sprintf(hashString, "%016" PRIx64, hash);
+
+	// Try to normalize the path layouts for last use.
+	// Without buckets:
+	//  Write part: path.$suffix.$feature-hash.$counter.foz
+	//  Read part: path.$suffix.$feature-hash.foz
+	// With buckets:
+	//  Write part: path.$bucket/path.$suffix.$feature-hash.$counter.foz
+	//  Read part: path.$bucket/path.$suffix.$feature-hash.foz
+
+	if (lastUseSuffix && !serializationPath.empty() && !needsBucket)
+	{
+		lastUsePath = serializationPath + '.' + lastUseSuffix;
+		lastUsePath += '.';
+		lastUsePath += hashString;
+	}
+
 	if (!serializationPath.empty() && !needsBucket)
 	{
-		serializationPath += ".";
+		serializationPath += '.';
 		serializationPath += hashString;
 	}
+
 	entry.interface.reset(create_concurrent_database_with_encoded_extra_paths(serializationPath.c_str(),
 	                                                                          DatabaseMode::Append,
 	                                                                          extraPaths));
 
-	if (const char *lastUseSuffix = getenv(FOSSILIZE_LAST_USE_SUFFIX_ENV))
+	if (lastUseSuffix)
 	{
-		auto lastUsePath = serializationPath + '.' + lastUseSuffix;
 		entry.last_use_interface.reset(create_concurrent_database(
-				lastUsePath.c_str(), DatabaseMode::OverWrite, nullptr, 0));
+				lastUsePath.empty() ? serializationPath.c_str() : lastUsePath.c_str(),
+				DatabaseMode::OverWrite, nullptr, 0));
 	}
 
 	if (needsBucket && infoFilter)
@@ -392,14 +411,27 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDevicePropert
 		sprintf(bucketPath, "%016" PRIx64, bucketHash);
 
 		// For convenience. Makes filenames similar in top-level directory and bucket directories.
-		auto prefix = Path::basename(serializationPath);
+		auto basename = Path::basename(serializationPath);
+		auto prefix = basename;
 		if (!prefix.empty())
-			prefix += ".";
+			prefix += '.';
 		prefix += hashString;
 
 		entry.interface->set_bucket_path(bucketPath, prefix.c_str());
+
 		if (entry.last_use_interface)
+		{
+			prefix = basename;
+			if (!prefix.empty())
+			{
+				prefix += '.';
+				prefix += lastUseSuffix;
+				prefix += '.';
+			}
+			prefix += hashString;
+
 			entry.last_use_interface->set_bucket_path(bucketPath, prefix.c_str());
+		}
 	}
 	else
 		needsBucket = false;
@@ -428,7 +460,8 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDevicePropert
 			identifierDatabasePath += uuidString;
 
 			entry.module_identifier_interface.reset(
-					create_concurrent_database(identifierDatabasePath.c_str(), DatabaseMode::AppendWithReadOnlyAccess,
+					create_concurrent_database(identifierDatabasePath.c_str(),
+					                           DatabaseMode::AppendWithReadOnlyAccess,
 					                           nullptr, 0));
 		}
 	}
