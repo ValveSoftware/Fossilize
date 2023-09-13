@@ -1868,7 +1868,9 @@ struct ConcurrentDatabase : DatabaseInterface
 
 	bool write_entry(ResourceTag tag, Hash hash, const void *blob, size_t blob_size, PayloadWriteFlags flags) override
 	{
-		if (mode != DatabaseMode::Append)
+		if (mode != DatabaseMode::Append &&
+		    mode != DatabaseMode::AppendWithReadOnlyAccess &&
+		    mode != DatabaseMode::OverWrite)
 			return false;
 
 		if (primed_hashes[tag].count(hash))
