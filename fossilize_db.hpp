@@ -73,6 +73,8 @@ enum class DatabaseMode
 {
 	Append,
 	ReadOnly,
+	// Special mode for the concurrent database interface where we can read the read-only portion only.
+	AppendWithReadOnlyAccess,
 	OverWrite,
 	// In the stream database backend, this will ensure that the database is exclusively created.
 	// For other backends, this is an alias for OverWrite

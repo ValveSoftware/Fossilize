@@ -1059,6 +1059,9 @@ struct StreamArchive : DatabaseInterface
 				file = fopen(path.c_str(), "wb");
 			break;
 
+		case DatabaseMode::AppendWithReadOnlyAccess:
+			return false;
+
 		case DatabaseMode::OverWrite:
 			file = fopen(path.c_str(), "wb");
 			break;
@@ -1756,7 +1759,7 @@ struct ConcurrentDatabase : DatabaseInterface
 
 	bool prepare() override
 	{
-		if (mode != DatabaseMode::Append && mode != DatabaseMode::ReadOnly)
+		if (mode != DatabaseMode::Append && mode != DatabaseMode::ReadOnly && mode != DatabaseMode::AppendWithReadOnlyAccess)
 			return false;
 
 		if (mode != DatabaseMode::ReadOnly && !impl->sub_databases_in_whitelist.empty())
@@ -1825,7 +1828,7 @@ struct ConcurrentDatabase : DatabaseInterface
 			}
 
 			// We only need the database for priming purposes.
-			if (mode != DatabaseMode::ReadOnly)
+			if (mode == DatabaseMode::Append)
 			{
 				readonly_interface.reset();
 				extra_readonly.clear();
@@ -1838,7 +1841,7 @@ struct ConcurrentDatabase : DatabaseInterface
 
 	bool read_entry(ResourceTag tag, Hash hash, size_t *blob_size, void *blob, PayloadReadFlags flags) override
 	{
-		if (mode != DatabaseMode::ReadOnly)
+		if (mode == DatabaseMode::Append)
 			return false;
 
 		if (readonly_interface && readonly_interface->read_entry(tag, hash, blob_size, blob, flags))
