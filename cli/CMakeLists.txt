@@ -8,7 +8,9 @@ endif()
 set(SPIRV-Headers_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/SPIRV-Headers" CACHE STRING "SPIRV-Headers path")
 set(SHADERC_SKIP_TESTS ON)
 set(SPIRV_WERROR OFF CACHE BOOL "" FORCE)
+set(CMAKE_CXX_STANDARD 17)
 add_subdirectory(SPIRV-Tools EXCLUDE_FROM_ALL)
+set(CMAKE_CXX_STANDARD 14)
 add_subdirectory(SPIRV-Cross EXCLUDE_FROM_ALL)
 
 add_library(cli-utils STATIC
