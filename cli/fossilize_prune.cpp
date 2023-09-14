@@ -552,7 +552,7 @@ int main(int argc, char *argv[])
 	});
 	cbs.error_handler = [] { print_help(); };
 
-	CLIParser parser(move(cbs), argc - 1, argv + 1);
+	CLIParser parser(std::move(cbs), argc - 1, argv + 1);
 	if (!parser.parse())
 		return EXIT_FAILURE;
 	if (parser.is_ended_state())
@@ -608,14 +608,14 @@ int main(int argc, char *argv[])
 		prune_replayer.filter_application_hash = application_hash;
 	}
 
-	prune_replayer.filter_graphics = move(filter_graphics);
-	prune_replayer.filter_compute = move(filter_compute);
-	prune_replayer.filter_raytracing = move(filter_raytracing);
-	prune_replayer.filter_modules = move(filter_modules);
-	prune_replayer.banned_graphics = move(banned_graphics);
-	prune_replayer.banned_compute = move(banned_compute);
-	prune_replayer.banned_raytracing = move(banned_raytracing);
-	prune_replayer.banned_modules = move(banned_modules);
+	prune_replayer.filter_graphics = std::move(filter_graphics);
+	prune_replayer.filter_compute = std::move(filter_compute);
+	prune_replayer.filter_raytracing = std::move(filter_raytracing);
+	prune_replayer.filter_modules = std::move(filter_modules);
+	prune_replayer.banned_graphics = std::move(banned_graphics);
+	prune_replayer.banned_compute = std::move(banned_compute);
+	prune_replayer.banned_raytracing = std::move(banned_raytracing);
+	prune_replayer.banned_modules = std::move(banned_modules);
 	prune_replayer.skip_application_info_links = skip_application_info_links;
 
 	static const ResourceTag playback_order[] = {
@@ -748,7 +748,7 @@ int main(int argc, char *argv[])
 		for (auto &h : hashes)
 			if (prune_replayer.accessed_shader_modules.count(h) == 0)
 				unreferenced_modules.insert(h);
-		prune_replayer.accessed_shader_modules = move(unreferenced_modules);
+		prune_replayer.accessed_shader_modules = std::move(unreferenced_modules);
 	}
 
 	if (!copy_accessed_types(*input_db, *output_db, state_json,
