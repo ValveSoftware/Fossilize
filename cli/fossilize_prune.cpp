@@ -141,7 +141,7 @@ struct PruneReplayer : StateCreatorInterface
 		if (skip_application_info_links)
 			return;
 
-		if (!filter_timestamp(RESOURCE_APPLICATION_BLOB_LINK, link_hash))
+		if (!filter_timestamp(RESOURCE_APPLICATION_BLOB_LINK, link_hash, nullptr))
 			return;
 
 		if (should_filter_application_hash && app_hash == filter_application_hash)
@@ -236,28 +236,33 @@ struct PruneReplayer : StateCreatorInterface
 		return true;
 	}
 
-	bool filter_timestamp(ResourceTag tag, Hash hash) const
+	bool filter_timestamp(ResourceTag tag, Hash hash, uint64_t *ts) const
 	{
 		if (!timestamp_db)
 			return true;
 
 		uint64_t timestamp = 0;
+		bool ret = true;
+
 		size_t timestamp_size = sizeof(timestamp);
 		if (!timestamp_db->read_entry(tag, hash, &timestamp_size, &timestamp, PAYLOAD_READ_NO_FLAGS) ||
 		    timestamp_size != sizeof(timestamp))
 		{
-			return false;
+			ret = false;
 		}
 
 		if (timestamp < timestamp_minimum_accept)
-			return false;
+			ret = false;
 
-		return true;
+		if (ts)
+			*ts = timestamp;
+
+		return ret;
 	}
 
 	bool filter_object(ResourceTag tag, Hash hash) const
 	{
-		if (!filter_timestamp(tag, hash))
+		if (!filter_timestamp(tag, hash, nullptr))
 			return false;
 
 		bool hash_filtering = !(filter_compute.empty() && filter_graphics.empty() && filter_raytracing.empty());
@@ -716,6 +721,33 @@ int main(int argc, char *argv[])
 		{
 			LOGE("Failed to get shader module hashes.\n");
 			return EXIT_FAILURE;
+		}
+
+		// Filter application infos as well,
+		// but avoid a situation where we omit all application infos since these are very important in replay.
+		if (tag == RESOURCE_APPLICATION_INFO && prune_replayer.timestamp_db)
+		{
+			vector<Hash> accepted_hashes;
+			uint64_t latest_ts = 0;
+			Hash latest_hash = 0;
+
+			for (auto hash : hashes)
+			{
+				uint64_t ts = 0;
+				if (hash == application_hash || prune_replayer.filter_timestamp(RESOURCE_APPLICATION_INFO, hash, &ts))
+					accepted_hashes.push_back(hash);
+
+				if (ts > latest_ts)
+				{
+					latest_hash = hash;
+					latest_ts = ts;
+				}
+			}
+
+			if (accepted_hashes.empty())
+				accepted_hashes.push_back(latest_hash);
+
+			hashes = std::move(accepted_hashes);
 		}
 
 		for (auto hash : hashes)
