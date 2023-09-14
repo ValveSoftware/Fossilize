@@ -593,6 +593,9 @@ struct StateRecorder::Impl
 	                                   Hash render_pass_hash,
 	                                   SubpassMeta *meta) const FOSSILIZE_WARN_UNUSED;
 
+	bool get_hash_for_shader_module(
+			const VkPipelineShaderStageModuleIdentifierCreateInfoEXT *identifier, Hash *hash) const FOSSILIZE_WARN_UNUSED;
+
 	bool serialize_application_info(std::vector<uint8_t> &blob) const FOSSILIZE_WARN_UNUSED;
 	bool serialize_application_blob_link(Hash hash, ResourceTag tag, std::vector<uint8_t> &blob) const FOSSILIZE_WARN_UNUSED;
 	Hash get_application_link_hash(ResourceTag tag, Hash hash) const;
@@ -6446,20 +6449,7 @@ bool StateRecorder::get_hash_for_shader_module(VkShaderModule module, Hash *hash
 bool StateRecorder::get_hash_for_shader_module(
 		const VkPipelineShaderStageModuleIdentifierCreateInfoEXT *info, Hash *hash) const
 {
-	VkShaderModuleIdentifierEXT ident = { VK_STRUCTURE_TYPE_SHADER_MODULE_IDENTIFIER_EXT };
-	ident.identifierSize = std::min<uint32_t>(info->identifierSize, VK_MAX_SHADER_MODULE_IDENTIFIER_SIZE_EXT);
-	memcpy(ident.identifier, info->pIdentifier, ident.identifierSize);
-	auto itr = impl->identifier_to_module.find(ident);
-
-	if (itr == impl->identifier_to_module.end())
-	{
-		return false;
-	}
-	else
-	{
-		*hash = api_object_cast<Hash>(itr->second);
-		return true;
-	}
+	return impl->get_hash_for_shader_module(info, hash);
 }
 
 bool StateRecorder::get_hash_for_pipeline_layout(VkPipelineLayout layout, Hash *hash) const
@@ -6845,10 +6835,10 @@ bool StateRecorder::Impl::copy_stages(CreateInfo *info, ScratchAllocator &alloc,
 		if (!copy_pnext_chain(stage.pNext, alloc, &pNext, dynamic_state_info, 0))
 			return false;
 
+		stage.pNext = pNext;
+
 		if (!add_module_identifier(&stage, alloc, device, gsmcii))
 			return false;
-
-		stage.pNext = pNext;
 	}
 
 	return true;
@@ -6864,16 +6854,19 @@ bool StateRecorder::Impl::add_module_identifier(
 	if (auto *module_info = find_pnext<VkShaderModuleCreateInfo>(VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
 	                                                             info->pNext))
 	{
-		VkShaderModuleIdentifierEXT ident = { VK_STRUCTURE_TYPE_SHADER_MODULE_IDENTIFIER_EXT };
-		gsmcii(device, module_info, &ident);
+		auto *ident = alloc.allocate_cleared<VkShaderModuleIdentifierEXT>();
+		if (!ident)
+			return false;
+		ident->sType = VK_STRUCTURE_TYPE_SHADER_MODULE_IDENTIFIER_EXT;
+		gsmcii(device, module_info, ident);
 
 		auto *identifier_create_info = alloc.allocate_cleared<VkPipelineShaderStageModuleIdentifierCreateInfoEXT>();
 		if (!identifier_create_info)
 			return false;
 
 		identifier_create_info->sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_MODULE_IDENTIFIER_CREATE_INFO_EXT;
-		identifier_create_info->pIdentifier = ident.identifier;
-		identifier_create_info->identifierSize = ident.identifierSize;
+		identifier_create_info->pIdentifier = ident->identifier;
+		identifier_create_info->identifierSize = ident->identifierSize;
 
 		identifier_create_info->pNext = info->pNext;
 		info->pNext = identifier_create_info;
@@ -7447,15 +7440,10 @@ bool StateRecorder::Impl::remap_shader_module_handle(VkPipelineShaderStageCreate
 	}
 	else if (identifier)
 	{
-		VkShaderModuleIdentifierEXT ident = { VK_STRUCTURE_TYPE_SHADER_MODULE_IDENTIFIER_EXT };
-		ident.identifierSize = identifier->identifierSize;
-		memcpy(ident.identifier, identifier->pIdentifier, ident.identifierSize);
-
-		auto itr = identifier_to_module.find(ident);
-		if (itr == identifier_to_module.end())
-			info.module = itr->second;
-		else
+		Hash h = 0;
+		if (!get_hash_for_shader_module(identifier, &h))
 			return false;
+		info.module = api_object_cast<VkShaderModule>(h);
 	}
 	else
 		return false;
@@ -7647,6 +7635,25 @@ bool StateRecorder::Impl::get_subpass_meta_for_pipeline(const VkGraphicsPipeline
 		meta->uses_depth_stencil = true;
 
 	return true;
+}
+
+bool StateRecorder::Impl::get_hash_for_shader_module(
+		const VkPipelineShaderStageModuleIdentifierCreateInfoEXT *info, Hash *hash) const
+{
+	VkShaderModuleIdentifierEXT ident = { VK_STRUCTURE_TYPE_SHADER_MODULE_IDENTIFIER_EXT };
+	ident.identifierSize = std::min<uint32_t>(info->identifierSize, VK_MAX_SHADER_MODULE_IDENTIFIER_SIZE_EXT);
+	memcpy(ident.identifier, info->pIdentifier, ident.identifierSize);
+	auto itr = identifier_to_module.find(ident);
+
+	if (itr == identifier_to_module.end())
+	{
+		return false;
+	}
+	else
+	{
+		*hash = api_object_cast<Hash>(itr->second);
+		return true;
+	}
 }
 
 Hash StateRecorder::Impl::record_shader_module(const WorkItem &record_item, bool dependent_record)
