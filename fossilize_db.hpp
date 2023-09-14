@@ -247,6 +247,11 @@ DatabaseInterface *create_concurrent_database_with_encoded_extra_paths(const cha
 // Merges stream archives found in source_paths into append_database_path.
 bool merge_concurrent_databases(const char *append_database_path, const char * const *source_paths, size_t num_source_paths);
 
+// Merges stream archives found in source_paths into append_database_path.
+// When there are duplicates in append database and any other database, picks the entry with the highest 8 byte timestamp payload.
+bool merge_concurrent_databases_last_use(const char *append_database_path,
+                                         const char * const *source_paths, size_t num_source_paths);
+
 // For set_bucket_path() behavior on a concurrent database:
 // Must be called before prepare().
 //

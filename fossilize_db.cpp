@@ -2243,6 +2243,64 @@ void DatabaseInterface::request_shutdown()
 	shutdown_requested.store(true, std::memory_order_relaxed);
 }
 
+bool merge_concurrent_databases_last_use(const char *append_archive, const char * const *source_paths, size_t num_source_paths)
+{
+	std::unordered_map<Hash, uint64_t> timestamps[RESOURCE_COUNT];
+
+	for (size_t source = 0; source < num_source_paths + 1; source++)
+	{
+		const char *path = source ? source_paths[source - 1] : append_archive;
+		auto source_db = std::unique_ptr<DatabaseInterface>(create_stream_archive_database(path, DatabaseMode::ReadOnly));
+		if (!source_db->prepare())
+		{
+			if (source == 0)
+				continue;
+			else
+				return false;
+		}
+
+		for (unsigned i = 0; i < RESOURCE_COUNT; i++)
+		{
+			auto tag = static_cast<ResourceTag>(i);
+
+			size_t hash_count = 0;
+			if (!source_db->get_hash_list_for_resource_tag(tag, &hash_count, nullptr))
+				return false;
+			std::vector<Hash> hashes(hash_count);
+			if (!source_db->get_hash_list_for_resource_tag(tag, &hash_count, hashes.data()))
+				return false;
+
+			for (auto &hash : hashes)
+			{
+				size_t timestamp_size = sizeof(uint64_t);
+				uint64_t timestamp = 0;
+				if (!source_db->read_entry(tag, hash, &timestamp_size, &timestamp, PAYLOAD_READ_NO_FLAGS) ||
+				    timestamp_size != sizeof(uint64_t))
+					return false;
+
+				auto &entry = timestamps[i][hash];
+				entry = std::max<uint64_t>(entry, timestamp);
+			}
+		}
+	}
+
+	auto write_db = std::unique_ptr<DatabaseInterface>(create_stream_archive_database(append_archive, DatabaseMode::OverWrite));
+	if (!write_db->prepare())
+		return false;
+
+	for (unsigned i = 0; i < RESOURCE_COUNT; i++)
+	{
+		auto tag = static_cast<ResourceTag>(i);
+		auto &ts = timestamps[i];
+
+		for (auto &t : ts)
+			if (!write_db->write_entry(tag, t.first, &t.second, sizeof(t.second), PAYLOAD_WRITE_COMPUTE_CHECKSUM_BIT))
+				return false;
+	}
+
+	return true;
+}
+
 bool merge_concurrent_databases(const char *append_archive, const char * const *source_paths, size_t num_source_paths)
 {
 	auto append_db = std::unique_ptr<DatabaseInterface>(create_stream_archive_database(append_archive, DatabaseMode::Append));
