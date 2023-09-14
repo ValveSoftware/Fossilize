@@ -30,6 +30,7 @@
 #include <chrono>
 #include <thread>
 #include <future>
+#include <algorithm>
 #include "layer/utils.hpp"
 #include "fossilize_errors.hpp"
 #include "path.hpp"
@@ -3899,6 +3900,262 @@ static bool test_reused_handles()
 	return true;
 }
 
+static VKAPI_ATTR void VKAPI_CALL
+fake_gsmcii(VkDevice, const VkShaderModuleCreateInfo *info, VkShaderModuleIdentifierEXT *ident)
+{
+	ident->identifierSize = 4;
+	ident->identifier[0] = info->pCode[0];
+	ident->identifier[1] = info->pCode[0];
+	ident->identifier[2] = info->pCode[0];
+	ident->identifier[3] = info->pCode[0];
+}
+
+static bool test_module_identifiers()
+{
+	// Verify that we can serialize module identifiers for all 4 scenarios.
+	{
+		auto ident_db = std::unique_ptr<DatabaseInterface>(
+				create_stream_archive_database(".__test_tmp_ident.foz", DatabaseMode::OverWrite));
+		if (!ident_db)
+			return false;
+
+		auto db = std::unique_ptr<DatabaseInterface>(
+				create_stream_archive_database(".__test_tmp.foz", DatabaseMode::OverWrite));
+		if (!db)
+			return false;
+
+		StateRecorder recorder;
+		recorder.set_module_identifier_database_interface(ident_db.get());
+		recorder.init_recording_thread(db.get());
+
+		static const uint8_t ident_standalone[] = { 0xab, 0xab, 0xab, 0xab };
+		const uint32_t module_blobs[] = { 0xab, 0xac, 0xad, 0xae };
+		VkShaderModuleCreateInfo module =
+				{ VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+		VkPipelineShaderStageModuleIdentifierCreateInfoEXT ident_info =
+				{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_MODULE_IDENTIFIER_CREATE_INFO_EXT };
+		ident_info.pIdentifier = ident_standalone;
+		ident_info.identifierSize = sizeof(ident_standalone);
+		module.codeSize = sizeof(module_blobs[0]);
+		module.pCode = &module_blobs[0];
+		module.pNext = &ident_info;
+		if (!recorder.record_shader_module(fake_handle<VkShaderModule>(1), module, 1000))
+			return false;
+		module.pNext = nullptr;
+
+		VkPipelineShaderStageCreateInfo stage = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
+		stage.stage = VK_SHADER_STAGE_VERTEX_BIT;
+		stage.pName = "main";
+		module.pCode = &module_blobs[1];
+		stage.pNext = &module;
+
+		VkGraphicsPipelineCreateInfo gp_info = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+		gp_info.stageCount = 1;
+		gp_info.pStages = &stage;
+		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(1), gp_info, nullptr, 0, 0,
+		                                       fake_handle<VkDevice>(1), fake_gsmcii))
+			return false;
+
+		VkComputePipelineCreateInfo comp_info = { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
+		stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+		module.pCode = &module_blobs[2];
+		comp_info.stage = stage;
+		if (!recorder.record_compute_pipeline(fake_handle<VkPipeline>(1), comp_info, nullptr, 0, 0,
+		                                      fake_handle<VkDevice>(1), fake_gsmcii))
+			return false;
+
+		VkRayTracingPipelineCreateInfoKHR rt_info = { VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR };
+		stage.stage = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+		module.pCode = &module_blobs[3];
+		rt_info.stageCount = 1;
+		rt_info.pStages = &stage;
+		if (!recorder.record_raytracing_pipeline(fake_handle<VkPipeline>(1), rt_info, nullptr, 0, 0,
+		                                         fake_handle<VkDevice>(1), fake_gsmcii))
+			return false;
+	}
+
+	// Using the identifier cache, make sure that we can create pipelines purely from identifier.
+	{
+		auto ident_db = std::unique_ptr<DatabaseInterface>(
+				create_stream_archive_database(".__test_tmp_ident.foz", DatabaseMode::ReadOnly));
+		if (!ident_db)
+			return false;
+
+		// Need this just to force recording.
+		auto last_use_db = std::unique_ptr<DatabaseInterface>(
+				create_stream_archive_database(".__test_tmp_last_use.foz", DatabaseMode::OverWrite));
+		if (!last_use_db)
+			return false;
+
+		auto db = std::unique_ptr<DatabaseInterface>(
+				create_stream_archive_database(".__test_tmp_from_ident.foz", DatabaseMode::OverWrite));
+		if (!db)
+			return false;
+
+		StateRecorder recorder;
+		recorder.set_module_identifier_database_interface(ident_db.get());
+		recorder.set_on_use_database_interface(last_use_db.get());
+		recorder.init_recording_synchronized(db.get());
+
+		static const uint8_t ident_standalone[] = { 0xab, 0xab, 0xab, 0xab };
+		static const uint8_t ident_graphics[] = { 0xac, 0xac, 0xac, 0xac };
+		static const uint8_t ident_compute[] = { 0xad, 0xad, 0xad, 0xad };
+		static const uint8_t ident_rt[] = { 0xae, 0xae, 0xae, 0xae };
+		static const uint8_t ident_bogus[] = { 1, 2, 3, 4 };
+
+		VkPipelineShaderStageModuleIdentifierCreateInfoEXT ident_info =
+				{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_MODULE_IDENTIFIER_CREATE_INFO_EXT };
+		ident_info.pIdentifier = ident_standalone;
+		ident_info.identifierSize = sizeof(ident_standalone);
+
+		VkPipelineShaderStageCreateInfo stage = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
+		stage.stage = VK_SHADER_STAGE_VERTEX_BIT;
+		stage.pName = "main";
+		stage.pNext = &ident_info;
+
+		VkGraphicsPipelineCreateInfo gp_info = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+		gp_info.stageCount = 1;
+		gp_info.pStages = &stage;
+		ident_info.pIdentifier = ident_graphics;
+		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(1), gp_info, nullptr, 0))
+			return false;
+		// Try recording with an identifier that does not exist, it should result in no recording.
+		ident_info.pIdentifier = ident_bogus;
+		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(1), gp_info, nullptr, 0))
+			return false;
+
+		VkComputePipelineCreateInfo comp_info = { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
+		stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+		comp_info.stage = stage;
+		ident_info.pIdentifier = ident_compute;
+		if (!recorder.record_compute_pipeline(fake_handle<VkPipeline>(1), comp_info, nullptr, 0))
+			return false;
+		ident_info.pIdentifier = ident_bogus;
+		if (!recorder.record_compute_pipeline(fake_handle<VkPipeline>(1), comp_info, nullptr, 0))
+			return false;
+
+		VkRayTracingPipelineCreateInfoKHR rt_info = { VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR };
+		stage.stage = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+		rt_info.stageCount = 1;
+		rt_info.pStages = &stage;
+		ident_info.pIdentifier = ident_rt;
+		if (!recorder.record_raytracing_pipeline(fake_handle<VkPipeline>(1), rt_info, nullptr, 0))
+			return false;
+		ident_info.pIdentifier = ident_bogus;
+		if (!recorder.record_raytracing_pipeline(fake_handle<VkPipeline>(1), rt_info, nullptr, 0))
+			return false;
+	}
+
+	// Verify that the pipelines we recorded result in same hashes.
+	{
+		auto reference_db = create_stream_archive_database(".__test_tmp.foz", DatabaseMode::ReadOnly);
+		auto ident_only_db = create_stream_archive_database(".__test_tmp_from_ident.foz", DatabaseMode::ReadOnly);
+		if (!reference_db->prepare() || !ident_only_db->prepare())
+			return false;
+
+		static const ResourceTag tags[] = {
+			RESOURCE_GRAPHICS_PIPELINE,
+			RESOURCE_COMPUTE_PIPELINE,
+			RESOURCE_RAYTRACING_PIPELINE
+		};
+
+		for (auto tag : tags)
+		{
+			size_t hash_count = 1;
+			Hash hash_reference = 0;
+			Hash hash_ident_only = 0;
+
+			if (!reference_db->get_hash_list_for_resource_tag(tag, &hash_count,
+			                                                  &hash_reference) || hash_count != 1)
+				return false;
+
+			if (!ident_only_db->get_hash_list_for_resource_tag(tag, &hash_count,
+			                                                   &hash_ident_only) || hash_count != 1)
+				return false;
+
+			if (hash_reference != hash_ident_only)
+				return false;
+		}
+	}
+
+	// Verify that standalone shader module recording creates identifier
+	{
+		auto ident_db = create_stream_archive_database(".__test_tmp_ident.foz", DatabaseMode::ReadOnly);
+		if (!ident_db->prepare())
+			return false;
+
+		uint8_t data[4];
+		size_t data_size = 4;
+		if (!ident_db->read_entry(RESOURCE_SHADER_MODULE, 1000, &data_size, data, PAYLOAD_READ_NO_FLAGS) || data_size != 4)
+			return false;
+
+		for (auto elem : data)
+			if (elem != 0xab)
+				return false;
+	}
+
+	// Verify that relevant last use hashes match up with recorded hashes and that their sizes are as expected.
+	{
+		auto last_use_db = create_stream_archive_database(".__test_tmp_last_use.foz", DatabaseMode::ReadOnly);
+		auto ident_only_db = create_stream_archive_database(".__test_tmp_from_ident.foz", DatabaseMode::ReadOnly);
+		if (!last_use_db->prepare() || !ident_only_db->prepare())
+			return false;
+
+		for (int i = 0; i < RESOURCE_COUNT; i++)
+		{
+			auto tag = ResourceTag(i);
+			size_t hash_count_last_use = 0;
+			size_t hash_count_ident = 0;
+
+			if (!last_use_db->get_hash_list_for_resource_tag(tag, &hash_count_last_use, nullptr))
+				return false;
+			if (!ident_only_db->get_hash_list_for_resource_tag(tag, &hash_count_ident, nullptr))
+				return false;
+
+			if (tag == RESOURCE_SHADER_MODULE)
+			{
+				// Special consideration. If we're recording with identifier cache,
+				// we expect the shader module to not be recorded, but we can record last use of the shader module.
+				if (hash_count_last_use != 3)
+					return false;
+				if (hash_count_ident != 0)
+					return false;
+
+				continue;
+			}
+
+			if (hash_count_last_use != hash_count_ident)
+				return false;
+
+			std::vector<Hash> hashes_last_use(hash_count_last_use);
+			std::vector<Hash> hashes_ident(hash_count_ident);
+
+			if (!last_use_db->get_hash_list_for_resource_tag(tag, &hash_count_last_use, hashes_last_use.data()))
+				return false;
+			if (!ident_only_db->get_hash_list_for_resource_tag(tag, &hash_count_ident, hashes_ident.data()))
+				return false;
+
+			for (auto hash : hashes_last_use)
+			{
+				size_t blob_size = 0;
+				if (!last_use_db->read_entry(tag, hash, &blob_size, nullptr, PAYLOAD_READ_NO_FLAGS) || blob_size != 8)
+					return false;
+			}
+
+			std::sort(hashes_last_use.begin(), hashes_last_use.end());
+			std::sort(hashes_ident.begin(), hashes_ident.end());
+			if (memcmp(hashes_last_use.data(), hashes_ident.data(), hash_count_last_use * sizeof(Hash)) != 0)
+				return false;
+		}
+	}
+
+	remove(".__test_tmp.foz");
+	remove(".__test_tmp_ident.foz");
+	remove(".__test_tmp_last_use.foz");
+	remove(".__test_tmp_from_ident.foz");
+	return true;
+}
+
 int main()
 {
 	if (!test_concurrent_database_extra_paths())
@@ -3928,6 +4185,9 @@ int main()
 		return EXIT_FAILURE;
 
 	if (!test_reused_handles())
+		return EXIT_FAILURE;
+
+	if (!test_module_identifiers())
 		return EXIT_FAILURE;
 
 	std::vector<uint8_t> res;
