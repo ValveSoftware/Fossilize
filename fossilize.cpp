@@ -7444,6 +7444,7 @@ bool StateRecorder::Impl::remap_shader_module_handle(VkPipelineShaderStageCreate
 		if (!get_hash_for_shader_module(identifier, &h))
 			return false;
 		info.module = api_object_cast<VkShaderModule>(h);
+		register_on_use(RESOURCE_SHADER_MODULE, h);
 	}
 	else
 		return false;
