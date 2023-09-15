@@ -309,7 +309,7 @@ bool ProcessProgress::process_shutdown()
 
 	// We might have crashed, but we never saw any progress marker.
 	// We do not know what to do from here, so we just terminate.
-	if (graphics_progress < 0 || compute_progress < 0)
+	if (graphics_progress < 0 || compute_progress < 0 || raytracing_progress < 0)
 	{
 		LOGE("Child process terminated before we could receive progress. Cannot continue.\n");
 		if (Global::control_block)
