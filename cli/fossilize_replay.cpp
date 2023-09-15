@@ -518,6 +518,7 @@ struct ThreadedReplayer : StateCreatorInterface
 
 		return resolve(RESOURCE_SHADER_MODULE) &&
 		       resolve(RESOURCE_GRAPHICS_PIPELINE) &&
+		       resolve(RESOURCE_RAYTRACING_PIPELINE) &&
 		       resolve(RESOURCE_COMPUTE_PIPELINE);
 	}
 
