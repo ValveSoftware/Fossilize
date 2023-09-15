@@ -1769,7 +1769,7 @@ struct ConcurrentDatabase : DatabaseInterface
 		if (mode != DatabaseMode::Append &&
 		    mode != DatabaseMode::ReadOnly &&
 		    mode != DatabaseMode::AppendWithReadOnlyAccess &&
-			mode != DatabaseMode::OverWrite)
+		    mode != DatabaseMode::OverWrite)
 			return false;
 
 		if (mode != DatabaseMode::ReadOnly && !impl->sub_databases_in_whitelist.empty())
