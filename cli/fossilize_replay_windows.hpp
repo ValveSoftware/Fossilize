@@ -990,7 +990,7 @@ static int run_master_process(const VulkanDevice::Options &opts,
 		if (strlen(child_processes[0].module_uuid_path) != 0)
 		{
 			std::vector<std::string> paths;
-			for (size_t idx = 0; idx < replayer_opts.num_threads; idx++)
+			for (size_t idx = 0, count = child_processes.size(); idx < count; idx++)
 			{
 				if (strlen(child_processes[idx].module_uuid_path) == 0)
 				{
