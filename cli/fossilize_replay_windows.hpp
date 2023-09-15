@@ -478,7 +478,7 @@ bool ProcessProgress::start_child_process()
 
 	if (!Global::base_replayer_options.on_disk_module_identifier_path.empty())
 	{
-		cmdline += " --on-disk-module-identifier";
+		cmdline += " --on-disk-module-identifier ";
 		cmdline += "\"";
 		cmdline += Global::base_replayer_options.on_disk_module_identifier_path;
 		if (index != 0)
