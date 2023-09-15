@@ -514,6 +514,8 @@ bool VulkanDevice::init_device(const Options &opts)
 		return strcmp(ext, VK_AMD_SHADER_INFO_EXTENSION_NAME) == 0;
 	}) != end(active_device_extensions);
 
+	supports_module_identifiers = features.shader_module_identifier.shaderModuleIdentifier == VK_TRUE;
+
 	VkDeviceCreateInfo device_info = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
 	device_info.pNext = has_device_features2 ? &gpu_features2 : nullptr;
 	device_info.pEnabledFeatures = has_device_features2 ? nullptr : &gpu_features2.features;

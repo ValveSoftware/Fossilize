@@ -71,6 +71,16 @@ public:
 		return supports_pipeline_feedback;
 	}
 
+	bool module_identifiers_enabled() const
+	{
+		return supports_module_identifiers;
+	}
+
+	const VkPhysicalDeviceShaderModuleIdentifierPropertiesEXT &get_module_identifier_properties() const
+	{
+		return props.shader_module_identifier;
+	}
+
 	bool has_pipeline_stats() const
 	{
 		return pipeline_stats;
@@ -113,6 +123,7 @@ private:
 	void (*validation_callback)(void *) = nullptr;
 	void *validation_callback_userdata = nullptr;
 	bool supports_pipeline_feedback = false;
+	bool supports_module_identifiers = false;
 
 	void init_null_device();
 	bool is_null_device = false;
