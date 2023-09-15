@@ -2243,7 +2243,8 @@ void DatabaseInterface::request_shutdown()
 	shutdown_requested.store(true, std::memory_order_relaxed);
 }
 
-bool merge_concurrent_databases_last_use(const char *append_archive, const char * const *source_paths, size_t num_source_paths)
+bool merge_concurrent_databases_last_use(const char *append_archive, const char * const *source_paths, size_t num_source_paths,
+                                         bool skip_missing_inputs)
 {
 	std::unordered_map<Hash, uint64_t> timestamps[RESOURCE_COUNT];
 
@@ -2256,7 +2257,13 @@ bool merge_concurrent_databases_last_use(const char *append_archive, const char 
 			if (source == 0)
 				continue;
 			else
-				return false;
+			{
+				if (!skip_missing_inputs)
+					return false;
+
+				LOGW("Archive %s could not be prepared, skipping.\n", path);
+				continue;
+			}
 		}
 
 		for (unsigned i = 0; i < RESOURCE_COUNT; i++)
@@ -2301,7 +2308,8 @@ bool merge_concurrent_databases_last_use(const char *append_archive, const char 
 	return true;
 }
 
-bool merge_concurrent_databases(const char *append_archive, const char * const *source_paths, size_t num_source_paths)
+bool merge_concurrent_databases(const char *append_archive, const char * const *source_paths, size_t num_source_paths,
+                                bool skip_missing_inputs)
 {
 	auto append_db = std::unique_ptr<DatabaseInterface>(create_stream_archive_database(append_archive, DatabaseMode::Append));
 	if (!append_db->prepare())
@@ -2312,7 +2320,13 @@ bool merge_concurrent_databases(const char *append_archive, const char * const *
 		const char *path = source_paths[source];
 		auto source_db = std::unique_ptr<DatabaseInterface>(create_stream_archive_database(path, DatabaseMode::ReadOnly));
 		if (!source_db->prepare())
-			return false;
+		{
+			if (!skip_missing_inputs)
+				return false;
+
+			LOGW("Archive %s could not be prepared, skipping.\n", path);
+			continue;
+		}
 
 		for (unsigned i = 0; i < RESOURCE_COUNT; i++)
 		{
