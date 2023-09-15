@@ -3953,7 +3953,7 @@ static bool test_module_identifiers()
 		gp_info.stageCount = 1;
 		gp_info.pStages = &stage;
 		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(1), gp_info, nullptr, 0, 0,
-		                                       fake_handle<VkDevice>(1), fake_gsmcii))
+		                                       reinterpret_cast<VkDevice>(1), fake_gsmcii))
 			return false;
 
 		VkComputePipelineCreateInfo comp_info = { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
@@ -3961,7 +3961,7 @@ static bool test_module_identifiers()
 		module.pCode = &module_blobs[2];
 		comp_info.stage = stage;
 		if (!recorder.record_compute_pipeline(fake_handle<VkPipeline>(1), comp_info, nullptr, 0, 0,
-		                                      fake_handle<VkDevice>(1), fake_gsmcii))
+		                                      reinterpret_cast<VkDevice>(1), fake_gsmcii))
 			return false;
 
 		VkRayTracingPipelineCreateInfoKHR rt_info = { VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR };
@@ -3970,7 +3970,7 @@ static bool test_module_identifiers()
 		rt_info.stageCount = 1;
 		rt_info.pStages = &stage;
 		if (!recorder.record_raytracing_pipeline(fake_handle<VkPipeline>(1), rt_info, nullptr, 0, 0,
-		                                         fake_handle<VkDevice>(1), fake_gsmcii))
+		                                         reinterpret_cast<VkDevice>(1), fake_gsmcii))
 			return false;
 	}
 
