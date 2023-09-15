@@ -3266,6 +3266,8 @@ static int run_progress_process(const VulkanDevice::Options &device_opts,
 	                                    nullptr : replayer_opts.on_disk_validation_whitelist_path.c_str();
 	opts.on_disk_validation_blacklist = replayer_opts.on_disk_validation_blacklist_path.empty() ?
 	                                    nullptr : replayer_opts.on_disk_validation_blacklist_path.c_str();
+	opts.on_disk_module_identifier = replayer_opts.on_disk_module_identifier_path.empty() ?
+	                                 nullptr : replayer_opts.on_disk_module_identifier_path.c_str();
 	opts.pipeline_stats_path = replayer_opts.pipeline_stats_path.empty() ?
 	                           nullptr : replayer_opts.pipeline_stats_path.c_str();
 	opts.num_threads = replayer_opts.num_threads;

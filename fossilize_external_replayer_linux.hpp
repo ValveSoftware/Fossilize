@@ -675,6 +675,12 @@ void ExternalReplayer::Impl::start_replayer_process(const ExternalReplayer::Opti
 		argv.push_back(whitelist_hex);
 	}
 
+	if (options.on_disk_module_identifier)
+	{
+		argv.push_back("--on-disk-module-identifier");
+		argv.push_back(options.on_disk_module_identifier);
+	}
+
 	if (options.replayer_cache_path)
 	{
 		argv.push_back("--replayer-cache");

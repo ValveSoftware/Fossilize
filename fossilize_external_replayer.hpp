@@ -84,6 +84,10 @@ public:
 		const char *on_disk_validation_whitelist;
 		const char *on_disk_validation_blacklist;
 
+		// Path to on-disk module identifier cache.
+		// The actual path is appended with ".$moduleIdentifierAlgorithmUUID.foz".
+		const char *on_disk_module_identifier;
+
 		// Path to store pipeline stats in.
 		const char *pipeline_stats_path;
 
