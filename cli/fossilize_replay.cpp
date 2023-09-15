@@ -217,6 +217,7 @@ struct EnqueuedWork
 
 static void on_validation_error(void *userdata);
 #ifndef NO_ROBUST_REPLAYER
+static void report_module_uuid(const char (&path)[2 * VK_UUID_SIZE + 1]);
 static void timeout_handler();
 #endif
 
@@ -1663,6 +1664,10 @@ struct ThreadedReplayer : StateCreatorInterface
 				char uuid_string[2 * VK_UUID_SIZE + 1];
 				for (unsigned i = 0; i < VK_UUID_SIZE; i++)
 					sprintf(uuid_string + 2 * i, "%02x", props.shaderModuleIdentifierAlgorithmUUID[i]);
+
+#ifndef NO_ROBUST_REPLAYER
+				report_module_uuid(uuid_string);
+#endif
 
 				auto path = opts.on_disk_module_identifier_path;
 				path += '.';

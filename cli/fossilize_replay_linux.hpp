@@ -123,6 +123,8 @@ struct ProcessProgress
 	uint32_t index = 0;
 	bool stopped = false;
 	bool expect_kill = false;
+
+	char module_uuid_path[2 * VK_UUID_SIZE + 1] = {};
 };
 
 void ProcessProgress::parse(const char *cmd)
@@ -218,6 +220,10 @@ void ProcessProgress::parse(const char *cmd)
 				futex_wrapper_unlock(&Global::control_block->futex_lock);
 			}
 		}
+	}
+	else if (strncmp(cmd, "MODULE_UUID", 11) == 0)
+	{
+		memcpy(module_uuid_path, cmd + 12, VK_UUID_SIZE * 2);
 	}
 	else if (strncmp(cmd, "MODULE", 6) == 0)
 	{
@@ -554,6 +560,12 @@ bool ProcessProgress::start_child_process(vector<ProcessProgress> &siblings)
 		{
 			copy_opts.pipeline_stats_path += ".";
 			copy_opts.pipeline_stats_path += std::to_string(index);
+		}
+
+		if (!copy_opts.on_disk_module_identifier_path.empty() && index != 0)
+		{
+			copy_opts.on_disk_module_identifier_path += ".";
+			copy_opts.on_disk_module_identifier_path += std::to_string(index);
 		}
 
 		exit(run_slave_process(Global::device_options, copy_opts, Global::databases));
@@ -1271,11 +1283,55 @@ static int run_master_process(const VulkanDevice::Options &opts,
 	if (Global::control_block)
 		Global::control_block->progress_complete.store(1, std::memory_order_release);
 
+	if (!replayer_opts.on_disk_module_identifier_path.empty())
+	{
+		if (strlen(child_processes[0].module_uuid_path) != 0)
+		{
+			std::vector<std::string> paths;
+			for (size_t idx = 0; idx < replayer_opts.num_threads; idx++)
+			{
+				if (strlen(child_processes[idx].module_uuid_path) == 0)
+				{
+					LOGW("No module UUID path was found for thread %zu, skipping identifiers.\n", idx);
+					continue;
+				}
+				auto path = replayer_opts.on_disk_module_identifier_path;
+				if (idx != 0)
+				{
+					path += ".";
+					path += std::to_string(idx);
+				}
+				path += ".";
+				path += child_processes[idx].module_uuid_path;
+				path += ".foz";
+				paths.push_back(path);
+			}
+
+			if (paths.size() > 1)
+			{
+				std::vector<const char *> input_paths;
+				input_paths.reserve(paths.size() - 1);
+				for (auto itr = paths.begin() + 1; itr != paths.end(); ++itr)
+					input_paths.push_back(itr->c_str());
+
+				// It's possible that no shader module was written, so don't treat that as an error.
+				if (!merge_concurrent_databases(paths.front().c_str(), input_paths.data(), input_paths.size(), true))
+					LOGE("Failed to merge identifier databases.\n");
+				for (auto itr = paths.begin() + 1; itr != paths.end(); ++itr)
+					remove(itr->c_str());
+			}
+		}
+		else
+		{
+			LOGW("No module UUID path was found, skipping identifiers.\n");
+		}
+	}
+
 	return EXIT_SUCCESS;
 }
 
 static ThreadedReplayer *global_replayer = nullptr;
-static int crash_fd;
+static int crash_fd = -1;
 static stack_t alt_stack;
 
 static void validation_error_cb(ThreadedReplayer *replayer)
@@ -1299,6 +1355,17 @@ static void validation_error_cb(ThreadedReplayer *replayer)
 	{
 		sprintf(buffer, "RAYTRACE_VERR %" PRIx64 "\n", per_thread.current_raytracing_pipeline);
 		write_all(crash_fd, buffer);
+	}
+}
+
+static void report_module_uuid(const char (&path)[2 * VK_UUID_SIZE + 1])
+{
+	if (crash_fd >= 0)
+	{
+		char buffer[64];
+		sprintf(buffer, "MODULE_UUID %s\n", path);
+		if (!write_all(crash_fd, buffer))
+			_exit(2);
 	}
 }
 
