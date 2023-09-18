@@ -26,8 +26,11 @@
 #include "logging.hpp"
 #include <string.h>
 #include <unordered_set>
+#include <unordered_map>
 #include <string>
 #include <algorithm>
+#include <vector>
+#include <mutex>
 
 namespace Fossilize
 {
@@ -448,6 +451,8 @@ struct FeatureFilter::Impl
 	bool descriptor_set_layout_is_supported(const VkDescriptorSetLayoutCreateInfo *info) const;
 	bool pipeline_layout_is_supported(const VkPipelineLayoutCreateInfo *info) const;
 	bool shader_module_is_supported(const VkShaderModuleCreateInfo *info) const;
+	bool register_shader_module_info(VkShaderModule module, const VkShaderModuleCreateInfo *info);
+	void unregister_shader_module_info(VkShaderModule module);
 	bool render_pass_is_supported(const VkRenderPassCreateInfo *info) const;
 	bool render_pass2_is_supported(const VkRenderPassCreateInfo2 *info) const;
 	bool graphics_pipeline_is_supported(const VkGraphicsPipelineCreateInfo *info) const;
@@ -472,6 +477,8 @@ struct FeatureFilter::Impl
 	bool image_layout_is_supported(VkImageLayout layout) const;
 	bool format_is_supported(VkFormat, VkFormatFeatureFlags format_features) const;
 
+	bool stage_limits_are_supported(const VkPipelineShaderStageCreateInfo &info) const;
+
 	std::unordered_set<std::string> enabled_extensions;
 
 	DeviceQueryInterface *query = nullptr;
@@ -484,10 +491,32 @@ struct FeatureFilter::Impl
 	bool supports_scalar_block_layout = false;
 	bool null_device = false;
 
+	struct DeferredEntryPoint
+	{
+		spv::Id id;
+		spv::Id wg_size_literal[3];
+		spv::Id wg_size_id[3];
+		spv::Id constant_id[3];
+		bool has_constant_id[3];
+		std::string name;
+		spv::ExecutionModel execution_model;
+		uint32_t max_vertices;
+		uint32_t max_primitives;
+	};
+
+	struct ModuleInfo
+	{
+		std::vector<DeferredEntryPoint> deferred_entry_points;
+	};
+
+	mutable std::mutex module_to_info_lock;
+	std::unordered_map<VkShaderModule, ModuleInfo> module_to_info;
+
 	void init_features(const void *pNext);
 	void init_properties(const void *pNext);
 	bool pnext_chain_is_supported(const void *pNext) const;
 	bool validate_module_capabilities(const uint32_t *data, size_t size) const;
+	bool parse_module_info(const uint32_t *data, size_t size, ModuleInfo &info);
 	bool validate_module_capability(spv::Capability cap) const;
 };
 
@@ -1760,6 +1789,265 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 	}
 }
 
+static std::string extract_string(const uint32_t *words, uint32_t num_words)
+{
+	std::string ret;
+	for (uint32_t i = 0; i < num_words; i++)
+	{
+		uint32_t w = words[i];
+
+		for (uint32_t j = 0; j < 4; j++, w >>= 8)
+		{
+			auto c = char(w & 0xff);
+			if (c == '\0')
+				return ret;
+			ret += c;
+		}
+	}
+	return ret;
+}
+
+bool FeatureFilter::Impl::parse_module_info(const uint32_t *data, size_t size, ModuleInfo &info)
+{
+	// We've already validated the module, now parse information which is related to API limits.
+	auto num_words = unsigned(size >> 2);
+	spv::Id global_workgroup_size_id = 0;
+
+	struct Constant
+	{
+		spv::Id id;
+		uint32_t literal;
+		spv::Id constant_id;
+		bool has_constant_id;
+	};
+	std::vector<Constant> constants;
+
+	const auto add_constant = [&](spv::Id id, uint32_t literal)
+	{
+		for (auto &c : constants)
+		{
+			if (c.id == id)
+			{
+				c.literal = literal;
+				return;
+			}
+		}
+
+		constants.push_back({ id, literal, 0, false });
+	};
+
+	const auto find_constant = [&](spv::Id id) -> std::vector<Constant>::const_iterator
+	{
+		return std::find_if(constants.begin(), constants.end(), [id](const Constant &c) { return c.id == id; });
+	};
+
+	unsigned offset = 5;
+	while (offset < num_words)
+	{
+		auto op = static_cast<spv::Op>(data[offset] & 0xffff);
+		unsigned count = (data[offset] >> 16) & 0xffff;
+
+		if (op == spv::OpFunction)
+		{
+			// We're now declaring code, so just stop parsing, there cannot be any capability ops after this.
+			break;
+		}
+		else if (op == spv::OpEntryPoint && count >= 4)
+		{
+			// Must come first.
+			auto execution_model = spv::ExecutionModel(data[offset + 1]);
+			spv::Id id = data[offset + 2];
+
+			// We only care about compute-like stages here since we need to validate workgroup sizes.
+			if (execution_model == spv::ExecutionModelGLCompute ||
+			    execution_model == spv::ExecutionModelTaskEXT ||
+			    execution_model == spv::ExecutionModelMeshEXT)
+			{
+				DeferredEntryPoint entry = {};
+				entry.name = extract_string(&data[offset + 3], num_words - (offset + 3));
+				entry.execution_model = execution_model;
+				entry.id = id;
+				info.deferred_entry_points.push_back(entry);
+			}
+		}
+		else if (op == spv::OpExecutionMode || op == spv::OpExecutionModeId)
+		{
+			// Now we can get execution mode.
+			spv::Id id = data[offset + 1];
+			auto mode = spv::ExecutionMode(data[offset + 2]);
+
+			auto itr = std::find_if(info.deferred_entry_points.begin(), info.deferred_entry_points.end(),
+			                        [id](const DeferredEntryPoint &entry)
+			                        { return entry.id == id; });
+
+			if (itr != info.deferred_entry_points.end())
+			{
+				if ((mode == spv::ExecutionModeLocalSize || mode == spv::ExecutionModeLocalSizeId) && count >= 6)
+				{
+					if (mode == spv::ExecutionModeLocalSizeId)
+					{
+						for (unsigned i = 0; i < 3; i++)
+							itr->wg_size_id[i] = data[offset + 3 + i];
+					}
+					else
+					{
+						for (unsigned i = 0; i < 3; i++)
+							itr->wg_size_literal[i] = data[offset + 3 + i];
+					}
+				}
+				else if (op == spv::OpExecutionMode && mode == spv::ExecutionModeOutputPrimitivesEXT && count >= 4)
+				{
+					itr->max_primitives = data[offset + 3];
+				}
+				else if (op == spv::OpExecutionMode && mode == spv::ExecutionModeOutputVertices && count >= 4)
+				{
+					itr->max_vertices = data[offset + 3];
+				}
+			}
+		}
+		else if (op == spv::OpDecorate && count >= 4)
+		{
+			// Now we can get decorations.
+			spv::Id target_id = data[offset + 1];
+			auto dec = spv::Decoration(data[offset + 2]);
+			if (dec == spv::DecorationBuiltIn && spv::BuiltIn(data[offset + 3]) == spv::BuiltInWorkgroupSize)
+			{
+				global_workgroup_size_id = target_id;
+			}
+			else if (dec == spv::DecorationSpecId)
+			{
+				Constant c = {};
+				c.id = target_id;
+				c.constant_id = data[offset + 3];
+				c.has_constant_id = true;
+				constants.push_back(c);
+			}
+		}
+		else if ((op == spv::OpConstant || op == spv::OpSpecConstant) && count >= 4)
+		{
+			spv::Id target_id = data[offset + 2];
+			if (count == 4)
+				add_constant(target_id, data[offset + 3]);
+		}
+		else if ((op == spv::OpSpecConstantComposite || op == spv::OpConstantComposite) && count >= 6)
+		{
+			spv::Id target_id = data[offset + 2];
+			if (target_id == global_workgroup_size_id)
+			{
+				// BuiltInWorkgroupSize overrides all execution modes if it exists (deprecated in SPIR-V 1.6).
+				for (auto &entry : info.deferred_entry_points)
+					for (unsigned i = 0; i < 3; i++)
+						entry.wg_size_id[i] = data[offset + 3 + i];
+			}
+		}
+
+		offset += count;
+	}
+
+	for (auto &entry : info.deferred_entry_points)
+	{
+		for (unsigned i = 0; i < 3; i++)
+		{
+			if (entry.wg_size_id[i] != 0)
+			{
+				auto itr = find_constant(entry.wg_size_id[i]);
+				if (itr != constants.end())
+				{
+					entry.wg_size_literal[i] = itr->literal;
+					entry.constant_id[i] = itr->constant_id;
+					entry.has_constant_id[i] = itr->has_constant_id;
+				}
+				else
+					return false;
+			}
+		}
+	}
+
+	// If we can statically pass an entry point now, go ahead. Remove it from consideration to save on storage.
+	auto itr = std::remove_if(info.deferred_entry_points.begin(), info.deferred_entry_points.end(), [&](const DeferredEntryPoint &e)
+	{
+		// We have no control over workgroup limits.
+		if (e.has_constant_id[0] || e.has_constant_id[1] || e.has_constant_id[2])
+			return false;
+
+		// It's possible that we have to fail validate based on FULL_SUBGROUPS usage.
+		if (props.subgroup_size_control.maxSubgroupSize &&
+		    (e.wg_size_literal[0] % props.subgroup_size_control.maxSubgroupSize) != 0)
+		{
+			return false;
+		}
+
+		// Might have to fail validation based on MaxVertices/MaxPrimitives.
+		if (e.execution_model == spv::ExecutionModelMeshEXT &&
+		    (e.max_vertices > props.mesh_shader.maxMeshOutputVertices ||
+		     e.max_primitives > props.mesh_shader.maxMeshOutputPrimitives))
+		{
+			return false;
+		}
+
+		uint32_t wg_limit[3] = {};
+		uint32_t wg_invocations = {};
+		switch (e.execution_model)
+		{
+		case spv::ExecutionModelGLCompute:
+			memcpy(wg_limit, props2.properties.limits.maxComputeWorkGroupSize, sizeof(wg_limit));
+			wg_invocations = props2.properties.limits.maxComputeWorkGroupInvocations;
+			break;
+
+		case spv::ExecutionModelMeshEXT:
+			memcpy(wg_limit, props.mesh_shader.maxMeshWorkGroupSize, sizeof(wg_limit));
+			wg_invocations = props.mesh_shader.maxMeshWorkGroupInvocations;
+			break;
+
+		case spv::ExecutionModelTaskEXT:
+			memcpy(wg_limit, props.mesh_shader.maxTaskWorkGroupSize, sizeof(wg_limit));
+			wg_invocations = props.mesh_shader.maxTaskWorkGroupInvocations;
+			break;
+
+		default:
+			break;
+		}
+
+		// If anyone tries to create this entry point, we have to fail it.
+		for (unsigned i = 0; i < 3; i++)
+			if (e.wg_size_literal[i] > wg_limit[i])
+				return false;
+
+		if (e.wg_size_literal[0] * e.wg_size_literal[1] * e.wg_size_literal[2] > wg_invocations)
+			return false;
+
+		return true;
+	});
+
+	info.deferred_entry_points.erase(itr, info.deferred_entry_points.end());
+
+	return true;
+}
+
+bool FeatureFilter::Impl::register_shader_module_info(VkShaderModule module, const VkShaderModuleCreateInfo *info)
+{
+	ModuleInfo module_info;
+	if (parse_module_info(info->pCode, info->codeSize, module_info))
+	{
+		if (!module_info.deferred_entry_points.empty())
+		{
+			std::lock_guard<std::mutex> holder{module_to_info_lock};
+			module_to_info[module] = std::move(module_info);
+		}
+		return true;
+	}
+	else
+		return false;
+}
+
+void FeatureFilter::Impl::unregister_shader_module_info(VkShaderModule module)
+{
+	std::lock_guard<std::mutex> holder{module_to_info_lock};
+	auto itr = module_to_info.find(module);
+	if (itr != module_to_info.end())
+		module_to_info.erase(itr);
+}
+
 bool FeatureFilter::Impl::validate_module_capabilities(const uint32_t *data, size_t size) const
 {
 	// Trivial SPIR-V parser, just need to poke at Capability opcodes.
@@ -2131,6 +2419,120 @@ bool FeatureFilter::Impl::subpass_dependency2_is_supported(const VkSubpassDepend
 		return false;
 	if (!pnext_chain_is_supported(dep.pNext))
 		return false;
+
+	return true;
+}
+
+bool FeatureFilter::Impl::stage_limits_are_supported(const VkPipelineShaderStageCreateInfo &info) const
+{
+	spv::ExecutionModel target_model;
+	uint32_t limit_workgroup_size[3];
+	uint32_t limit_invocations;
+
+	if (!info.pName)
+		return false;
+
+	switch (info.stage)
+	{
+	case VK_SHADER_STAGE_COMPUTE_BIT:
+		target_model = spv::ExecutionModelGLCompute;
+		memcpy(limit_workgroup_size, props2.properties.limits.maxComputeWorkGroupSize, sizeof(limit_workgroup_size));
+		limit_invocations = props2.properties.limits.maxComputeWorkGroupInvocations;
+		break;
+
+	case VK_SHADER_STAGE_TASK_BIT_EXT:
+		target_model = spv::ExecutionModelTaskEXT;
+		memcpy(limit_workgroup_size, props.mesh_shader.maxTaskWorkGroupSize, sizeof(limit_workgroup_size));
+		limit_invocations = props.mesh_shader.maxTaskWorkGroupInvocations;
+		break;
+
+	case VK_SHADER_STAGE_MESH_BIT_EXT:
+		target_model = spv::ExecutionModelMeshEXT;
+		memcpy(limit_workgroup_size, props.mesh_shader.maxMeshWorkGroupSize, sizeof(limit_workgroup_size));
+		limit_invocations = props.mesh_shader.maxMeshWorkGroupInvocations;
+		break;
+
+	default:
+		// Shouldn't happen. Only happens for invalid input.
+		return true;
+	}
+
+	std::lock_guard<std::mutex> holder{module_to_info_lock};
+
+	// If we cannot find anything, assume that we're statically okay.
+	auto itr = module_to_info.find(info.module);
+	if (itr == module_to_info.end())
+		return true;
+
+	const DeferredEntryPoint *deferred_entry_point = nullptr;
+	for (auto &entry : itr->second.deferred_entry_points)
+	{
+		if (target_model == entry.execution_model && entry.name == info.pName)
+		{
+			deferred_entry_point = &entry;
+			break;
+		}
+	}
+
+	if (deferred_entry_point)
+	{
+		auto &entry = *deferred_entry_point;
+		uint32_t wg_size[3] = {};
+
+		if (entry.execution_model == spv::ExecutionModelMeshEXT)
+		{
+			if (entry.max_primitives > props.mesh_shader.maxMeshOutputPrimitives)
+				return false;
+			if (entry.max_vertices > props.mesh_shader.maxMeshOutputVertices)
+				return false;
+		}
+
+		for (unsigned i = 0; i < 3; i++)
+		{
+			wg_size[i] = entry.wg_size_literal[i];
+			if (entry.has_constant_id[i] && info.pSpecializationInfo)
+			{
+				auto *data = static_cast<const uint8_t *>(info.pSpecializationInfo->pData);
+				for (unsigned j = 0; j < info.pSpecializationInfo->mapEntryCount; j++)
+				{
+					auto &map_entry = info.pSpecializationInfo->pMapEntries[j];
+					if (map_entry.constantID == entry.constant_id[i] &&
+					    map_entry.size == sizeof(uint32_t) &&
+					    map_entry.size + sizeof(uint32_t) <= info.pSpecializationInfo->dataSize)
+					{
+						memcpy(&wg_size[i], data + map_entry.offset, sizeof(uint32_t));
+						break;
+					}
+				}
+			}
+
+			if (wg_size[i] > limit_workgroup_size[i])
+				return false;
+		}
+
+		if (wg_size[0] * wg_size[1] * wg_size[2] > limit_invocations)
+			return false;
+
+		if (info.flags & VK_PIPELINE_SHADER_STAGE_CREATE_REQUIRE_FULL_SUBGROUPS_BIT)
+		{
+			auto *required = find_pnext<VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT>(
+					VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT,
+					info.pNext);
+
+			uint32_t target_subgroup_size = required ?
+					required->requiredSubgroupSize : props.subgroup_size_control.maxSubgroupSize;
+
+			if (!target_subgroup_size)
+				return false;
+
+			if (wg_size[0] % target_subgroup_size != 0)
+			{
+				// Can only use full subgroups if we're guaranteed maxSubgroupSize is contained.
+				// If we're using required size, we can statically validate it.
+				return false;
+			}
+		}
+	}
 
 	return true;
 }
@@ -2556,10 +2958,14 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 		case VK_SHADER_STAGE_MESH_BIT_EXT:
 			if (!features.mesh_shader.meshShader && !features.mesh_shader_nv.meshShader)
 				return false;
+			if (!stage_limits_are_supported(info->pStages[i]))
+				return false;
 			break;
 
 		case VK_SHADER_STAGE_TASK_BIT_EXT:
 			if (!features.mesh_shader.taskShader && !features.mesh_shader_nv.taskShader)
+				return false;
+			if (!stage_limits_are_supported(info->pStages[i]))
 				return false;
 			break;
 
@@ -2605,6 +3011,9 @@ bool FeatureFilter::Impl::compute_pipeline_is_supported(const VkComputePipelineC
 	}
 
 	if (!subgroup_size_control_is_supported(info->stage))
+		return false;
+
+	if (!stage_limits_are_supported(info->stage))
 		return false;
 
 	return pnext_chain_is_supported(info->pNext);
@@ -2719,6 +3128,16 @@ bool FeatureFilter::pipeline_layout_is_supported(const VkPipelineLayoutCreateInf
 bool FeatureFilter::shader_module_is_supported(const VkShaderModuleCreateInfo *info) const
 {
 	return impl->shader_module_is_supported(info);
+}
+
+bool FeatureFilter::register_shader_module_info(VkShaderModule module, const VkShaderModuleCreateInfo *info)
+{
+	return impl->register_shader_module_info(module, info);
+}
+
+void FeatureFilter::unregister_shader_module_info(VkShaderModule module)
+{
+	impl->unregister_shader_module_info(module);
 }
 
 bool FeatureFilter::render_pass_is_supported(const VkRenderPassCreateInfo *info) const

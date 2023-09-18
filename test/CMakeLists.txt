@@ -25,6 +25,11 @@ target_link_libraries(object-cache-test fossilize)
 set_target_properties(object-cache-test PROPERTIES LINK_FLAGS "${FOSSILIZE_LINK_FLAGS}")
 add_test(NAME object-cache-test COMMAND object-cache-test)
 
+add_executable(feature-filter-test feature_filter_test.cpp)
+target_link_libraries(feature-filter-test cli-utils)
+set_target_properties(feature-filter-test PROPERTIES LINK_FLAGS "${FOSSILIZE_LINK_FLAGS}")
+add_test(NAME feature-filter-test COMMAND feature-filter-test)
+
 option(FOSSILIZE_TEST_RUNTIME_LAYER "Tests runtime layer" OFF)
 
 if (FOSSILIZE_TEST_RUNTIME_LAYER)

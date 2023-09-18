@@ -86,7 +86,7 @@ public:
 		return amd_shader_info;
 	}
 
-	const FeatureFilter &get_feature_filter() const
+	FeatureFilter &get_feature_filter()
 	{
 		return feature_filter;
 	}

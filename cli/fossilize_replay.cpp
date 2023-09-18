@@ -2011,6 +2011,9 @@ struct ThreadedReplayer : StateCreatorInterface
 
 				if (opts.control_block && i == 0)
 					opts.control_block->successful_modules.fetch_add(1, std::memory_order_relaxed);
+
+				if (i == 0)
+					device->get_feature_filter().register_shader_module_info(*module, create_info);
 			}
 			else
 			{
@@ -2697,7 +2700,10 @@ struct ThreadedReplayer : StateCreatorInterface
 						                 //LOGI("Removing shader module %016llx.\n", static_cast<unsigned long long>(hash));
 						                 enqueued_shader_modules.erase((VkShaderModule) hash);
 						                 if (module != VK_NULL_HANDLE)
+						                 {
+							                 device->get_feature_filter().unregister_shader_module_info(module);
 							                 vkDestroyShaderModule(device->get_device(), module, nullptr);
+						                 }
 
 						                 shader_module_evicted_count.fetch_add(1, std::memory_order_relaxed);
 					                 });
