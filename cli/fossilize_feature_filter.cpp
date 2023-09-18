@@ -30,6 +30,7 @@
 #include <string>
 #include <algorithm>
 #include <vector>
+#include <mutex>
 
 namespace Fossilize
 {
@@ -506,6 +507,7 @@ struct FeatureFilter::Impl
 		std::vector<DeferredEntryPoint> deferred_entry_points;
 	};
 
+	mutable std::mutex module_to_info_lock;
 	std::unordered_map<VkShaderModule, ModuleInfo> module_to_info;
 
 	void init_features(const void *pNext);
@@ -2008,7 +2010,10 @@ bool FeatureFilter::Impl::register_shader_module_info(VkShaderModule module, con
 	if (parse_module_info(info->pCode, info->codeSize, module_info))
 	{
 		if (!module_info.deferred_entry_points.empty())
+		{
+			std::lock_guard<std::mutex> holder{module_to_info_lock};
 			module_to_info[module] = std::move(module_info);
+		}
 		return true;
 	}
 	else
@@ -2017,6 +2022,7 @@ bool FeatureFilter::Impl::register_shader_module_info(VkShaderModule module, con
 
 void FeatureFilter::Impl::unregister_shader_module_info(VkShaderModule module)
 {
+	std::lock_guard<std::mutex> holder{module_to_info_lock};
 	auto itr = module_to_info.find(module);
 	if (itr != module_to_info.end())
 		module_to_info.erase(itr);
@@ -2430,6 +2436,8 @@ bool FeatureFilter::Impl::workgroup_size_is_supported(const VkPipelineShaderStag
 		// Shouldn't happen. Only happens for invalid input.
 		return true;
 	}
+
+	std::lock_guard<std::mutex> holder{module_to_info_lock};
 
 	// If we cannot find anything, assume that we're statically okay.
 	auto itr = module_to_info.find(info.module);
