@@ -410,6 +410,66 @@ static const uint32_t spirv_blob_deprecated_wg_size_spec[] =
 	0x00010038,
 };
 
+#if 0
+OpCapability Shader
+OpCapability MeshShadingEXT
+OpExtension "SPV_EXT_mesh_shader"
+OpMemoryModel Logical GLSL450
+
+OpEntryPoint MeshEXT %ms_1_1 "main_1_1"
+OpEntryPoint MeshEXT %ms_512_1 "main_512_1"
+OpEntryPoint MeshEXT %ms_1_512 "main_1_512"
+
+OpExecutionMode %ms_1_1 OutputVertices 1
+OpExecutionMode %ms_512_1 OutputVertices 512
+OpExecutionMode %ms_1_512 OutputVertices 1
+
+OpExecutionMode %ms_1_1 OutputPrimitivesEXT 1
+OpExecutionMode %ms_512_1 OutputPrimitivesEXT 1
+OpExecutionMode %ms_1_512 OutputPrimitivesEXT 512
+
+OpExecutionMode %ms_1_1 OutputTrianglesEXT
+OpExecutionMode %ms_512_1 OutputTrianglesEXT
+OpExecutionMode %ms_1_512 OutputTrianglesEXT
+
+%void = OpTypeVoid
+%3 = OpTypeFunction %void
+%uint = OpTypeInt 32 0
+
+%ms_1_1 = OpFunction %void None %3
+%ms_1_1_label = OpLabel
+OpReturn
+OpFunctionEnd
+
+%ms_512_1 = OpFunction %void None %3
+%ms_512_1_label = OpLabel
+OpReturn
+OpFunctionEnd
+
+%ms_1_512 = OpFunction %void None %3
+%ms_1_512_label = OpLabel
+OpReturn
+OpFunctionEnd
+#endif
+
+static const uint32_t spirv_blob_mesh_limits[] =
+{
+	0x07230203, 0x00010600, 0x00070000, 0x0000000a, 0x00000000, 0x00020011, 0x00000001, 0x00020011,
+	0x000014a3, 0x0006000a, 0x5f565053, 0x5f545845, 0x6873656d, 0x6168735f, 0x00726564, 0x0003000e,
+	0x00000000, 0x00000001, 0x0006000f, 0x000014f5, 0x00000001, 0x6e69616d, 0x315f315f, 0x00000000,
+	0x0006000f, 0x000014f5, 0x00000002, 0x6e69616d, 0x3231355f, 0x0000315f, 0x0006000f, 0x000014f5,
+	0x00000003, 0x6e69616d, 0x355f315f, 0x00003231, 0x00040010, 0x00000001, 0x0000001a, 0x00000001,
+	0x00040010, 0x00000002, 0x0000001a, 0x00000200, 0x00040010, 0x00000003, 0x0000001a, 0x00000001,
+	0x00040010, 0x00000001, 0x00001496, 0x00000001, 0x00040010, 0x00000002, 0x00001496, 0x00000001,
+	0x00040010, 0x00000003, 0x00001496, 0x00000200, 0x00030010, 0x00000001, 0x000014b2, 0x00030010,
+	0x00000002, 0x000014b2, 0x00030010, 0x00000003, 0x000014b2, 0x00020013, 0x00000004, 0x00030021,
+	0x00000005, 0x00000004, 0x00040015, 0x00000006, 0x00000020, 0x00000000, 0x00050036, 0x00000004,
+	0x00000001, 0x00000000, 0x00000005, 0x000200f8, 0x00000007, 0x000100fd, 0x00010038, 0x00050036,
+	0x00000004, 0x00000002, 0x00000000, 0x00000005, 0x000200f8, 0x00000008, 0x000100fd, 0x00010038,
+	0x00050036, 0x00000004, 0x00000003, 0x00000000, 0x00000005, 0x000200f8, 0x00000009, 0x000100fd,
+	0x00010038,
+};
+
 struct Test
 {
 	bool expected;
@@ -517,6 +577,9 @@ int main()
 	mesh_props.maxMeshWorkGroupSize[1] = 32;
 	mesh_props.maxMeshWorkGroupSize[2] = 16;
 
+	mesh_props.maxMeshOutputVertices = 256;
+	mesh_props.maxMeshOutputPrimitives = 256;
+
 	FeatureFilter filter;
 	if (!filter.init(VK_API_VERSION_1_3, &ext, 1, &pdf2, &props2))
 		return EXIT_FAILURE;
@@ -604,6 +667,13 @@ int main()
 		{ false, VK_SHADER_STAGE_COMPUTE_BIT, "main_spec_1_2_3", { 1, 1, 512 } },
 	};
 
+	static const Test mesh_limit_tests[] =
+	{
+		{ true, VK_SHADER_STAGE_MESH_BIT_EXT, "main_1_1" },
+		{ false, VK_SHADER_STAGE_MESH_BIT_EXT, "main_512_1" },
+		{ false, VK_SHADER_STAGE_MESH_BIT_EXT, "main_1_512" },
+	};
+
 	VkShaderModuleCreateInfo module_info = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
 
 	module_info.pCode = spirv_blob;
@@ -624,6 +694,11 @@ int main()
 	if (!filter.register_shader_module_info((VkShaderModule)3, &module_info))
 		return EXIT_FAILURE;
 
+	module_info.pCode = spirv_blob_mesh_limits;
+	module_info.codeSize = sizeof(spirv_blob_mesh_limits);
+	if (!filter.register_shader_module_info((VkShaderModule)4, &module_info))
+		return EXIT_FAILURE;
+
 	for (auto &test : tests)
 		if (!run_test(filter, test, (VkShaderModule)1))
 			return EXIT_FAILURE;
@@ -634,5 +709,9 @@ int main()
 
 	for (auto &test : deprecated_wg_spec_tests)
 		if (!run_test(filter, test, (VkShaderModule)3))
+			return EXIT_FAILURE;
+
+	for (auto &test : mesh_limit_tests)
+		if (!run_test(filter, test, (VkShaderModule)4))
 			return EXIT_FAILURE;
 }
