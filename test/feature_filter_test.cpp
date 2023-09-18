@@ -503,7 +503,7 @@ int main()
 	mesh_features.taskShader = VK_TRUE;
 
 	props2.properties.limits.maxComputeWorkGroupInvocations = 256;
-	props2.properties.limits.maxComputeWorkGroupSize[0] = 128;
+	props2.properties.limits.maxComputeWorkGroupSize[0] = 256;
 	props2.properties.limits.maxComputeWorkGroupSize[1] = 64;
 	props2.properties.limits.maxComputeWorkGroupSize[2] = 16;
 
@@ -524,10 +524,10 @@ int main()
 	static const Test tests[] = {
 		// Sanity checks.
 		{ true, VK_SHADER_STAGE_COMPUTE_BIT, "main_local_1_1_1" },
-		{ false, VK_SHADER_STAGE_COMPUTE_BIT, "main_local_256_1_1" },
+		{ true, VK_SHADER_STAGE_COMPUTE_BIT, "main_local_256_1_1" },
 		{ true, VK_SHADER_STAGE_COMPUTE_BIT, "main_local_16_16_1" },
 		{ true, VK_SHADER_STAGE_COMPUTE_BIT, "main_local_id_1_1_1" },
-		{ false, VK_SHADER_STAGE_COMPUTE_BIT, "main_local_id_256_1_1" },
+		{ true, VK_SHADER_STAGE_COMPUTE_BIT, "main_local_id_256_1_1" },
 		{ true, VK_SHADER_STAGE_COMPUTE_BIT, "main_local_id_16_16_1" },
 		{ true, VK_SHADER_STAGE_COMPUTE_BIT, "main_spec_1_2_3" },
 
@@ -556,8 +556,8 @@ int main()
 		{ true, VK_SHADER_STAGE_TASK_BIT_EXT, "main_local_id_1_1_1", { 512, 512, 512 } },
 
 		// Test that spec constant override is honored.
-		{ true, VK_SHADER_STAGE_COMPUTE_BIT, "main_spec_1_2_3", { 128, 2, 1 }, },
-		{ false, VK_SHADER_STAGE_COMPUTE_BIT, "main_spec_1_2_3", { 129, 1, 1 }, },
+		{ true, VK_SHADER_STAGE_COMPUTE_BIT, "main_spec_1_2_3", { 256, 1, 1 }, },
+		{ false, VK_SHADER_STAGE_COMPUTE_BIT, "main_spec_1_2_3", { 257, 1, 1 }, },
 		{ true, VK_SHADER_STAGE_COMPUTE_BIT, "main_spec_1_2_3", { 1, 64, 1 }, },
 		{ false, VK_SHADER_STAGE_COMPUTE_BIT, "main_spec_1_2_3", { 1, 65, 1 }, },
 		{ true, VK_SHADER_STAGE_COMPUTE_BIT, "main_spec_1_2_3", { 1, 1, 16 }, },
