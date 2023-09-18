@@ -1949,6 +1949,56 @@ bool FeatureFilter::Impl::parse_module_info(const uint32_t *data, size_t size, M
 		}
 	}
 
+	// If we can statically pass an entry point now, go ahead. Remove it from consideration to save on storage.
+	auto itr = std::remove_if(info.deferred_entry_points.begin(), info.deferred_entry_points.end(), [&](const DeferredEntryPoint &e)
+	{
+		// We have no control over workgroup limits.
+		if (e.has_constant_id[0] || e.has_constant_id[1] || e.has_constant_id[2])
+			return false;
+
+		// It's possible that we have to fail validate based on FULL_SUBGROUPS usage.
+		if (props.subgroup_size_control.maxSubgroupSize &&
+		    (e.wg_size_literal[0] % props.subgroup_size_control.maxSubgroupSize) != 0)
+		{
+			return false;
+		}
+
+		uint32_t wg_limit[3] = {};
+		uint32_t wg_invocations = {};
+		switch (e.execution_model)
+		{
+		case spv::ExecutionModelGLCompute:
+			memcpy(wg_limit, props2.properties.limits.maxComputeWorkGroupSize, sizeof(wg_limit));
+			wg_invocations = props2.properties.limits.maxComputeWorkGroupInvocations;
+			break;
+
+		case spv::ExecutionModelMeshEXT:
+			memcpy(wg_limit, props.mesh_shader.maxMeshWorkGroupSize, sizeof(wg_limit));
+			wg_invocations = props.mesh_shader.maxMeshWorkGroupInvocations;
+			break;
+
+		case spv::ExecutionModelTaskEXT:
+			memcpy(wg_limit, props.mesh_shader.maxTaskWorkGroupSize, sizeof(wg_limit));
+			wg_invocations = props.mesh_shader.maxTaskWorkGroupInvocations;
+			break;
+
+		default:
+			break;
+		}
+
+		// If anyone tries to create this entry point, we have to fail it.
+		for (unsigned i = 0; i < 3; i++)
+			if (e.wg_size_literal[i] > wg_limit[i])
+				return false;
+
+		if (e.wg_size_literal[0] * e.wg_size_literal[1] * e.wg_size_literal[2] > wg_invocations)
+			return false;
+
+		return true;
+	});
+
+	info.deferred_entry_points.erase(itr, info.deferred_entry_points.end());
+
 	return true;
 }
 
