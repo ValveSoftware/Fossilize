@@ -477,7 +477,7 @@ struct FeatureFilter::Impl
 	bool image_layout_is_supported(VkImageLayout layout) const;
 	bool format_is_supported(VkFormat, VkFormatFeatureFlags format_features) const;
 
-	bool workgroup_size_is_supported(const VkPipelineShaderStageCreateInfo &info) const;
+	bool stage_limits_are_supported(const VkPipelineShaderStageCreateInfo &info) const;
 
 	std::unordered_set<std::string> enabled_extensions;
 
@@ -500,6 +500,8 @@ struct FeatureFilter::Impl
 		bool has_constant_id[3];
 		std::string name;
 		spv::ExecutionModel execution_model;
+		uint32_t max_vertices;
+		uint32_t max_primitives;
 	};
 
 	struct ModuleInfo
@@ -1868,17 +1870,19 @@ bool FeatureFilter::Impl::parse_module_info(const uint32_t *data, size_t size, M
 				info.deferred_entry_points.push_back(entry);
 			}
 		}
-		else if ((op == spv::OpExecutionMode || op == spv::OpExecutionModeId) && count >= 6)
+		else if (op == spv::OpExecutionMode || op == spv::OpExecutionModeId)
 		{
 			// Now we can get execution mode.
 			spv::Id id = data[offset + 1];
 			auto mode = spv::ExecutionMode(data[offset + 2]);
 
-			if (mode == spv::ExecutionModeLocalSize || mode == spv::ExecutionModeLocalSizeId)
+			auto itr = std::find_if(info.deferred_entry_points.begin(), info.deferred_entry_points.end(),
+			                        [id](const DeferredEntryPoint &entry)
+			                        { return entry.id == id; });
+
+			if (itr != info.deferred_entry_points.end())
 			{
-				auto itr = std::find_if(info.deferred_entry_points.begin(), info.deferred_entry_points.end(),
-				                        [id](const DeferredEntryPoint &entry) { return entry.id == id; });
-				if (itr != info.deferred_entry_points.end())
+				if ((mode == spv::ExecutionModeLocalSize || mode == spv::ExecutionModeLocalSizeId) && count >= 6)
 				{
 					if (mode == spv::ExecutionModeLocalSizeId)
 					{
@@ -1890,6 +1894,14 @@ bool FeatureFilter::Impl::parse_module_info(const uint32_t *data, size_t size, M
 						for (unsigned i = 0; i < 3; i++)
 							itr->wg_size_literal[i] = data[offset + 3 + i];
 					}
+				}
+				else if (op == spv::OpExecutionMode && mode == spv::ExecutionModeOutputPrimitivesEXT && count >= 4)
+				{
+					itr->max_primitives = data[offset + 3];
+				}
+				else if (op == spv::OpExecutionMode && mode == spv::ExecutionModeOutputVertices && count >= 4)
+				{
+					itr->max_vertices = data[offset + 3];
 				}
 			}
 		}
@@ -1961,6 +1973,14 @@ bool FeatureFilter::Impl::parse_module_info(const uint32_t *data, size_t size, M
 		// It's possible that we have to fail validate based on FULL_SUBGROUPS usage.
 		if (props.subgroup_size_control.maxSubgroupSize &&
 		    (e.wg_size_literal[0] % props.subgroup_size_control.maxSubgroupSize) != 0)
+		{
+			return false;
+		}
+
+		// Might have to fail validation based on MaxVertices/MaxPrimitives.
+		if (e.execution_model == spv::ExecutionModelMeshEXT &&
+		    (e.max_vertices > props.mesh_shader.maxMeshOutputVertices ||
+		     e.max_primitives > props.mesh_shader.maxMeshOutputPrimitives))
 		{
 			return false;
 		}
@@ -2403,7 +2423,7 @@ bool FeatureFilter::Impl::subpass_dependency2_is_supported(const VkSubpassDepend
 	return true;
 }
 
-bool FeatureFilter::Impl::workgroup_size_is_supported(const VkPipelineShaderStageCreateInfo &info) const
+bool FeatureFilter::Impl::stage_limits_are_supported(const VkPipelineShaderStageCreateInfo &info) const
 {
 	spv::ExecutionModel target_model;
 	uint32_t limit_workgroup_size[3];
@@ -2458,6 +2478,14 @@ bool FeatureFilter::Impl::workgroup_size_is_supported(const VkPipelineShaderStag
 	{
 		auto &entry = *deferred_entry_point;
 		uint32_t wg_size[3] = {};
+
+		if (entry.execution_model == spv::ExecutionModelMeshEXT)
+		{
+			if (entry.max_primitives > props.mesh_shader.maxMeshOutputPrimitives)
+				return false;
+			if (entry.max_vertices > props.mesh_shader.maxMeshOutputVertices)
+				return false;
+		}
 
 		for (unsigned i = 0; i < 3; i++)
 		{
@@ -2930,14 +2958,14 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 		case VK_SHADER_STAGE_MESH_BIT_EXT:
 			if (!features.mesh_shader.meshShader && !features.mesh_shader_nv.meshShader)
 				return false;
-			if (!workgroup_size_is_supported(info->pStages[i]))
+			if (!stage_limits_are_supported(info->pStages[i]))
 				return false;
 			break;
 
 		case VK_SHADER_STAGE_TASK_BIT_EXT:
 			if (!features.mesh_shader.taskShader && !features.mesh_shader_nv.taskShader)
 				return false;
-			if (!workgroup_size_is_supported(info->pStages[i]))
+			if (!stage_limits_are_supported(info->pStages[i]))
 				return false;
 			break;
 
@@ -2985,7 +3013,7 @@ bool FeatureFilter::Impl::compute_pipeline_is_supported(const VkComputePipelineC
 	if (!subgroup_size_control_is_supported(info->stage))
 		return false;
 
-	if (!workgroup_size_is_supported(info->stage))
+	if (!stage_limits_are_supported(info->stage))
 		return false;
 
 	return pnext_chain_is_supported(info->pNext);
