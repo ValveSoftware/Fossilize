@@ -34,3 +34,4 @@ PE(VERTEX_ATTRIBUTE_DIVISOR, attribute_divisor, EXT);
 PE(PUSH_DESCRIPTOR, push_descriptor, KHR);
 PE(SAMPLE_LOCATIONS, sample_locations, EXT);
 PE(EXTENDED_DYNAMIC_STATE_3, extended_dynamic_state3, EXT);
+PE(MESH_SHADER, mesh_shader, EXT);

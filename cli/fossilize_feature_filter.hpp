@@ -119,6 +119,7 @@ struct VulkanProperties
 	VkPhysicalDevicePushDescriptorPropertiesKHR push_descriptor;
 	VkPhysicalDeviceSampleLocationsPropertiesEXT sample_locations;
 	VkPhysicalDeviceExtendedDynamicState3PropertiesEXT extended_dynamic_state3;
+	VkPhysicalDeviceMeshShaderPropertiesEXT mesh_shader;
 };
 
 void *build_pnext_chain(VulkanProperties &properties, uint32_t api_version,
@@ -161,6 +162,9 @@ public:
 	bool graphics_pipeline_is_supported(const VkGraphicsPipelineCreateInfo *info) const;
 	bool compute_pipeline_is_supported(const VkComputePipelineCreateInfo *info) const;
 	bool raytracing_pipeline_is_supported(const VkRayTracingPipelineCreateInfoKHR *info) const;
+
+	bool register_shader_module_info(VkShaderModule module, const VkShaderModuleCreateInfo *info);
+	void unregister_shader_module_info(VkShaderModule module);
 
 	bool supports_scalar_block_layout() const;
 
