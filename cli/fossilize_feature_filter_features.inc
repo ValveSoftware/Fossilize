@@ -82,3 +82,5 @@ FE(MESH_SHADER, mesh_shader, EXT);
 FE(DESCRIPTOR_BUFFER, descriptor_buffer, EXT);
 FE(NON_SEAMLESS_CUBE_MAP, non_seamless_cube_map, EXT);
 FE(ATTACHMENT_FEEDBACK_LOOP_LAYOUT, attachment_feedback_loop_layout, EXT);
+FE(MAINTENANCE_4, maintenance4, KHR);
+FE(MAINTENANCE_5, maintenance5, KHR);
