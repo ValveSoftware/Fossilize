@@ -607,6 +607,7 @@ struct ThreadedReplayer : StateCreatorInterface
 			sync_worker_memory_context(i);
 			if (memory_context_pipeline_cache[i])
 				vkDestroyPipelineCache(device->get_device(), memory_context_pipeline_cache[i], nullptr);
+			memory_context_pipeline_cache[i] = VK_NULL_HANDLE;
 		}
 	}
 
@@ -3841,15 +3842,25 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 		return a.order_index < b.order_index;
 	});
 
+	// Need to synchronize worker threads between pipeline types to avoid a race condition
+	// where memory iteration 1 for a GPL link is running, and then compute starts running
+	// with only memory iteration 0 (< 1024 pipelines).
+	// Then we get the pattern of:
+	// - Link GPL pipeline iteration 1
+	// - Sync memory context 0
+	// - LRU maintenance memory context 0
+	// - Free pipelines (race condition!)
+	// To avoid shenanigans, synchronize everything between types.
 	for (auto &work : graphics_workload)
 		work.func();
+	replayer.sync_worker_threads();
 	for (auto &work : compute_workload)
 		work.func();
+	replayer.sync_worker_threads();
 	for (auto &work : raytracing_workload)
 		work.func();
-
-	// VALVE: drain all outstanding pipeline compiles
 	replayer.sync_worker_threads();
+
 	replayer.tear_down_threads();
 
 	LOGI("Total binary size for %s: %" PRIu64 " (%" PRIu64 " compressed)\n", tag_names[RESOURCE_SHADER_MODULE],
