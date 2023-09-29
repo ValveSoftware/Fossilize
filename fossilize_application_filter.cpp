@@ -23,7 +23,7 @@
 #include "fossilize_application_filter.hpp"
 #include "fossilize_hasher.hpp"
 #include "layer/utils.hpp"
-#include "vulkan.h"
+#include "vulkan/vulkan.h"
 #include <vector>
 #include <unordered_set>
 #include <unordered_map>

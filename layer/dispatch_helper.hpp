@@ -30,8 +30,8 @@
 #include <string.h>
 #include <unordered_map>
 #include <algorithm>
-#include "vk_layer.h"
-#include "vulkan.h"
+#include "vulkan/vk_layer.h"
+#include "vulkan/vulkan.h"
 
 namespace Fossilize
 {

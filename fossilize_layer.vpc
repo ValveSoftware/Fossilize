@@ -34,7 +34,7 @@ $Configuration
 		$PreprocessorDefinitions			"$BASE;NOMINMAX=1";VK_LAYER_fossilize="VK_LAYER_steam_fossilize";FOSSILIZE_DUMP_PATH_ENV="STEAM_FOSSILIZE_DUMP_PATH";FOSSILIZE_DUMP_PATH_READ_ONLY_ENV="STEAM_FOSSILIZE_DUMP_PATH_READ_ONLY" [$WINDOWS]
 		$PreprocessorDefinitions			"$BASE;DONT_WRAP_FILEIO";__STDC_FORMAT_MACROS;VK_LAYER_fossilize=\"VK_LAYER_steam_fossilize\";FOSSILIZE_DUMP_PATH_ENV=\"STEAM_FOSSILIZE_DUMP_PATH\";FOSSILIZE_DUMP_PATH_READ_ONLY_ENV=\"STEAM_FOSSILIZE_DUMP_PATH_READ_ONLY\" [$POSIX]
 		$AdditionalIncludeDirectories		"$BASE;.\rapidjson\include"
-		$AdditionalIncludeDirectories		"$BASE;.\khronos\vulkan"
+		$AdditionalIncludeDirectories		"$BASE;.\khronos"
 		$AdditionalIncludeDirectories		"$BASE;.\miniz"
 		$AdditionalIncludeDirectories		"$BASE;..;."
 		$AdditionalIncludeDirectories		"$BASE;.\cli\dirent\include" [$WINDOWS]

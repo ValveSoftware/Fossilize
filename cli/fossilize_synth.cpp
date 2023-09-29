@@ -24,7 +24,7 @@
 #include "fossilize_db.hpp"
 #include "cli_parser.hpp"
 #include "logging.hpp"
-#include "vulkan.h"
+#include "vulkan/vulkan.h"
 #include "spirv_cross_c.h"
 #include "file.hpp"
 #include <algorithm>

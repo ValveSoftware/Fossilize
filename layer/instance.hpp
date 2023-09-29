@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include "vulkan.h"
+#include "vulkan/vulkan.h"
 #include "dispatch_helper.hpp"
 #include "fossilize.hpp"
 #include "fossilize_db.hpp"

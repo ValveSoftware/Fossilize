@@ -122,7 +122,7 @@ option(FOSSILIZE_VULKAN_INCLUDE_PATH "Optional custom include path for Vulkan he
 if (FOSSILIZE_VULKAN_INCLUDE_PATH)
     target_include_directories(fossilize PUBLIC ${FOSSILIZE_VULKAN_INCLUDE_PATH})
 else()
-    target_include_directories(fossilize PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/khronos/vulkan)
+    target_include_directories(fossilize PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/khronos)
 endif()
 
 if (FOSSILIZE_VULKAN_LAYER)

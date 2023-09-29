@@ -22,7 +22,7 @@
 
 #include "fossilize_application_filter.hpp"
 #include "layer/utils.hpp"
-#include "vulkan.h"
+#include "vulkan/vulkan.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

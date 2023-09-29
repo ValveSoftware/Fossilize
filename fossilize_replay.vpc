@@ -33,7 +33,7 @@ $Configuration
 		$PreprocessorDefinitions			"$BASE;DONT_WRAP_FILEIO;__STDC_FORMAT_MACROS" [$POSIX]
 		$PreprocessorDefinitions			"$BASE;FOSSILIZE_REPLAYER_SPIRV_VAL" // enable spirv-tools validation
 		$AdditionalIncludeDirectories		"$BASE;.\rapidjson\include"
-		$AdditionalIncludeDirectories		"$BASE;.\khronos;.\khronos\vulkan"
+		$AdditionalIncludeDirectories		"$BASE;.\khronos"
 		$AdditionalIncludeDirectories		"$BASE;.\cli\volk"
 		$AdditionalIncludeDirectories		"$BASE;.\miniz"
 		$AdditionalIncludeDirectories		"$BASE;.\cli\SPIRV-Headers\include\spirv\unified1"
