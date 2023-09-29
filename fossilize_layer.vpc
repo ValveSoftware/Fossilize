@@ -45,6 +45,9 @@ $Configuration
 		$GCC_ExtraCompilerFlags				"$BASE -Wno-format" [$LINUXALL]
 		$GCC_ExtraCompilerFlags				"$BASE -Wno-format-security" [$LINUXALL]
 		$GCC_ExtraCompilerFlags				"$BASE -fvisibility=hidden" [$LINUXALL]
+		// -O3 produces an unstable 32 bit binary for some unknown reason, related to a missing pthread_once symbol
+		// see https://gitlab.steamos.cloud/steamrt/tasks/-/issues/189
+		$GCC_ExtraCompilerFlags				"$BASE -O2" [$LINUXALL]
 		$DisableSpecificWarnings			"$BASE;6313" [$ANALYZE] // Disable C6313: Incorrect operator: zero-valued flag cannot be tested with bitwise-and for rapidjson code
 	}
 }
