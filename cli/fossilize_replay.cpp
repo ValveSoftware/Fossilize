@@ -217,6 +217,7 @@ struct EnqueuedWork
 
 static void on_validation_error(void *userdata);
 #ifndef NO_ROBUST_REPLAYER
+static void report_module_uuid(const char (&path)[2 * VK_UUID_SIZE + 1]);
 static void timeout_handler();
 #endif
 
@@ -341,6 +342,7 @@ struct ThreadedReplayer : StateCreatorInterface
 		string on_disk_validation_cache_path;
 		string on_disk_validation_whitelist_path;
 		string on_disk_validation_blacklist_path;
+		string on_disk_module_identifier_path;
 		string pipeline_stats_path;
 		string replayer_cache_path;
 		vector<unsigned> implicit_whitelist_database_indices;
@@ -517,6 +519,7 @@ struct ThreadedReplayer : StateCreatorInterface
 
 		return resolve(RESOURCE_SHADER_MODULE) &&
 		       resolve(RESOURCE_GRAPHICS_PIPELINE) &&
+		       resolve(RESOURCE_RAYTRACING_PIPELINE) &&
 		       resolve(RESOURCE_COMPUTE_PIPELINE);
 	}
 
@@ -1655,6 +1658,29 @@ struct ThreadedReplayer : StateCreatorInterface
 				opts.pipeline_stats = false;
 			}
 
+			if (!opts.on_disk_module_identifier_path.empty() && device->module_identifiers_enabled())
+			{
+				auto &props = device->get_module_identifier_properties();
+				char uuid_string[2 * VK_UUID_SIZE + 1];
+				for (unsigned i = 0; i < VK_UUID_SIZE; i++)
+					sprintf(uuid_string + 2 * i, "%02x", props.shaderModuleIdentifierAlgorithmUUID[i]);
+
+#ifndef NO_ROBUST_REPLAYER
+				report_module_uuid(uuid_string);
+#endif
+
+				auto path = opts.on_disk_module_identifier_path;
+				path += '.';
+				path += uuid_string;
+				path += ".foz";
+				module_identifier_db.reset(create_stream_archive_database(path.c_str(), DatabaseMode::Append));
+				if (!module_identifier_db->prepare())
+				{
+					LOGW("Failed to prepare module identifier database. Disabling identifiers.\n");
+					module_identifier_db.reset();
+				}
+			}
+
 			if (opts.pipeline_stats)
 			{
 				auto foz_path = opts.pipeline_stats_path + ".__tmp.foz";
@@ -2008,6 +2034,19 @@ struct ThreadedReplayer : StateCreatorInterface
 				{
 					lock_guard<mutex> lock(internal_enqueue_mutex);
 					shader_module_to_hash[*module] = hash;
+				}
+
+				if (i == 0 && module_identifier_db)
+				{
+					VkShaderModuleIdentifierEXT ident = { VK_STRUCTURE_TYPE_SHADER_MODULE_IDENTIFIER_EXT };
+					vkGetShaderModuleIdentifierEXT(device->get_device(), *module, &ident);
+					std::lock_guard<std::mutex> holder{module_identifier_db_mutex};
+					if (!module_identifier_db->has_entry(RESOURCE_SHADER_MODULE, hash))
+					{
+						module_identifier_db->write_entry(RESOURCE_SHADER_MODULE, hash,
+						                                  ident.identifier, ident.identifierSize,
+						                                  PAYLOAD_WRITE_COMPUTE_CHECKSUM_BIT);
+					}
 				}
 
 				if (opts.control_block && i == 0)
@@ -2976,6 +3015,9 @@ struct ThreadedReplayer : StateCreatorInterface
 	std::unique_ptr<DatabaseInterface> validation_blacklist_db;
 	std::unordered_set<Hash> implicit_whitelist[RESOURCE_COUNT];
 
+	std::mutex module_identifier_db_mutex;
+	std::unique_ptr<DatabaseInterface> module_identifier_db;
+
 	std::mutex replayer_cache_mutex;
 	std::unique_ptr<DatabaseInterface> replayer_cache_db;
 	std::unordered_set<Hash> cached_blobs[RESOURCE_COUNT];
@@ -3079,6 +3121,7 @@ static void print_help()
 	     "\t[--on-disk-validation-blacklist <path>]\n"
 	     "\t[--on-disk-replay-whitelist <path>]\n"
 	     "\t[--on-disk-replay-whitelist-mask <module/pipeline/hex>]\n"
+	     "\t[--on-disk-module-identifier <path>]\n"
 	     "\t[--pipeline-hash <hash>]\n"
 	     "\t[--graphics-pipeline-range <start> <end>]\n"
 	     "\t[--compute-pipeline-range <start> <end>]\n"
@@ -3223,6 +3266,8 @@ static int run_progress_process(const VulkanDevice::Options &device_opts,
 	                                    nullptr : replayer_opts.on_disk_validation_whitelist_path.c_str();
 	opts.on_disk_validation_blacklist = replayer_opts.on_disk_validation_blacklist_path.empty() ?
 	                                    nullptr : replayer_opts.on_disk_validation_blacklist_path.c_str();
+	opts.on_disk_module_identifier = replayer_opts.on_disk_module_identifier_path.empty() ?
+	                                 nullptr : replayer_opts.on_disk_module_identifier_path.c_str();
 	opts.pipeline_stats_path = replayer_opts.pipeline_stats_path.empty() ?
 	                           nullptr : replayer_opts.pipeline_stats_path.c_str();
 	opts.num_threads = replayer_opts.num_threads;
@@ -4043,6 +4088,7 @@ int main(int argc, char *argv[])
 		replayer_opts.end_raytracing_index = parser.next_uint();
 	});
 	cbs.add("--enable-pipeline-stats", [&](CLIParser &parser) { replayer_opts.pipeline_stats_path = parser.next_string(); });
+	cbs.add("--on-disk-module-identifier", [&](CLIParser &parser) { replayer_opts.on_disk_module_identifier_path = parser.next_string(); });
 
 #ifndef NO_ROBUST_REPLAYER
 	cbs.add("--quiet-slave", [&](CLIParser &) { quiet_slave = true; });
@@ -4078,7 +4124,7 @@ int main(int argc, char *argv[])
 
 	cbs.error_handler = [] { print_help(); };
 
-	CLIParser parser(move(cbs), argc - 1, argv + 1);
+	CLIParser parser(std::move(cbs), argc - 1, argv + 1);
 	if (!parser.parse())
 		return EXIT_FAILURE;
 	if (parser.is_ended_state())

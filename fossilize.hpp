@@ -225,10 +225,15 @@ public:
 	                          Hash custom_hash = 0) FOSSILIZE_WARN_UNUSED;
 	bool record_graphics_pipeline(VkPipeline pipeline, const VkGraphicsPipelineCreateInfo &create_info,
 	                              const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
-	                              Hash custom_hash = 0) FOSSILIZE_WARN_UNUSED;
+	                              Hash custom_hash = 0,
+	                              VkDevice device = nullptr,
+	                              PFN_vkGetShaderModuleCreateInfoIdentifierEXT gsmcii = nullptr) FOSSILIZE_WARN_UNUSED;
+
 	bool record_compute_pipeline(VkPipeline pipeline, const VkComputePipelineCreateInfo &create_info,
 	                             const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
-	                             Hash custom_hash = 0) FOSSILIZE_WARN_UNUSED;
+	                             Hash custom_hash = 0,
+	                             VkDevice device = nullptr,
+	                             PFN_vkGetShaderModuleCreateInfoIdentifierEXT gsmcii = nullptr) FOSSILIZE_WARN_UNUSED;
 	bool record_render_pass(VkRenderPass render_pass, const VkRenderPassCreateInfo &create_info,
 	                        Hash custom_hash = 0) FOSSILIZE_WARN_UNUSED;
 	bool record_render_pass2(VkRenderPass render_pass, const VkRenderPassCreateInfo2 &create_info,
@@ -237,7 +242,9 @@ public:
 	                    Hash custom_hash = 0) FOSSILIZE_WARN_UNUSED;
 	bool record_raytracing_pipeline(VkPipeline pipeline, const VkRayTracingPipelineCreateInfoKHR &create_info,
 	                                const VkPipeline *base_pipelines, uint32_t base_pipeline_count,
-	                                Hash custom_hash = 0) FOSSILIZE_WARN_UNUSED;
+	                                Hash custom_hash = 0,
+	                                VkDevice device = nullptr,
+	                                PFN_vkGetShaderModuleCreateInfoIdentifierEXT gsmcii = nullptr) FOSSILIZE_WARN_UNUSED;
 	// YCbCr conversion objects are treated somewhat differently and their create infos
 	// are inlined into a sampler create info.
 	// In a replay scenario, the YCbCr create info is fished out of the pNext chain and replaced
@@ -249,6 +256,8 @@ public:
 	bool get_hash_for_descriptor_set_layout(VkDescriptorSetLayout layout, Hash *hash) const FOSSILIZE_WARN_UNUSED;
 	bool get_hash_for_pipeline_layout(VkPipelineLayout layout, Hash *hash) const FOSSILIZE_WARN_UNUSED;
 	bool get_hash_for_shader_module(VkShaderModule module, Hash *hash) const FOSSILIZE_WARN_UNUSED;
+	bool get_hash_for_shader_module(
+			const VkPipelineShaderStageModuleIdentifierCreateInfoEXT *identifier, Hash *hash) const FOSSILIZE_WARN_UNUSED;
 	bool get_hash_for_graphics_pipeline_handle(VkPipeline pipeline, Hash *hash) const FOSSILIZE_WARN_UNUSED;
 	bool get_hash_for_compute_pipeline_handle(VkPipeline pipeline, Hash *hash) const FOSSILIZE_WARN_UNUSED;
 	bool get_hash_for_raytracing_pipeline_handle(VkPipeline pipeline, Hash *hash) const FOSSILIZE_WARN_UNUSED;
@@ -265,6 +274,16 @@ public:
 	bool get_subpass_meta_for_pipeline(const VkGraphicsPipelineCreateInfo &create_info,
 	                                   Hash render_pass_hash,
 	                                   SubpassMeta *meta) const FOSSILIZE_WARN_UNUSED;
+
+	// Called before init_recording_thread or init_recording_synchronized.
+	// NOTE: If iface is non-null,
+	// prepare() will be called asynchronously on the DatabaseInterface to hide the cost of up-front file I/O.
+	// Do not attempt to call prepare() on the calling thread!
+	// The database should be unique per shaderIdentifierAlgorithmUUID.
+	// For this to work, a shader module create info needs to include a ShaderModuleIdentifierCreateInfoEXT struct,
+	// alongside the normal VkShaderModule.
+	void set_module_identifier_database_interface(DatabaseInterface *iface);
+	void set_on_use_database_interface(DatabaseInterface *iface);
 
 	// If database is non-null, serialize cannot be called later, as the implementation will not retain
 	// memory for the create info structs, but rather rely on the database interface to make objects persist.

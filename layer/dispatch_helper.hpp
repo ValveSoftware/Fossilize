@@ -42,6 +42,8 @@ struct VkLayerInstanceDispatchTable
 {
 	PFN_vkDestroyInstance DestroyInstance;
 	PFN_vkGetPhysicalDeviceProperties GetPhysicalDeviceProperties;
+	PFN_vkGetPhysicalDeviceProperties2 GetPhysicalDeviceProperties2;
+	PFN_vkGetPhysicalDeviceProperties2KHR GetPhysicalDeviceProperties2KHR;
 };
 
 // Device function pointer dispatch table
@@ -62,6 +64,8 @@ struct VkLayerDispatchTable
 	PFN_vkCreateSamplerYcbcrConversion CreateSamplerYcbcrConversion;
 	PFN_vkCreateSamplerYcbcrConversionKHR CreateSamplerYcbcrConversionKHR;
 	PFN_vkCreateRayTracingPipelinesKHR CreateRayTracingPipelinesKHR;
+	PFN_vkGetShaderModuleIdentifierEXT GetShaderModuleIdentifierEXT;
+	PFN_vkGetShaderModuleCreateInfoIdentifierEXT GetShaderModuleCreateInfoIdentifierEXT;
 };
 
 using InstanceTable = std::unordered_map<void *, std::unique_ptr<VkLayerInstanceDispatchTable>>;

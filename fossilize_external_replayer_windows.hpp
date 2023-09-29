@@ -567,6 +567,14 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 		cmdline += whitelist_hex;
 	}
 
+	if (options.on_disk_module_identifier)
+	{
+		cmdline += " --on-disk-module-identifier ";
+		cmdline += "\"";
+		cmdline += options.on_disk_module_identifier;
+		cmdline += "\"";
+	}
+
 	if (options.replayer_cache_path)
 	{
 		cmdline += " --replayer-cache ";

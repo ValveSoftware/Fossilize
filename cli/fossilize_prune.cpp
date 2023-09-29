@@ -25,6 +25,7 @@
 #include <stdlib.h>
 #include <memory>
 #include <vector>
+#include <time.h>
 #include <unordered_set>
 #include <unordered_map>
 #include "layer/utils.hpp"
@@ -43,6 +44,7 @@ static void print_help()
 	     "\t[--filter-compute hash]\n"
 	     "\t[--filter-raytracing hash]\n"
 	     "\t[--filter-module hash]\n"
+	     "\t[--filter-timestamp path seconds] (seconds is relative to current time. E.g., if 100, any entry made more than 100 seconds ago are pruned)\n"
 	     "\t[--skip-graphics hash]\n"
 	     "\t[--skip-compute hash]\n"
 	     "\t[--skip-raytracing hash]\n"
@@ -102,6 +104,9 @@ struct PruneReplayer : StateCreatorInterface
 
 	unordered_set<Hash> filtered_blob_hashes[RESOURCE_COUNT];
 
+	std::unique_ptr<DatabaseInterface> timestamp_db;
+	uint64_t timestamp_minimum_accept = 0;
+
 	Hash filter_application_hash = 0;
 	bool should_filter_application_hash = false;
 
@@ -134,6 +139,9 @@ struct PruneReplayer : StateCreatorInterface
 	void notify_application_info_link(Hash link_hash, Hash app_hash, ResourceTag tag, Hash hash) override
 	{
 		if (skip_application_info_links)
+			return;
+
+		if (!filter_timestamp(RESOURCE_APPLICATION_BLOB_LINK, link_hash, nullptr))
 			return;
 
 		if (should_filter_application_hash && app_hash == filter_application_hash)
@@ -228,8 +236,35 @@ struct PruneReplayer : StateCreatorInterface
 		return true;
 	}
 
+	bool filter_timestamp(ResourceTag tag, Hash hash, uint64_t *ts) const
+	{
+		if (!timestamp_db)
+			return true;
+
+		uint64_t timestamp = 0;
+		bool ret = true;
+
+		size_t timestamp_size = sizeof(timestamp);
+		if (!timestamp_db->read_entry(tag, hash, &timestamp_size, &timestamp, PAYLOAD_READ_NO_FLAGS) ||
+		    timestamp_size != sizeof(timestamp))
+		{
+			ret = false;
+		}
+
+		if (timestamp < timestamp_minimum_accept)
+			ret = false;
+
+		if (ts)
+			*ts = timestamp;
+
+		return ret;
+	}
+
 	bool filter_object(ResourceTag tag, Hash hash) const
 	{
+		if (!filter_timestamp(tag, hash, nullptr))
+			return false;
+
 		bool hash_filtering = !(filter_compute.empty() && filter_graphics.empty() && filter_raytracing.empty());
 		if (tag == RESOURCE_COMPUTE_PIPELINE)
 		{
@@ -491,7 +526,8 @@ int main(int argc, char *argv[])
 	CLICallbacks cbs;
 	string input_db_path;
 	string output_db_path;
-	string whitelist, blacklist;
+	string whitelist, blacklist, timestamp;
+	unsigned timestamp_seconds = 0;
 	Hash application_hash = 0;
 	bool should_filter_application_hash = false;
 	bool skip_application_info_links = false;
@@ -526,6 +562,10 @@ int main(int argc, char *argv[])
 	cbs.add("--filter-module", [&](CLIParser &parser) {
 		filter_modules.insert(strtoull(parser.next_string(), nullptr, 16));
 	});
+	cbs.add("--filter-timestamp", [&](CLIParser &parser) {
+		timestamp = parser.next_string();
+		timestamp_seconds = parser.next_uint();
+	});
 	cbs.add("--skip-graphics", [&](CLIParser &parser) {
 		banned_graphics.insert(strtoull(parser.next_string(), nullptr, 16));
 	});
@@ -552,7 +592,7 @@ int main(int argc, char *argv[])
 	});
 	cbs.error_handler = [] { print_help(); };
 
-	CLIParser parser(move(cbs), argc - 1, argv + 1);
+	CLIParser parser(std::move(cbs), argc - 1, argv + 1);
 	if (!parser.parse())
 		return EXIT_FAILURE;
 	if (parser.is_ended_state())
@@ -608,15 +648,28 @@ int main(int argc, char *argv[])
 		prune_replayer.filter_application_hash = application_hash;
 	}
 
-	prune_replayer.filter_graphics = move(filter_graphics);
-	prune_replayer.filter_compute = move(filter_compute);
-	prune_replayer.filter_raytracing = move(filter_raytracing);
-	prune_replayer.filter_modules = move(filter_modules);
-	prune_replayer.banned_graphics = move(banned_graphics);
-	prune_replayer.banned_compute = move(banned_compute);
-	prune_replayer.banned_raytracing = move(banned_raytracing);
-	prune_replayer.banned_modules = move(banned_modules);
+	prune_replayer.filter_graphics = std::move(filter_graphics);
+	prune_replayer.filter_compute = std::move(filter_compute);
+	prune_replayer.filter_raytracing = std::move(filter_raytracing);
+	prune_replayer.filter_modules = std::move(filter_modules);
+	prune_replayer.banned_graphics = std::move(banned_graphics);
+	prune_replayer.banned_compute = std::move(banned_compute);
+	prune_replayer.banned_raytracing = std::move(banned_raytracing);
+	prune_replayer.banned_modules = std::move(banned_modules);
 	prune_replayer.skip_application_info_links = skip_application_info_links;
+
+	if (!timestamp.empty())
+	{
+		prune_replayer.timestamp_db.reset(create_stream_archive_database(timestamp.c_str(), DatabaseMode::ReadOnly));
+		if (!prune_replayer.timestamp_db->prepare())
+		{
+			LOGE("Failed to open timestamp DB.\n");
+			return EXIT_FAILURE;
+		}
+		prune_replayer.timestamp_minimum_accept = time(nullptr);
+		prune_replayer.timestamp_minimum_accept -=
+				std::min<uint64_t>(prune_replayer.timestamp_minimum_accept, timestamp_seconds);
+	}
 
 	static const ResourceTag playback_order[] = {
 		RESOURCE_APPLICATION_INFO,
@@ -668,6 +721,33 @@ int main(int argc, char *argv[])
 		{
 			LOGE("Failed to get shader module hashes.\n");
 			return EXIT_FAILURE;
+		}
+
+		// Filter application infos as well,
+		// but avoid a situation where we omit all application infos since these are very important in replay.
+		if (tag == RESOURCE_APPLICATION_INFO && prune_replayer.timestamp_db)
+		{
+			vector<Hash> accepted_hashes;
+			uint64_t latest_ts = 0;
+			Hash latest_hash = 0;
+
+			for (auto hash : hashes)
+			{
+				uint64_t ts = 0;
+				if (hash == application_hash || prune_replayer.filter_timestamp(RESOURCE_APPLICATION_INFO, hash, &ts))
+					accepted_hashes.push_back(hash);
+
+				if (ts > latest_ts)
+				{
+					latest_hash = hash;
+					latest_ts = ts;
+				}
+			}
+
+			if (accepted_hashes.empty())
+				accepted_hashes.push_back(latest_hash);
+
+			hashes = std::move(accepted_hashes);
 		}
 
 		for (auto hash : hashes)
@@ -748,7 +828,7 @@ int main(int argc, char *argv[])
 		for (auto &h : hashes)
 			if (prune_replayer.accessed_shader_modules.count(h) == 0)
 				unreferenced_modules.insert(h);
-		prune_replayer.accessed_shader_modules = move(unreferenced_modules);
+		prune_replayer.accessed_shader_modules = std::move(unreferenced_modules);
 	}
 
 	if (!copy_accessed_types(*input_db, *output_db, state_json,

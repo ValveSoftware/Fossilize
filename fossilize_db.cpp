@@ -614,16 +614,12 @@ struct DumbDirectoryDatabase : DatabaseInterface
 		size_t file_size = size_t(ftell(file));
 		rewind(file);
 
-		if (blob)
+		if (blob && *blob_size < file_size)
 		{
-			if (*blob_size != file_size)
-			{
-				fclose(file);
-				return false;
-			}
+			fclose(file);
+			return false;
 		}
-		else
-			*blob_size = file_size;
+		*blob_size = file_size;
 
 		if (blob)
 		{
@@ -837,13 +833,9 @@ struct ZipDatabase : DatabaseInterface
 		if (!blob_size)
 			return false;
 
-		if (blob)
-		{
-			if (*blob_size != itr->second.size)
-				return false;
-		}
-		else
-			*blob_size = itr->second.size;
+		if (blob && *blob_size < itr->second.size)
+			return false;
+		*blob_size = itr->second.size;
 
 		if (blob)
 		{
@@ -1067,6 +1059,9 @@ struct StreamArchive : DatabaseInterface
 				file = fopen(path.c_str(), "wb");
 			break;
 
+		case DatabaseMode::AppendWithReadOnlyAccess:
+			return false;
+
 		case DatabaseMode::OverWrite:
 			file = fopen(path.c_str(), "wb");
 			break;
@@ -1277,13 +1272,9 @@ struct StreamArchive : DatabaseInterface
 		                    (entry.header.payload_size + sizeof(PayloadHeaderRaw)) :
 		                    entry.header.uncompressed_size;
 
-		if (blob)
-		{
-			if (*blob_size != out_size)
-				return false;
-		}
-		else
-			*blob_size = out_size;
+		if (blob && *blob_size < out_size)
+			return false;
+		*blob_size = out_size;
 
 		if (blob)
 		{
@@ -1710,14 +1701,21 @@ struct ConcurrentDatabase : DatabaseInterface
 	                            const char * const *extra_paths, size_t num_extra_paths)
 		: DatabaseInterface(mode_), base_path(base_path_ ? base_path_ : ""), mode(mode_)
 	{
-		if (!base_path.empty())
-		{
-			std::string readonly_path = base_path + ".foz";
-			readonly_interface.reset(create_stream_archive_database(readonly_path.c_str(), DatabaseMode::ReadOnly));
-		}
+		// Normalize this mode. The concurrent database is always "exclusive write".
+		if (mode == DatabaseMode::ExclusiveOverWrite)
+			mode = DatabaseMode::OverWrite;
 
-		for (size_t i = 0; i < num_extra_paths; i++)
-			extra_readonly.emplace_back(create_stream_archive_database(extra_paths[i], DatabaseMode::ReadOnly));
+		if (mode != DatabaseMode::OverWrite)
+		{
+			if (!base_path.empty())
+			{
+				std::string readonly_path = base_path + ".foz";
+				readonly_interface.reset(create_stream_archive_database(readonly_path.c_str(), DatabaseMode::ReadOnly));
+			}
+
+			for (size_t i = 0; i < num_extra_paths; i++)
+				extra_readonly.emplace_back(create_stream_archive_database(extra_paths[i], DatabaseMode::ReadOnly));
+		}
 	}
 
 	void flush() override
@@ -1768,13 +1766,16 @@ struct ConcurrentDatabase : DatabaseInterface
 
 	bool prepare() override
 	{
-		if (mode != DatabaseMode::Append && mode != DatabaseMode::ReadOnly)
+		if (mode != DatabaseMode::Append &&
+		    mode != DatabaseMode::ReadOnly &&
+		    mode != DatabaseMode::AppendWithReadOnlyAccess &&
+		    mode != DatabaseMode::OverWrite)
 			return false;
 
 		if (mode != DatabaseMode::ReadOnly && !impl->sub_databases_in_whitelist.empty())
 			return false;
 
-		if (mode != DatabaseMode::Append && !bucket_dirname.empty() && !bucket_basename.empty())
+		if (mode == DatabaseMode::ReadOnly && !bucket_dirname.empty() && !bucket_basename.empty())
 			return false;
 
 		if (!bucket_dirname.empty() && !setup_bucket())
@@ -1837,7 +1838,7 @@ struct ConcurrentDatabase : DatabaseInterface
 			}
 
 			// We only need the database for priming purposes.
-			if (mode != DatabaseMode::ReadOnly)
+			if (mode == DatabaseMode::Append)
 			{
 				readonly_interface.reset();
 				extra_readonly.clear();
@@ -1850,7 +1851,7 @@ struct ConcurrentDatabase : DatabaseInterface
 
 	bool read_entry(ResourceTag tag, Hash hash, size_t *blob_size, void *blob, PayloadReadFlags flags) override
 	{
-		if (mode != DatabaseMode::ReadOnly)
+		if (mode == DatabaseMode::Append || mode == DatabaseMode::OverWrite)
 			return false;
 
 		if (readonly_interface && readonly_interface->read_entry(tag, hash, blob_size, blob, flags))
@@ -1867,7 +1868,9 @@ struct ConcurrentDatabase : DatabaseInterface
 
 	bool write_entry(ResourceTag tag, Hash hash, const void *blob, size_t blob_size, PayloadWriteFlags flags) override
 	{
-		if (mode != DatabaseMode::Append)
+		if (mode != DatabaseMode::Append &&
+		    mode != DatabaseMode::AppendWithReadOnlyAccess &&
+		    mode != DatabaseMode::OverWrite)
 			return false;
 
 		if (primed_hashes[tag].count(hash))
@@ -2240,7 +2243,73 @@ void DatabaseInterface::request_shutdown()
 	shutdown_requested.store(true, std::memory_order_relaxed);
 }
 
-bool merge_concurrent_databases(const char *append_archive, const char * const *source_paths, size_t num_source_paths)
+bool merge_concurrent_databases_last_use(const char *append_archive, const char * const *source_paths, size_t num_source_paths,
+                                         bool skip_missing_inputs)
+{
+	std::unordered_map<Hash, uint64_t> timestamps[RESOURCE_COUNT];
+
+	for (size_t source = 0; source < num_source_paths + 1; source++)
+	{
+		const char *path = source ? source_paths[source - 1] : append_archive;
+		auto source_db = std::unique_ptr<DatabaseInterface>(create_stream_archive_database(path, DatabaseMode::ReadOnly));
+		if (!source_db->prepare())
+		{
+			if (source == 0)
+				continue;
+			else
+			{
+				if (!skip_missing_inputs)
+					return false;
+
+				LOGW("Archive %s could not be prepared, skipping.\n", path);
+				continue;
+			}
+		}
+
+		for (unsigned i = 0; i < RESOURCE_COUNT; i++)
+		{
+			auto tag = static_cast<ResourceTag>(i);
+
+			size_t hash_count = 0;
+			if (!source_db->get_hash_list_for_resource_tag(tag, &hash_count, nullptr))
+				return false;
+			std::vector<Hash> hashes(hash_count);
+			if (!source_db->get_hash_list_for_resource_tag(tag, &hash_count, hashes.data()))
+				return false;
+
+			for (auto &hash : hashes)
+			{
+				size_t timestamp_size = sizeof(uint64_t);
+				uint64_t timestamp = 0;
+				if (!source_db->read_entry(tag, hash, &timestamp_size, &timestamp, PAYLOAD_READ_NO_FLAGS) ||
+				    timestamp_size != sizeof(uint64_t))
+					return false;
+
+				auto &entry = timestamps[i][hash];
+				entry = std::max<uint64_t>(entry, timestamp);
+			}
+		}
+	}
+
+	auto write_db = std::unique_ptr<DatabaseInterface>(create_stream_archive_database(append_archive, DatabaseMode::OverWrite));
+	if (!write_db->prepare())
+		return false;
+
+	for (unsigned i = 0; i < RESOURCE_COUNT; i++)
+	{
+		auto tag = static_cast<ResourceTag>(i);
+		auto &ts = timestamps[i];
+
+		for (auto &t : ts)
+			if (!write_db->write_entry(tag, t.first, &t.second, sizeof(t.second), PAYLOAD_WRITE_COMPUTE_CHECKSUM_BIT))
+				return false;
+	}
+
+	return true;
+}
+
+bool merge_concurrent_databases(const char *append_archive, const char * const *source_paths, size_t num_source_paths,
+                                bool skip_missing_inputs)
 {
 	auto append_db = std::unique_ptr<DatabaseInterface>(create_stream_archive_database(append_archive, DatabaseMode::Append));
 	if (!append_db->prepare())
@@ -2251,7 +2320,13 @@ bool merge_concurrent_databases(const char *append_archive, const char * const *
 		const char *path = source_paths[source];
 		auto source_db = std::unique_ptr<DatabaseInterface>(create_stream_archive_database(path, DatabaseMode::ReadOnly));
 		if (!source_db->prepare())
-			return false;
+		{
+			if (!skip_missing_inputs)
+				return false;
+
+			LOGW("Archive %s could not be prepared, skipping.\n", path);
+			continue;
+		}
 
 		for (unsigned i = 0; i < RESOURCE_COUNT; i++)
 		{

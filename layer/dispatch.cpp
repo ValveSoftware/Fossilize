@@ -176,7 +176,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelinesNormal(Device *laye
 
 	for (uint32_t i = 0; i < createInfoCount; i++)
 	{
-		if (!layer->getRecorder().record_graphics_pipeline(pPipelines[i], pCreateInfos[i], pPipelines, createInfoCount))
+		if (!layer->getRecorder().record_graphics_pipeline(
+				pPipelines[i], pCreateInfos[i], pPipelines, createInfoCount, 0,
+				device, layer->requiresModuleIdentifiers() ? layer->getTable()->GetShaderModuleCreateInfoIdentifierEXT : nullptr))
 			LOGW_LEVEL("Recording graphics pipeline failed, usually caused by unsupported pNext.\n");
 	}
 
@@ -209,8 +211,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelinesParanoid(Device *la
 		}
 
 		bool eager = layer->getInstance()->capturesEagerly();
-		if (eager && !layer->getRecorder().record_graphics_pipeline(VK_NULL_HANDLE, info, nullptr, 0))
+		if (eager && !layer->getRecorder().record_graphics_pipeline(
+				VK_NULL_HANDLE, info, nullptr, 0, 0,
+				device, layer->requiresModuleIdentifiers() ? layer->getTable()->GetShaderModuleCreateInfoIdentifierEXT : nullptr))
+		{
 			LOGW_LEVEL("Failed to capture eagerly.\n");
+		}
 
 		// Have to create all pipelines here, in case the application makes use of basePipelineIndex.
 		// Write arguments in TLS in-case we crash here.
@@ -220,8 +226,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelinesParanoid(Device *la
 		Instance::completedPipelineCompilation();
 
 		// Record failing pipelines for repro.
-		if (!layer->getRecorder().record_graphics_pipeline(res == VK_SUCCESS ? pPipelines[i] : VK_NULL_HANDLE, info, nullptr, 0))
+		if (!layer->getRecorder().record_graphics_pipeline(
+				res == VK_SUCCESS ? pPipelines[i] : VK_NULL_HANDLE, info, nullptr, 0, 0,
+				device, layer->requiresModuleIdentifiers() ? layer->getTable()->GetShaderModuleCreateInfoIdentifierEXT : nullptr))
+		{
 			LOGW_LEVEL("Failed to record graphics pipeline, usually caused by unsupported pNext.\n");
+		}
 
 		if (res == VK_PIPELINE_COMPILE_REQUIRED_EXT)
 			final_res = res;
@@ -273,8 +283,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelinesNormal(Device *layer
 
 	for (uint32_t i = 0; i < createInfoCount; i++)
 	{
-		if (!layer->getRecorder().record_compute_pipeline(pPipelines[i], pCreateInfos[i], pPipelines, createInfoCount))
+		if (!layer->getRecorder().record_compute_pipeline(
+				pPipelines[i], pCreateInfos[i], pPipelines, createInfoCount, 0,
+				device, layer->requiresModuleIdentifiers() ? layer->getTable()->GetShaderModuleCreateInfoIdentifierEXT : nullptr))
+		{
 			LOGW_LEVEL("Failed to record compute pipeline, usually caused by unsupported pNext.\n");
+		}
 	}
 
 	return VK_SUCCESS;
@@ -306,8 +320,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelinesParanoid(Device *lay
 		}
 
 		bool eager = layer->getInstance()->capturesEagerly();
-		if (eager && !layer->getRecorder().record_compute_pipeline(VK_NULL_HANDLE, info, nullptr, 0))
+		if (eager && !layer->getRecorder().record_compute_pipeline(
+				VK_NULL_HANDLE, info, nullptr, 0, 0,
+				device, layer->requiresModuleIdentifiers() ? layer->getTable()->GetShaderModuleCreateInfoIdentifierEXT : nullptr))
+		{
 			LOGW_LEVEL("Failed to capture eagerly.\n");
+		}
 
 		// Have to create all pipelines here, in case the application makes use of basePipelineIndex.
 		// Write arguments in TLS in-case we crash here.
@@ -317,8 +335,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelinesParanoid(Device *lay
 		Instance::completedPipelineCompilation();
 
 		// Record failing pipelines for repro.
-		if (!layer->getRecorder().record_compute_pipeline(res == VK_SUCCESS ? pPipelines[i] : VK_NULL_HANDLE, info, nullptr, 0))
+		if (!layer->getRecorder().record_compute_pipeline(
+				res == VK_SUCCESS ? pPipelines[i] : VK_NULL_HANDLE, info, nullptr, 0, 0,
+				device, layer->requiresModuleIdentifiers() ? layer->getTable()->GetShaderModuleCreateInfoIdentifierEXT : nullptr))
+		{
 			LOGW_LEVEL("Failed to record compute pipeline, usually caused by unsupported pNext.\n");
+		}
 
 		if (res == VK_PIPELINE_COMPILE_REQUIRED_EXT)
 			final_res = res;
@@ -373,8 +395,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesNormal(Device *la
 
 	for (uint32_t i = 0; i < createInfoCount; i++)
 	{
-		if (!layer->getRecorder().record_raytracing_pipeline(pPipelines[i], pCreateInfos[i], pPipelines, createInfoCount))
+		if (!layer->getRecorder().record_raytracing_pipeline(
+				pPipelines[i], pCreateInfos[i], pPipelines, createInfoCount, 0,
+				device, layer->requiresModuleIdentifiers() ? layer->getTable()->GetShaderModuleCreateInfoIdentifierEXT : nullptr))
+		{
 			LOGW_LEVEL("Failed to record compute pipeline, usually caused by unsupported pNext.\n");
+		}
 	}
 
 	return VK_SUCCESS;
@@ -407,8 +433,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesParanoid(Device *
 		}
 
 		bool eager = layer->getInstance()->capturesEagerly();
-		if (eager && !layer->getRecorder().record_raytracing_pipeline(VK_NULL_HANDLE, info, nullptr, 0))
+		if (eager && !layer->getRecorder().record_raytracing_pipeline(
+				VK_NULL_HANDLE, info, nullptr, 0, 0,
+				device, layer->requiresModuleIdentifiers() ? layer->getTable()->GetShaderModuleCreateInfoIdentifierEXT : nullptr))
+		{
 			LOGW_LEVEL("Failed to capture eagerly.\n");
+		}
 
 		// Have to create all pipelines here, in case the application makes use of basePipelineIndex.
 		// Write arguments in TLS in-case we crash here.
@@ -419,8 +449,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesParanoid(Device *
 		Instance::completedPipelineCompilation();
 
 		// Record failing pipelines for repro.
-		if (!layer->getRecorder().record_raytracing_pipeline(res == VK_SUCCESS ? pPipelines[i] : VK_NULL_HANDLE, info, nullptr, 0))
+		if (!layer->getRecorder().record_raytracing_pipeline(
+				res == VK_SUCCESS ? pPipelines[i] : VK_NULL_HANDLE, info, nullptr, 0, 0,
+				device, layer->requiresModuleIdentifiers() ? layer->getTable()->GetShaderModuleCreateInfoIdentifierEXT : nullptr))
+		{
 			LOGW_LEVEL("Failed to record compute pipeline, usually caused by unsupported pNext.\n");
+		}
 
 		if (res == VK_PIPELINE_COMPILE_REQUIRED_EXT)
 			final_res = res;
@@ -554,6 +588,24 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateShaderModule(VkDevice device, const 
 
 	if (res == VK_SUCCESS)
 	{
+		// Pass along the module identifier for later reference.
+		VkPipelineShaderStageModuleIdentifierCreateInfoEXT identifierCreateInfo =
+				{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_MODULE_IDENTIFIER_CREATE_INFO_EXT };
+		VkShaderModuleIdentifierEXT identifier =
+				{ VK_STRUCTURE_TYPE_SHADER_MODULE_IDENTIFIER_EXT };
+		VkShaderModuleCreateInfo tmpCreateInfo;
+
+		if (layer->requiresModuleIdentifiers())
+		{
+			layer->getTable()->GetShaderModuleIdentifierEXT(device, *pShaderModule, &identifier);
+			identifierCreateInfo.pIdentifier = identifier.identifier;
+			identifierCreateInfo.identifierSize = identifier.identifierSize;
+			tmpCreateInfo = *pCreateInfo;
+			identifierCreateInfo.pNext = tmpCreateInfo.pNext;
+			tmpCreateInfo.pNext = &identifierCreateInfo;
+			pCreateInfo = &tmpCreateInfo;
+		}
+
 		if (!layer->getRecorder().record_shader_module(*pShaderModule, *pCreateInfo))
 			LOGW_LEVEL("Failed to record shader module, usually caused by unsupported pNext.\n");
 	}

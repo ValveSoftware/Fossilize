@@ -21,32 +21,47 @@
  */
 
 #include "fossilize_db.hpp"
-#include <memory>
 #include <vector>
 #include "layer/utils.hpp"
 #include <cstdlib>
+#include "cli_parser.hpp"
 
 using namespace Fossilize;
 
 static void print_help()
 {
-	LOGI("Usage: fossilize-merge-db append.foz [input1.foz] [input2.foz] ...\n");
+	LOGI("Usage: fossilize-merge-db [--last-use] append.foz [input1.foz] [input2.foz] ...\n");
 }
 
 int main(int argc, char **argv)
 {
 	std::vector<const char *> inputs;
-	if (argc < 3)
+	bool last_use = false;
+
+	CLICallbacks cbs;
+	cbs.default_handler = [&](const char *arg) { inputs.push_back(arg); };
+	cbs.add("--last-use", [&](CLIParser &) { last_use = true; });
+	cbs.error_handler = [] { print_help(); };
+
+	CLIParser parser(std::move(cbs), argc - 1, argv + 1);
+	if (!parser.parse())
+		return EXIT_FAILURE;
+	if (parser.is_ended_state())
+		return EXIT_SUCCESS;
+
+	if (inputs.size() < 2)
+		return EXIT_FAILURE;
+
+	if (last_use)
 	{
-		print_help();
-		return EXIT_FAILURE;
+		if (!merge_concurrent_databases_last_use(inputs.front(), inputs.data() + 1, inputs.size() - 1))
+			return EXIT_FAILURE;
 	}
-
-	for (int i = 2; i < argc; i++)
-		inputs.push_back(argv[i]);
-
-	if (!merge_concurrent_databases(argv[1], inputs.data(), inputs.size()))
-		return EXIT_FAILURE;
+	else
+	{
+		if (!merge_concurrent_databases(inputs.front(), inputs.data() + 1, inputs.size() - 1))
+			return EXIT_FAILURE;
+	}
 
 	return EXIT_SUCCESS;
 }

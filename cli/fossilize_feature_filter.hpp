@@ -94,6 +94,7 @@ struct VulkanFeatures
 	VkPhysicalDeviceDescriptorBufferFeaturesEXT descriptor_buffer;
 	VkPhysicalDeviceNonSeamlessCubeMapFeaturesEXT non_seamless_cube_map;
 	VkPhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT attachment_feedback_loop_layout;
+	VkPhysicalDeviceShaderModuleIdentifierFeaturesEXT shader_module_identifier;
 };
 
 void *build_pnext_chain(VulkanFeatures &features, uint32_t api_version,
@@ -122,6 +123,7 @@ struct VulkanProperties
 	VkPhysicalDeviceSampleLocationsPropertiesEXT sample_locations;
 	VkPhysicalDeviceExtendedDynamicState3PropertiesEXT extended_dynamic_state3;
 	VkPhysicalDeviceMeshShaderPropertiesEXT mesh_shader;
+	VkPhysicalDeviceShaderModuleIdentifierPropertiesEXT shader_module_identifier;
 };
 
 void *build_pnext_chain(VulkanProperties &properties, uint32_t api_version,

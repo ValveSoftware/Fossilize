@@ -94,6 +94,8 @@ struct ProcessProgress
 	bool kick_overlapped_io();
 
 	uint32_t index = 0;
+
+	char module_uuid_path[2 * VK_UUID_SIZE + 1] = {};
 };
 
 bool ProcessProgress::kick_overlapped_io()
@@ -214,6 +216,10 @@ void ProcessProgress::parse(const char *cmd)
 			}
 		}
 	}
+	else if (strncmp(cmd, "MODULE_UUID", 11) == 0)
+	{
+		memcpy(module_uuid_path, cmd + 12, VK_UUID_SIZE * 2);
+	}
 	else if (strncmp(cmd, "MODULE", 6) == 0)
 	{
 		auto hash = strtoull(cmd + 6, nullptr, 16);
@@ -309,7 +315,7 @@ bool ProcessProgress::process_shutdown()
 
 	// We might have crashed, but we never saw any progress marker.
 	// We do not know what to do from here, so we just terminate.
-	if (graphics_progress < 0 || compute_progress < 0)
+	if (graphics_progress < 0 || compute_progress < 0 || raytracing_progress < 0)
 	{
 		LOGE("Child process terminated before we could receive progress. Cannot continue.\n");
 		if (Global::control_block)
@@ -468,6 +474,19 @@ bool ProcessProgress::start_child_process()
 		cmdline += "\"";
 		// TODO: Merge the on-disk pipeline caches, but it's probably not that important.
 		// We're supposed to populate the driver caches here first and foremost.
+	}
+
+	if (!Global::base_replayer_options.on_disk_module_identifier_path.empty())
+	{
+		cmdline += " --on-disk-module-identifier ";
+		cmdline += "\"";
+		cmdline += Global::base_replayer_options.on_disk_module_identifier_path;
+		if (index != 0)
+		{
+			cmdline += ".";
+			cmdline += std::to_string(index);
+		}
+		cmdline += "\"";
 	}
 
 	if (!Global::base_replayer_options.on_disk_validation_cache_path.empty())
@@ -966,6 +985,50 @@ static int run_master_process(const VulkanDevice::Options &opts,
 	if (Global::job_handle)
 		CloseHandle(Global::job_handle);
 
+	if (!replayer_opts.on_disk_module_identifier_path.empty())
+	{
+		if (strlen(child_processes[0].module_uuid_path) != 0)
+		{
+			std::vector<std::string> paths;
+			for (size_t idx = 0, count = child_processes.size(); idx < count; idx++)
+			{
+				if (strlen(child_processes[idx].module_uuid_path) == 0)
+				{
+					LOGW("No module UUID path was found for thread %zu, skipping identifiers.\n", idx);
+					continue;
+				}
+				auto path = replayer_opts.on_disk_module_identifier_path;
+				if (idx != 0)
+				{
+					path += ".";
+					path += std::to_string(idx);
+				}
+				path += ".";
+				path += child_processes[idx].module_uuid_path;
+				path += ".foz";
+				paths.push_back(path);
+			}
+
+			if (paths.size() > 1)
+			{
+				std::vector<const char *> input_paths;
+				input_paths.reserve(paths.size() - 1);
+				for (auto itr = paths.begin() + 1; itr != paths.end(); ++itr)
+					input_paths.push_back(itr->c_str());
+
+				// It's possible that no shader module was written, so don't treat that as an error.
+				if (!merge_concurrent_databases(paths.front().c_str(), input_paths.data(), input_paths.size(), true))
+					LOGE("Failed to merge identifier databases.\n");
+				for (auto itr = paths.begin() + 1; itr != paths.end(); ++itr)
+					remove(itr->c_str());
+			}
+		}
+		else
+		{
+			LOGW("No module UUID path was found, skipping identifiers.\n");
+		}
+	}
+
 	if (Global::control_block)
 		Global::control_block->progress_complete.store(1, std::memory_order_release);
 
@@ -996,6 +1059,17 @@ static void validation_error_cb(ThreadedReplayer *replayer)
 	{
 		sprintf(buffer, "RAYTRACE_VERR %" PRIx64 "\n", per_thread.current_raytracing_pipeline);
 		write_all(crash_handle, buffer);
+	}
+}
+
+static void report_module_uuid(const char (&path)[2 * VK_UUID_SIZE + 1])
+{
+	if (crash_handle)
+	{
+		char buffer[64];
+		sprintf(buffer, "MODULE_UUID %s\n", path);
+		if (!write_all(crash_handle, buffer))
+			ExitProcess(2);
 	}
 }
 

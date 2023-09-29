@@ -116,6 +116,8 @@ static std::mutex recorderLock;
 struct Recorder
 {
 	std::unique_ptr<DatabaseInterface> interface;
+	std::unique_ptr<DatabaseInterface> module_identifier_interface;
+	std::unique_ptr<DatabaseInterface> last_use_interface;
 	std::unique_ptr<StateRecorder> recorder;
 };
 static std::unordered_map<Hash, Recorder> globalRecorders;
@@ -157,6 +159,14 @@ static std::string getSystemProperty(const char *key)
 
 #ifndef FOSSILIZE_DUMP_SYNC_ENV
 #define FOSSILIZE_DUMP_SYNC_ENV "FOSSILIZE_DUMP_SYNC"
+#endif
+
+#ifndef FOSSILIZE_IDENTIFIER_DUMP_PATH_ENV
+#define FOSSILIZE_IDENTIFIER_DUMP_PATH_ENV "FOSSILIZE_IDENTIFIER_DUMP_PATH"
+#endif
+
+#ifndef FOSSILIZE_LAST_USE_TAG_ENV
+#define FOSSILIZE_LAST_USE_TAG_ENV "FOSSILIZE_LAST_USE_TAG"
 #endif
 
 #ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
@@ -329,6 +339,7 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDevicePropert
 	auto &entry = globalRecorders[hash];
 
 	std::string serializationPath;
+	std::string lastUsePath;
 	const char *extraPaths = nullptr;
 #ifdef ANDROID
 	serializationPath = "/sdcard/fossilize";
@@ -349,38 +360,110 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDevicePropert
 	extraPaths = getenv(FOSSILIZE_DUMP_PATH_READ_ONLY_ENV);
 #endif
 
-	bool needs_bucket = infoFilter && infoFilter->needs_buckets(appInfo);
+	const char *lastUseTag = getenv(FOSSILIZE_LAST_USE_TAG_ENV);
+
+	bool needsBucket = infoFilter && infoFilter->needs_buckets(appInfo);
 	shouldRecordImmutableSamplers = !infoFilter || infoFilter->should_record_immutable_samplers(appInfo);
 
 	// Don't write a bucket if we're going to filter out the application.
-	if (needs_bucket && appInfo && infoFilter && !infoFilter->test_application_info(appInfo))
-		needs_bucket = false;
+	if (needsBucket && appInfo && infoFilter && !infoFilter->test_application_info(appInfo))
+		needsBucket = false;
 
 	char hashString[17];
-
 	sprintf(hashString, "%016" PRIx64, hash);
-	if (!serializationPath.empty() && !needs_bucket)
+
+	// Try to normalize the path layouts for last use.
+	// Without buckets:
+	//  Write part: path.$suffix.$feature-hash.$counter.foz
+	//  Read part: path.$suffix.$feature-hash.foz
+	// With buckets:
+	//  Write part: path.$bucket/path.$suffix.$feature-hash.$counter.foz
+	//  Read part: path.$bucket/path.$suffix.$feature-hash.foz
+
+	if (lastUseTag && !serializationPath.empty() && !needsBucket)
 	{
-		serializationPath += ".";
+		lastUsePath = serializationPath + '.' + lastUseTag;
+		lastUsePath += '.';
+		lastUsePath += hashString;
+	}
+
+	if (!serializationPath.empty() && !needsBucket)
+	{
+		serializationPath += '.';
 		serializationPath += hashString;
 	}
+
 	entry.interface.reset(create_concurrent_database_with_encoded_extra_paths(serializationPath.c_str(),
 	                                                                          DatabaseMode::Append,
 	                                                                          extraPaths));
 
-	if (needs_bucket && infoFilter)
+	if (lastUseTag)
+	{
+		entry.last_use_interface.reset(create_concurrent_database(
+				lastUsePath.empty() ? serializationPath.c_str() : lastUsePath.c_str(),
+				DatabaseMode::OverWrite, nullptr, 0));
+	}
+
+	if (needsBucket && infoFilter)
 	{
 		char bucketPath[17];
 		Hash bucketHash = infoFilter->get_bucket_hash(props, appInfo, device_pnext);
 		sprintf(bucketPath, "%016" PRIx64, bucketHash);
 
 		// For convenience. Makes filenames similar in top-level directory and bucket directories.
-		auto prefix = Path::basename(serializationPath);
+		auto basename = Path::basename(serializationPath);
+		auto prefix = basename;
 		if (!prefix.empty())
-			prefix += ".";
+			prefix += '.';
 		prefix += hashString;
 
 		entry.interface->set_bucket_path(bucketPath, prefix.c_str());
+
+		if (entry.last_use_interface)
+		{
+			prefix = basename;
+			if (!prefix.empty())
+			{
+				prefix += '.';
+				prefix += lastUseTag;
+				prefix += '.';
+			}
+			prefix += hashString;
+
+			entry.last_use_interface->set_bucket_path(bucketPath, prefix.c_str());
+		}
+	}
+	else
+		needsBucket = false;
+
+	if (const char *identifierPath = getenv(FOSSILIZE_IDENTIFIER_DUMP_PATH_ENV))
+	{
+		// If the application is using shader module identifiers, we need to save those as well as sideband information.
+		// This allows us to resolve identifiers later.
+		auto *identifier =
+				static_cast<const VkPhysicalDeviceShaderModuleIdentifierFeaturesEXT *>(
+						findpNext(device_pnext,
+						          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_MODULE_IDENTIFIER_FEATURES_EXT));
+
+		auto *identifierProps =
+				static_cast<const VkPhysicalDeviceShaderModuleIdentifierPropertiesEXT *>(
+						findpNext(props, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_MODULE_IDENTIFIER_PROPERTIES_EXT));
+
+		if (identifier && identifierProps && identifier->shaderModuleIdentifier)
+		{
+			char uuidString[2 * VK_UUID_SIZE + 1];
+			for (unsigned i = 0; i < VK_UUID_SIZE; i++)
+				sprintf(uuidString + 2 * i, "%02x", identifierProps->shaderModuleIdentifierAlgorithmUUID[i]);
+
+			std::string identifierDatabasePath = identifierPath;
+			identifierDatabasePath += '.';
+			identifierDatabasePath += uuidString;
+
+			entry.module_identifier_interface.reset(
+					create_concurrent_database(identifierDatabasePath.c_str(),
+					                           DatabaseMode::AppendWithReadOnlyAccess,
+					                           nullptr, 0));
+		}
 	}
 
 	entry.recorder.reset(new StateRecorder);
@@ -388,12 +471,20 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDevicePropert
 	recorder->set_database_enable_compression(true);
 	recorder->set_database_enable_checksum(true);
 	recorder->set_application_info_filter(infoFilter);
+
+	// Feature links are somewhat irrelevant if we're using bucket mechanism.
+	if (needsBucket)
+		recorder->set_database_enable_application_feature_links(false);
+
 	if (appInfo)
 		if (!recorder->record_application_info(*appInfo))
 			LOGE_LEVEL("Failed to record application info.\n");
 	if (device_pnext)
 		if (!recorder->record_physical_device_features(device_pnext))
 			LOGE_LEVEL("Failed to record physical device features.\n");
+
+	recorder->set_module_identifier_database_interface(entry.module_identifier_interface.get());
+	recorder->set_on_use_database_interface(entry.last_use_interface.get());
 
 	if (synchronized)
 		recorder->init_recording_synchronized(entry.interface.get());

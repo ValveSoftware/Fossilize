@@ -73,6 +73,8 @@ enum class DatabaseMode
 {
 	Append,
 	ReadOnly,
+	// Special mode for the concurrent database interface where we can read the read-only portion only.
+	AppendWithReadOnlyAccess,
 	OverWrite,
 	// In the stream database backend, this will ensure that the database is exclusively created.
 	// For other backends, this is an alias for OverWrite
@@ -191,7 +193,7 @@ public:
 	void add_imported_metadata(const ExportedMetadataHeader *header);
 
 	// For bucketization of archives.
-	// This only works with concurrent databases in Append mode.
+	// This only works with concurrent databases in Append or Overwrite mode.
 	// See further comments after create_concurrent_database().
 	virtual bool set_bucket_path(const char *bucket_dirname, const char *bucket_basename);
 
@@ -222,7 +224,7 @@ DatabaseInterface *create_database(const char *path, DatabaseMode mode);
 //
 // The Fossilize layer will make sure access to a single instance of DatabaseInterface is serialized to one thread.
 //
-// Mode can only be ReadOnly or Append. Any other mode will fail.
+// Mode can be ReadOnly, Append, AppendWithReadOnly or Overwrite. Any other mode will fail.
 //
 // It is possible to specify some extra database paths which are treated as read-only.
 // In ReadOnly mode, all entries in these databases are assumed to be part of the read-only database base_path.foz,
@@ -243,7 +245,15 @@ DatabaseInterface *create_concurrent_database_with_encoded_extra_paths(const cha
                                                                        const char *encoded_read_only_database_paths);
 
 // Merges stream archives found in source_paths into append_database_path.
-bool merge_concurrent_databases(const char *append_database_path, const char * const *source_paths, size_t num_source_paths);
+bool merge_concurrent_databases(const char *append_database_path,
+                                const char * const *source_paths, size_t num_source_paths,
+                                bool skip_missing_inputs = false);
+
+// Merges stream archives found in source_paths into append_database_path.
+// When there are duplicates in append database and any other database, picks the entry with the highest 8 byte timestamp payload.
+bool merge_concurrent_databases_last_use(const char *append_database_path,
+                                         const char * const *source_paths, size_t num_source_paths,
+                                         bool skip_missing_inputs = false);
 
 // For set_bucket_path() behavior on a concurrent database:
 // Must be called before prepare().
