@@ -58,6 +58,11 @@ $Configuration
 		$SystemLibraries					"$BASE;pthread;rt" [$POSIX]
 		$OutputFile							"$CLIENTBINDIR\fossilize_replay" [$POSIX]
 	}
+	$PostBuildEvent [!$ANALYZE]
+	{
+		$CommandLine						"$BASE" "\n" \
+											"call $SRCDIR\copyexefiles_p4.bat $(TargetName) $(TargetDir) $SRCDIR\..\client\bin $SRCDIR $TARGETNAME $TARGETNAME" [$WINDOWS]
+	}
 }
 
 $Project "fossilize_replay"
