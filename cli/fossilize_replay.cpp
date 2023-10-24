@@ -2972,7 +2972,6 @@ struct ThreadedReplayer : StateCreatorInterface
 			validation_whitelist_db->flush();
 		if (validation_blacklist_db)
 			validation_blacklist_db->flush();
-		device.reset();
 	}
 
 	Options opts;
