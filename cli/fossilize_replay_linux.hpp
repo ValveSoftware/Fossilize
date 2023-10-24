@@ -367,10 +367,11 @@ bool ProcessProgress::process_shutdown(int wstatus)
 
 	// If the child did not exit in a normal manner, we failed to catch any crashing signal.
 	// Do not try any further.
-	if (!WIFEXITED(wstatus) && WIFSIGNALED(wstatus) && WTERMSIG(wstatus) != SIGKILL)
+	if (!WIFEXITED(wstatus) && WIFSIGNALED(wstatus) &&
+	    (WTERMSIG(wstatus) != SIGKILL && WTERMSIG(wstatus) != SIGSEGV))
 	{
-		LOGE("Process index %u (PID: %d) failed to terminate in a clean fashion. We cannot continue replaying.\n",
-		     index, wait_pid);
+		LOGE("Process index %u (PID: %d) failed to terminate in a clean fashion (signal %d). We cannot continue replaying.\n",
+		     index, wait_pid, WTERMSIG(wstatus));
 
 		if (Global::control_block)
 			Global::control_block->dirty_process_deaths.fetch_add(1, std::memory_order_relaxed);
