@@ -84,7 +84,7 @@ __declspec(noinline)
 #else
 __attribute__((noinline))
 #endif
-static void simulate_crash(int *v)
+static void simulate_crash(volatile int *v)
 {
 	*v = 0;
 }
@@ -94,7 +94,7 @@ __declspec(noinline)
 #else
 __attribute__((noinline))
 #endif
-static int simulate_divide_by_zero(int a, int b)
+static int simulate_divide_by_zero(volatile int a, volatile int b)
 {
 	return a / b;
 }
