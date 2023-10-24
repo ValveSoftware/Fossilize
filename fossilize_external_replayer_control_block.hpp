@@ -32,7 +32,7 @@ static_assert(sizeof(std::atomic<uint32_t>) == sizeof(uint32_t), "Atomic size mi
 namespace Fossilize
 {
 enum { ControlBlockMessageSize = 64 };
-enum { ControlBlockMagic = 0x19bcde1c };
+enum { ControlBlockMagic = 0x19bcde1d };
 enum { MaxProcessStats = 256 };
 
 struct SharedControlBlock
@@ -82,6 +82,7 @@ struct SharedControlBlock
 	// 64-bit would need some form of locking on 32-bit arch.
 	std::atomic<uint32_t> process_reserved_memory_mib[MaxProcessStats];
 	std::atomic<uint32_t> process_shared_memory_mib[MaxProcessStats];
+	std::atomic<int32_t> process_heartbeats[MaxProcessStats];
 
 	std::atomic<int32_t> dirty_pages_mib;
 	std::atomic<int32_t> io_stall_percentage;

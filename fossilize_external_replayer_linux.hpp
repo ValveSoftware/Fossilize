@@ -208,6 +208,7 @@ bool ExternalReplayer::Impl::poll_memory_usage(uint32_t *num_processes, ProcessS
 		{
 			stats[i].resident_mib = shm_block->process_reserved_memory_mib[i].load(std::memory_order_relaxed);
 			stats[i].shared_mib = shm_block->process_shared_memory_mib[i].load(std::memory_order_relaxed);
+			stats[i].heartbeats = shm_block->process_heartbeats[i].load(std::memory_order_relaxed);
 
 			if (i != 0)
 				stats[i].shared_metadata_mib = shm_block->metadata_shared_size_mib.load(std::memory_order_relaxed);
