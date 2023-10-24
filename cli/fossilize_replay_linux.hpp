@@ -93,10 +93,14 @@ static void remove_epoll_entry(int fd)
 		LOGE("epoll_ctl() DEL failed.\n");
 }
 
-static void close_and_remove_epoll_entry(int fd)
+static void close_and_remove_epoll_entry(int &fd)
 {
-	remove_epoll_entry(fd);
-	close(fd);
+	if (fd >= 0)
+	{
+		remove_epoll_entry(fd);
+		close(fd);
+	}
+	fd = -1;
 }
 
 struct ProcessProgress
@@ -108,7 +112,7 @@ struct ProcessProgress
 	unsigned end_compute_index = ~0u;
 	unsigned end_raytracing_index = ~0u;
 	pid_t pid = -1;
-	FILE *crash_file = nullptr;
+	int crash_fd = -1;
 	int timer_fd = -1;
 
 	int compute_progress = -1;
@@ -118,6 +122,7 @@ struct ProcessProgress
 	bool process_once();
 	bool process_shutdown(int wstatus);
 	bool start_child_process(vector<ProcessProgress> &siblings);
+	void parse_raw(const char *str);
 	void parse(const char *cmd);
 
 	uint32_t index = 0;
@@ -125,15 +130,28 @@ struct ProcessProgress
 	bool expect_kill = false;
 
 	char module_uuid_path[2 * VK_UUID_SIZE + 1] = {};
+	std::string parse_buffer;
 };
+
+void ProcessProgress::parse_raw(const char *str)
+{
+	parse_buffer += str;
+	size_t n;
+
+	while ((n = parse_buffer.find_first_of('\n')) != std::string::npos)
+	{
+		auto cmd = parse_buffer.substr(0, n);
+		parse(cmd.c_str());
+		parse_buffer = parse_buffer.substr(n + 1);
+	}
+}
 
 void ProcessProgress::parse(const char *cmd)
 {
 	if (strncmp(cmd, "CRASH", 5) == 0)
 	{
 		// We crashed ... Set up a timeout in case the process hangs while trying to recover.
-		if (timer_fd >= 0)
-			close_and_remove_epoll_entry(timer_fd);
+		close_and_remove_epoll_entry(timer_fd);
 		timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC);
 
 		if (timer_fd >= 0)
@@ -247,36 +265,32 @@ void ProcessProgress::parse(const char *cmd)
 
 bool ProcessProgress::process_once()
 {
-	if (!crash_file)
+	if (crash_fd < 0)
 		return false;
 
-	char buffer[64];
-	if (fgets(buffer, sizeof(buffer), crash_file))
-	{
-		parse(buffer);
-		return true;
-	}
-	else
+	// Important to use raw FD IO here since we are not guaranteed
+	// to be able to read a newline here.
+	// This can happen if the child process started writing to the file,
+	// but received a SIGSTOP in the middle of writing for whatever reason.
+	char buffer[65];
+	ssize_t ret = ::read(crash_fd, buffer, sizeof(buffer) - 1);
+	if (ret <= 0)
 		return false;
+
+	buffer[ret] = '\0';
+	parse_raw(buffer);
+	return true;
 }
 
 bool ProcessProgress::process_shutdown(int wstatus)
 {
 	// Flush out all messages we got.
 	while (process_once());
-	if (crash_file)
-	{
-		remove_epoll_entry(fileno(crash_file));
-		fclose(crash_file);
-	}
-	crash_file = nullptr;
+	parse_buffer.clear();
 
+	close_and_remove_epoll_entry(crash_fd);
 	// Close the timerfd.
-	if (timer_fd >= 0)
-	{
-		close_and_remove_epoll_entry(timer_fd);
-		timer_fd = -1;
-	}
+	close_and_remove_epoll_entry(timer_fd);
 
 	// Reap child process.
 	Global::active_processes--;
@@ -459,9 +473,7 @@ bool ProcessProgress::start_child_process(vector<ProcessProgress> &siblings)
 	if (new_pid > 0)
 	{
 		// We're the parent, keep track of the process in a thread to avoid a lot of complex multiplexing code.
-		crash_file = fdopen(crash_fds[0], "r");
-		if (!crash_file)
-			return false;
+		crash_fd = crash_fds[0];
 		pid = new_pid;
 
 		send_faulty_modules_and_close(input_fds[1]);
@@ -472,7 +484,7 @@ bool ProcessProgress::start_child_process(vector<ProcessProgress> &siblings)
 		epoll_event event = {};
 		event.data.u32 = index;
 		event.events = EPOLLIN | EPOLLRDHUP;
-		if (epoll_ctl(Global::epoll_fd, EPOLL_CTL_ADD, fileno(crash_file), &event) < 0)
+		if (epoll_ctl(Global::epoll_fd, EPOLL_CTL_ADD, crash_fd, &event) < 0)
 		{
 			LOGE("Failed to add file to epoll.\n");
 			return false;
@@ -502,10 +514,10 @@ bool ProcessProgress::start_child_process(vector<ProcessProgress> &siblings)
 			if (&sibling == this)
 				continue;
 
-			if (sibling.crash_file)
+			if (sibling.crash_fd >= 0)
 			{
-				fclose(sibling.crash_file);
-				sibling.crash_file = NULL;
+				::close(sibling.crash_fd);
+				sibling.crash_fd = -1;
 			}
 
 			if (sibling.timer_fd >= 0)
@@ -840,10 +852,7 @@ static void handle_control_commands(std::vector<ProcessProgress> &child_processe
 		close_fd = true;
 
 	if (close_fd)
-	{
 		close_and_remove_epoll_entry(Global::control_fd);
-		Global::control_fd = -1;
-	}
 }
 
 static bool poll_children_process_states(vector<ProcessProgress> &child_processes)
@@ -1200,17 +1209,12 @@ static int run_master_process(const VulkanDevice::Options &opts,
 							LOGE("Timeout triggered for child process #%u.\n", e.data.u32 & 0x7fffffffu);
 							kill(proc.pid, SIGKILL);
 							close_and_remove_epoll_entry(proc.timer_fd);
-							proc.timer_fd = -1;
 						}
 					}
-					else if (proc.crash_file)
+					else if (proc.crash_fd >= 0)
 					{
 						if (!proc.process_once())
-						{
-							remove_epoll_entry(fileno(proc.crash_file));
-							fclose(proc.crash_file);
-							proc.crash_file = nullptr;
-						}
+							close_and_remove_epoll_entry(proc.crash_fd);
 					}
 				}
 				else if (e.data.u32 == POLL_VALUE_SIGNAL_FD)
@@ -1269,12 +1273,7 @@ static int run_master_process(const VulkanDevice::Options &opts,
 				if (e.data.u32 < 0x80000000u)
 				{
 					auto &proc = child_processes[e.data.u32 & 0x7fffffffu];
-					if (proc.crash_file)
-					{
-						remove_epoll_entry(fileno(proc.crash_file));
-						fclose(proc.crash_file);
-						proc.crash_file = nullptr;
-					}
+					close_and_remove_epoll_entry(proc.crash_fd);
 				}
 			}
 		}
