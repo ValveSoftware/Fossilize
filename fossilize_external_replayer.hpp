@@ -282,6 +282,9 @@ public:
 		uint32_t shared_metadata_mib;
 
 		// resident - shared is the amount of resident memory which is unique to the process,
+
+		// -1 means dead process, 0 means stopped process.
+		int32_t heartbeats;
 	};
 
 	// num_processes must not be nullptr.

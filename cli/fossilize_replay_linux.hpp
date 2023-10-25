@@ -85,6 +85,7 @@ static int control_fd = -1;
 
 static SharedControlBlock *control_block;
 static int metadata_fd = -1;
+static int heartbeats = 1;
 }
 
 static void remove_epoll_entry(int fd)
@@ -93,10 +94,14 @@ static void remove_epoll_entry(int fd)
 		LOGE("epoll_ctl() DEL failed.\n");
 }
 
-static void close_and_remove_epoll_entry(int fd)
+static void close_and_remove_epoll_entry(int &fd)
 {
-	remove_epoll_entry(fd);
-	close(fd);
+	if (fd >= 0)
+	{
+		remove_epoll_entry(fd);
+		close(fd);
+	}
+	fd = -1;
 }
 
 struct ProcessProgress
@@ -107,9 +112,11 @@ struct ProcessProgress
 	unsigned end_graphics_index = ~0u;
 	unsigned end_compute_index = ~0u;
 	unsigned end_raytracing_index = ~0u;
+	int heartbeats = -1;
 	pid_t pid = -1;
-	FILE *crash_file = nullptr;
+	int crash_fd = -1;
 	int timer_fd = -1;
+	int watchdog_timer_fd = -1;
 
 	int compute_progress = -1;
 	int graphics_progress = -1;
@@ -118,22 +125,39 @@ struct ProcessProgress
 	bool process_once();
 	bool process_shutdown(int wstatus);
 	bool start_child_process(vector<ProcessProgress> &siblings);
+	void parse_raw(const char *str);
 	void parse(const char *cmd);
+
+	void begin_heartbeat();
+	void heartbeat();
 
 	uint32_t index = 0;
 	bool stopped = false;
 	bool expect_kill = false;
 
 	char module_uuid_path[2 * VK_UUID_SIZE + 1] = {};
+	std::string parse_buffer;
 };
+
+void ProcessProgress::parse_raw(const char *str)
+{
+	parse_buffer += str;
+	size_t n;
+
+	while ((n = parse_buffer.find_first_of('\n')) != std::string::npos)
+	{
+		auto cmd = parse_buffer.substr(0, n);
+		parse(cmd.c_str());
+		parse_buffer = parse_buffer.substr(n + 1);
+	}
+}
 
 void ProcessProgress::parse(const char *cmd)
 {
 	if (strncmp(cmd, "CRASH", 5) == 0)
 	{
 		// We crashed ... Set up a timeout in case the process hangs while trying to recover.
-		if (timer_fd >= 0)
-			close_and_remove_epoll_entry(timer_fd);
+		close_and_remove_epoll_entry(timer_fd);
 		timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC);
 
 		if (timer_fd >= 0)
@@ -150,7 +174,7 @@ void ProcessProgress::parse(const char *cmd)
 				LOGE("Failed adding timer_fd to epoll_ctl().\n");
 		}
 		else
-			LOGE("Failed to creater timerfd. Cannot support timeout for process.\n");
+			LOGE("Failed to create timerfd. Cannot support timeout for process.\n");
 	}
 	else if (strncmp(cmd, "GRAPHICS_VERR", 13) == 0 ||
 	         strncmp(cmd, "RAYTRACE_VERR", 13) == 0 ||
@@ -241,42 +265,83 @@ void ProcessProgress::parse(const char *cmd)
 			futex_wrapper_unlock(&Global::control_block->futex_lock);
 		}
 	}
+	else if (strncmp(cmd, "BEGIN_HEARTBEAT", 15) == 0)
+	{
+		begin_heartbeat();
+	}
+	else if (strncmp(cmd, "HEARTBEAT", 9) == 0)
+	{
+		heartbeat();
+	}
 	else
 		LOGE("Got unexpected message from child: %s\n", cmd);
 }
 
 bool ProcessProgress::process_once()
 {
-	if (!crash_file)
+	if (crash_fd < 0)
 		return false;
 
-	char buffer[64];
-	if (fgets(buffer, sizeof(buffer), crash_file))
+	// Important to use raw FD IO here since we are not guaranteed
+	// to be able to read a newline here.
+	// This can happen if the child process started writing to the file,
+	// but received a SIGSTOP in the middle of writing for whatever reason.
+	char buffer[65];
+	ssize_t ret = ::read(crash_fd, buffer, sizeof(buffer) - 1);
+	if (ret <= 0)
+		return false;
+
+	buffer[ret] = '\0';
+	parse_raw(buffer);
+	return true;
+}
+
+void ProcessProgress::begin_heartbeat()
+{
+	close_and_remove_epoll_entry(watchdog_timer_fd);
+	watchdog_timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC);
+
+	if (watchdog_timer_fd >= 0)
 	{
-		parse(buffer);
-		return true;
+		struct itimerspec spec = {};
+		spec.it_value.tv_sec = 10;
+		if (timerfd_settime(watchdog_timer_fd, 0, &spec, nullptr) < 0)
+			LOGE("Failed to set time with timerfd_settime.\n");
+
+		struct epoll_event event = {};
+		event.data.u32 = 0x40000000u | index;
+		event.events = EPOLLIN;
+		if (epoll_ctl(Global::epoll_fd, EPOLL_CTL_ADD, watchdog_timer_fd, &event))
+			LOGE("Failed adding timer_fd to epoll_ctl().\n");
 	}
 	else
-		return false;
+		LOGE("Failed to create timerfd. Cannot support timeout for process.\n");
+}
+
+void ProcessProgress::heartbeat()
+{
+	if (watchdog_timer_fd >= 0)
+	{
+		heartbeats++;
+		// Rearm timer
+		struct itimerspec spec = {};
+		spec.it_value.tv_sec = 10;
+		if (timerfd_settime(watchdog_timer_fd, 0, &spec, nullptr) < 0)
+			LOGE("Failed to set time with timerfd_settime.\n");
+	}
 }
 
 bool ProcessProgress::process_shutdown(int wstatus)
 {
 	// Flush out all messages we got.
 	while (process_once());
-	if (crash_file)
-	{
-		remove_epoll_entry(fileno(crash_file));
-		fclose(crash_file);
-	}
-	crash_file = nullptr;
+	parse_buffer.clear();
+	heartbeats = -1;
 
+	close_and_remove_epoll_entry(crash_fd);
 	// Close the timerfd.
-	if (timer_fd >= 0)
-	{
-		close_and_remove_epoll_entry(timer_fd);
-		timer_fd = -1;
-	}
+	close_and_remove_epoll_entry(timer_fd);
+	close_and_remove_epoll_entry(watchdog_timer_fd);
 
 	// Reap child process.
 	Global::active_processes--;
@@ -302,10 +367,11 @@ bool ProcessProgress::process_shutdown(int wstatus)
 
 	// If the child did not exit in a normal manner, we failed to catch any crashing signal.
 	// Do not try any further.
-	if (!WIFEXITED(wstatus) && WIFSIGNALED(wstatus) && WTERMSIG(wstatus) != SIGKILL)
+	if (!WIFEXITED(wstatus) && WIFSIGNALED(wstatus) &&
+	    (WTERMSIG(wstatus) != SIGKILL && WTERMSIG(wstatus) != SIGSEGV))
 	{
-		LOGE("Process index %u (PID: %d) failed to terminate in a clean fashion. We cannot continue replaying.\n",
-		     index, wait_pid);
+		LOGE("Process index %u (PID: %d) failed to terminate in a clean fashion (signal %d). We cannot continue replaying.\n",
+		     index, wait_pid, WTERMSIG(wstatus));
 
 		if (Global::control_block)
 			Global::control_block->dirty_process_deaths.fetch_add(1, std::memory_order_relaxed);
@@ -401,6 +467,7 @@ static void poll_self_child_memory_usage(const std::vector<ProcessProgress> &pro
 	{
 		Global::control_block->process_reserved_memory_mib[0].store(stats.resident_mib, std::memory_order_relaxed);
 		Global::control_block->process_shared_memory_mib[0].store(stats.shared_mib, std::memory_order_relaxed);
+		Global::control_block->process_heartbeats[0].store(Global::heartbeats, std::memory_order_relaxed);
 	}
 	else
 	{
@@ -418,6 +485,8 @@ static void poll_self_child_memory_usage(const std::vector<ProcessProgress> &pro
 		{
 			Global::control_block->process_reserved_memory_mib[i].store(stats.resident_mib, std::memory_order_relaxed);
 			Global::control_block->process_shared_memory_mib[i].store(stats.shared_mib, std::memory_order_relaxed);
+			Global::control_block->process_heartbeats[i].store(
+					processes[i - 1].stopped ? 0 : processes[i - 1].heartbeats, std::memory_order_relaxed);
 		}
 		else
 		{
@@ -459,10 +528,9 @@ bool ProcessProgress::start_child_process(vector<ProcessProgress> &siblings)
 	if (new_pid > 0)
 	{
 		// We're the parent, keep track of the process in a thread to avoid a lot of complex multiplexing code.
-		crash_file = fdopen(crash_fds[0], "r");
-		if (!crash_file)
-			return false;
+		crash_fd = crash_fds[0];
 		pid = new_pid;
+		heartbeats = 1;
 
 		send_faulty_modules_and_close(input_fds[1]);
 		close(crash_fds[1]);
@@ -472,7 +540,7 @@ bool ProcessProgress::start_child_process(vector<ProcessProgress> &siblings)
 		epoll_event event = {};
 		event.data.u32 = index;
 		event.events = EPOLLIN | EPOLLRDHUP;
-		if (epoll_ctl(Global::epoll_fd, EPOLL_CTL_ADD, fileno(crash_file), &event) < 0)
+		if (epoll_ctl(Global::epoll_fd, EPOLL_CTL_ADD, crash_fd, &event) < 0)
 		{
 			LOGE("Failed to add file to epoll.\n");
 			return false;
@@ -502,16 +570,22 @@ bool ProcessProgress::start_child_process(vector<ProcessProgress> &siblings)
 			if (&sibling == this)
 				continue;
 
-			if (sibling.crash_file)
+			if (sibling.crash_fd >= 0)
 			{
-				fclose(sibling.crash_file);
-				sibling.crash_file = NULL;
+				::close(sibling.crash_fd);
+				sibling.crash_fd = -1;
 			}
 
 			if (sibling.timer_fd >= 0)
 			{
 				close(sibling.timer_fd);
 				sibling.timer_fd = -1;
+			}
+
+			if (sibling.watchdog_timer_fd >= 0)
+			{
+				close(sibling.watchdog_timer_fd);
+				sibling.watchdog_timer_fd = -1;
 			}
 		}
 
@@ -768,6 +842,10 @@ static void update_target_running_processes(std::vector<ProcessProgress> &child_
 		{
 			if (child_processes[i].pid > 0 && child_processes[i].stopped && !child_processes[i].expect_kill)
 			{
+				// Re-arm any timers before waking up to avoid potential scenario where
+				// we hit watchdog timer right after waking up child process.
+				child_processes[i].heartbeat();
+
 				if (::kill(child_processes[i].pid, SIGCONT) == 0)
 				{
 					to_wake_up--;
@@ -840,10 +918,7 @@ static void handle_control_commands(std::vector<ProcessProgress> &child_processe
 		close_fd = true;
 
 	if (close_fd)
-	{
 		close_and_remove_epoll_entry(Global::control_fd);
-		Global::control_fd = -1;
-	}
 }
 
 static bool poll_children_process_states(vector<ProcessProgress> &child_processes)
@@ -1177,6 +1252,8 @@ static int run_master_process(const VulkanDevice::Options &opts,
 			return EXIT_FAILURE;
 		}
 
+		Global::heartbeats += ret;
+
 		// Check for three cases in the epoll.
 		// - Child process wrote something to stdout, we need to parse it.
 		// - SIGCHLD happened, we need to reap child processes.
@@ -1189,7 +1266,7 @@ static int run_master_process(const VulkanDevice::Options &opts,
 			{
 				if (e.data.u32 <= POLL_VALUE_MAX_CHILD)
 				{
-					auto &proc = child_processes[e.data.u32 & 0x7fffffffu];
+					auto &proc = child_processes[e.data.u32 & 0x3fffffffu];
 
 					if (e.data.u32 & 0x80000000u)
 					{
@@ -1197,20 +1274,33 @@ static int run_master_process(const VulkanDevice::Options &opts,
 						// SIGCHLD handler should rearm the process as necessary.
 						if (proc.timer_fd >= 0)
 						{
-							LOGE("Timeout triggered for child process #%u.\n", e.data.u32 & 0x7fffffffu);
+							LOGE("Timeout triggered for child process #%u.\n", e.data.u32 & 0x3fffffffu);
 							kill(proc.pid, SIGKILL);
 							close_and_remove_epoll_entry(proc.timer_fd);
-							proc.timer_fd = -1;
 						}
 					}
-					else if (proc.crash_file)
+					else if (e.data.u32 & 0x40000000u)
+					{
+						// Timeout triggered. kill the process and reap it.
+						// SIGCHLD handler should rearm the process as necessary.
+						if (proc.watchdog_timer_fd >= 0)
+						{
+							uint64_t dummy;
+							(void)::read(proc.watchdog_timer_fd, &dummy, sizeof(dummy));
+
+							// Hitting watchdog timer while asleep is okay.
+							if (!proc.stopped)
+							{
+								LOGE("Watchdog timeout triggered for child process #%u.\n", e.data.u32 & 0x3fffffffu);
+								kill(proc.pid, SIGKILL);
+								close_and_remove_epoll_entry(proc.watchdog_timer_fd);
+							}
+						}
+					}
+					else if (proc.crash_fd >= 0)
 					{
 						if (!proc.process_once())
-						{
-							remove_epoll_entry(fileno(proc.crash_file));
-							fclose(proc.crash_file);
-							proc.crash_file = nullptr;
-						}
+							close_and_remove_epoll_entry(proc.crash_fd);
 					}
 				}
 				else if (e.data.u32 == POLL_VALUE_SIGNAL_FD)
@@ -1269,12 +1359,7 @@ static int run_master_process(const VulkanDevice::Options &opts,
 				if (e.data.u32 < 0x80000000u)
 				{
 					auto &proc = child_processes[e.data.u32 & 0x7fffffffu];
-					if (proc.crash_file)
-					{
-						remove_epoll_entry(fileno(proc.crash_file));
-						fclose(proc.crash_file);
-						proc.crash_file = nullptr;
-					}
+					close_and_remove_epoll_entry(proc.crash_fd);
 				}
 			}
 		}
@@ -1501,6 +1586,18 @@ static void timeout_handler()
 		// Send a signal to the worker thread to make sure we tear down on that thread.
 		pthread_kill(global_replayer->thread_pool.front().native_handle(), SIGABRT);
 	}
+}
+
+static void begin_heartbeat()
+{
+	if (crash_fd >= 0)
+		write_all(crash_fd, "BEGIN_HEARTBEAT\n");
+}
+
+static void heartbeat()
+{
+	if (crash_fd >= 0)
+		write_all(crash_fd, "HEARTBEAT\n");
 }
 
 static void thread_callback(void *)

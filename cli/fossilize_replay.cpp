@@ -84,7 +84,7 @@ __declspec(noinline)
 #else
 __attribute__((noinline))
 #endif
-static void simulate_crash(int *v)
+static void simulate_crash(volatile int *v)
 {
 	*v = 0;
 }
@@ -94,7 +94,7 @@ __declspec(noinline)
 #else
 __attribute__((noinline))
 #endif
-static int simulate_divide_by_zero(int a, int b)
+static int simulate_divide_by_zero(volatile int a, volatile int b)
 {
 	return a / b;
 }
@@ -219,6 +219,13 @@ static void on_validation_error(void *userdata);
 #ifndef NO_ROBUST_REPLAYER
 static void report_module_uuid(const char (&path)[2 * VK_UUID_SIZE + 1]);
 static void timeout_handler();
+static void begin_heartbeat();
+static void heartbeat();
+#else
+#define report_module_uuid(x) ((void)(x))
+#define timeout_handler() ((void)0)
+#define begin_heartbeat() ((void)0)
+#define heartbeat() ((void)0)
 #endif
 
 struct PipelineWorkItem
@@ -635,43 +642,50 @@ struct ThreadedReplayer : StateCreatorInterface
 		assert(index < NUM_MEMORY_CONTEXTS);
 		unique_lock<mutex> lock(pipeline_work_queue_mutex);
 
+		heartbeat();
+		auto last_heartbeat = std::chrono::steady_clock::now();
+
 		if (queued_count[index] == completed_count[index])
 		{
 			reset_memory_context_pipeline_cache(index);
 			return;
 		}
 
-		if (opts.timeout_seconds != 0)
-		{
-			bool signalled;
-			unsigned current_completed = completed_count[index];
-			do
-			{
-				signalled = work_done_condition[index].wait_for(lock, std::chrono::seconds(opts.timeout_seconds),
-				                                                [&]() -> bool
-				                                                {
-					                                                return current_completed != completed_count[index];
-				                                                });
-				if (!signalled && completed_count[index] == current_completed)
-				{
-#ifndef NO_ROBUST_REPLAYER
-					timeout_handler();
-#else
-					LOGE("Timed out replaying pipelines!\n");
-					exit(2);
-#endif
-				}
+		unsigned current_completed = completed_count[index];
+		unsigned num_second_timeouts = 0;
 
-				current_completed = completed_count[index];
-			} while (queued_count[index] != completed_count[index]);
-		}
-		else
+		do
 		{
-			work_done_condition[index].wait(lock, [&]() -> bool
+			bool signalled = work_done_condition[index].wait_for(
+					lock, std::chrono::seconds(1),
+					[&]() -> bool { return current_completed != completed_count[index]; });
+
+			// Fire off a heartbeat every 500ms. No need to overwhelm the parent process.
+			auto new_time = std::chrono::steady_clock::now();
+			auto delta = new_time - last_heartbeat;
+			if (std::chrono::duration_cast<std::chrono::milliseconds>(delta).count() > 500)
 			{
-				return queued_count[index] == completed_count[index];
-			});
-		}
+				heartbeat();
+				last_heartbeat = new_time;
+			}
+
+			if (!signalled && completed_count[index] == current_completed)
+				num_second_timeouts++;
+			else
+				num_second_timeouts = 0;
+
+			if (opts.timeout_seconds != 0 && num_second_timeouts >= opts.timeout_seconds)
+			{
+				timeout_handler();
+				LOGE("Timed out replaying pipelines!\n");
+				exit(2);
+			}
+
+			current_completed = completed_count[index];
+		} while (queued_count[index] != completed_count[index]);
+
+		heartbeat();
+
 		reset_memory_context_pipeline_cache(index);
 	}
 
@@ -1637,6 +1651,10 @@ struct ThreadedReplayer : StateCreatorInterface
 
 		if (!device_was_init)
 		{
+			// From this point on, we expect forward progress in finite time.
+			// If the Vulkan driver is unstable and deadlocks, we'll be able to detect it and kill the process.
+			begin_heartbeat();
+
 			// Now we can init the device with correct app info.
 			device_was_init = true;
 			device.reset(new VulkanDevice);
@@ -1665,9 +1683,7 @@ struct ThreadedReplayer : StateCreatorInterface
 				for (unsigned i = 0; i < VK_UUID_SIZE; i++)
 					sprintf(uuid_string + 2 * i, "%02x", props.shaderModuleIdentifierAlgorithmUUID[i]);
 
-#ifndef NO_ROBUST_REPLAYER
 				report_module_uuid(uuid_string);
-#endif
 
 				auto path = opts.on_disk_module_identifier_path;
 				path += '.';
@@ -2956,7 +2972,6 @@ struct ThreadedReplayer : StateCreatorInterface
 			validation_whitelist_db->flush();
 		if (validation_blacklist_db)
 			validation_blacklist_db->flush();
-		device.reset();
 	}
 
 	Options opts;
@@ -3171,8 +3186,8 @@ static void log_memory_usage(const std::vector<ExternalReplayer::ProcessStats> &
 	unsigned index = 0;
 	for (auto &use : usage)
 	{
-		LOGI("   #%u: %5u MiB resident %5u MiB shared (%u MiB shared metadata).\n", index++,
-		     use.resident_mib, use.shared_mib, use.shared_metadata_mib);
+		LOGI("   #%u: %5u MiB resident %5u MiB shared (%u MiB shared metadata) [activity %d].\n", index++,
+		     use.resident_mib, use.shared_mib, use.shared_metadata_mib, use.heartbeats);
 	}
 
 	if (global_stats)
@@ -3743,6 +3758,8 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 		LOGI("Total time decoding %s in main thread: %.3f s\n", tag_names[tag], duration * 1e-9);
 	}
 
+	heartbeat();
+
 	// Now we've laid the initial ground work, kick off worker threads.
 	replayer.start_worker_threads();
 
@@ -3887,24 +3904,28 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 		return a.order_index < b.order_index;
 	});
 
-	// Need to synchronize worker threads between pipeline types to avoid a race condition
-	// where memory iteration 1 for a GPL link is running, and then compute starts running
-	// with only memory iteration 0 (< 1024 pipelines).
-	// Then we get the pattern of:
-	// - Link GPL pipeline iteration 1
-	// - Sync memory context 0
-	// - LRU maintenance memory context 0
-	// - Free pipelines (race condition!)
-	// To avoid shenanigans, synchronize everything between types.
-	for (auto &work : graphics_workload)
-		work.func();
-	replayer.sync_worker_threads();
-	for (auto &work : compute_workload)
-		work.func();
-	replayer.sync_worker_threads();
-	for (auto &work : raytracing_workload)
-		work.func();
-	replayer.sync_worker_threads();
+	const auto run_work = [&replayer](const std::vector<EnqueuedWork> &workload) {
+		for (auto &work : workload)
+		{
+			work.func();
+			heartbeat();
+		}
+
+		// Need to synchronize worker threads between pipeline types to avoid a race condition
+		// where memory iteration 1 for a GPL link is running, and then compute starts running
+		// with only memory iteration 0 (< 1024 pipelines).
+		// Then we get the pattern of:
+		// - Link GPL pipeline iteration 1
+		// - Sync memory context 0
+		// - LRU maintenance memory context 0
+		// - Free pipelines (race condition!)
+		// To avoid shenanigans, synchronize everything between types.
+		replayer.sync_worker_threads();
+	};
+
+	run_work(graphics_workload);
+	run_work(compute_workload);
+	run_work(raytracing_workload);
 
 	replayer.tear_down_threads();
 

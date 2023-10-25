@@ -1230,6 +1230,18 @@ static void timeout_handler()
 	}
 }
 
+static void begin_heartbeat()
+{
+	if (crash_handle)
+		write_all(crash_handle, "BEGIN_HEARTBEAT\n");
+}
+
+static void heartbeat()
+{
+	if (crash_handle)
+		write_all(crash_handle, "HEARTBEAT\n");
+}
+
 static void abort_handler(int)
 {
 	crash_handler(nullptr);
