@@ -2498,7 +2498,7 @@ bool FeatureFilter::Impl::stage_limits_are_supported(const VkPipelineShaderStage
 					auto &map_entry = info.pSpecializationInfo->pMapEntries[j];
 					if (map_entry.constantID == entry.constant_id[i] &&
 					    map_entry.size == sizeof(uint32_t) &&
-					    map_entry.size + sizeof(uint32_t) <= info.pSpecializationInfo->dataSize)
+					    map_entry.offset + sizeof(uint32_t) <= info.pSpecializationInfo->dataSize)
 					{
 						memcpy(&wg_size[i], data + map_entry.offset, sizeof(uint32_t));
 						break;
