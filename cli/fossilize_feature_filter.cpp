@@ -488,7 +488,6 @@ struct FeatureFilter::Impl
 	VkPhysicalDeviceFeatures2 features2 = {};
 	VulkanFeatures features = {};
 	VulkanProperties props = {};
-	bool supports_scalar_block_layout = false;
 	bool null_device = false;
 
 	struct DeferredEntryPoint
@@ -551,9 +550,102 @@ void FeatureFilter::Impl::init_features(const void *pNext)
 		features.member.pNext = nullptr; \
 		break
 
+#define FEATURE(struct_name, core_struct, feature) if (core_struct.feature) features.struct_name.feature = VK_TRUE
 		switch (base->sType)
 		{
 #include "fossilize_feature_filter_features.inc"
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES:
+		{
+			auto &vk11 = *reinterpret_cast<const VkPhysicalDeviceVulkan11Features *>(base);
+			FEATURE(storage_16bit, vk11, storageBuffer16BitAccess);
+			FEATURE(storage_16bit, vk11, uniformAndStorageBuffer16BitAccess);
+			FEATURE(storage_16bit, vk11, storagePushConstant16);
+			FEATURE(storage_16bit, vk11, storageInputOutput16);
+			FEATURE(multiview, vk11, multiview);
+			FEATURE(multiview, vk11, multiviewGeometryShader);
+			FEATURE(multiview, vk11, multiviewTessellationShader);
+			FEATURE(variable_pointers, vk11, variablePointersStorageBuffer);
+			FEATURE(variable_pointers, vk11, variablePointers);
+			// protected memory
+			FEATURE(ycbcr_conversion, vk11, samplerYcbcrConversion);
+			FEATURE(draw_parameters, vk11, shaderDrawParameters);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES:
+		{
+			auto &vk12 = *reinterpret_cast<const VkPhysicalDeviceVulkan12Features *>(base);
+			//samplerMirrorClampToEdge
+			//drawIndirectCount
+			FEATURE(storage_8bit, vk12, storageBuffer8BitAccess);
+			FEATURE(storage_8bit, vk12, uniformAndStorageBuffer8BitAccess);
+			FEATURE(storage_8bit, vk12, storagePushConstant8);
+			FEATURE(atomic_int64, vk12, shaderBufferInt64Atomics);
+			FEATURE(atomic_int64, vk12, shaderSharedInt64Atomics);
+			FEATURE(float16_int8, vk12, shaderFloat16);
+			FEATURE(float16_int8, vk12, shaderInt8);
+			FEATURE(vk12, vk12, descriptorIndexing);
+			FEATURE(descriptor_indexing, vk12, shaderInputAttachmentArrayDynamicIndexing);
+			FEATURE(descriptor_indexing, vk12, shaderUniformTexelBufferArrayDynamicIndexing);
+			FEATURE(descriptor_indexing, vk12, shaderStorageTexelBufferArrayDynamicIndexing);
+			FEATURE(descriptor_indexing, vk12, shaderUniformBufferArrayNonUniformIndexing);
+			FEATURE(descriptor_indexing, vk12, shaderSampledImageArrayNonUniformIndexing);
+			FEATURE(descriptor_indexing, vk12, shaderStorageBufferArrayNonUniformIndexing);
+			FEATURE(descriptor_indexing, vk12, shaderStorageImageArrayNonUniformIndexing);
+			FEATURE(descriptor_indexing, vk12, shaderInputAttachmentArrayNonUniformIndexing);
+			FEATURE(descriptor_indexing, vk12, shaderUniformTexelBufferArrayNonUniformIndexing);
+			FEATURE(descriptor_indexing, vk12, shaderStorageTexelBufferArrayNonUniformIndexing);
+			FEATURE(descriptor_indexing, vk12, descriptorBindingUniformBufferUpdateAfterBind);
+			FEATURE(descriptor_indexing, vk12, descriptorBindingSampledImageUpdateAfterBind);
+			FEATURE(descriptor_indexing, vk12, descriptorBindingStorageImageUpdateAfterBind);
+			FEATURE(descriptor_indexing, vk12, descriptorBindingStorageBufferUpdateAfterBind);
+			FEATURE(descriptor_indexing, vk12, descriptorBindingUniformTexelBufferUpdateAfterBind);
+			FEATURE(descriptor_indexing, vk12, descriptorBindingStorageTexelBufferUpdateAfterBind);
+			FEATURE(descriptor_indexing, vk12, descriptorBindingUpdateUnusedWhilePending);
+			FEATURE(descriptor_indexing, vk12, descriptorBindingPartiallyBound);
+			FEATURE(descriptor_indexing, vk12, descriptorBindingVariableDescriptorCount);
+			FEATURE(descriptor_indexing, vk12, runtimeDescriptorArray);
+			FEATURE(vk12, vk12, samplerFilterMinmax);
+			FEATURE(vk12, vk12, scalarBlockLayout);
+			//imagelessFramebuffer;
+			//uniformBufferStandardLayout;
+			FEATURE(subgroup_extended_types, vk12, shaderSubgroupExtendedTypes);
+			FEATURE(separate_ds_layout, vk12, separateDepthStencilLayouts);
+			//hostQueryReset;
+			//timelineSemaphore;
+			FEATURE(buffer_device_address, vk12, bufferDeviceAddress);
+			FEATURE(buffer_device_address, vk12, bufferDeviceAddressCaptureReplay);
+			FEATURE(buffer_device_address, vk12, bufferDeviceAddressMultiDevice);
+			FEATURE(memory_model, vk12, vulkanMemoryModel);
+			FEATURE(memory_model, vk12, vulkanMemoryModelDeviceScope);
+			FEATURE(memory_model, vk12, vulkanMemoryModelAvailabilityVisibilityChains);
+			FEATURE(vk12, vk12, shaderOutputViewportIndex);
+			FEATURE(vk12, vk12, shaderOutputLayer);
+			//subgroupBroadcastDynamicId;
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES:
+		{
+			auto &vk13 = *reinterpret_cast<const VkPhysicalDeviceVulkan13Features *>(base);
+			FEATURE(image_robustness, vk13, robustImageAccess);
+			FEATURE(inline_uniform_block, vk13, inlineUniformBlock);
+			FEATURE(inline_uniform_block, vk13, descriptorBindingInlineUniformBlockUpdateAfterBind);
+			//pipelineCreationCacheControl;
+			//privateData;
+			FEATURE(demote_to_helper, vk13, shaderDemoteToHelperInvocation);
+			FEATURE(vk13, vk13, shaderTerminateInvocation);
+			FEATURE(subgroup_size_control, vk13, subgroupSizeControl);
+			FEATURE(subgroup_size_control, vk13, computeFullSubgroups);
+			FEATURE(synchronization2, vk13, synchronization2);
+			//textureCompressionASTC_HDR;
+			FEATURE(zero_initialize_workgroup_memory, vk13, shaderZeroInitializeWorkgroupMemory);
+			FEATURE(dynamic_rendering, vk13, dynamicRendering);
+			FEATURE(shader_integer_dot_product, vk13, shaderIntegerDotProduct);
+			FEATURE(maintenance4, vk13, maintenance4);
+			break;
+		}
+
 		default:
 			break;
 		}
@@ -561,6 +653,7 @@ void FeatureFilter::Impl::init_features(const void *pNext)
 #undef F
 #undef FE
 #undef FE_ALIAS
+#undef FEATURE
 
 		pNext = base->pNext;
 	}
@@ -584,15 +677,111 @@ void FeatureFilter::Impl::init_properties(const void *pNext)
 		props.member.pNext = nullptr; \
 		break
 
+#define PROP(struct_name, core_struct, prop) props.struct_name.prop = core_struct.prop
 		switch (base->sType)
 		{
 #include "fossilize_feature_filter_properties.inc"
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_PROPERTIES:
+		{
+			auto &vk11 = *reinterpret_cast<const VkPhysicalDeviceVulkan11Properties *>(base);
+			PROP(subgroup, vk11, subgroupSize);
+			props.subgroup.supportedStages = vk11.subgroupSupportedStages;
+			props.subgroup.supportedOperations = vk11.subgroupSupportedOperations;
+			props.subgroup.quadOperationsInAllStages = vk11.subgroupQuadOperationsInAllStages;
+			//pointClippingBehavior;
+			PROP(multiview, vk11, maxMultiviewViewCount);
+			PROP(multiview, vk11, maxMultiviewInstanceIndex);
+			//protectedNoFault;
+			//maxPerSetDescriptors;
+			//maxMemoryAllocationSize;
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES:
+		{
+			auto &vk12 = *reinterpret_cast<const VkPhysicalDeviceVulkan12Properties *>(base);
+			//conformanceVersion;
+			PROP(float_control, vk12, denormBehaviorIndependence);
+			PROP(float_control, vk12, roundingModeIndependence);
+			PROP(float_control, vk12, shaderSignedZeroInfNanPreserveFloat16);
+			PROP(float_control, vk12, shaderSignedZeroInfNanPreserveFloat32);
+			PROP(float_control, vk12, shaderSignedZeroInfNanPreserveFloat64);
+			PROP(float_control, vk12, shaderDenormPreserveFloat16);
+			PROP(float_control, vk12, shaderDenormPreserveFloat32);
+			PROP(float_control, vk12, shaderDenormPreserveFloat64);
+			PROP(float_control, vk12, shaderDenormFlushToZeroFloat16);
+			PROP(float_control, vk12, shaderDenormFlushToZeroFloat32);
+			PROP(float_control, vk12, shaderDenormFlushToZeroFloat64);
+			PROP(float_control, vk12, shaderRoundingModeRTEFloat16);
+			PROP(float_control, vk12, shaderRoundingModeRTEFloat32);
+			PROP(float_control, vk12, shaderRoundingModeRTEFloat64);
+			PROP(float_control, vk12, shaderRoundingModeRTZFloat16);
+			PROP(float_control, vk12, shaderRoundingModeRTZFloat32);
+			PROP(float_control, vk12, shaderRoundingModeRTZFloat64);
+			PROP(descriptor_indexing, vk12, maxUpdateAfterBindDescriptorsInAllPools);
+			PROP(descriptor_indexing, vk12, shaderUniformBufferArrayNonUniformIndexingNative);
+			PROP(descriptor_indexing, vk12, shaderSampledImageArrayNonUniformIndexingNative);
+			PROP(descriptor_indexing, vk12, shaderStorageBufferArrayNonUniformIndexingNative);
+			PROP(descriptor_indexing, vk12, shaderStorageImageArrayNonUniformIndexingNative);
+			PROP(descriptor_indexing, vk12, shaderInputAttachmentArrayNonUniformIndexingNative);
+			PROP(descriptor_indexing, vk12, robustBufferAccessUpdateAfterBind);
+			PROP(descriptor_indexing, vk12, quadDivergentImplicitLod);
+			PROP(descriptor_indexing, vk12, maxPerStageDescriptorUpdateAfterBindSamplers);
+			PROP(descriptor_indexing, vk12, maxPerStageDescriptorUpdateAfterBindUniformBuffers);
+			PROP(descriptor_indexing, vk12, maxPerStageDescriptorUpdateAfterBindStorageBuffers);
+			PROP(descriptor_indexing, vk12, maxPerStageDescriptorUpdateAfterBindSampledImages);
+			PROP(descriptor_indexing, vk12, maxPerStageDescriptorUpdateAfterBindStorageImages);
+			PROP(descriptor_indexing, vk12, maxPerStageDescriptorUpdateAfterBindInputAttachments);
+			PROP(descriptor_indexing, vk12, maxPerStageUpdateAfterBindResources);
+			PROP(descriptor_indexing, vk12, maxDescriptorSetUpdateAfterBindSamplers);
+			PROP(descriptor_indexing, vk12, maxDescriptorSetUpdateAfterBindUniformBuffers);
+			PROP(descriptor_indexing, vk12, maxDescriptorSetUpdateAfterBindUniformBuffersDynamic);
+			PROP(descriptor_indexing, vk12, maxDescriptorSetUpdateAfterBindStorageBuffers);
+			PROP(descriptor_indexing, vk12, maxDescriptorSetUpdateAfterBindStorageBuffersDynamic);
+			PROP(descriptor_indexing, vk12, maxDescriptorSetUpdateAfterBindSampledImages);
+			PROP(descriptor_indexing, vk12, maxDescriptorSetUpdateAfterBindStorageImages);
+			PROP(descriptor_indexing, vk12, maxDescriptorSetUpdateAfterBindInputAttachments);
+			PROP(ds_resolve, vk12, supportedDepthResolveModes);
+			PROP(ds_resolve, vk12, supportedStencilResolveModes);
+			PROP(ds_resolve, vk12, independentResolveNone);
+			PROP(ds_resolve, vk12, independentResolve);
+			//filterMinmaxSingleComponentFormats;
+			//filterMinmaxImageComponentMapping;
+			//maxTimelineSemaphoreValueDifference;
+			//framebufferIntegerColorSampleCounts;
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_PROPERTIES:
+		{
+			auto &vk13 = *reinterpret_cast<const VkPhysicalDeviceVulkan13Properties *>(base);
+			PROP(subgroup_size_control, vk13, minSubgroupSize);
+			PROP(subgroup_size_control, vk13, maxSubgroupSize);
+			PROP(subgroup_size_control, vk13, maxComputeWorkgroupSubgroups);
+			PROP(subgroup_size_control, vk13, requiredSubgroupSizeStages);
+			PROP(inline_uniform_block, vk13, maxInlineUniformBlockSize);
+			PROP(inline_uniform_block, vk13, maxPerStageDescriptorInlineUniformBlocks);
+			PROP(inline_uniform_block, vk13, maxPerStageDescriptorUpdateAfterBindInlineUniformBlocks);
+			PROP(inline_uniform_block, vk13, maxDescriptorSetInlineUniformBlocks);
+			PROP(inline_uniform_block, vk13, maxDescriptorSetUpdateAfterBindInlineUniformBlocks);
+			PROP(vk13, vk13, maxInlineUniformTotalSize);
+			// integer dot product hints
+			//storageTexelBufferOffsetAlignmentBytes;
+			//storageTexelBufferOffsetSingleTexelAlignment;
+			//uniformTexelBufferOffsetAlignmentBytes;
+			//uniformTexelBufferOffsetSingleTexelAlignment;
+			//maxBufferSize;
+			break;
+		}
+
 		default:
 			break;
 		}
 
 #undef P
 #undef PE
+#undef PROP
 
 		pNext = base->pNext;
 	}
@@ -606,7 +795,7 @@ bool FeatureFilter::Impl::init(uint32_t api_version_, const char **device_exts, 
 	{
 		enabled_extensions.insert(device_exts[i]);
 		if (strcmp(device_exts[i], VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME) == 0)
-			supports_scalar_block_layout = true;
+			features.vk12.scalarBlockLayout = VK_TRUE;
 	}
 
 	api_version = api_version_;
@@ -685,8 +874,6 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 
 		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_DEPTH_CLIP_STATE_CREATE_INFO_EXT:
 		{
-			if (!enabled_extensions.count(VK_EXT_DEPTH_CLIP_ENABLE_EXTENSION_NAME))
-				return false;
 			auto *clip = static_cast<const VkPipelineRasterizationDepthClipStateCreateInfoEXT *>(pNext);
 			if (clip->depthClipEnable && !features.depth_clip.depthClipEnable)
 				return false;
@@ -841,11 +1028,8 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 
 		case VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_STENCIL_LAYOUT:
 		{
-			if ((api_version < VK_API_VERSION_1_2 && !enabled_extensions.count(VK_KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS_EXTENSION_NAME)) ||
-			    !features.separate_ds_layout.separateDepthStencilLayouts)
-			{
+			if (!features.separate_ds_layout.separateDepthStencilLayouts)
 				return false;
-			}
 
 			auto *layout = static_cast<const VkAttachmentDescriptionStencilLayout *>(pNext);
 			if (!image_layout_is_supported(layout->stencilInitialLayout))
@@ -857,11 +1041,8 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 
 		case VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_STENCIL_LAYOUT:
 		{
-			if ((api_version < VK_API_VERSION_1_2 && !enabled_extensions.count(VK_KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS_EXTENSION_NAME)) ||
-			    !features.separate_ds_layout.separateDepthStencilLayouts)
-			{
+			if (!features.separate_ds_layout.separateDepthStencilLayouts)
 				return false;
-			}
 
 			auto *layout = static_cast<const VkAttachmentReferenceStencilLayout *>(pNext);
 			if (!image_layout_is_supported(layout->stencilLayout))
@@ -907,11 +1088,8 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 
 		case VK_STRUCTURE_TYPE_FRAGMENT_SHADING_RATE_ATTACHMENT_INFO_KHR:
 		{
-			if (!enabled_extensions.count(VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME) ||
-			    !features.fragment_shading_rate.attachmentFragmentShadingRate)
-			{
+			if (!features.fragment_shading_rate.attachmentFragmentShadingRate)
 				return false;
-			}
 
 			auto *attachment = static_cast<const VkFragmentShadingRateAttachmentInfoKHR *>(pNext);
 
@@ -947,11 +1125,8 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 
 		case VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR:
 		{
-			if (!enabled_extensions.count(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME) ||
-			    features.dynamic_rendering.dynamicRendering == VK_FALSE)
-			{
+			if (features.dynamic_rendering.dynamicRendering == VK_FALSE)
 				return false;
-			}
 
 			auto *info = static_cast<const VkPipelineRenderingCreateInfoKHR *>(pNext);
 
@@ -991,8 +1166,7 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 
 		case VK_STRUCTURE_TYPE_PIPELINE_COLOR_WRITE_CREATE_INFO_EXT:
 		{
-			if (!enabled_extensions.count(VK_EXT_COLOR_WRITE_ENABLE_EXTENSION_NAME) ||
-			    !features.color_write_enable.colorWriteEnable)
+			if (!features.color_write_enable.colorWriteEnable)
 				return false;
 
 			break;
@@ -1028,15 +1202,14 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 
 		case VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO:
 		{
-			if (!enabled_extensions.count(VK_EXT_SAMPLER_FILTER_MINMAX_EXTENSION_NAME))
+			if (!enabled_extensions.count(VK_EXT_SAMPLER_FILTER_MINMAX_EXTENSION_NAME) && !features.vk12.samplerFilterMinmax)
 				return false;
-
 			break;
 		}
 
 		case VK_STRUCTURE_TYPE_RENDER_PASS_INPUT_ATTACHMENT_ASPECT_CREATE_INFO:
 		{
-			if (!enabled_extensions.count(VK_KHR_MAINTENANCE_2_EXTENSION_NAME))
+			if (!enabled_extensions.count(VK_KHR_MAINTENANCE_2_EXTENSION_NAME) && api_version < VK_API_VERSION_1_1)
 				return false;
 
 			break;
@@ -1052,8 +1225,7 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 
 		case VK_STRUCTURE_TYPE_MEMORY_BARRIER_2_KHR:
 		{
-			if (!enabled_extensions.count(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME) ||
-			    !features.synchronization2.synchronization2)
+			if (!features.synchronization2.synchronization2)
 				return false;
 
 			break;
@@ -1061,8 +1233,7 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 
 		case VK_STRUCTURE_TYPE_PIPELINE_FRAGMENT_SHADING_RATE_STATE_CREATE_INFO_KHR:
 		{
-			if (!enabled_extensions.count(VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME) ||
-			    !features.fragment_shading_rate.pipelineFragmentShadingRate)
+			if (!features.fragment_shading_rate.pipelineFragmentShadingRate)
 				return false;
 
 			break;
@@ -1076,10 +1247,7 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 			// YcbcrConversionCreateInfo is inlined into a VkSamplerCreateInfo when replaying from a Fossilize archive.
 			// Normally, it's not a pNext, but we pretend it is to make capture and replay
 			// a bit more sane.
-			bool enabled = api_version >= VK_API_VERSION_1_1 ||
-			               enabled_extensions.count(VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME);
-
-			if (!enabled || !features.ycbcr_conversion.samplerYcbcrConversion)
+			if (!features.ycbcr_conversion.samplerYcbcrConversion)
 				return false;
 
 			break;
@@ -1088,8 +1256,7 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 		case VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR:
 		case VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT:
 		{
-			if (!enabled_extensions.count(VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME) ||
-			    features.graphics_pipeline_library.graphicsPipelineLibrary == VK_FALSE)
+			if (features.graphics_pipeline_library.graphicsPipelineLibrary == VK_FALSE)
 				return false;
 
 			break;
@@ -1120,8 +1287,7 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 
 		case VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_DEPTH_CLIP_CONTROL_CREATE_INFO_EXT:
 		{
-			if (!enabled_extensions.count(VK_EXT_DEPTH_CLIP_CONTROL_EXTENSION_NAME) ||
-			    !features.depth_clip_control.depthClipControl)
+			if (!features.depth_clip_control.depthClipControl)
 			{
 				return false;
 			}
@@ -1185,7 +1351,7 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 	{
 		// There doesn't seem to be a specific feature bit for this flag, key it on extension being enabled.
 		// For specific descriptor types, we check the individual features.
-		if (enabled_extensions.count(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME) == 0)
+		if (enabled_extensions.count(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME) == 0 && !features.vk12.descriptorIndexing)
 			return false;
 	}
 
@@ -1197,11 +1363,8 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 
 		if (info->flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR)
 		{
-			if (!features.descriptor_buffer.descriptorBufferPushDescriptors ||
-			    enabled_extensions.count(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME) == 0)
-			{
+			if (!features.descriptor_buffer.descriptorBufferPushDescriptors)
 				return false;
-			}
 		}
 	}
 
@@ -1243,6 +1406,7 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 		case VK_DESCRIPTOR_TYPE_INLINE_UNIFORM_BLOCK_EXT:
 			if (features.inline_uniform_block.inlineUniformBlock == VK_FALSE)
 				return false;
+			// TODO: maxInlineUniformTotalSize, but this shouldn't matter when we use the EXT.
 			if (info->pBindings[i].descriptorCount > props.inline_uniform_block.maxInlineUniformBlockSize)
 				return false;
 			if (binding_is_update_after_bind && features.inline_uniform_block.descriptorBindingInlineUniformBlockUpdateAfterBind == VK_FALSE)
@@ -1465,8 +1629,7 @@ bool FeatureFilter::Impl::pipeline_layout_is_supported(const VkPipelineLayoutCre
 		return true;
 
 	if ((info->flags & VK_PIPELINE_LAYOUT_CREATE_INDEPENDENT_SETS_BIT_EXT) != 0 &&
-	    (enabled_extensions.count(VK_EXT_GRAPHICS_PIPELINE_LIBRARY_EXTENSION_NAME) == 0 ||
-	     features.graphics_pipeline_library.graphicsPipelineLibrary == VK_FALSE))
+	    features.graphics_pipeline_library.graphicsPipelineLibrary == VK_FALSE)
 	{
 		return false;
 	}
@@ -1579,15 +1742,16 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 		return features2.features.sampleRateShading == VK_TRUE;
 	case spv::CapabilityStorageImageReadWithoutFormat:
 		return features2.features.shaderStorageImageReadWithoutFormat == VK_TRUE ||
+		       api_version >= VK_API_VERSION_1_3 ||
 		       enabled_extensions.count(VK_KHR_FORMAT_FEATURE_FLAGS_2_EXTENSION_NAME) != 0;
 	case spv::CapabilityStorageImageWriteWithoutFormat:
 		return features2.features.shaderStorageImageWriteWithoutFormat == VK_TRUE ||
+		       api_version >= VK_API_VERSION_1_3 ||
 		       enabled_extensions.count(VK_KHR_FORMAT_FEATURE_FLAGS_2_EXTENSION_NAME) != 0;
 	case spv::CapabilityMultiViewport:
 		return features2.features.multiViewport == VK_TRUE;
 	case spv::CapabilityDrawParameters:
-		return features.draw_parameters.shaderDrawParameters == VK_TRUE ||
-		       enabled_extensions.count(VK_KHR_SHADER_DRAW_PARAMETERS_EXTENSION_NAME) != 0;
+		return features.draw_parameters.shaderDrawParameters == VK_TRUE;
 	case spv::CapabilityMultiView:
 		return features.multiview.multiview == VK_TRUE;
 	case spv::CapabilityVariablePointersStorageBuffer:
@@ -1597,8 +1761,7 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 	case spv::CapabilityShaderClockKHR:
 		// There aren't two separate capabilities, so we'd have to analyze all opcodes to deduce this.
 		// Just gate this on both feature bits being supported to be safe.
-		return enabled_extensions.count(VK_KHR_SHADER_CLOCK_EXTENSION_NAME) != 0 &&
-		       features.shader_clock.shaderDeviceClock == VK_TRUE &&
+		return features.shader_clock.shaderDeviceClock == VK_TRUE &&
 		       features.shader_clock.shaderSubgroupClock == VK_TRUE;
 	case spv::CapabilityStencilExportEXT:
 		return enabled_extensions.count(VK_EXT_SHADER_STENCIL_EXPORT_EXTENSION_NAME) != 0;
@@ -1617,9 +1780,9 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 	case spv::CapabilityGeometryShaderPassthroughNV:
 		return enabled_extensions.count(VK_NV_GEOMETRY_SHADER_PASSTHROUGH_EXTENSION_NAME) != 0;
 	case spv::CapabilityShaderViewportIndex:
+		return features.vk12.shaderOutputViewportIndex;
 	case spv::CapabilityShaderLayer:
-		// Vulkan 1.2 feature struct. Validation layer complains when we use 1_2 feature struct along other similar structs.
-		return false;
+		return features.vk12.shaderOutputLayer;
 	case spv::CapabilityShaderViewportIndexLayerEXT:
 		// NV version is a cloned enum.
 		return enabled_extensions.count(VK_EXT_SHADER_VIEWPORT_INDEX_LAYER_EXTENSION_NAME) != 0 ||
@@ -1732,10 +1895,9 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 		return features.shading_rate_nv.shadingRateImage == VK_TRUE ||
 		       features.fragment_density.fragmentDensityMap == VK_TRUE;
 	case spv::CapabilityMeshShadingNV:
-		return enabled_extensions.count(VK_NV_MESH_SHADER_EXTENSION_NAME) == VK_TRUE &&
-		       features.mesh_shader_nv.meshShader;
+		return features.mesh_shader_nv.meshShader == VK_TRUE;
 	case spv::CapabilityRayTracingNV:
-		return enabled_extensions.count(VK_NV_RAY_TRACING_EXTENSION_NAME) == VK_TRUE;
+		return enabled_extensions.count(VK_NV_RAY_TRACING_EXTENSION_NAME) != 0;
 	case spv::CapabilityTransformFeedback:
 		return features.transform_feedback.transformFeedback == VK_TRUE;
 	case spv::CapabilityGeometryStreams:
@@ -1780,8 +1942,7 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 	case spv::CapabilityDotProductInput4x8BitPackedKHR:
 		return features.shader_integer_dot_product.shaderIntegerDotProduct == VK_TRUE;
 	case spv::CapabilityMeshShadingEXT:
-		return enabled_extensions.count(VK_EXT_MESH_SHADER_EXTENSION_NAME) == VK_TRUE &&
-		       features.mesh_shader.meshShader;
+		return features.mesh_shader.meshShader == VK_TRUE;
 
 	default:
 		LOGE("Unrecognized SPIR-V capability %u, treating as unsupported.\n", unsigned(cap));
@@ -2274,13 +2435,10 @@ bool FeatureFilter::Impl::image_layout_is_supported(VkImageLayout layout) const
 	case VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL:
 	case VK_IMAGE_LAYOUT_STENCIL_ATTACHMENT_OPTIMAL:
 	case VK_IMAGE_LAYOUT_STENCIL_READ_ONLY_OPTIMAL:
-		return (api_version >= VK_API_VERSION_1_2 ||
-		        enabled_extensions.count(VK_KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS_EXTENSION_NAME) != 0) &&
-		       features.separate_ds_layout.separateDepthStencilLayouts == VK_TRUE;
+		return features.separate_ds_layout.separateDepthStencilLayouts == VK_TRUE;
 
 	case VK_IMAGE_LAYOUT_FRAGMENT_SHADING_RATE_ATTACHMENT_OPTIMAL_KHR:
-		return enabled_extensions.count(VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME) != 0 &&
-		       features.fragment_shading_rate.attachmentFragmentShadingRate == VK_TRUE;
+		return features.fragment_shading_rate.attachmentFragmentShadingRate == VK_TRUE;
 
 	case VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL_KHR:
 	case VK_IMAGE_LAYOUT_READ_ONLY_OPTIMAL_KHR:
@@ -2593,7 +2751,7 @@ bool FeatureFilter::Impl::render_pass2_is_supported(const VkRenderPassCreateInfo
 	if (null_device)
 		return true;
 
-	if (!enabled_extensions.count(VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME))
+	if (!enabled_extensions.count(VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME) && api_version < VK_API_VERSION_1_2)
 		return false;
 
 	if (!pnext_chain_is_supported(info->pNext))
@@ -2717,8 +2875,7 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 	if ((info->flags & (VK_PIPELINE_CREATE_LIBRARY_BIT_KHR |
 	                    VK_PIPELINE_CREATE_LINK_TIME_OPTIMIZATION_BIT_EXT |
 	                    VK_PIPELINE_CREATE_RETAIN_LINK_TIME_OPTIMIZATION_INFO_BIT_EXT)) != 0 &&
-	    (enabled_extensions.count(VK_EXT_GRAPHICS_PIPELINE_LIBRARY_EXTENSION_NAME) == 0 ||
-	     features.graphics_pipeline_library.graphicsPipelineLibrary == VK_FALSE))
+	    features.graphics_pipeline_library.graphicsPipelineLibrary == VK_FALSE)
 	{
 		return false;
 	}
@@ -2785,22 +2942,16 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 			case VK_DYNAMIC_STATE_DEPTH_BOUNDS_TEST_ENABLE_EXT:
 			case VK_DYNAMIC_STATE_STENCIL_TEST_ENABLE_EXT:
 			case VK_DYNAMIC_STATE_STENCIL_OP_EXT:
-				if (!enabled_extensions.count(VK_EXT_EXTENDED_DYNAMIC_STATE_EXTENSION_NAME))
-					return false;
-				if (!features.extended_dynamic_state.extendedDynamicState)
+				if (!features.extended_dynamic_state.extendedDynamicState && api_version < VK_API_VERSION_1_3)
 					return false;
 				break;
 
 			case VK_DYNAMIC_STATE_PATCH_CONTROL_POINTS_EXT:
-				if (!enabled_extensions.count(VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME))
-					return false;
 				if (!features.extended_dynamic_state2.extendedDynamicState2PatchControlPoints)
 					return false;
 				break;
 
 			case VK_DYNAMIC_STATE_LOGIC_OP_EXT:
-				if (!enabled_extensions.count(VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME))
-					return false;
 				if (!features.extended_dynamic_state2.extendedDynamicState2LogicOp)
 					return false;
 				break;
@@ -2808,22 +2959,16 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 			case VK_DYNAMIC_STATE_RASTERIZER_DISCARD_ENABLE_EXT:
 			case VK_DYNAMIC_STATE_DEPTH_BIAS_ENABLE_EXT:
 			case VK_DYNAMIC_STATE_PRIMITIVE_RESTART_ENABLE_EXT:
-				if (!enabled_extensions.count(VK_EXT_EXTENDED_DYNAMIC_STATE_2_EXTENSION_NAME))
-					return false;
-				if (!features.extended_dynamic_state2.extendedDynamicState2)
+				if (!features.extended_dynamic_state2.extendedDynamicState2 && api_version < VK_API_VERSION_1_3)
 					return false;
 				break;
 
 			case VK_DYNAMIC_STATE_COLOR_WRITE_ENABLE_EXT:
-				if (!enabled_extensions.count(VK_EXT_COLOR_WRITE_ENABLE_EXTENSION_NAME))
-					return false;
 				if (!features.color_write_enable.colorWriteEnable)
 					return false;
 				break;
 
 			case VK_DYNAMIC_STATE_VERTEX_INPUT_EXT:
-				if (!enabled_extensions.count(VK_EXT_VERTEX_INPUT_DYNAMIC_STATE_EXTENSION_NAME))
-					return false;
 				if (!features.vertex_input_dynamic_state.vertexInputDynamicState)
 					return false;
 				break;
@@ -2831,8 +2976,7 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 			case VK_DYNAMIC_STATE_FRAGMENT_SHADING_RATE_KHR:
 				// Only support dynamic fragment shading rate for now.
 				// pNext variant needs to validate against vkGetPhysicalDeviceFragmentShadingRatesKHR on top.
-				if (!enabled_extensions.count(VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME) ||
-				    features.fragment_shading_rate.pipelineFragmentShadingRate == VK_FALSE)
+				if (features.fragment_shading_rate.pipelineFragmentShadingRate == VK_FALSE)
 					return false;
 				break;
 
@@ -2852,15 +2996,11 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 				break;
 
 			case VK_DYNAMIC_STATE_VIEWPORT_SHADING_RATE_PALETTE_NV:
-				if (!enabled_extensions.count(VK_NV_SHADING_RATE_IMAGE_EXTENSION_NAME))
-					return false;
 				if (!features.shading_rate_nv.shadingRateImage)
 					return false;
 				break;
 
 			case VK_DYNAMIC_STATE_VIEWPORT_COARSE_SAMPLE_ORDER_NV:
-				if (!enabled_extensions.count(VK_NV_SHADING_RATE_IMAGE_EXTENSION_NAME))
-					return false;
 				if (!features.shading_rate_nv.shadingRateCoarseSampleOrder)
 					return false;
 				break;
@@ -3167,7 +3307,7 @@ bool FeatureFilter::raytracing_pipeline_is_supported(const VkRayTracingPipelineC
 
 bool FeatureFilter::supports_scalar_block_layout() const
 {
-	return impl->null_device || impl->supports_scalar_block_layout;
+	return impl->null_device || impl->features.vk12.scalarBlockLayout;
 }
 
 void FeatureFilter::set_device_query_interface(DeviceQueryInterface *iface)

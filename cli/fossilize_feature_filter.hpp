@@ -55,6 +55,7 @@ struct VulkanFeatures
 	VkPhysicalDeviceDynamicRenderingFeaturesKHR dynamic_rendering;
 	VkPhysicalDeviceMaintenance4FeaturesKHR maintenance4;
 	VkPhysicalDeviceMaintenance5FeaturesKHR maintenance5;
+	VkPhysicalDeviceZeroInitializeWorkgroupMemoryFeaturesKHR zero_initialize_workgroup_memory;
 	VkPhysicalDeviceTransformFeedbackFeaturesEXT transform_feedback;
 	VkPhysicalDeviceDepthClipEnableFeaturesEXT depth_clip;
 	VkPhysicalDeviceInlineUniformBlockFeaturesEXT inline_uniform_block;
@@ -95,6 +96,20 @@ struct VulkanFeatures
 	VkPhysicalDeviceNonSeamlessCubeMapFeaturesEXT non_seamless_cube_map;
 	VkPhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT attachment_feedback_loop_layout;
 	VkPhysicalDeviceShaderModuleIdentifierFeaturesEXT shader_module_identifier;
+
+	struct
+	{
+		VkBool32 shaderOutputViewportIndex;
+		VkBool32 shaderOutputLayer;
+		VkBool32 samplerFilterMinmax;
+		VkBool32 scalarBlockLayout;
+		VkBool32 descriptorIndexing;
+	} vk12;
+
+	struct
+	{
+		VkBool32 shaderTerminateInvocation;
+	} vk13;
 };
 
 void *build_pnext_chain(VulkanFeatures &features, uint32_t api_version,
@@ -124,6 +139,11 @@ struct VulkanProperties
 	VkPhysicalDeviceExtendedDynamicState3PropertiesEXT extended_dynamic_state3;
 	VkPhysicalDeviceMeshShaderPropertiesEXT mesh_shader;
 	VkPhysicalDeviceShaderModuleIdentifierPropertiesEXT shader_module_identifier;
+
+	struct
+	{
+		uint32_t maxInlineUniformTotalSize;
+	} vk13;
 };
 
 void *build_pnext_chain(VulkanProperties &properties, uint32_t api_version,

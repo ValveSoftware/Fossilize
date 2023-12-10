@@ -43,6 +43,7 @@ FE(WORKGROUP_MEMORY_EXPLICIT_LAYOUT, workgroup_memory_explicit_layout, KHR);
 FE(SHADER_INTEGER_DOT_PRODUCT, shader_integer_dot_product, KHR);
 FE(SYNCHRONIZATION_2, synchronization2, KHR);
 FE(DYNAMIC_RENDERING, dynamic_rendering, KHR);
+FE(ZERO_INITIALIZE_WORKGROUP_MEMORY, zero_initialize_workgroup_memory, KHR);
 FE(TRANSFORM_FEEDBACK, transform_feedback, EXT);
 FE(DEPTH_CLIP_ENABLE, depth_clip, EXT);
 FE(INLINE_UNIFORM_BLOCK, inline_uniform_block, EXT);
