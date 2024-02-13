@@ -44,6 +44,7 @@ static void print_help()
 	     "\t[--geom shader.spv]\n"
 	     "\t[--frag shader.spv]\n"
 	     "\t[--comp shader.spv]\n"
+	     "\t[--multiview views]\n"
 	     "\t[--output out.foz]\n"
 	     "\t[--spec <ID> <f32/u32/i32> <value>\n"
 	     "\t[--multi-spec <index> <count>\n");
@@ -359,7 +360,8 @@ static VkPipelineLayout synthesize_pipeline_layout(StateRecorder &recorder, spvc
 	return (VkPipelineLayout)uint64_t(1);
 }
 
-static VkRenderPass synthesize_render_pass(StateRecorder &recorder, spvc_compiler frag, uint8_t &active_rt_mask)
+static VkRenderPass synthesize_render_pass(StateRecorder &recorder, spvc_compiler frag,
+                                           uint32_t view_count, uint8_t &active_rt_mask)
 {
 	if (!frag)
 		return VK_NULL_HANDLE;
@@ -495,14 +497,15 @@ static VkRenderPass synthesize_render_pass(StateRecorder &recorder, spvc_compile
 	unsigned output_location_to_attachment[8] = {};
 	unsigned input_location_to_attachment[8] = {};
 
-	VkRenderPassCreateInfo info = { VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
-	VkAttachmentDescription attachments[8] = {};
+	VkRenderPassCreateInfo2 info = { VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2 };
+	VkAttachmentDescription2 attachments[8] = {};
 
 	for (unsigned i = 0; i < num_rts; i++)
 	{
 		if (rt_formats[i] != VK_FORMAT_UNDEFINED)
 		{
 			auto &att = attachments[info.attachmentCount];
+			att.sType = VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2;
 			att.format = rt_formats[i];
 			att.samples = VK_SAMPLE_COUNT_1_BIT;
 			att.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
@@ -519,6 +522,7 @@ static VkRenderPass synthesize_render_pass(StateRecorder &recorder, spvc_compile
 		if (input_rt_formats[i] != VK_FORMAT_UNDEFINED)
 		{
 			auto &att = attachments[info.attachmentCount];
+			att.sType = VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2;
 			att.format = input_rt_formats[i];
 			att.samples = VK_SAMPLE_COUNT_1_BIT;
 			att.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
@@ -530,14 +534,17 @@ static VkRenderPass synthesize_render_pass(StateRecorder &recorder, spvc_compile
 		}
 	}
 
-	VkSubpassDescription subpass = {};
+	VkSubpassDescription2 subpass = { VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_2 };
 	subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+	// view_count of 0 translates to default 0 mask.
+	subpass.viewMask = (1u << view_count) - 1u;
 
-	VkAttachmentReference references[8] = {};
-	VkAttachmentReference input_references[8] = {};
+	VkAttachmentReference2 references[8] = {};
+	VkAttachmentReference2 input_references[8] = {};
 
 	for (unsigned i = 0; i < num_rts; i++)
 	{
+		references[i].sType = VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2;
 		if (rt_formats[i] != VK_FORMAT_UNDEFINED)
 		{
 			references[i].attachment = output_location_to_attachment[i];
@@ -552,6 +559,7 @@ static VkRenderPass synthesize_render_pass(StateRecorder &recorder, spvc_compile
 
 	for (unsigned i = 0; i < num_input_rts; i++)
 	{
+		input_references[i].sType = VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2;
 		if (input_rt_formats[i] != VK_FORMAT_UNDEFINED)
 		{
 			input_references[i].attachment = input_location_to_attachment[i];
@@ -573,7 +581,7 @@ static VkRenderPass synthesize_render_pass(StateRecorder &recorder, spvc_compile
 	info.pSubpasses = &subpass;
 	info.pAttachments = attachments;
 
-	if (!recorder.record_render_pass((VkRenderPass)uint64_t(1), info))
+	if (!recorder.record_render_pass2((VkRenderPass)uint64_t(1), info))
 		return VK_NULL_HANDLE;
 
 	return (VkRenderPass)uint64_t(1);
@@ -822,6 +830,7 @@ int main(int argc, char *argv[])
 	std::string spv_paths[STAGE_COUNT];
 	std::string output_path;
 	SpecConstant spec_constants;
+	uint32_t view_count = 0;
 
 	cbs.add("--vert", [&](CLIParser &parser) { spv_paths[STAGE_VERT] = parser.next_string(); });
 	cbs.add("--tesc", [&](CLIParser &parser) { spv_paths[STAGE_TESC] = parser.next_string(); });
@@ -865,6 +874,9 @@ int main(int argc, char *argv[])
 		uint32_t index = parser.next_uint();
 		uint32_t count = parser.next_uint();
 		spec_constants.iteration = { index, count };
+	});
+	cbs.add("--multiview", [&](CLIParser &parser) {
+		view_count = parser.next_uint();
 	});
 
 	CLIParser parser(std::move(cbs), argc - 1, argv + 1);
@@ -918,7 +930,7 @@ int main(int argc, char *argv[])
 	uint8_t active_rt_mask = 0;
 	if (compilers[STAGE_FRAG])
 	{
-		render_pass = synthesize_render_pass(recorder, compilers[STAGE_FRAG], active_rt_mask);
+		render_pass = synthesize_render_pass(recorder, compilers[STAGE_FRAG], view_count, active_rt_mask);
 		if (render_pass == VK_NULL_HANDLE)
 			return EXIT_FAILURE;
 	}
