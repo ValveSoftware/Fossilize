@@ -906,6 +906,25 @@ int main(int argc, char *argv[])
 	}
 
 	StateRecorder recorder;
+
+	VkApplicationInfo app_info = { VK_STRUCTURE_TYPE_APPLICATION_INFO };
+	app_info.pApplicationName = "fossilize-synth";
+	app_info.apiVersion = VK_API_VERSION_1_3;
+
+	if (!recorder.record_application_info(app_info))
+		return EXIT_FAILURE;
+
+	// Make sure we record mesh shader features so replayer can pick it up if applicable.
+	VkPhysicalDeviceFeatures2 features2 =
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+	VkPhysicalDeviceMeshShaderFeaturesEXT mesh_features =
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT };
+	mesh_features.taskShader = VK_TRUE;
+	mesh_features.meshShader = VK_TRUE;
+	features2.pNext = &mesh_features;
+	if (!recorder.record_physical_device_features(&features2))
+		return EXIT_FAILURE;
+
 	recorder.init_recording_thread(db.get());
 
 	spvc_context context;
