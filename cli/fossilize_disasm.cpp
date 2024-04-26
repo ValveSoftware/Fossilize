@@ -852,6 +852,7 @@ static void print_help()
 	     "\t[--filter-compute hash]\n"
 	     "\t[--filter-raytracing hash]\n"
 	     "\t[--filter-module hash]\n"
+		 "\t[--disasm-match <pattern>]\n"
 	     "state.json\n");
 }
 
@@ -951,6 +952,7 @@ int main(int argc, char *argv[])
 {
 	string json_path;
 	string output;
+	string disasm_match;
 	VulkanDevice::Options opts;
 	DisasmMethod method = DisasmMethod::Asm;
 	bool module_only = false;
@@ -981,6 +983,9 @@ int main(int argc, char *argv[])
 	});
 	cbs.add("--filter-module", [&](CLIParser &parser) {
 		filter_modules.insert(strtoull(parser.next_string(), nullptr, 16));
+	});
+	cbs.add("--disasm-match", [&](CLIParser &parser) {
+		disasm_match = parser.next_string();
 	});
 	cbs.error_handler = [] { print_help(); };
 
@@ -1163,7 +1168,11 @@ int main(int argc, char *argv[])
 			auto module_hash = replayer.module_hashes[i];
 			string path = output + "/" + uint64_string(module_hash);
 
-			LOGI("Dumping disassembly to: %s\n", path.c_str());
+			if (disasm_match.empty())
+				LOGI("Dumping disassembly to: %s\n", path.c_str());
+			else if (disassembled.find(disasm_match) != std::string::npos)
+				LOGI("Found matching string, dumping disassembly to: %s\n", path.c_str());
+
 			if (!write_string_to_file(path.c_str(), disassembled.c_str()))
 			{
 				LOGE("Failed to write disassembly to file: %s\n", output.c_str());
@@ -1194,7 +1203,11 @@ int main(int argc, char *argv[])
 				              uint64_string(replayer.graphics_hashes[i]) +
 				              "." + stage_to_string(info->pStages[j].stage);
 
-				LOGI("Dumping disassembly to: %s\n", path.c_str());
+				if (disasm_match.empty())
+					LOGI("Dumping disassembly to: %s\n", path.c_str());
+				else if (disassembled.find(disasm_match) != std::string::npos)
+					LOGI("Found matching string, dumping disassembly to: %s\n", path.c_str());
+
 				if (!write_string_to_file(path.c_str(), disassembled.c_str()))
 				{
 					LOGE("Failed to write disassembly to file: %s\n", output.c_str());
@@ -1222,7 +1235,11 @@ int main(int argc, char *argv[])
 			              uint64_string(replayer.compute_hashes[i]) +
 			              "." + stage_to_string(info->stage.stage);
 
-			LOGI("Dumping disassembly to: %s\n", path.c_str());
+			if (disasm_match.empty())
+				LOGI("Dumping disassembly to: %s\n", path.c_str());
+			else if (disassembled.find(disasm_match) != std::string::npos)
+				LOGI("Found matching string, dumping disassembly to: %s\n", path.c_str());
+
 			if (!write_string_to_file(path.c_str(), disassembled.c_str()))
 			{
 				LOGE("Failed to write disassembly to file: %s\n", output.c_str());
@@ -1250,7 +1267,11 @@ int main(int argc, char *argv[])
 						uint64_string(replayer.raytracing_hashes[i]) +
 						"." + stage_to_string(info->pStages[j].stage);
 
-				LOGI("Dumping disassembly to: %s\n", path.c_str());
+				if (disasm_match.empty())
+					LOGI("Dumping disassembly to: %s\n", path.c_str());
+				else if (disassembled.find(disasm_match) != std::string::npos)
+					LOGI("Found matching string, dumping disassembly to: %s\n", path.c_str());
+
 				if (!write_string_to_file(path.c_str(), disassembled.c_str()))
 				{
 					LOGE("Failed to write disassembly to file: %s\n", output.c_str());
