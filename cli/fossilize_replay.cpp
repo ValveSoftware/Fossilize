@@ -2104,17 +2104,7 @@ struct ThreadedReplayer : StateCreatorInterface
 		if (opts.pipeline_stats)
 			info->flags |= VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR;
 
-		// Compute does not support pipeline libraries, but sanitizes the code paths.
-		auto *library_info = find_pnext<VkPipelineLibraryCreateInfoKHR>(
-				VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR, create_info->pNext);
-		bool consumes_libraries = library_info && library_info->libraryCount != 0;
 		bool generates_library = (create_info->flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0;
-
-		if (generates_library && consumes_libraries)
-		{
-			LOGE("Consuming pipeline libraries while creating a pipeline library. This cannot work.\n");
-			return false;
-		}
 
 		auto &per_thread = get_per_thread_data();
 		unsigned index = per_thread.current_parse_index;
@@ -2163,16 +2153,7 @@ struct ThreadedReplayer : StateCreatorInterface
 		if (opts.pipeline_stats)
 			info->flags |= VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR;
 
-		auto *library_info = find_pnext<VkPipelineLibraryCreateInfoKHR>(
-				VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR, create_info->pNext);
-		bool consumes_libraries = library_info && library_info->libraryCount != 0;
 		bool generates_library = (create_info->flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0;
-
-		if (generates_library && consumes_libraries)
-		{
-			LOGE("Consuming pipeline libraries while creating a pipeline library. This cannot work.\n");
-			return false;
-		}
 
 		auto &per_thread = get_per_thread_data();
 		unsigned index = per_thread.current_parse_index;
@@ -2219,14 +2200,7 @@ struct ThreadedReplayer : StateCreatorInterface
 		info->basePipelineHandle = VK_NULL_HANDLE;
 		info->basePipelineIndex = -1;
 
-		bool consumes_libraries = create_info->pLibraryInfo && create_info->pLibraryInfo->libraryCount != 0;
 		bool generates_library = (create_info->flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0;
-
-		if (generates_library && consumes_libraries)
-		{
-			LOGE("Consuming pipeline libraries while creating a pipeline library. This cannot work.\n");
-			return false;
-		}
 
 		if (opts.pipeline_stats)
 			info->flags |= VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR;
@@ -2549,7 +2523,9 @@ struct ThreadedReplayer : StateCreatorInterface
 
 	template <typename DerivedInfo>
 	void enqueue_parent_pipeline(const DerivedInfo &info, Hash h,
-	                             const unordered_map<Hash, VkPipeline> &pipelines)
+	                             const unordered_map<Hash, VkPipeline> &pipelines,
+	                             unordered_map<Hash, DerivedInfo> &parents,
+	                             unordered_set<Hash> &parsed_parents)
 	{
 		if (!h)
 			return;
@@ -2558,8 +2534,14 @@ struct ThreadedReplayer : StateCreatorInterface
 		// it's not necessarily complete yet!
 		bool is_outside_range = pipelines.count(h) == 0;
 
-		if (is_outside_range)
+		if (is_outside_range && parsed_parents.count(h) == 0)
 		{
+			{
+				lock_guard<mutex> holder(hash_lock);
+				if (parents.count(h) != 0)
+					return;
+			}
+
 			PipelineWorkItem work_item;
 			work_item.index = info.index;
 			work_item.hash = h;
@@ -2568,28 +2550,53 @@ struct ThreadedReplayer : StateCreatorInterface
 			work_item.memory_context_index = PARENT_PIPELINE_MEMORY_CONTEXT;
 			work_item.tag = DerivedInfo::get_tag();
 			enqueue_work_item(work_item);
+
+			parsed_parents.insert(h);
 		}
 	}
 
 	template <typename DerivedInfo>
 	void enqueue_parent_pipelines_pipeline_library(const DerivedInfo &info,
-												   const VkPipelineLibraryCreateInfoKHR &library_info,
-	                                               const unordered_map<Hash, VkPipeline> &pipelines)
+	                                               const VkPipelineLibraryCreateInfoKHR &library_info,
+	                                               const unordered_map<Hash, VkPipeline> &pipelines,
+	                                               unordered_map<Hash, DerivedInfo> &parents,
+	                                               unordered_set<Hash> &parsed_parents)
 	{
 		for (uint32_t i = 0; i < library_info.libraryCount; i++)
 		{
 			Hash h = (Hash)library_info.pLibraries[i];
-			enqueue_parent_pipeline(info, h, pipelines);
+			enqueue_parent_pipeline(info, h, pipelines, parents, parsed_parents);
 		}
 	}
 
 	template <typename DerivedInfo>
 	void enqueue_parent_pipelines(const DerivedInfo &info,
-	                              const unordered_map<Hash, VkPipeline> &pipelines)
+	                              const unordered_map<Hash, VkPipeline> &pipelines,
+	                              unordered_map<Hash, DerivedInfo> &parents,
+	                              unordered_set<Hash> &parsed_parents)
 	{
 		auto *library = work_item_get_library_info(info);
 		if (library)
-			enqueue_parent_pipelines_pipeline_library(info, *library, pipelines);
+			enqueue_parent_pipelines_pipeline_library(info, *library, pipelines, parents, parsed_parents);
+	}
+
+	template <typename DerivedInfo>
+	void compute_parents_depth(const unordered_map<Hash, DerivedInfo> &parents,
+	                           unordered_map<Hash, uint32_t> &parents_depth,
+	                           const DerivedInfo &info, uint32_t depth)
+	{
+		parents_depth[info.hash] = max(parents_depth.at(info.hash), depth);
+
+		auto library = work_item_get_library_info(info);
+		if (!library)
+			return;
+
+		for (uint32_t i = 0; i < library->libraryCount; i++)
+		{
+			Hash parent = (Hash)library->pLibraries[i];
+			if (parents.count(parent) != 0 && parents_depth.at(parent) <= depth)
+				compute_parents_depth(parents, parents_depth, parents.at(parent), depth + 1);
+		}
 	}
 
 	template <typename DerivedInfo>
@@ -2633,6 +2640,8 @@ struct ThreadedReplayer : StateCreatorInterface
 			       pass * NUM_PIPELINE_MEMORY_CONTEXTS +
 			       memory_index;
 		};
+
+		auto parsed_parents = make_shared<unordered_set<Hash>>();
 
 		for (unsigned hash_offset = 0; hash_offset < hashes.size(); hash_offset += NUM_PIPELINES_PER_CONTEXT, iteration++)
 		{
@@ -2722,7 +2731,7 @@ struct ThreadedReplayer : StateCreatorInterface
 			if (memory_index == 0)
 			{
 				work.push_back({ get_order_index(MAINTAIN_LRU_CACHE),
-				                 [this]() {
+				                 [this, &parents]() {
 					                 // Now all worker threads are drained for any work which needs shader modules,
 					                 // so we can maintain the shader module LRU cache while we're parsing new pipelines in parallel.
 					                 shader_modules.prune_cache([this](Hash hash, VkShaderModule module) {
@@ -2749,6 +2758,8 @@ struct ThreadedReplayer : StateCreatorInterface
 									 // will be "parent" pipelines, which leads to excessive memory bloat
 									 // if we keep them around indefinitely.
 					                 free_pipelines();
+
+					                 parents.clear();
 
 					                 // We might have to replay the same pipeline multiple times,
 					                 // forget handle references.
@@ -2796,20 +2807,36 @@ struct ThreadedReplayer : StateCreatorInterface
 			                 }});
 
 			work.push_back({ get_order_index(ENQUEUE_OUT_OF_RANGE_PARENT_PIPELINES),
-			                 [this, &pipelines, derived]() {
+			                 [this, &pipelines, &parents, derived, parsed_parents]() {
 				                 // Figure out which of the parent pipelines we need.
 				                 for (auto &d : *derived)
-					                 enqueue_parent_pipelines(d, pipelines);
+					                 enqueue_parent_pipelines(d, pipelines, parents, *parsed_parents);
 			                 }});
 
 			if (memory_index == 0)
 			{
 				// This is a join-like operation. We need to wait for all parent pipelines and all shader modules to have completed.
 				work.push_back({get_order_index(ENQUEUE_SHADER_MODULE_SECONDARY_OFFSET),
-				                [this, &parents, hash_offset, start_index]()
+				                [this, &pipelines, &parents, parsed_parents, hash_offset, start_index]()
 				                {
-					                // Wait until all parent pipelines have been parsed.
-					                sync_worker_memory_context(PARENT_PIPELINE_MEMORY_CONTEXT);
+					                unordered_set<Hash> dependencies;
+					                while (true)
+					                {
+						                // Wait until all parent pipelines have been parsed.
+						                sync_worker_memory_context(PARENT_PIPELINE_MEMORY_CONTEXT);
+
+						                dependencies.clear();
+						                std::swap(*parsed_parents, dependencies);
+
+						                for (auto dependency : dependencies)
+						                {
+							                // Handle nested libraries.
+							                enqueue_parent_pipelines(parents.at(dependency), pipelines, parents, *parsed_parents);
+						                }
+
+						                if (parsed_parents->empty())
+							                break;
+					                }
 
 					                // Queue up all shader modules if somehow the shader modules used by parent pipelines differ from children ...
 					                for (auto &parent : parents)
@@ -2840,36 +2867,73 @@ struct ThreadedReplayer : StateCreatorInterface
 					                }
 
 					                sync_worker_memory_context(SHADER_MODULE_MEMORY_CONTEXT);
-					                // The shader module memory context recycles itself.
 
-					                for (auto &parent : parents)
+					                unordered_map<Hash, uint32_t> parents_depth;
+
+					                dependencies.clear();
+					                for (const auto &parent : parents)
 					                {
-						                if (parent.second.info)
-						                {
-							                resolve_shader_modules(parent.second.info);
-							                assert(!work_item_is_derived(parent.second));
-							                enqueue_pipeline(parent.second.hash, parent.second.info,
-							                                 parent.second.pipeline,
-							                                 parent.second.index + hash_offset + start_index,
-							                                 PARENT_PIPELINE_MEMORY_CONTEXT);
-						                }
+						                parents_depth[parent.first] = 0;
+
+						                auto library = work_item_get_library_info(parent.second);
+						                if (!library)
+							                continue;
+
+						                for (uint32_t i = 0; i < library->libraryCount; i++)
+							                dependencies.insert((Hash)library->pLibraries[i]);
 					                }
 
-					                parents.clear();
+					                // Compute the depth of every pipeline library using a DFS starting at the top level libraries.
+					                vector<DerivedInfo> ordered_parents; 
+					                for (const auto &parent : parents)
+					                {
+						                ordered_parents.push_back(parent.second);
+
+						                if (dependencies.count(parent.first) == 0)
+							                compute_parents_depth(parents, parents_depth, parent.second, 0);
+					                }
+
+					                sort(begin(ordered_parents), end(ordered_parents), [&](const DerivedInfo &a, const DerivedInfo &b) -> bool {
+						                return parents_depth.at(a.hash) > parents_depth.at(b.hash);
+					                });
 
 					                // We might be pulling in a parent pipeline from another memory context next iteration,
 					                // so we need to wait for all normal memory contexts.
 					                for (unsigned i = 0; i < NUM_PIPELINE_MEMORY_CONTEXTS; i++)
 						                sync_worker_memory_context(i);
+
+					                uint32_t prev_depth = UINT32_MAX;
+					                for (auto &parent : ordered_parents)
+					                {
+						                if (!parent.info)
+							                continue;
+
+						                if (!derived_work_item_is_satisfied(parent, pipelines))
+							                continue;
+
+						                uint32_t depth = parents_depth.at(parent.hash);
+						                if (prev_depth != depth)
+						                {
+							                prev_depth = depth;
+							                sync_worker_memory_context(PARENT_PIPELINE_MEMORY_CONTEXT);
+						                }
+
+						                resolve_shader_modules(parent.info);
+						                resolve_pipelines(parent, pipelines);
+						                enqueue_pipeline(parent.hash, parent.info,
+						                                 parent.pipeline,
+						                                 parent.index + hash_offset + start_index,
+						                                 PARENT_PIPELINE_MEMORY_CONTEXT);
+					                }
 				                }});
 			}
 
 			work.push_back({ get_order_index(ENQUEUE_DERIVED_PIPELINES_OFFSET),
-			                 [this, &pipelines, derived, memory_index, hash_offset, start_index]() {
+			                 [this, &pipelines, derived, &parents, memory_index, hash_offset, start_index]() {
 				                 // Go over all pipelines. If there are no further dependencies to resolve, we can go ahead and queue them up.
 				                 // If an entry exists in pipelines, we have queued up that hash earlier, but it might not be done compiling yet.
 				                 auto itr = unstable_remove_if(begin(*derived), end(*derived), [&](const DerivedInfo &info) -> bool {
-					                 return derived_work_item_is_satisfied(info, pipelines);
+					                 return derived_work_item_is_satisfied(info, pipelines) || parents.count(info.hash) != 0;
 				                 });
 
 				                 // Wait for parent pipelines to complete.
@@ -2887,7 +2951,11 @@ struct ThreadedReplayer : StateCreatorInterface
 				                 // Now we can enqueue pipeline compilation with correct pipeline handles.
 				                 for (auto i = itr; i != end(*derived); ++i)
 				                 {
-					                 if (i->info)
+					                 // itr always removes parent pipelines because they were already compiled
+					                 // in ENQUEUE_SHADER_MODULE_SECONDARY_OFFSET. This way they do not count
+					                 // as skipped, but it also means that we need to skip them here to avoid
+					                 // compiling them twice.
+					                 if (i->info && parents.count(i->hash) == 0)
 					                 {
 						                 resolve_shader_modules(i->info);
 						                 resolve_pipelines(*i, pipelines);
