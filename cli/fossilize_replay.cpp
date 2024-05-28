@@ -2453,18 +2453,26 @@ struct ThreadedReplayer : StateCreatorInterface
 	}
 
 	template <typename DerivedInfo>
+	static const VkPipelineLibraryCreateInfoKHR *work_item_get_library_info(const DerivedInfo &info)
+	{
+		if (!info.info)
+			return nullptr;
+		return find_pnext<VkPipelineLibraryCreateInfoKHR>(
+			VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR, info.info->pNext);
+	}
+
+	static const VkPipelineLibraryCreateInfoKHR *work_item_get_library_info(const DeferredRayTracingInfo &info)
+	{
+		return info.info ? info.info->pLibraryInfo : nullptr;
+	}
+
+	template <typename DerivedInfo>
 	static bool work_item_is_derived(const DerivedInfo &info)
 	{
 		if (!info.info)
 			return true;
-		auto *library = find_pnext<VkPipelineLibraryCreateInfoKHR>(
-				VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR, info.info->pNext);
+		auto *library = work_item_get_library_info(info);
 		return library && library->libraryCount != 0;
-	}
-
-	static bool work_item_is_derived(const DeferredRayTracingInfo &info)
-	{
-		return !info.info || (info.info->pLibraryInfo && info.info->pLibraryInfo->libraryCount != 0);
 	}
 
 	bool pipeline_library_info_is_satisfied(const VkPipelineLibraryCreateInfoKHR &library,
@@ -2491,44 +2499,21 @@ struct ThreadedReplayer : StateCreatorInterface
 	}
 
 	template <typename DerivedInfo>
-	bool derived_work_item_is_satisfied_base(const DerivedInfo &info,
-	                                         const unordered_map<Hash, VkPipeline> &pipelines) const
+	bool derived_work_item_is_satisfied(const DerivedInfo &info,
+	                                    const unordered_map<Hash, VkPipeline> &pipelines) const
 	{
 		if (!info.info)
 			return false;
-		auto *library = find_pnext<VkPipelineLibraryCreateInfoKHR>(
-				VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR, info.info->pNext);
+		auto *library = work_item_get_library_info(info);
 		return !library || pipeline_library_info_is_satisfied(*library, pipelines);
-	}
-
-	template <typename DerivedInfo>
-	bool derived_work_item_is_satisfied(const DerivedInfo &info,
-										const unordered_map<Hash, VkPipeline> &pipelines) const
-	{
-		return derived_work_item_is_satisfied_base(info, pipelines);
-	}
-
-	bool derived_work_item_is_satisfied(const DeferredRayTracingInfo &info,
-	                                    const unordered_map<Hash, VkPipeline> &pipelines) const
-	{
-		if (!derived_work_item_is_satisfied_base(info, pipelines))
-			return false;
-		return !info.info->pLibraryInfo || pipeline_library_info_is_satisfied(*info.info->pLibraryInfo, pipelines);
 	}
 
 	template <typename DerivedInfo>
 	void resolve_pipelines(DerivedInfo &info, const unordered_map<Hash, VkPipeline> &pipelines) const
 	{
-		auto *library = find_pnext<VkPipelineLibraryCreateInfoKHR>(
-				VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR, info.info->pNext);
+		auto *library = work_item_get_library_info(info);
 		if (library)
 			resolve_pipeline_library_info(*library, pipelines);
-	}
-
-	void resolve_pipelines(DeferredRayTracingInfo &info, const unordered_map<Hash, VkPipeline> &pipelines) const
-	{
-		if (info.info->pLibraryInfo)
-			resolve_pipeline_library_info(*info.info->pLibraryInfo, pipelines);
 	}
 
 	template <typename DerivedInfo>
@@ -2602,20 +2587,9 @@ struct ThreadedReplayer : StateCreatorInterface
 	void enqueue_parent_pipelines(const DerivedInfo &info,
 	                              const unordered_map<Hash, VkPipeline> &pipelines)
 	{
-		if (info.info)
-		{
-			auto *library = find_pnext<VkPipelineLibraryCreateInfoKHR>(
-					VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR, info.info->pNext);
-			if (library)
-				enqueue_parent_pipelines_pipeline_library(info, *library, pipelines);
-		}
-	}
-
-	void enqueue_parent_pipelines(const DeferredRayTracingInfo &info,
-	                              const unordered_map<Hash, VkPipeline> &pipelines)
-	{
-		if (info.info && info.info->pLibraryInfo)
-			enqueue_parent_pipelines_pipeline_library(info, *info.info->pLibraryInfo, pipelines);
+		auto *library = work_item_get_library_info(info);
+		if (library)
+			enqueue_parent_pipelines_pipeline_library(info, *library, pipelines);
 	}
 
 	template <typename DerivedInfo>
