@@ -87,6 +87,7 @@ struct VulkanFeatures
 	VkPhysicalDeviceMutableDescriptorTypeFeaturesEXT mutable_descriptor_type;
 	VkPhysicalDeviceRobustness2FeaturesEXT robustness2;
 	VkPhysicalDeviceImageRobustnessFeaturesEXT image_robustness;
+	VkPhysicalDevicePipelineRobustnessFeaturesEXT pipeline_robustness;
 	VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT graphics_pipeline_library;
 	VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV fragment_shading_rate_enums;
 	VkPhysicalDeviceDepthClipControlFeaturesEXT depth_clip_control;
@@ -237,6 +238,11 @@ static inline void reset_features(VkPhysicalDeviceRobustness2FeaturesEXT &featur
 static inline void reset_features(VkPhysicalDeviceImageRobustnessFeaturesEXT &features, VkBool32 state)
 {
 	features.robustImageAccess = state;
+}
+
+static inline void reset_features(VkPhysicalDevicePipelineRobustnessFeaturesEXT &features, VkBool32 state)
+{
+	features.pipelineRobustness = state;
 }
 
 static inline void reset_features(VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV &features, VkBool32 state)

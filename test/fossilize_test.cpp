@@ -3594,6 +3594,8 @@ static bool test_pdf_recording()
 			VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_NV, nullptr, 80, 90 };
 	VkPhysicalDeviceDescriptorBufferFeaturesEXT descriptor_buffer = {
 			VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT, nullptr, 100, 200, 300, 400 };
+	VkPhysicalDevicePipelineRobustnessFeaturesEXT pipeline_robustness = {
+			VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_ROBUSTNESS_FEATURES_EXT, nullptr, 500 };
 
 	// Expect to fail here.
 	if (test_pdf_recording(&dummy, h))
@@ -3623,7 +3625,7 @@ static bool test_pdf_recording()
 	}
 
 	{
-		constexpr size_t hash_count = 8;
+		constexpr size_t hash_count = 9;
 		Hash hashes[hash_count] = {};
 
 		pdf2.pNext = nullptr;
@@ -3650,6 +3652,9 @@ static bool test_pdf_recording()
 		mesh_nv.pNext = &descriptor_buffer;
 		if (!test_pdf_recording(&pdf2, hashes[7]))
 			return false;
+		descriptor_buffer.pNext = &pipeline_robustness;
+		if (!test_pdf_recording(&pdf2, hashes[8]))
+			return false;
 
 		// Make sure all of these are serialized.
 		for (unsigned i = 1; i < hash_count; i++)
@@ -3657,7 +3662,7 @@ static bool test_pdf_recording()
 				return false;
 
 		// If we move PDF2 last, hash should still be invariant.
-		descriptor_buffer.pNext = &pdf2;
+		pipeline_robustness.pNext = &pdf2;
 		pdf2.pNext = nullptr;
 		if (!test_pdf_recording(&robustness2, hashes[0]))
 			return false;

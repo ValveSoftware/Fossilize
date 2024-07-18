@@ -131,6 +131,21 @@ static void filter_feature_enablement(
 			reset_features(features.image_robustness, VK_FALSE);
 		}
 
+		const auto *pipeline_robustness = find_pnext<VkPhysicalDevicePipelineRobustnessFeaturesEXT>(
+				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_ROBUSTNESS_FEATURES_EXT,
+				target_features->pNext);
+
+		if (pipeline_robustness)
+		{
+			features.pipeline_robustness.pipelineRobustness =
+					features.pipeline_robustness.pipelineRobustness &&
+					pipeline_robustness->pipelineRobustness;
+		}
+		else
+		{
+			reset_features(features.pipeline_robustness, VK_FALSE);
+		}
+
 		const auto *fragment_shading_rate_enums = find_pnext<VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV>(
 				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_ENUMS_FEATURES_NV,
 				target_features->pNext);
@@ -244,6 +259,7 @@ static void filter_feature_enablement(
 		pdf.features.robustBufferAccess = VK_FALSE;
 		reset_features(features.robustness2, VK_FALSE);
 		reset_features(features.image_robustness, VK_FALSE);
+		reset_features(features.pipeline_robustness, VK_FALSE);
 		reset_features(features.fragment_shading_rate_enums, VK_FALSE);
 		reset_features(features.fragment_shading_rate, VK_FALSE);
 		reset_features(features.mesh_shader, VK_FALSE);
@@ -332,6 +348,17 @@ static void filter_active_extensions(VkPhysicalDeviceFeatures2 &pdf,
 			if (feature->robustImageAccess == VK_FALSE)
 			{
 				remove_extension(active_extensions, out_extension_count, VK_EXT_IMAGE_ROBUSTNESS_EXTENSION_NAME);
+				accept = false;
+			}
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_ROBUSTNESS_FEATURES_EXT:
+		{
+			auto *feature = reinterpret_cast<VkPhysicalDevicePipelineRobustnessFeaturesEXT *>(s);
+			if (feature->pipelineRobustness== VK_FALSE)
+			{
+				remove_extension(active_extensions, out_extension_count, VK_EXT_PIPELINE_ROBUSTNESS_EXTENSION_NAME);
 				accept = false;
 			}
 			break;

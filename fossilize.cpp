@@ -343,6 +343,7 @@ struct StateReplayer::Impl
 	bool parse_pnext_chain_pdf2(const Value &pnext, void **out_pnext) FOSSILIZE_WARN_UNUSED;
 	bool parse_robustness2_features(const Value &state, VkPhysicalDeviceRobustness2FeaturesEXT **out_features) FOSSILIZE_WARN_UNUSED;
 	bool parse_image_robustness_features(const Value &state, VkPhysicalDeviceImageRobustnessFeaturesEXT **out_features) FOSSILIZE_WARN_UNUSED;
+	bool parse_pipeline_robustness_features(const Value &state, VkPhysicalDevicePipelineRobustnessFeaturesEXT **out_features) FOSSILIZE_WARN_UNUSED;
 	bool parse_fragment_shading_rate_enums_features(const Value &state, VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV **out_features) FOSSILIZE_WARN_UNUSED;
 	bool parse_fragment_shading_rate_features(const Value &state, VkPhysicalDeviceFragmentShadingRateFeaturesKHR **out_features) FOSSILIZE_WARN_UNUSED;
 	bool parse_mesh_shader_features(const Value &state, VkPhysicalDeviceMeshShaderFeaturesEXT **out_features) FOSSILIZE_WARN_UNUSED;
@@ -368,6 +369,7 @@ struct StateReplayer::Impl
 			VkPipelineLibraryCreateInfoKHR **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_viewport_depth_clip_control(
 			const Value &state, VkPipelineViewportDepthClipControlCreateInfoEXT **clip) FOSSILIZE_WARN_UNUSED;
+	bool parse_robustness(const Value &state, VkPipelineRobustnessCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_uints(const Value &attachments, const uint32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	bool parse_sints(const Value &attachments, const int32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	const char *duplicate_string(const char *str, size_t len);
@@ -521,6 +523,8 @@ struct StateRecorder::Impl
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPhysicalDeviceImageRobustnessFeaturesEXT *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkPhysicalDevicePipelineRobustnessFeaturesEXT *create_info,
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPhysicalDeviceFragmentShadingRateFeaturesKHR *create_info,
@@ -559,6 +563,8 @@ struct StateRecorder::Impl
 	void *copy_pnext_struct(const VkPipelineLibraryCreateInfoKHR *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPipelineViewportDepthClipControlCreateInfoEXT *create_info,
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkPipelineRobustnessCreateInfoEXT *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPipelineShaderStageModuleIdentifierCreateInfoEXT *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
@@ -699,6 +705,13 @@ static void hash_pnext_struct(const StateRecorder *,
 
 static void hash_pnext_struct(const StateRecorder *,
                               Hasher &h,
+                              const VkPhysicalDevicePipelineRobustnessFeaturesEXT &info)
+{
+	h.u32(info.pipelineRobustness);
+}
+
+static void hash_pnext_struct(const StateRecorder *,
+                              Hasher &h,
                               const VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV &info)
 {
 	h.u32(info.noInvocationFragmentShadingRates);
@@ -762,6 +775,10 @@ static bool hash_pnext_chain_pdf2(const StateRecorder *recorder, Hasher &h, cons
 
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_ROBUSTNESS_FEATURES_EXT:
 			hash_pnext_struct(recorder, h, *static_cast<const VkPhysicalDeviceImageRobustnessFeaturesEXT *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_ROBUSTNESS_FEATURES_EXT:
+			hash_pnext_struct(recorder, h, *static_cast<const VkPhysicalDevicePipelineRobustnessFeaturesEXT *>(pNext));
 			break;
 
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_ENUMS_FEATURES_NV:
@@ -1382,6 +1399,15 @@ static void hash_pnext_struct(const StateRecorder *,
 	h.u32(dynamic_state_info && dynamic_state_info->depth_clip_negative_one_to_one ? 0 : info.negativeOneToOne);
 }
 
+static void hash_pnext_struct(const StateRecorder *,
+                              Hasher &h,
+                              const VkPipelineRobustnessCreateInfoEXT &info)
+{
+	h.u32(info.storageBuffers);
+	h.u32(info.uniformBuffers);
+	h.u32(info.images);
+}
+
 static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const void *pNext,
                              const DynamicStateInfo *dynamic_state_info,
                              VkGraphicsPipelineLibraryFlagsEXT state_flags)
@@ -1518,6 +1544,10 @@ static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const voi
 
 		case VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_DEPTH_CLIP_CONTROL_CREATE_INFO_EXT:
 			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineViewportDepthClipControlCreateInfoEXT *>(pNext), dynamic_state_info);
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_ROBUSTNESS_CREATE_INFO_EXT:
+			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineRobustnessCreateInfoEXT*>(pNext));
 			break;
 
 		default:
@@ -4558,6 +4588,18 @@ bool StateReplayer::Impl::parse_viewport_depth_clip_control(const Value &state,
 	return true;
 }
 
+bool StateReplayer::Impl::parse_robustness(const Value &state,
+                                           VkPipelineRobustnessCreateInfoEXT **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkPipelineRobustnessCreateInfoEXT>();
+	*out_info = info;
+	info->storageBuffers = static_cast<VkPipelineRobustnessBufferBehaviorEXT>(state["storageBuffers"].GetUint());
+	info->uniformBuffers = static_cast<VkPipelineRobustnessBufferBehaviorEXT>(state["uniformBuffers"].GetUint());
+	info->vertexInputs = static_cast<VkPipelineRobustnessBufferBehaviorEXT>(state["vertexInputs"].GetUint());
+	info->images = static_cast<VkPipelineRobustnessImageBehaviorEXT>(state["images"].GetUint());
+	return true;
+}
+
 bool StateReplayer::Impl::parse_mutable_descriptor_type(const Value &state,
                                                         VkMutableDescriptorTypeCreateInfoEXT **out_info)
 {
@@ -4903,6 +4945,15 @@ bool StateReplayer::Impl::parse_pnext_chain(
 			break;
 		}
 
+		case VK_STRUCTURE_TYPE_PIPELINE_ROBUSTNESS_CREATE_INFO_EXT:
+		{
+			VkPipelineRobustnessCreateInfoEXT *pipeline_robustness = nullptr;
+			if (!parse_robustness(next, &pipeline_robustness))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(pipeline_robustness);
+			break;
+		}
+
 		default:
 			LOGE_LEVEL("Failed to parse pNext chain for sType: %d\n", int(sType));
 			return false;
@@ -4947,6 +4998,17 @@ bool StateReplayer::Impl::parse_image_robustness_features(const Value &state,
 	*out_features = features;
 
 	features->robustImageAccess = state["robustImageAccess"].GetUint();
+	return true;
+}
+
+bool StateReplayer::Impl::parse_pipeline_robustness_features(
+		const Value &state,
+		VkPhysicalDevicePipelineRobustnessFeaturesEXT **out_features)
+{
+	auto *features = allocator.allocate_cleared<VkPhysicalDevicePipelineRobustnessFeaturesEXT>();
+	*out_features = features;
+
+	features->pipelineRobustness = state["pipelineRobustness"].GetUint();
 	return true;
 }
 
@@ -5045,6 +5107,15 @@ bool StateReplayer::Impl::parse_pnext_chain_pdf2(const Value &pnext, void **outp
 			if (!parse_image_robustness_features(next, &image_robustness))
 				return false;
 			new_struct = reinterpret_cast<VkBaseInStructure *>(image_robustness);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_ROBUSTNESS_FEATURES_EXT:
+		{
+			VkPhysicalDevicePipelineRobustnessFeaturesEXT *pipeline_robustness = nullptr;
+			if (!parse_pipeline_robustness_features(next, &pipeline_robustness))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(pipeline_robustness);
 			break;
 		}
 
@@ -5581,6 +5652,13 @@ void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineViewportDepthClipCo
 	return clip;
 }
 
+void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineRobustnessCreateInfoEXT *create_info,
+                                             ScratchAllocator &alloc)
+{
+	auto *pipeline_robustness = copy(create_info, 1, alloc);
+	return pipeline_robustness;
+}
+
 void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineShaderStageModuleIdentifierCreateInfoEXT *create_info,
                                              ScratchAllocator &alloc)
 {
@@ -5848,6 +5926,13 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 		case VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_DEPTH_CLIP_CONTROL_CREATE_INFO_EXT:
 		{
 			auto *ci = static_cast<const VkPipelineViewportDepthClipControlCreateInfoEXT *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			break;
+		}
+
+                case VK_STRUCTURE_TYPE_PIPELINE_ROBUSTNESS_CREATE_INFO_EXT:
+		{
+			auto *ci = static_cast<const VkPipelineRobustnessCreateInfoEXT*>(pNext);
 			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
 			break;
 		}
@@ -6585,6 +6670,13 @@ void *StateRecorder::Impl::copy_pnext_struct(
 }
 
 void *StateRecorder::Impl::copy_pnext_struct(
+		const VkPhysicalDevicePipelineRobustnessFeaturesEXT *create_info,
+		ScratchAllocator &alloc)
+{
+	return copy(create_info, 1, alloc);
+}
+
+void *StateRecorder::Impl::copy_pnext_struct(
 		const VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV *create_info,
 		ScratchAllocator &alloc)
 {
@@ -6640,6 +6732,13 @@ bool StateRecorder::Impl::copy_pnext_chain_pdf2(const void *pNext, ScratchAlloca
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_ROBUSTNESS_FEATURES_EXT:
 		{
 			auto *ci = static_cast<const VkPhysicalDeviceImageRobustnessFeaturesEXT *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_ROBUSTNESS_FEATURES_EXT:
+		{
+			auto *ci = static_cast<const VkPhysicalDevicePipelineRobustnessFeaturesEXT *>(pNext);
 			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
 			break;
 		}
@@ -8885,6 +8984,19 @@ static bool json_value(const VkPipelineViewportDepthClipControlCreateInfoEXT &cr
 }
 
 template <typename Allocator>
+static bool json_value(const VkPipelineRobustnessCreateInfoEXT &create_info,
+                       Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("storageBuffers", create_info.storageBuffers, alloc);
+	value.AddMember("uniformBuffers", create_info.uniformBuffers, alloc);
+	value.AddMember("images", create_info.images, alloc);
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
 static bool json_value(const VkSubpassDescriptionDepthStencilResolve &create_info, Allocator &alloc, Value *out_value);
 template <typename Allocator>
 static bool json_value(const VkFragmentShadingRateAttachmentInfoKHR &create_info, Allocator &alloc, Value *out_value);
@@ -9051,6 +9163,11 @@ static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *o
 
 		case VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_DEPTH_CLIP_CONTROL_CREATE_INFO_EXT:
 			if (!json_value(*static_cast<const VkPipelineViewportDepthClipControlCreateInfoEXT *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_ROBUSTNESS_CREATE_INFO_EXT:
+			if (!json_value(*static_cast<const VkPipelineRobustnessCreateInfoEXT *>(pNext), alloc, &next))
 				return false;
 			break;
 
@@ -9959,6 +10076,16 @@ static bool json_value(const VkPhysicalDeviceImageRobustnessFeaturesEXT &create_
 }
 
 template <typename Allocator>
+static bool json_value(const VkPhysicalDevicePipelineRobustnessFeaturesEXT &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("pipelineRobustness", uint32_t(create_info.pipelineRobustness), alloc);
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
 static bool json_value(const VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -10038,6 +10165,11 @@ static bool pnext_chain_pdf2_json_value(const void *pNext, Allocator &alloc, Val
 
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_ROBUSTNESS_FEATURES_EXT:
 			if (!json_value(*static_cast<const VkPhysicalDeviceImageRobustnessFeaturesEXT *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_ROBUSTNESS_FEATURES_EXT:
+			if (!json_value(*static_cast<const VkPhysicalDevicePipelineRobustnessFeaturesEXT *>(pNext), alloc, &next))
 				return false;
 			break;
 
@@ -10672,6 +10804,7 @@ static const void *pnext_chain_pdf2_skip_ignored_entries(const void *pNext)
 		// Robustness tends to affect shader compilation.
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT:
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_ROBUSTNESS_FEATURES_EXT:
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_ROBUSTNESS_FEATURES_EXT:
 		// Affects compilation on NV.
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_ENUMS_FEATURES_NV:
 		// Affects compilation on RADV.
