@@ -354,6 +354,7 @@ struct PruneReplayer : StateCreatorInterface
 
 			if (library_info)
 			{
+				bool has_default_allowed_library = false;
 				for (uint32_t i = 0; i < library_info->libraryCount; i++)
 				{
 					if (banned_graphics.count((Hash) library_info->pLibraries[i]))
@@ -361,8 +362,24 @@ struct PruneReplayer : StateCreatorInterface
 						allow_pipeline = false;
 						break;
 					}
+
+					if (!has_default_allowed_library)
+					{
+						// Only consider libraries which contain modules.
+						auto itr = graphics_pipelines.find((Hash) library_info->pLibraries[i]);
+						if (itr != graphics_pipelines.end() && itr->second->stageCount != 0)
+							has_default_allowed_library = true;
+					}
 				}
+
+				// At least one of the dependent libraries must be considered allowed to pass.
+				if (create_info->stageCount == 0 && allow_pipeline)
+					allow_pipeline = has_default_allowed_library;
 			}
+
+			// Never include libraries by default unless they contain real code.
+			if ((create_info->flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0 && create_info->stageCount == 0)
+				allow_pipeline = false;
 		}
 
 		// Need to defer this since we need to access pipeline libraries.
@@ -467,6 +484,7 @@ struct PruneReplayer : StateCreatorInterface
 
 			if (create_info->pLibraryInfo)
 			{
+				bool has_default_allowed_library = false;
 				for (uint32_t i = 0; i < create_info->pLibraryInfo->libraryCount; i++)
 				{
 					if (banned_raytracing.count((Hash) create_info->pLibraryInfo->pLibraries[i]))
@@ -474,8 +492,22 @@ struct PruneReplayer : StateCreatorInterface
 						allow_pipeline = false;
 						break;
 					}
+
+					if (!has_default_allowed_library &&
+					    raytracing_pipelines.count((Hash) create_info->pLibraryInfo->pLibraries[i]))
+					{
+						has_default_allowed_library = true;
+					}
+
+					// At least one of the dependent libraries must be considered allowed to pass.
+					if (create_info->stageCount == 0 && allow_pipeline)
+						allow_pipeline = has_default_allowed_library;
 				}
 			}
+
+			// Never include libraries by default unless they contain real code.
+			if ((create_info->flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0 && create_info->stageCount == 0)
+				allow_pipeline = false;
 		}
 
 		// Need to defer this since we need to access pipeline libraries.
