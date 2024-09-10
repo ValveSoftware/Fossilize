@@ -11,7 +11,12 @@
 		"VK_KHR_push_descriptor",
 		"VK_EXT_conditional_rendering",
 		"VK_NVX_multiview_per_view_attributes",
-		"VK_EXT_discard_rectangles"
+		"VK_EXT_discard_rectangles",
+		"VK_EXT_conservative_rasterization",
+		"VK_EXT_depth_clip_enable",
+		"VK_KHR_shared_presentable_image",
+		"VK_KHR_maintenance2",
+		"VK_EXT_debug_utils"
 	],
 	"spirvcapabilities" : [
 		"Matrix",
