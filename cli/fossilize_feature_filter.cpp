@@ -456,7 +456,8 @@ struct FeatureFilter::Impl
 	bool render_pass_is_supported(const VkRenderPassCreateInfo *info) const;
 	bool render_pass2_is_supported(const VkRenderPassCreateInfo2 *info) const;
 	bool graphics_pipeline_is_supported(const VkGraphicsPipelineCreateInfo *info) const;
-	bool color_blend_state_is_supported(const VkPipelineColorBlendStateCreateInfo *info) const;
+	bool color_blend_state_is_supported(const VkPipelineColorBlendStateCreateInfo *info,
+	                                    const VkDynamicState *dynamic_states, uint32_t num_dynamic_states) const;
 	bool compute_pipeline_is_supported(const VkComputePipelineCreateInfo *info) const;
 	bool raytracing_pipeline_is_supported(const VkRayTracingPipelineCreateInfoKHR *info) const;
 
@@ -3268,42 +3269,62 @@ static bool blend_op_is_advanced(VkBlendOp blend_op)
 	}
 }
 
-bool FeatureFilter::Impl::color_blend_state_is_supported(const VkPipelineColorBlendStateCreateInfo *info) const
+static bool has_dynamic_state(const VkDynamicState *dynamic_states, uint32_t num_dynamic_states, VkDynamicState dyn_state)
 {
-	bool has_advanced_color_blend = false;
-	bool has_advanced_alpha_blend = false;
+	for (uint32_t i = 0; i < num_dynamic_states; i++)
+		if (dynamic_states[i] == dyn_state)
+			return true;
+	return false;
+}
 
-	for (uint32_t i = 0; i < info->attachmentCount; i++)
+bool FeatureFilter::Impl::color_blend_state_is_supported(
+		const VkPipelineColorBlendStateCreateInfo *info,
+		const VkDynamicState *dynamic_states, uint32_t num_dynamic_states) const
+{
+	if (!has_dynamic_state(dynamic_states, num_dynamic_states, VK_DYNAMIC_STATE_LOGIC_OP_ENABLE_EXT) &&
+	    info->logicOpEnable && !features2.features.logicOp)
 	{
-		auto &att = info->pAttachments[i];
-
-		bool advanced_color = blend_op_is_advanced(att.colorBlendOp);
-		bool advanced_alpha = blend_op_is_advanced(att.alphaBlendOp);
-		has_advanced_color_blend = has_advanced_color_blend || advanced_color;
-		has_advanced_alpha_blend = has_advanced_alpha_blend || advanced_alpha;
-
-		if (advanced_color || advanced_alpha)
-		{
-			if (att.alphaBlendOp != att.colorBlendOp)
-				return false;
-			if (!props.blend_operation_advanced.advancedBlendAllOperations)
-				return false;
-		}
+		return false;
 	}
 
-	if (has_advanced_color_blend || has_advanced_alpha_blend)
+	if (!has_dynamic_state(dynamic_states, num_dynamic_states, VK_DYNAMIC_STATE_COLOR_BLEND_EQUATION_EXT) &&
+	    !has_dynamic_state(dynamic_states, num_dynamic_states, VK_DYNAMIC_STATE_COLOR_BLEND_ADVANCED_EXT))
 	{
-		if (info->attachmentCount > props.blend_operation_advanced.advancedBlendMaxColorAttachments)
-			return false;
+		bool has_advanced_color_blend = false;
+		bool has_advanced_alpha_blend = false;
 
-		if (!props.blend_operation_advanced.advancedBlendIndependentBlend)
+		for (uint32_t i = 0; i < info->attachmentCount; i++)
 		{
-			for (uint32_t i = 1; i < info->attachmentCount; i++)
+			auto &att = info->pAttachments[i];
+
+			bool advanced_color = blend_op_is_advanced(att.colorBlendOp);
+			bool advanced_alpha = blend_op_is_advanced(att.alphaBlendOp);
+			has_advanced_color_blend = has_advanced_color_blend || advanced_color;
+			has_advanced_alpha_blend = has_advanced_alpha_blend || advanced_alpha;
+
+			if (advanced_color || advanced_alpha)
 			{
-				if (info->pAttachments[i].alphaBlendOp != info->pAttachments[0].alphaBlendOp)
+				if (att.alphaBlendOp != att.colorBlendOp)
 					return false;
-				if (info->pAttachments[i].colorBlendOp != info->pAttachments[0].colorBlendOp)
+				if (!props.blend_operation_advanced.advancedBlendAllOperations)
 					return false;
+			}
+		}
+
+		if (has_advanced_color_blend || has_advanced_alpha_blend)
+		{
+			if (info->attachmentCount > props.blend_operation_advanced.advancedBlendMaxColorAttachments)
+				return false;
+
+			if (!props.blend_operation_advanced.advancedBlendIndependentBlend)
+			{
+				for (uint32_t i = 1; i < info->attachmentCount; i++)
+				{
+					if (info->pAttachments[i].alphaBlendOp != info->pAttachments[0].alphaBlendOp)
+						return false;
+					if (info->pAttachments[i].colorBlendOp != info->pAttachments[0].colorBlendOp)
+						return false;
+				}
 			}
 		}
 	}
@@ -3375,9 +3396,20 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 			return false;
 	}
 
+	const VkDynamicState *dynamic_states = nullptr;
+	uint32_t num_dynamic_states = 0;
+
+	if (info->pDynamicState)
+	{
+		dynamic_states = info->pDynamicState->pDynamicStates;
+		num_dynamic_states = info->pDynamicState->dynamicStateCount;
+	}
+
 	if (info->pColorBlendState && !pnext_chain_is_supported(info->pColorBlendState->pNext))
 		return false;
-	if (info->pColorBlendState && !color_blend_state_is_supported(info->pColorBlendState))
+
+	if (info->pColorBlendState && !color_blend_state_is_supported(
+			info->pColorBlendState, dynamic_states, num_dynamic_states))
 		return false;
 
 	if (info->pVertexInputState && !pnext_chain_is_supported(info->pVertexInputState->pNext))
