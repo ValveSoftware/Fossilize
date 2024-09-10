@@ -470,11 +470,15 @@ struct FeatureFilter::Impl
 	bool subpass_dependency_is_supported(const VkSubpassDependency &dep) const;
 	bool subpass_dependency2_is_supported(const VkSubpassDependency2 &dep) const;
 	bool dependency_flags_is_supported(VkDependencyFlags deps) const;
+	bool store_op_is_supported(VkAttachmentStoreOp store_op) const;
+	bool load_op_is_supported(VkAttachmentLoadOp load_op) const;
 
 	bool subgroup_size_control_is_supported(const VkPipelineShaderStageCreateInfo &stage) const;
 
 	bool multiview_mask_is_supported(uint32_t mask) const;
 	bool image_layout_is_supported(VkImageLayout layout) const;
+	bool access_mask_is_supported(VkAccessFlags2 access) const;
+	bool stage_mask_is_supported(VkPipelineStageFlags2 stages) const;
 	bool format_is_supported(VkFormat, VkFormatFeatureFlags format_features) const;
 
 	bool stage_limits_are_supported(const VkPipelineShaderStageCreateInfo &info) const;
@@ -1321,6 +1325,17 @@ bool FeatureFilter::Impl::sampler_is_supported(const VkSamplerCreateInfo *info) 
 	if ((info->flags & VK_SAMPLER_CREATE_NON_SEAMLESS_CUBE_MAP_BIT_EXT) != 0)
 		if (!features.non_seamless_cube_map.nonSeamlessCubeMap)
 			return false;
+
+	if ((info->addressModeU == VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE ||
+	     info->addressModeV == VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE ||
+	     info->addressModeW == VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE) &&
+	    enabled_extensions.count(VK_KHR_SAMPLER_MIRROR_CLAMP_TO_EDGE_EXTENSION_NAME) == 0)
+		return false;
+
+	if ((info->minFilter == VK_FILTER_CUBIC_IMG ||
+	     info->magFilter == VK_FILTER_CUBIC_IMG) &&
+	    enabled_extensions.count(VK_IMG_FILTER_CUBIC_EXTENSION_NAME) == 0)
+		return false;
 
 	return pnext_chain_is_supported(info->pNext);
 }
@@ -2581,6 +2596,68 @@ bool FeatureFilter::Impl::format_is_supported(VkFormat format, VkFormatFeatureFl
 	return query->format_is_supported(format, format_features);
 }
 
+bool FeatureFilter::Impl::access_mask_is_supported(VkAccessFlags2 access) const
+{
+	if ((access & (VK_ACCESS_2_VIDEO_DECODE_READ_BIT_KHR | VK_ACCESS_2_VIDEO_DECODE_WRITE_BIT_KHR)) != 0 &&
+	    enabled_extensions.count(VK_KHR_VIDEO_DECODE_QUEUE_EXTENSION_NAME) == 0)
+		return false;
+
+	if ((access & (VK_ACCESS_TRANSFORM_FEEDBACK_WRITE_BIT_EXT |
+	               VK_ACCESS_TRANSFORM_FEEDBACK_COUNTER_READ_BIT_EXT |
+	               VK_ACCESS_TRANSFORM_FEEDBACK_COUNTER_WRITE_BIT_EXT)) != 0 &&
+	    features.transform_feedback.transformFeedback == VK_FALSE)
+		return false;
+
+	return true;
+}
+
+bool FeatureFilter::Impl::stage_mask_is_supported(VkPipelineStageFlags2 stages) const
+{
+	if ((stages & VK_PIPELINE_STAGE_2_VIDEO_DECODE_BIT_KHR) != 0 &&
+	    enabled_extensions.count(VK_KHR_VIDEO_DECODE_QUEUE_EXTENSION_NAME) == 0)
+		return false;
+
+	if ((stages & VK_PIPELINE_STAGE_TRANSFORM_FEEDBACK_BIT_EXT) != 0 &&
+	    features.transform_feedback.transformFeedback == VK_FALSE)
+		return false;
+
+	return true;
+}
+
+bool FeatureFilter::Impl::load_op_is_supported(VkAttachmentLoadOp load_op) const
+{
+	switch (load_op)
+	{
+	case VK_ATTACHMENT_LOAD_OP_CLEAR:
+	case VK_ATTACHMENT_LOAD_OP_LOAD:
+	case VK_ATTACHMENT_LOAD_OP_DONT_CARE:
+		return true;
+	case VK_ATTACHMENT_LOAD_OP_NONE_KHR:
+		return enabled_extensions.count(VK_KHR_LOAD_STORE_OP_NONE_EXTENSION_NAME) != 0 ||
+		       enabled_extensions.count(VK_EXT_LOAD_STORE_OP_NONE_EXTENSION_NAME) != 0;
+	default:
+		return false;
+	}
+}
+
+bool FeatureFilter::Impl::store_op_is_supported(VkAttachmentStoreOp store_op) const
+{
+	switch (store_op)
+	{
+	case VK_ATTACHMENT_STORE_OP_DONT_CARE:
+	case VK_ATTACHMENT_STORE_OP_STORE:
+		return true;
+	case VK_ATTACHMENT_STORE_OP_NONE_KHR:
+		return api_version >= VK_API_VERSION_1_3 ||
+		       enabled_extensions.count(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME) != 0 ||
+		       enabled_extensions.count(VK_EXT_LOAD_STORE_OP_NONE_EXTENSION_NAME) != 0 ||
+		       enabled_extensions.count(VK_KHR_LOAD_STORE_OP_NONE_EXTENSION_NAME) != 0 ||
+		       enabled_extensions.count(VK_QCOM_RENDER_PASS_STORE_OPS_EXTENSION_NAME) != 0;
+	default:
+		return false;
+	}
+}
+
 bool FeatureFilter::Impl::image_layout_is_supported(VkImageLayout layout) const
 {
 	switch (layout)
@@ -2622,6 +2699,11 @@ bool FeatureFilter::Impl::image_layout_is_supported(VkImageLayout layout) const
 	case VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT:
 		return features.attachment_feedback_loop_layout.attachmentFeedbackLoopLayout == VK_TRUE;
 
+	case VK_IMAGE_LAYOUT_VIDEO_DECODE_DPB_KHR:
+	case VK_IMAGE_LAYOUT_VIDEO_DECODE_SRC_KHR:
+	case VK_IMAGE_LAYOUT_VIDEO_DECODE_DST_KHR:
+		return enabled_extensions.count(VK_KHR_VIDEO_DECODE_QUEUE_EXTENSION_NAME) != 0;
+
 	default:
 		return false;
 	}
@@ -2654,6 +2736,14 @@ bool FeatureFilter::Impl::attachment_description_is_supported(const VkAttachment
 		return false;
 	if (format_features && !format_is_supported(desc.format, format_features))
 		return false;
+	if (!load_op_is_supported(desc.loadOp))
+		return false;
+	if (!load_op_is_supported(desc.stencilLoadOp))
+		return false;
+	if (!store_op_is_supported(desc.storeOp))
+		return false;
+	if (!store_op_is_supported(desc.stencilStoreOp))
+		return false;
 
 	return true;
 }
@@ -2668,6 +2758,14 @@ bool FeatureFilter::Impl::attachment_description2_is_supported(const VkAttachmen
 	if (!image_layout_is_supported(desc.finalLayout))
 		return false;
 	if (format_features && !format_is_supported(desc.format, format_features))
+		return false;
+	if (!load_op_is_supported(desc.loadOp))
+		return false;
+	if (!load_op_is_supported(desc.stencilLoadOp))
+		return false;
+	if (!store_op_is_supported(desc.storeOp))
+		return false;
+	if (!store_op_is_supported(desc.stencilStoreOp))
 		return false;
 
 	return true;
@@ -2723,7 +2821,8 @@ bool FeatureFilter::Impl::dependency_flags_is_supported(VkDependencyFlags deps) 
 {
 	constexpr VkDependencyFlags supported_flags = VK_DEPENDENCY_BY_REGION_BIT |
 	                                              VK_DEPENDENCY_FEEDBACK_LOOP_BIT_EXT |
-	                                              VK_DEPENDENCY_VIEW_LOCAL_BIT;
+	                                              VK_DEPENDENCY_VIEW_LOCAL_BIT |
+	                                              VK_DEPENDENCY_DEVICE_GROUP_BIT;
 
 	if ((deps & ~supported_flags) != 0)
 		return false;
@@ -2735,6 +2834,9 @@ bool FeatureFilter::Impl::dependency_flags_is_supported(VkDependencyFlags deps) 
 	if ((deps & VK_DEPENDENCY_VIEW_LOCAL_BIT) != 0)
 		if (!features.multiview.multiview)
 			return false;
+
+	if ((deps & VK_DEPENDENCY_DEVICE_GROUP_BIT) != 0 && api_version < VK_API_VERSION_1_1)
+		return false;
 
 	return true;
 }
