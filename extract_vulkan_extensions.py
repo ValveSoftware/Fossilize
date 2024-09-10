@@ -89,6 +89,11 @@ def main():
     struct_types = {}
     enum_types = {}
     bitmask_requirements = {}
+    type_aliases = {}
+
+    for t in root.find('types').iter('type'):
+        if 'alias' in t.attrib:
+            type_aliases[t.attrib['name']] = t.attrib['alias']
 
     for t in root.find('types').iter('type'):
         if 'category' not in t.attrib:
@@ -100,13 +105,16 @@ def main():
             extended_types = set()
             extends = set()
             if 'structextends' in t.attrib:
-                extends = set(t.attrib['structextends'].split(','))
+                extends = t.attrib['structextends'].split(',')
+                extends = set([type_aliases.get(x, x) for x in extends])
             for elem in t.iter('member'):
                 member_type = elem.find('type').text
+                member_type = type_aliases.get(member_type, member_type)
                 member_types.append(member_type)
             struct_types[name] = StructType(extends, member_types)
         elif category == 'enum':
             name = t.attrib['name']
+            name = type_aliases.get(name, name)
             if name != 'VkStructureType' and name != 'VkFormat' and name != 'VkObjectType':
                 enum_types[name] = EnumType(set()) 
         elif category == 'bitmask' and 'requires' in t.attrib:
@@ -159,6 +167,7 @@ def main():
             for reqs in ext.iter('require'):
                 for t in reqs.iter('type'):
                     type_name = t.attrib['name']
+                    type_name = type_aliases.get(type_name, type_name)
                     if type_name in active_types or type_name in extending_types:
                         new_structs.append(type_name)
                     elif type_name in active_enums:
@@ -173,6 +182,7 @@ def main():
 
                 for e in reqs.iter('enum'):
                     enum_name = e.attrib['name']
+                    enum_name = type_aliases.get(enum_name, enum_name)
                     if 'extends' in e.attrib and e.attrib['extends'] in active_enums:
                         extended_enums.append((e.attrib['extends'], enum_name))
 
