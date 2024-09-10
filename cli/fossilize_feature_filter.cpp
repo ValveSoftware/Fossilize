@@ -1667,8 +1667,10 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 	case spv::CapabilityImageQuery:
 	case spv::CapabilityDerivativeControl:
 	case spv::CapabilityStorageImageExtendedFormats:
-	case spv::CapabilityDeviceGroup:
 		return true;
+
+	case spv::CapabilityDeviceGroup:
+		return api_version >= VK_API_VERSION_1_1;
 
 	case spv::CapabilityGeometry:
 		return features2.features.geometryShader == VK_TRUE;
@@ -1882,9 +1884,9 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 		return props.float_control.shaderRoundingModeRTZFloat16 == VK_TRUE ||
 		       props.float_control.shaderRoundingModeRTZFloat32 == VK_TRUE ||
 		       props.float_control.shaderRoundingModeRTZFloat64 == VK_TRUE;
-	case spv::CapabilityComputeDerivativeGroupQuadsNV:
+	case spv::CapabilityComputeDerivativeGroupQuadsKHR:
 		return features.compute_shader_derivatives.computeDerivativeGroupQuads == VK_TRUE;
-	case spv::CapabilityComputeDerivativeGroupLinearNV:
+	case spv::CapabilityComputeDerivativeGroupLinearKHR:
 		return features.compute_shader_derivatives.computeDerivativeGroupLinear == VK_TRUE;
 	case spv::CapabilityFragmentBarycentricKHR:
 		return features.barycentric.fragmentShaderBarycentric == VK_TRUE;
@@ -1943,6 +1945,52 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 		return features.shader_integer_dot_product.shaderIntegerDotProduct == VK_TRUE;
 	case spv::CapabilityMeshShadingEXT:
 		return features.mesh_shader.meshShader == VK_TRUE;
+	case spv::CapabilityFragmentFullyCoveredEXT:
+		return enabled_extensions.count(VK_EXT_CONSERVATIVE_RASTERIZATION_EXTENSION_NAME) != 0;
+	// AtomicFloat16VectorNV does not seem to exist.
+	case spv::CapabilityRayCullMaskKHR:
+		return features.ray_tracing_maintenance1.rayTracingMaintenance1 == VK_TRUE;
+	case spv::CapabilityRayTracingMotionBlurNV:
+		return features.ray_tracing_motion_blur_nv.rayTracingMotionBlur == VK_TRUE;
+	case spv::CapabilityRayTracingOpacityMicromapEXT:
+		return enabled_extensions.count(VK_EXT_OPACITY_MICROMAP_EXTENSION_NAME) != 0;
+	case spv::CapabilityTextureSampleWeightedQCOM:
+		return features.image_processing_qcom.textureSampleWeighted == VK_TRUE;
+	case spv::CapabilityTextureBoxFilterQCOM:
+		return features.image_processing_qcom.textureBoxFilter == VK_TRUE;
+	case spv::CapabilityTextureBlockMatchQCOM:
+		return features.image_processing_qcom.textureBlockMatch == VK_TRUE;
+	case spv::CapabilityTextureBlockMatch2QCOM:
+		return features.image_processing2_qcom.textureBlockMatch2 == VK_TRUE;
+	case spv::CapabilityCoreBuiltinsARM:
+		return features.shader_core_builtins_arm.shaderCoreBuiltins == VK_TRUE;
+	case spv::CapabilityShaderInvocationReorderNV:
+		return enabled_extensions.count(VK_NV_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME) != 0;
+	// Ignore CapabilityClusterCullingShadingHUAWEI. It does not exist in SPIR-V headers.
+	case spv::CapabilityRayTracingPositionFetchKHR:
+	case spv::CapabilityRayQueryPositionFetchKHR:
+		return features.ray_tracing_position_fetch.rayTracingPositionFetch == VK_TRUE;
+	case spv::CapabilityTileImageColorReadAccessEXT:
+		return features.shader_tile_image.shaderTileImageColorReadAccess == VK_TRUE;
+	case spv::CapabilityTileImageDepthReadAccessEXT:
+		return features.shader_tile_image.shaderTileImageDepthReadAccess == VK_TRUE;
+	case spv::CapabilityTileImageStencilReadAccessEXT:
+		return features.shader_tile_image.shaderTileImageStencilReadAccess == VK_TRUE;
+	case spv::CapabilityCooperativeMatrixKHR:
+		return features.cooperative_matrix.cooperativeMatrix == VK_TRUE;
+	// Ignore ShaderEnqueueAMDX, it's a beta extension.
+	case spv::CapabilityGroupNonUniformRotateKHR:
+		return features.shader_subgroup_rotate.shaderSubgroupRotate == VK_TRUE;
+	case spv::CapabilityExpectAssumeKHR:
+		return features.expect_assume.shaderExpectAssume == VK_TRUE;
+	case spv::CapabilityFloatControls2:
+		return features.shader_float_controls2.shaderFloatControls2 == VK_TRUE;
+	case spv::CapabilityQuadControlKHR:
+		return features.shader_quad_control.shaderQuadControl == VK_TRUE;
+	case spv::CapabilityRawAccessChainsNV:
+		return features.raw_access_chains_nv.shaderRawAccessChains == VK_TRUE;
+	case spv::CapabilityReplicatedCompositesEXT:
+		return features.shader_replicated_composites.shaderReplicatedComposites == VK_TRUE;
 
 	default:
 		LOGE("Unrecognized SPIR-V capability %u, treating as unsupported.\n", unsigned(cap));
