@@ -16,7 +16,10 @@
 		"VK_EXT_depth_clip_enable",
 		"VK_KHR_shared_presentable_image",
 		"VK_KHR_maintenance2",
-		"VK_EXT_debug_utils"
+		"VK_KHR_create_renderpass2",
+		"VK_EXT_debug_utils",
+		"VK_EXT_sampler_filter_minmax",
+		"VK_EXT_inline_uniform_block"
 	],
 	"spirvcapabilities" : [
 		"Matrix",

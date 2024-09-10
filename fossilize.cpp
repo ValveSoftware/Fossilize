@@ -2038,7 +2038,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 			{
 				if (!dynamic_info.color_blend_equation)
 				{
-					h.u32(b.pAttachments[i].alphaBlendOp);
+					h.u32(dynamic_info.color_blend_advanced ? 0 : b.pAttachments[i].alphaBlendOp);
 					h.u32(dynamic_info.color_blend_advanced ? 0 : b.pAttachments[i].colorBlendOp);
 					h.u32(b.pAttachments[i].dstAlphaBlendFactor);
 					h.u32(b.pAttachments[i].srcAlphaBlendFactor);

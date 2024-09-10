@@ -155,6 +155,7 @@ struct VulkanProperties
 	VkPhysicalDeviceExtendedDynamicState3PropertiesEXT extended_dynamic_state3;
 	VkPhysicalDeviceMeshShaderPropertiesEXT mesh_shader;
 	VkPhysicalDeviceShaderModuleIdentifierPropertiesEXT shader_module_identifier;
+	VkPhysicalDeviceBlendOperationAdvancedPropertiesEXT blend_operation_advanced;
 
 	struct
 	{

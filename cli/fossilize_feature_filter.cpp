@@ -456,6 +456,7 @@ struct FeatureFilter::Impl
 	bool render_pass_is_supported(const VkRenderPassCreateInfo *info) const;
 	bool render_pass2_is_supported(const VkRenderPassCreateInfo2 *info) const;
 	bool graphics_pipeline_is_supported(const VkGraphicsPipelineCreateInfo *info) const;
+	bool color_blend_state_is_supported(const VkPipelineColorBlendStateCreateInfo *info) const;
 	bool compute_pipeline_is_supported(const VkComputePipelineCreateInfo *info) const;
 	bool raytracing_pipeline_is_supported(const VkRayTracingPipelineCreateInfoKHR *info) const;
 
@@ -2683,6 +2684,10 @@ bool FeatureFilter::Impl::access_mask_is_supported(VkAccessFlags2 access) const
 	    features.conditional_rendering.conditionalRendering == VK_FALSE)
 		return false;
 
+	if ((access & VK_ACCESS_COLOR_ATTACHMENT_READ_NONCOHERENT_BIT_EXT) != 0 &&
+	    enabled_extensions.count(VK_EXT_BLEND_OPERATION_ADVANCED_EXTENSION_NAME) == 0)
+		return false;
+
 	return true;
 }
 
@@ -3206,6 +3211,106 @@ bool FeatureFilter::Impl::render_pass2_is_supported(const VkRenderPassCreateInfo
 	return true;
 }
 
+static bool blend_op_is_advanced(VkBlendOp blend_op)
+{
+	switch (blend_op)
+	{
+	case VK_BLEND_OP_ZERO_EXT:
+	case VK_BLEND_OP_SRC_EXT:
+	case VK_BLEND_OP_DST_EXT:
+	case VK_BLEND_OP_SRC_OVER_EXT:
+	case VK_BLEND_OP_DST_OVER_EXT:
+	case VK_BLEND_OP_SRC_IN_EXT:
+	case VK_BLEND_OP_DST_IN_EXT:
+	case VK_BLEND_OP_SRC_OUT_EXT:
+	case VK_BLEND_OP_DST_OUT_EXT:
+	case VK_BLEND_OP_SRC_ATOP_EXT:
+	case VK_BLEND_OP_DST_ATOP_EXT:
+	case VK_BLEND_OP_XOR_EXT:
+	case VK_BLEND_OP_MULTIPLY_EXT:
+	case VK_BLEND_OP_SCREEN_EXT:
+	case VK_BLEND_OP_OVERLAY_EXT:
+	case VK_BLEND_OP_DARKEN_EXT:
+	case VK_BLEND_OP_LIGHTEN_EXT:
+	case VK_BLEND_OP_COLORDODGE_EXT:
+	case VK_BLEND_OP_COLORBURN_EXT:
+	case VK_BLEND_OP_HARDLIGHT_EXT:
+	case VK_BLEND_OP_SOFTLIGHT_EXT:
+	case VK_BLEND_OP_DIFFERENCE_EXT:
+	case VK_BLEND_OP_EXCLUSION_EXT:
+	case VK_BLEND_OP_INVERT_EXT:
+	case VK_BLEND_OP_INVERT_RGB_EXT:
+	case VK_BLEND_OP_LINEARDODGE_EXT:
+	case VK_BLEND_OP_LINEARBURN_EXT:
+	case VK_BLEND_OP_VIVIDLIGHT_EXT:
+	case VK_BLEND_OP_LINEARLIGHT_EXT:
+	case VK_BLEND_OP_PINLIGHT_EXT:
+	case VK_BLEND_OP_HARDMIX_EXT:
+	case VK_BLEND_OP_HSL_HUE_EXT:
+	case VK_BLEND_OP_HSL_SATURATION_EXT:
+	case VK_BLEND_OP_HSL_COLOR_EXT:
+	case VK_BLEND_OP_HSL_LUMINOSITY_EXT:
+	case VK_BLEND_OP_PLUS_EXT:
+	case VK_BLEND_OP_PLUS_CLAMPED_EXT:
+	case VK_BLEND_OP_PLUS_CLAMPED_ALPHA_EXT:
+	case VK_BLEND_OP_PLUS_DARKER_EXT:
+	case VK_BLEND_OP_MINUS_EXT:
+	case VK_BLEND_OP_MINUS_CLAMPED_EXT:
+	case VK_BLEND_OP_CONTRAST_EXT:
+	case VK_BLEND_OP_INVERT_OVG_EXT:
+	case VK_BLEND_OP_RED_EXT:
+	case VK_BLEND_OP_GREEN_EXT:
+	case VK_BLEND_OP_BLUE_EXT:
+		return true;
+
+	default:
+		return false;
+	}
+}
+
+bool FeatureFilter::Impl::color_blend_state_is_supported(const VkPipelineColorBlendStateCreateInfo *info) const
+{
+	bool has_advanced_color_blend = false;
+	bool has_advanced_alpha_blend = false;
+
+	for (uint32_t i = 0; i < info->attachmentCount; i++)
+	{
+		auto &att = info->pAttachments[i];
+
+		bool advanced_color = blend_op_is_advanced(att.colorBlendOp);
+		bool advanced_alpha = blend_op_is_advanced(att.alphaBlendOp);
+		has_advanced_color_blend = has_advanced_color_blend || advanced_color;
+		has_advanced_alpha_blend = has_advanced_alpha_blend || advanced_alpha;
+
+		if (advanced_color || advanced_alpha)
+		{
+			if (att.alphaBlendOp != att.colorBlendOp)
+				return false;
+			if (!props.blend_operation_advanced.advancedBlendAllOperations)
+				return false;
+		}
+	}
+
+	if (has_advanced_color_blend || has_advanced_alpha_blend)
+	{
+		if (info->attachmentCount > props.blend_operation_advanced.advancedBlendMaxColorAttachments)
+			return false;
+
+		if (!props.blend_operation_advanced.advancedBlendIndependentBlend)
+		{
+			for (uint32_t i = 1; i < info->attachmentCount; i++)
+			{
+				if (info->pAttachments[i].alphaBlendOp != info->pAttachments[0].alphaBlendOp)
+					return false;
+				if (info->pAttachments[i].colorBlendOp != info->pAttachments[0].colorBlendOp)
+					return false;
+			}
+		}
+	}
+
+	return true;
+}
+
 bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelineCreateInfo *info) const
 {
 	// Only allow flags we recognize and validate.
@@ -3272,6 +3377,9 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 
 	if (info->pColorBlendState && !pnext_chain_is_supported(info->pColorBlendState->pNext))
 		return false;
+	if (info->pColorBlendState && !color_blend_state_is_supported(info->pColorBlendState))
+		return false;
+
 	if (info->pVertexInputState && !pnext_chain_is_supported(info->pVertexInputState->pNext))
 		return false;
 	if (info->pDepthStencilState && !pnext_chain_is_supported(info->pDepthStencilState->pNext))
