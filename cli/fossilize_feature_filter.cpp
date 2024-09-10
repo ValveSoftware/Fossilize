@@ -465,6 +465,7 @@ struct FeatureFilter::Impl
 	                                         VkFormatFeatureFlags format_features) const;
 	bool attachment_description2_is_supported(const VkAttachmentDescription2 &desc,
 	                                          VkFormatFeatureFlags format_features) const;
+	bool subpass_description_flags_is_supported(VkSubpassDescriptionFlags flags) const;
 	bool subpass_description_is_supported(const VkSubpassDescription &sub) const;
 	bool subpass_description2_is_supported(const VkSubpassDescription2 &sub) const;
 	bool subpass_dependency_is_supported(const VkSubpassDependency &dep) const;
@@ -2678,6 +2679,10 @@ bool FeatureFilter::Impl::access_mask_is_supported(VkAccessFlags2 access) const
 	    features.transform_feedback.transformFeedback == VK_FALSE)
 		return false;
 
+	if ((access & VK_ACCESS_CONDITIONAL_RENDERING_READ_BIT_EXT) != 0 &&
+	    features.conditional_rendering.conditionalRendering == VK_FALSE)
+		return false;
+
 	return true;
 }
 
@@ -2689,6 +2694,10 @@ bool FeatureFilter::Impl::stage_mask_is_supported(VkPipelineStageFlags2 stages) 
 
 	if ((stages & VK_PIPELINE_STAGE_TRANSFORM_FEEDBACK_BIT_EXT) != 0 &&
 	    features.transform_feedback.transformFeedback == VK_FALSE)
+		return false;
+
+	if ((stages & VK_PIPELINE_STAGE_CONDITIONAL_RENDERING_BIT_EXT) != 0 &&
+	    features.conditional_rendering.conditionalRendering == VK_FALSE)
 		return false;
 
 	return true;
@@ -2841,8 +2850,28 @@ bool FeatureFilter::Impl::attachment_description2_is_supported(const VkAttachmen
 	return true;
 }
 
+bool FeatureFilter::Impl::subpass_description_flags_is_supported(VkSubpassDescriptionFlags flags) const
+{
+	constexpr VkSubpassDescriptionFlags supported_flags =
+			VK_SUBPASS_DESCRIPTION_PER_VIEW_ATTRIBUTES_BIT_NVX |
+			VK_SUBPASS_DESCRIPTION_PER_VIEW_POSITION_X_ONLY_BIT_NVX;
+
+	if (flags & ~supported_flags)
+		return false;
+
+	if ((flags & (VK_SUBPASS_DESCRIPTION_PER_VIEW_ATTRIBUTES_BIT_NVX |
+	              VK_SUBPASS_DESCRIPTION_PER_VIEW_POSITION_X_ONLY_BIT_NVX)) != 0 &&
+	    enabled_extensions.count(VK_NVX_MULTIVIEW_PER_VIEW_ATTRIBUTES_EXTENSION_NAME) == 0)
+		return false;
+
+	return true;
+}
+
 bool FeatureFilter::Impl::subpass_description_is_supported(const VkSubpassDescription &sub) const
 {
+	if (!subpass_description_flags_is_supported(sub.flags))
+		return false;
+
 	for (uint32_t j = 0; j < sub.colorAttachmentCount; j++)
 	{
 		if (!attachment_reference_is_supported(sub.pColorAttachments[j]))
@@ -2863,6 +2892,9 @@ bool FeatureFilter::Impl::subpass_description_is_supported(const VkSubpassDescri
 
 bool FeatureFilter::Impl::subpass_description2_is_supported(const VkSubpassDescription2 &sub) const
 {
+	if (!subpass_description_flags_is_supported(sub.flags))
+		return false;
+
 	if (!pnext_chain_is_supported(sub.pNext))
 		return false;
 
@@ -3333,6 +3365,9 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 				break;
 
 			case VK_DYNAMIC_STATE_DISCARD_RECTANGLE_EXT:
+				// Technically we have to check v2, but whatever.
+			case VK_DYNAMIC_STATE_DISCARD_RECTANGLE_MODE_EXT:
+			case VK_DYNAMIC_STATE_DISCARD_RECTANGLE_ENABLE_EXT:
 				if (!enabled_extensions.count(VK_EXT_DISCARD_RECTANGLES_EXTENSION_NAME))
 					return false;
 				break;

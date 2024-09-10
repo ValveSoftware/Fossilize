@@ -111,6 +111,7 @@ struct VulkanFeatures
 	VkPhysicalDeviceRawAccessChainsFeaturesNV raw_access_chains_nv;
 	VkPhysicalDeviceShaderReplicatedCompositesFeaturesEXT shader_replicated_composites;
 	VkPhysicalDevicePipelineRobustnessFeaturesEXT pipeline_robustness;
+	VkPhysicalDeviceConditionalRenderingFeaturesEXT conditional_rendering;
 
 	struct
 	{

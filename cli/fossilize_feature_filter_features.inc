@@ -101,3 +101,4 @@ FE(SHADER_QUAD_CONTROL, shader_quad_control, KHR);
 FE(RAW_ACCESS_CHAINS, raw_access_chains_nv, NV);
 FE(SHADER_REPLICATED_COMPOSITES, shader_replicated_composites, EXT);
 FE(PIPELINE_ROBUSTNESS, pipeline_robustness, EXT);
+FE(CONDITIONAL_RENDERING, conditional_rendering, EXT);

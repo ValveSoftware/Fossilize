@@ -7,7 +7,11 @@
 		"VK_EXT_transform_feedback",
 		"VK_KHR_dynamic_rendering",
 		"VK_KHR_multiview",
-		"VK_KHR_device_group"
+		"VK_KHR_device_group",
+		"VK_KHR_push_descriptor",
+		"VK_EXT_conditional_rendering",
+		"VK_NVX_multiview_per_view_attributes",
+		"VK_EXT_discard_rectangles"
 	],
 	"spirvcapabilities" : [
 		"Matrix",
