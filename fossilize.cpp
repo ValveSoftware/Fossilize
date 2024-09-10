@@ -162,6 +162,7 @@ struct DynamicStateInfo
 	bool color_write_enable;
 	bool depth_bias_enable;
 	bool discard_rectangle;
+	bool discard_rectangle_mode;
 	bool fragment_shading_rate;
 	bool sample_locations;
 	bool line_stipple;
@@ -1295,7 +1296,7 @@ static void hash_pnext_struct(const StateRecorder *,
                               const DynamicStateInfo *dynamic_state_info)
 {
 	h.u32(info.flags);
-	h.u32(info.discardRectangleMode);
+	h.u32(dynamic_state_info->discard_rectangle_mode ? 0 : info.discardRectangleMode);
 	h.u32(info.discardRectangleCount);
 	if (dynamic_state_info && !dynamic_state_info->discard_rectangle)
 	{
@@ -1707,6 +1708,7 @@ static DynamicStateInfo parse_dynamic_state_info(const VkPipelineDynamicStateCre
 		DYN_STATE(COLOR_WRITE_ENABLE_EXT, color_write_enable);
 		DYN_STATE(PRIMITIVE_RESTART_ENABLE_EXT, primitive_restart_enable);
 		DYN_STATE(DISCARD_RECTANGLE_EXT, discard_rectangle);
+		DYN_STATE(DISCARD_RECTANGLE_MODE_EXT, discard_rectangle_mode);
 		DYN_STATE(FRAGMENT_SHADING_RATE_KHR, fragment_shading_rate);
 		DYN_STATE(SAMPLE_LOCATIONS_EXT, sample_locations);
 		DYN_STATE(LINE_STIPPLE_EXT, line_stipple);
@@ -4437,7 +4439,7 @@ bool StateReplayer::Impl::parse_input_attachment_aspect(const Value &state,
 }
 
 bool StateReplayer::Impl::parse_discard_rectangles(const Value &state,
-						   VkPipelineDiscardRectangleStateCreateInfoEXT **out_info)
+                                                   VkPipelineDiscardRectangleStateCreateInfoEXT **out_info)
 {
 	auto *info = allocator.allocate_cleared<VkPipelineDiscardRectangleStateCreateInfoEXT>();
 	*out_info = info;
