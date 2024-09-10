@@ -1300,6 +1300,76 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 			break;
 		}
 
+		case VK_STRUCTURE_TYPE_PIPELINE_ROBUSTNESS_CREATE_INFO_EXT:
+		{
+			if (enabled_extensions.count(VK_EXT_PIPELINE_ROBUSTNESS_EXTENSION_NAME) == 0)
+				return false;
+			auto *info = static_cast<const VkPipelineRobustnessCreateInfoEXT *>(pNext);
+
+			if ((info->storageBuffers != VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_DEVICE_DEFAULT_EXT ||
+			     info->images != VK_PIPELINE_ROBUSTNESS_IMAGE_BEHAVIOR_DEVICE_DEFAULT_EXT ||
+			     info->uniformBuffers != VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_DEVICE_DEFAULT_EXT ||
+			     info->vertexInputs != VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_DEVICE_DEFAULT_EXT) &&
+			    features.pipeline_robustness.pipelineRobustness == VK_FALSE)
+			{
+				return false;
+			}
+
+			if (!query)
+				return false;
+
+			bool need_robust_image =
+					info->images == VK_PIPELINE_ROBUSTNESS_IMAGE_BEHAVIOR_ROBUST_IMAGE_ACCESS_EXT;
+			bool need_robust_image2 =
+					info->images == VK_PIPELINE_ROBUSTNESS_IMAGE_BEHAVIOR_ROBUST_IMAGE_ACCESS_2_EXT;
+			bool need_robust_buffer2 =
+					info->storageBuffers == VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_ROBUST_BUFFER_ACCESS_2_EXT ||
+					info->vertexInputs == VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_ROBUST_BUFFER_ACCESS_2_EXT ||
+					info->uniformBuffers == VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_ROBUST_BUFFER_ACCESS_2_EXT;
+
+			// From spec:
+			// Any component of the implementation (the loader, any enabled layers, and drivers) must skip over,
+			// without processing (other than reading the sType and pNext members)
+			// any extending structures in the chain not defined by core versions
+			// or extensions supported by that component.
+			// I.e. it's safe for us to query the struct, even if the extension is not supported.
+
+			if (need_robust_image)
+			{
+				VkPhysicalDeviceFeatures2 pdf2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+				VkPhysicalDeviceImageRobustnessFeaturesEXT robust_image =
+						{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_ROBUSTNESS_FEATURES_EXT };
+				pdf2.pNext = &robust_image;
+				query->physical_device_feature_query(&pdf2);
+				if (robust_image.robustImageAccess == VK_FALSE)
+					return false;
+			}
+
+			if (need_robust_image2)
+			{
+				VkPhysicalDeviceFeatures2 pdf2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+				VkPhysicalDeviceRobustness2FeaturesEXT robust2 =
+						{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT };
+				pdf2.pNext = &robust2;
+				query->physical_device_feature_query(&pdf2);
+				if (robust2.robustImageAccess2 == VK_FALSE)
+					return false;
+			}
+
+			if (need_robust_buffer2)
+			{
+				VkPhysicalDeviceFeatures2 pdf2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+				VkPhysicalDeviceRobustness2FeaturesEXT robust2 =
+						{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT };
+				pdf2.pNext = &robust2;
+				query->physical_device_feature_query(&pdf2);
+				if (robust2.robustBufferAccess2 == VK_FALSE)
+					return false;
+			}
+
+			break;
+		}
+
 		default:
 			LOGE("Unrecognized pNext sType: %u. Treating as unsupported.\n", unsigned(base->sType));
 			return false;

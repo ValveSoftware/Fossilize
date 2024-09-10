@@ -110,6 +110,7 @@ struct VulkanFeatures
 	VkPhysicalDeviceShaderQuadControlFeaturesKHR shader_quad_control;
 	VkPhysicalDeviceRawAccessChainsFeaturesNV raw_access_chains_nv;
 	VkPhysicalDeviceShaderReplicatedCompositesFeaturesEXT shader_replicated_composites;
+	VkPhysicalDevicePipelineRobustnessFeaturesEXT pipeline_robustness;
 
 	struct
 	{
@@ -169,6 +170,7 @@ public:
 	virtual ~DeviceQueryInterface() = default;
 	virtual bool format_is_supported(VkFormat format, VkFormatFeatureFlags features) = 0;
 	virtual bool descriptor_set_layout_is_supported(const VkDescriptorSetLayoutCreateInfo *info) = 0;
+	virtual void physical_device_feature_query(VkPhysicalDeviceFeatures2 *pdf2) = 0;
 };
 
 class FeatureFilter

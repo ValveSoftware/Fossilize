@@ -139,5 +139,6 @@ private:
 
 	bool format_is_supported(VkFormat format, VkFormatFeatureFlags features) override;
 	bool descriptor_set_layout_is_supported(const VkDescriptorSetLayoutCreateInfo *info) override;
+	void physical_device_feature_query(VkPhysicalDeviceFeatures2 *pdf2) override;
 };
 }
