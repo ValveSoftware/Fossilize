@@ -10645,7 +10645,9 @@ static const void *pnext_chain_skip_ignored_entries(const void *pNext)
 		case VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO_EXT:
 		case VK_STRUCTURE_TYPE_SHADER_MODULE_VALIDATION_CACHE_CREATE_INFO_EXT:
 		case VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT:
-			// We need to ignore any pNext struct which represents output information from a pipeline object.
+		case VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT:
+			// We need to ignore any pNext struct which represents output information from a pipeline object, or
+			// irrelevant information which only tooling would care about.
 			ignored = true;
 			break;
 
