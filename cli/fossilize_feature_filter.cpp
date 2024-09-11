@@ -481,7 +481,8 @@ struct FeatureFilter::Impl
 	bool multiview_mask_is_supported(uint32_t mask) const;
 	bool image_layout_is_supported(VkImageLayout layout) const;
 	bool access_mask_is_supported(VkAccessFlags2 access) const;
-	bool stage_mask_is_supported(VkPipelineStageFlags2 stages) const;
+	bool pipeline_stage_mask_is_supported(VkPipelineStageFlags2 stages) const;
+	bool shader_stage_mask_is_supported(VkShaderStageFlags stages) const;
 	bool format_is_supported(VkFormat, VkFormatFeatureFlags format_features) const;
 
 	bool stage_limits_are_supported(const VkPipelineShaderStageCreateInfo &info) const;
@@ -1388,7 +1389,10 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 bool FeatureFilter::Impl::sampler_is_supported(const VkSamplerCreateInfo *info) const
 {
 	// Only allow flags we recognize and validate.
-	constexpr VkSamplerCreateFlags supported_flags = VK_SAMPLER_CREATE_NON_SEAMLESS_CUBE_MAP_BIT_EXT;
+	constexpr VkSamplerCreateFlags supported_flags =
+			VK_SAMPLER_CREATE_NON_SEAMLESS_CUBE_MAP_BIT_EXT |
+			VK_SAMPLER_CREATE_SUBSAMPLED_BIT_EXT |
+			VK_SAMPLER_CREATE_SUBSAMPLED_COARSE_RECONSTRUCTION_BIT_EXT;
 	if ((info->flags & ~supported_flags) != 0)
 		return false;
 
@@ -1408,6 +1412,11 @@ bool FeatureFilter::Impl::sampler_is_supported(const VkSamplerCreateInfo *info) 
 	if ((info->minFilter == VK_FILTER_CUBIC_IMG ||
 	     info->magFilter == VK_FILTER_CUBIC_IMG) &&
 	    enabled_extensions.count(VK_IMG_FILTER_CUBIC_EXTENSION_NAME) == 0)
+		return false;
+
+	if ((info->flags & (VK_SAMPLER_CREATE_SUBSAMPLED_BIT_EXT |
+	                    VK_SAMPLER_CREATE_SUBSAMPLED_COARSE_RECONSTRUCTION_BIT_EXT)) != 0 &&
+	    features.fragment_density.fragmentDensityMap == VK_FALSE)
 		return false;
 
 	return pnext_chain_is_supported(info->pNext);
@@ -1484,6 +1493,18 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 
 	for (unsigned i = 0; i < info->bindingCount; i++)
 	{
+		if (!shader_stage_mask_is_supported(info->pBindings[i].stageFlags))
+			return false;
+
+		constexpr VkDescriptorBindingFlags supported_binding_flags =
+				VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT |
+				VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT |
+				VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT |
+				VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT;
+
+		if (flags && (flags->pBindingFlags[i] & ~supported_binding_flags) != 0)
+			return false;
+
 		bool binding_is_update_after_bind =
 				flags && i < flags->bindingCount &&
 				(flags->pBindingFlags[i] & VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT) != 0;
@@ -2671,6 +2692,37 @@ bool FeatureFilter::Impl::format_is_supported(VkFormat format, VkFormatFeatureFl
 
 bool FeatureFilter::Impl::access_mask_is_supported(VkAccessFlags2 access) const
 {
+	constexpr VkAccessFlags2 supported_flags =
+			VK_ACCESS_INDIRECT_COMMAND_READ_BIT |
+			VK_ACCESS_INDEX_READ_BIT |
+			VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT |
+			VK_ACCESS_UNIFORM_READ_BIT |
+			VK_ACCESS_INPUT_ATTACHMENT_READ_BIT |
+			VK_ACCESS_SHADER_READ_BIT |
+			VK_ACCESS_SHADER_WRITE_BIT |
+			VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+			VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+			VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+			VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
+			VK_ACCESS_TRANSFER_READ_BIT |
+			VK_ACCESS_TRANSFER_WRITE_BIT |
+			VK_ACCESS_HOST_READ_BIT |
+			VK_ACCESS_HOST_WRITE_BIT |
+			VK_ACCESS_MEMORY_READ_BIT |
+			VK_ACCESS_MEMORY_WRITE_BIT |
+			VK_ACCESS_TRANSFORM_FEEDBACK_WRITE_BIT_EXT |
+			VK_ACCESS_TRANSFORM_FEEDBACK_COUNTER_READ_BIT_EXT |
+			VK_ACCESS_TRANSFORM_FEEDBACK_COUNTER_WRITE_BIT_EXT |
+			VK_ACCESS_CONDITIONAL_RENDERING_READ_BIT_EXT |
+			VK_ACCESS_COLOR_ATTACHMENT_READ_NONCOHERENT_BIT_EXT |
+			VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR |
+			VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR |
+			VK_ACCESS_FRAGMENT_DENSITY_MAP_READ_BIT_EXT |
+			VK_ACCESS_FRAGMENT_SHADING_RATE_ATTACHMENT_READ_BIT_KHR;
+
+	if (access & ~supported_flags)
+		return false;
+
 	if ((access & (VK_ACCESS_2_VIDEO_DECODE_READ_BIT_KHR | VK_ACCESS_2_VIDEO_DECODE_WRITE_BIT_KHR)) != 0 &&
 	    enabled_extensions.count(VK_KHR_VIDEO_DECODE_QUEUE_EXTENSION_NAME) == 0)
 		return false;
@@ -2689,11 +2741,100 @@ bool FeatureFilter::Impl::access_mask_is_supported(VkAccessFlags2 access) const
 	    enabled_extensions.count(VK_EXT_BLEND_OPERATION_ADVANCED_EXTENSION_NAME) == 0)
 		return false;
 
+	if ((access & (VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR |
+	               VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR)) != 0 &&
+	    features.acceleration_structure.accelerationStructure == VK_FALSE)
+		return false;
+
+	if ((access & VK_ACCESS_FRAGMENT_DENSITY_MAP_READ_BIT_EXT) != 0 &&
+	    features.fragment_density.fragmentDensityMap == VK_FALSE)
+		return false;
+
+	if ((access & VK_ACCESS_FRAGMENT_SHADING_RATE_ATTACHMENT_READ_BIT_KHR) != 0 &&
+	    features.fragment_shading_rate.attachmentFragmentShadingRate == VK_FALSE)
+		return false;
+
 	return true;
 }
 
-bool FeatureFilter::Impl::stage_mask_is_supported(VkPipelineStageFlags2 stages) const
+bool FeatureFilter::Impl::shader_stage_mask_is_supported(VkShaderStageFlags stages) const
 {
+	if (stages == VK_SHADER_STAGE_ALL || stages == VK_SHADER_STAGE_ALL_GRAPHICS)
+		return true;
+
+	constexpr VkShaderStageFlags supported_flags =
+			VK_SHADER_STAGE_VERTEX_BIT |
+			VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT |
+			VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT |
+			VK_SHADER_STAGE_GEOMETRY_BIT |
+			VK_SHADER_STAGE_FRAGMENT_BIT |
+			VK_SHADER_STAGE_COMPUTE_BIT |
+			VK_SHADER_STAGE_RAYGEN_BIT_KHR |
+			VK_SHADER_STAGE_CALLABLE_BIT_KHR |
+			VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR |
+			VK_SHADER_STAGE_MISS_BIT_KHR |
+			VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
+			VK_SHADER_STAGE_INTERSECTION_BIT_KHR |
+			VK_SHADER_STAGE_MESH_BIT_EXT |
+			VK_SHADER_STAGE_TASK_BIT_EXT;
+
+	if (stages & ~supported_flags)
+		return false;
+
+	if ((stages & (VK_SHADER_STAGE_RAYGEN_BIT_KHR |
+	               VK_SHADER_STAGE_CALLABLE_BIT_KHR |
+	               VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR |
+	               VK_SHADER_STAGE_MISS_BIT_KHR |
+	               VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
+	               VK_SHADER_STAGE_INTERSECTION_BIT_KHR)) != 0 &&
+	    features.ray_tracing_pipeline.rayTracingPipeline == VK_FALSE)
+	{
+		return false;
+	}
+
+	if ((stages & VK_SHADER_STAGE_MESH_BIT_EXT) != 0 && features.mesh_shader.meshShader == VK_FALSE)
+		return false;
+
+	if ((stages & VK_SHADER_STAGE_TASK_BIT_EXT) != 0 && features.mesh_shader.taskShader == VK_FALSE)
+		return false;
+
+	return true;
+}
+
+bool FeatureFilter::Impl::pipeline_stage_mask_is_supported(VkPipelineStageFlags2 stages) const
+{
+	if (stages == VK_PIPELINE_STAGE_NONE && features.synchronization2.synchronization2 == VK_FALSE)
+		return false;
+
+	constexpr VkPipelineStageFlags2 supported_flags =
+			VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT |
+			VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT |
+			VK_PIPELINE_STAGE_VERTEX_INPUT_BIT |
+			VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
+			VK_PIPELINE_STAGE_TESSELLATION_CONTROL_SHADER_BIT |
+			VK_PIPELINE_STAGE_TESSELLATION_EVALUATION_SHADER_BIT |
+			VK_PIPELINE_STAGE_GEOMETRY_SHADER_BIT |
+			VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
+			VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+			VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT |
+			VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+			VK_PIPELINE_STAGE_TRANSFER_BIT |
+			VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT |
+			VK_PIPELINE_STAGE_HOST_BIT |
+			VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT |
+			VK_PIPELINE_STAGE_ALL_COMMANDS_BIT |
+			VK_PIPELINE_STAGE_2_VIDEO_DECODE_BIT_KHR |
+			VK_PIPELINE_STAGE_TRANSFORM_FEEDBACK_BIT_EXT |
+			VK_PIPELINE_STAGE_CONDITIONAL_RENDERING_BIT_EXT |
+			VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR |
+			VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR |
+			VK_PIPELINE_STAGE_FRAGMENT_DENSITY_PROCESS_BIT_EXT |
+			VK_PIPELINE_STAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR;
+
+	if (stages & ~supported_flags)
+		return false;
+
 	if ((stages & VK_PIPELINE_STAGE_2_VIDEO_DECODE_BIT_KHR) != 0 &&
 	    enabled_extensions.count(VK_KHR_VIDEO_DECODE_QUEUE_EXTENSION_NAME) == 0)
 		return false;
@@ -2704,6 +2845,22 @@ bool FeatureFilter::Impl::stage_mask_is_supported(VkPipelineStageFlags2 stages) 
 
 	if ((stages & VK_PIPELINE_STAGE_CONDITIONAL_RENDERING_BIT_EXT) != 0 &&
 	    features.conditional_rendering.conditionalRendering == VK_FALSE)
+		return false;
+
+	if ((stages & VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR) != 0 &&
+	    features.acceleration_structure.accelerationStructure == VK_FALSE)
+		return false;
+
+	if ((stages & VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR) != 0 &&
+	    features.ray_tracing_pipeline.rayTracingPipeline == VK_FALSE)
+		return false;
+
+	if ((stages & VK_PIPELINE_STAGE_FRAGMENT_DENSITY_PROCESS_BIT_EXT) != 0 &&
+	    features.fragment_density.fragmentDensityMap == VK_FALSE)
+		return false;
+
+	if ((stages & VK_PIPELINE_STAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR) != 0 &&
+	    features.fragment_shading_rate.attachmentFragmentShadingRate == VK_FALSE)
 		return false;
 
 	return true;
@@ -2788,6 +2945,12 @@ bool FeatureFilter::Impl::image_layout_is_supported(VkImageLayout layout) const
 	case VK_IMAGE_LAYOUT_VIDEO_DECODE_SRC_KHR:
 	case VK_IMAGE_LAYOUT_VIDEO_DECODE_DST_KHR:
 		return enabled_extensions.count(VK_KHR_VIDEO_DECODE_QUEUE_EXTENSION_NAME) != 0;
+
+	case VK_IMAGE_LAYOUT_FRAGMENT_DENSITY_MAP_OPTIMAL_EXT:
+		return features.fragment_density.fragmentDensityMap == VK_TRUE;
+
+	case VK_IMAGE_LAYOUT_RENDERING_LOCAL_READ_KHR:
+		return features.dynamic_rendering_local_read.dynamicRenderingLocalRead == VK_TRUE;
 
 	default:
 		return false;

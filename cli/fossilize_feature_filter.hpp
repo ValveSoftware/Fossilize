@@ -112,6 +112,7 @@ struct VulkanFeatures
 	VkPhysicalDeviceShaderReplicatedCompositesFeaturesEXT shader_replicated_composites;
 	VkPhysicalDevicePipelineRobustnessFeaturesEXT pipeline_robustness;
 	VkPhysicalDeviceConditionalRenderingFeaturesEXT conditional_rendering;
+	VkPhysicalDeviceDynamicRenderingLocalReadFeaturesKHR dynamic_rendering_local_read;
 
 	struct
 	{
