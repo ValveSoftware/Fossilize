@@ -480,9 +480,11 @@ struct FeatureFilter::Impl
 
 	bool multiview_mask_is_supported(uint32_t mask) const;
 	bool image_layout_is_supported(VkImageLayout layout) const;
+	bool polygon_mode_is_supported(VkPolygonMode mode) const;
 	bool access_mask_is_supported(VkAccessFlags2 access) const;
 	bool pipeline_stage_mask_is_supported(VkPipelineStageFlags2 stages) const;
 	bool shader_stage_mask_is_supported(VkShaderStageFlags stages) const;
+	bool aspect_mask_is_supported(VkImageAspectFlags aspect) const;
 	bool format_is_supported(VkFormat, VkFormatFeatureFlags format_features) const;
 
 	bool stage_limits_are_supported(const VkPipelineShaderStageCreateInfo &info) const;
@@ -1220,6 +1222,11 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 		{
 			if (!enabled_extensions.count(VK_KHR_MAINTENANCE_2_EXTENSION_NAME) && api_version < VK_API_VERSION_1_1)
 				return false;
+
+			auto *info = static_cast<const VkRenderPassInputAttachmentAspectCreateInfo *>(pNext);
+			for (uint32_t i = 0; i < info->aspectReferenceCount; i++)
+				if (!aspect_mask_is_supported(info->pAspectReferences[i].aspectMask))
+					return false;
 
 			break;
 		}
@@ -2624,8 +2631,12 @@ bool FeatureFilter::Impl::shader_module_is_supported(const VkShaderModuleCreateI
 bool FeatureFilter::Impl::render_pass_is_supported(const VkRenderPassCreateInfo *info) const
 {
 	// Only allow flags we recognize and validate.
-	constexpr VkRenderPassCreateFlags supported_flags = 0;
+	constexpr VkRenderPassCreateFlags supported_flags = VK_RENDER_PASS_CREATE_TRANSFORM_BIT_QCOM;
 	if ((info->flags & ~supported_flags) != 0)
+		return false;
+
+	if ((info->flags & VK_RENDER_PASS_CREATE_TRANSFORM_BIT_QCOM) != 0 &&
+	    enabled_extensions.count(VK_QCOM_RENDER_PASS_TRANSFORM_EXTENSION_NAME) == 0)
 		return false;
 
 	if (null_device)
@@ -2688,6 +2699,43 @@ bool FeatureFilter::Impl::format_is_supported(VkFormat format, VkFormatFeatureFl
 		return true;
 
 	return query->format_is_supported(format, format_features);
+}
+
+bool FeatureFilter::Impl::aspect_mask_is_supported(VkImageAspectFlags aspect) const
+{
+	if (aspect == VK_IMAGE_ASPECT_NONE && features.maintenance4.maintenance4 == VK_FALSE)
+		return false;
+
+	constexpr VkImageAspectFlags supported_flags =
+			VK_IMAGE_ASPECT_COLOR_BIT |
+			VK_IMAGE_ASPECT_DEPTH_BIT |
+			VK_IMAGE_ASPECT_STENCIL_BIT |
+			VK_IMAGE_ASPECT_METADATA_BIT |
+			VK_IMAGE_ASPECT_PLANE_0_BIT |
+			VK_IMAGE_ASPECT_PLANE_1_BIT |
+			VK_IMAGE_ASPECT_PLANE_2_BIT |
+			VK_IMAGE_ASPECT_MEMORY_PLANE_0_BIT_EXT |
+			VK_IMAGE_ASPECT_MEMORY_PLANE_1_BIT_EXT |
+			VK_IMAGE_ASPECT_MEMORY_PLANE_2_BIT_EXT |
+			VK_IMAGE_ASPECT_MEMORY_PLANE_3_BIT_EXT;
+
+	if (aspect & ~supported_flags)
+		return false;
+
+	if ((aspect & (VK_IMAGE_ASPECT_PLANE_0_BIT |
+	               VK_IMAGE_ASPECT_PLANE_1_BIT |
+	               VK_IMAGE_ASPECT_PLANE_2_BIT)) != 0 &&
+	    features.ycbcr_conversion.samplerYcbcrConversion == VK_FALSE)
+		return false;
+
+	if ((aspect & (VK_IMAGE_ASPECT_MEMORY_PLANE_0_BIT_EXT |
+	               VK_IMAGE_ASPECT_MEMORY_PLANE_1_BIT_EXT |
+	               VK_IMAGE_ASPECT_MEMORY_PLANE_2_BIT_EXT |
+	               VK_IMAGE_ASPECT_MEMORY_PLANE_3_BIT_EXT)) != 0 &&
+	    enabled_extensions.count(VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME) == 0)
+		return false;
+
+	return true;
 }
 
 bool FeatureFilter::Impl::access_mask_is_supported(VkAccessFlags2 access) const
@@ -2900,6 +2948,25 @@ bool FeatureFilter::Impl::store_op_is_supported(VkAttachmentStoreOp store_op) co
 	}
 }
 
+bool FeatureFilter::Impl::polygon_mode_is_supported(VkPolygonMode mode) const
+{
+	switch (mode)
+	{
+	case VK_POLYGON_MODE_FILL:
+		return true;
+
+	case VK_POLYGON_MODE_POINT:
+	case VK_POLYGON_MODE_LINE:
+		return features2.features.fillModeNonSolid == VK_TRUE;
+
+	case VK_POLYGON_MODE_FILL_RECTANGLE_NV:
+		return enabled_extensions.count(VK_NV_FILL_RECTANGLE_EXTENSION_NAME) != 0;
+
+	default:
+		return false;
+	}
+}
+
 bool FeatureFilter::Impl::image_layout_is_supported(VkImageLayout layout) const
 {
 	switch (layout)
@@ -2971,6 +3038,8 @@ bool FeatureFilter::Impl::attachment_reference2_is_supported(const VkAttachmentR
 		return false;
 	if (!image_layout_is_supported(ref.layout))
 		return false;
+	if (!aspect_mask_is_supported(ref.aspectMask))
+		return false;
 
 	return true;
 }
@@ -3023,7 +3092,9 @@ bool FeatureFilter::Impl::subpass_description_flags_is_supported(VkSubpassDescri
 {
 	constexpr VkSubpassDescriptionFlags supported_flags =
 			VK_SUBPASS_DESCRIPTION_PER_VIEW_ATTRIBUTES_BIT_NVX |
-			VK_SUBPASS_DESCRIPTION_PER_VIEW_POSITION_X_ONLY_BIT_NVX;
+			VK_SUBPASS_DESCRIPTION_PER_VIEW_POSITION_X_ONLY_BIT_NVX |
+			VK_SUBPASS_DESCRIPTION_FRAGMENT_REGION_BIT_QCOM |
+			VK_SUBPASS_DESCRIPTION_SHADER_RESOLVE_BIT_QCOM;
 
 	if (flags & ~supported_flags)
 		return false;
@@ -3031,6 +3102,11 @@ bool FeatureFilter::Impl::subpass_description_flags_is_supported(VkSubpassDescri
 	if ((flags & (VK_SUBPASS_DESCRIPTION_PER_VIEW_ATTRIBUTES_BIT_NVX |
 	              VK_SUBPASS_DESCRIPTION_PER_VIEW_POSITION_X_ONLY_BIT_NVX)) != 0 &&
 	    enabled_extensions.count(VK_NVX_MULTIVIEW_PER_VIEW_ATTRIBUTES_EXTENSION_NAME) == 0)
+		return false;
+
+	if ((flags & (VK_SUBPASS_DESCRIPTION_FRAGMENT_REGION_BIT_QCOM |
+	              VK_SUBPASS_DESCRIPTION_SHADER_RESOLVE_BIT_QCOM)) != 0 &&
+	    enabled_extensions.count(VK_QCOM_RENDER_PASS_SHADER_RESOLVE_EXTENSION_NAME) == 0)
 		return false;
 
 	return true;
@@ -3292,8 +3368,12 @@ bool FeatureFilter::Impl::subgroup_size_control_is_supported(const VkPipelineSha
 bool FeatureFilter::Impl::render_pass2_is_supported(const VkRenderPassCreateInfo2 *info) const
 {
 	// Only allow flags we recognize and validate.
-	constexpr VkRenderPassCreateFlags supported_flags = 0;
+	constexpr VkRenderPassCreateFlags supported_flags = VK_RENDER_PASS_CREATE_TRANSFORM_BIT_QCOM;
 	if ((info->flags & ~supported_flags) != 0)
+		return false;
+
+	if ((info->flags & VK_RENDER_PASS_CREATE_TRANSFORM_BIT_QCOM) != 0 &&
+	    enabled_extensions.count(VK_QCOM_RENDER_PASS_TRANSFORM_EXTENSION_NAME) == 0)
 		return false;
 
 	if (null_device)
@@ -3591,6 +3671,17 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 		return false;
 	if (info->pRasterizationState && !pnext_chain_is_supported(info->pRasterizationState->pNext))
 		return false;
+
+	if (info->pRasterizationState)
+	{
+		if (!has_dynamic_state(dynamic_states, num_dynamic_states, VK_DYNAMIC_STATE_POLYGON_MODE_EXT) &&
+		    !polygon_mode_is_supported(info->pRasterizationState->polygonMode))
+			return false;
+
+		if (!has_dynamic_state(dynamic_states, num_dynamic_states, VK_DYNAMIC_STATE_DEPTH_CLAMP_ENABLE_EXT) &&
+		    info->pRasterizationState->depthClampEnable && features2.features.depthClamp == VK_FALSE)
+			return false;
+	}
 
 	if (info->renderPass == VK_NULL_HANDLE && features.dynamic_rendering.dynamicRendering == VK_FALSE)
 		return false;

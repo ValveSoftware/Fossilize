@@ -33,7 +33,15 @@
 		"VK_KHR_dynamic_rendering_local_read",
 		"VK_KHR_separate_depth_stencil_layouts",
 		"VK_EXT_validation_features",
-		"VK_EXT_provoking_vertex"
+		"VK_EXT_provoking_vertex",
+		"VK_KHR_sampler_ycbcr_conversion",
+		"VK_EXT_image_drm_format_modifier",
+		"VK_NV_fill_rectangle",
+		"VK_QCOM_render_pass_shader_resolve",
+		"VK_EXT_line_rasterization",
+		"VK_EXT_extended_dynamic_state",
+		"VK_KHR_pipeline_executable_properties",
+		"VK_QCOM_render_pass_transform"
 	],
 	"spirvcapabilities" : [
 		"Matrix",
