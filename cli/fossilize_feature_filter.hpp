@@ -113,6 +113,7 @@ struct VulkanFeatures
 	VkPhysicalDevicePipelineRobustnessFeaturesEXT pipeline_robustness;
 	VkPhysicalDeviceConditionalRenderingFeaturesEXT conditional_rendering;
 	VkPhysicalDeviceDynamicRenderingLocalReadFeaturesKHR dynamic_rendering_local_read;
+	VkPhysicalDeviceRasterizationOrderAttachmentAccessFeaturesEXT rasterization_order_attachment_access;
 
 	struct
 	{

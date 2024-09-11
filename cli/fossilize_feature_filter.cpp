@@ -3578,6 +3578,16 @@ bool FeatureFilter::Impl::color_blend_state_is_supported(
 		const VkPipelineColorBlendStateCreateInfo *info,
 		const VkDynamicState *dynamic_states, uint32_t num_dynamic_states) const
 {
+	constexpr VkPipelineColorBlendStateCreateFlags supported_flags =
+			VK_PIPELINE_COLOR_BLEND_STATE_CREATE_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_BIT_EXT;
+
+	if (info->flags & ~supported_flags)
+		return false;
+
+	if ((info->flags & VK_PIPELINE_COLOR_BLEND_STATE_CREATE_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_BIT_EXT) != 0 &&
+	    features.rasterization_order_attachment_access.rasterizationOrderColorAttachmentAccess == VK_FALSE)
+		return false;
+
 	if (!has_dynamic_state(dynamic_states, num_dynamic_states, VK_DYNAMIC_STATE_LOGIC_OP_ENABLE_EXT) &&
 	    info->logicOpEnable && !features2.features.logicOp)
 	{
@@ -3734,6 +3744,26 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 
 		if (!has_dynamic_state(dynamic_states, num_dynamic_states, VK_DYNAMIC_STATE_DEPTH_CLAMP_ENABLE_EXT) &&
 		    info->pRasterizationState->depthClampEnable && features2.features.depthClamp == VK_FALSE)
+			return false;
+	}
+
+	if (info->pDepthStencilState)
+	{
+		constexpr VkPipelineDepthStencilStateCreateFlags supported_ds_flags =
+				VK_PIPELINE_DEPTH_STENCIL_STATE_CREATE_RASTERIZATION_ORDER_ATTACHMENT_DEPTH_ACCESS_BIT_EXT |
+				VK_PIPELINE_DEPTH_STENCIL_STATE_CREATE_RASTERIZATION_ORDER_ATTACHMENT_STENCIL_ACCESS_BIT_EXT;
+
+		if (info->pDepthStencilState->flags & ~supported_ds_flags)
+			return false;
+
+		if ((info->pDepthStencilState->flags &
+		     VK_PIPELINE_DEPTH_STENCIL_STATE_CREATE_RASTERIZATION_ORDER_ATTACHMENT_DEPTH_ACCESS_BIT_EXT) != 0 &&
+		    features.rasterization_order_attachment_access.rasterizationOrderDepthAttachmentAccess == VK_FALSE)
+			return false;
+
+		if ((info->pDepthStencilState->flags &
+		     VK_PIPELINE_DEPTH_STENCIL_STATE_CREATE_RASTERIZATION_ORDER_ATTACHMENT_STENCIL_ACCESS_BIT_EXT) != 0 &&
+		    features.rasterization_order_attachment_access.rasterizationOrderStencilAttachmentAccess == VK_FALSE)
 			return false;
 	}
 

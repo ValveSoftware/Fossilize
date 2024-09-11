@@ -54,7 +54,11 @@
 		"VK_NV_ray_tracing_motion_blur",
 		"VK_EXT_mesh_shader",
 		"VK_EXT_attachment_feedback_loop_layout",
-		"VK_VALVE_mutable_descriptor_type"
+		"VK_VALVE_mutable_descriptor_type",
+		"VK_ARM_rasterization_order_attachment_access",
+		"VK_EXT_rasterization_order_attachment_access",
+		"VK_EXT_depth_clip_control",
+		"VK_EXT_extended_dynamic_state2"
 	],
 	"fully-ignored" : [
 		"VK_AMD_rasterization_order",
@@ -71,7 +75,10 @@
 		"VK_NV_scissor_exclusive",
 		"VK_NV_coverage_reduction_mode",
 		"VK_NV_device_generated_commands",
-		"VK_NV_fragment_shading_rate_enums"
+		"VK_NV_fragment_shading_rate_enums",
+		"VK_NV_clip_space_w_scaling",
+		"VK_HUAWEI_invocation_mask",
+		"VK_HUAWEI_subpass_shading"
 	],
 	"cherry-pick": [
 		"VK_DYNAMIC_STATE_VIEWPORT_W_SCALING_NV",

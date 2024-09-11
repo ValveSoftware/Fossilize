@@ -103,3 +103,4 @@ FE(SHADER_REPLICATED_COMPOSITES, shader_replicated_composites, EXT);
 FE(PIPELINE_ROBUSTNESS, pipeline_robustness, EXT);
 FE(CONDITIONAL_RENDERING, conditional_rendering, EXT);
 FE(DYNAMIC_RENDERING_LOCAL_READ, dynamic_rendering_local_read, KHR);
+FE_ALIAS(RASTERIZATION_ORDER_ATTACHMENT_ACCESS, rasterization_order_attachment_access, EXT, ARM);
