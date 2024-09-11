@@ -411,9 +411,13 @@ void *build_pnext_chain(VulkanProperties &props, uint32_t api_version,
 	for (uint32_t i = 0; i < extension_count; i++)
 		enabled_extension_set.insert(enabled_extensions[i]);
 
-#define CHAIN(struct_type, member, min_api_version, required_extension) \
+#define CHAIN(struct_type, member, min_api_version, required_extension, required_extension_alias) \
 	do { \
-		if ((required_extension == nullptr || enabled_extension_set.count(required_extension) != 0) && api_version >= min_api_version) { \
+        bool is_minimum_api_version = api_version >= min_api_version; \
+		bool supports_extension = required_extension == nullptr || enabled_extension_set.count(required_extension) != 0; \
+        if (!supports_extension && required_extension_alias) \
+			supports_extension = enabled_extension_set.count(required_extension_alias) != 0; \
+		if (supports_extension && is_minimum_api_version) { \
 			member.sType = struct_type; \
 			if (!pNext) pNext = &member; \
 			if (ppNext) *ppNext = &member; \
@@ -423,13 +427,16 @@ void *build_pnext_chain(VulkanProperties &props, uint32_t api_version,
 
 #define P(struct_type, member, minimum_api_version, required_extension) \
 	CHAIN(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_PROPERTIES, props.member, \
-	VK_API_VERSION_##minimum_api_version, VK_##required_extension##_EXTENSION_NAME)
+	VK_API_VERSION_##minimum_api_version, VK_##required_extension##_EXTENSION_NAME, nullptr)
 #define P_CORE(struct_type, member, minimum_api_version) \
 	CHAIN(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_PROPERTIES, props.member, \
-	VK_API_VERSION_##minimum_api_version, nullptr)
+	VK_API_VERSION_##minimum_api_version, nullptr, nullptr)
 #define PE(struct_type, member, ext) \
 	CHAIN(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_PROPERTIES_##ext, props.member, \
-	VK_API_VERSION_1_0, VK_##ext##_##struct_type##_EXTENSION_NAME)
+	VK_API_VERSION_1_0, VK_##ext##_##struct_type##_EXTENSION_NAME, nullptr)
+#define PE_ALIAS(struct_type, member, ext, ext_alias) \
+	CHAIN(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_PROPERTIES_##ext, props.member, \
+	VK_API_VERSION_1_0, VK_##ext##_##struct_type##_EXTENSION_NAME, VK_##ext##_##struct_type##_EXTENSION_NAME)
 
 #include "fossilize_feature_filter_properties.inc"
 
@@ -437,6 +444,7 @@ void *build_pnext_chain(VulkanProperties &props, uint32_t api_version,
 #undef P
 #undef P_CORE
 #undef PE
+#undef PE_ALIAS
 
 	return pNext;
 }
@@ -688,6 +696,11 @@ void FeatureFilter::Impl::init_properties(const void *pNext)
 		props.member.pNext = nullptr; \
 		break
 
+#define PE_ALIAS(struct_type, member, ext, ext_alias) case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_PROPERTIES_##ext: \
+		memcpy(&props.member, base, sizeof(props.member)); \
+		props.member.pNext = nullptr; \
+		break
+
 #define PROP(struct_name, core_struct, prop) props.struct_name.prop = core_struct.prop
 		switch (base->sType)
 		{
@@ -792,6 +805,7 @@ void FeatureFilter::Impl::init_properties(const void *pNext)
 
 #undef P
 #undef PE
+#undef PE_ALIAS
 #undef PROP
 
 		pNext = base->pNext;
@@ -854,9 +868,10 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 				return false;
 			break;
 
-		case VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_DIVISOR_STATE_CREATE_INFO_EXT:
+		case VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_DIVISOR_STATE_CREATE_INFO_KHR:
 		{
-			if (!enabled_extensions.count(VK_EXT_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME))
+			if (!enabled_extensions.count(VK_EXT_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME) &&
+			    !enabled_extensions.count(VK_KHR_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME))
 				return false;
 
 			auto *divisor = static_cast<const VkPipelineVertexInputDivisorStateCreateInfoEXT *>(pNext);
@@ -956,22 +971,22 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 				return false;
 			break;
 
-		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_LINE_STATE_CREATE_INFO_EXT:
+		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_LINE_STATE_CREATE_INFO_KHR:
 		{
-			auto *line = static_cast<const VkPipelineRasterizationLineStateCreateInfoEXT *>(pNext);
-			if (line->lineRasterizationMode == VK_LINE_RASTERIZATION_MODE_RECTANGULAR_EXT &&
+			auto *line = static_cast<const VkPipelineRasterizationLineStateCreateInfoKHR *>(pNext);
+			if (line->lineRasterizationMode == VK_LINE_RASTERIZATION_MODE_RECTANGULAR_KHR &&
 			    features.line_rasterization.rectangularLines == VK_FALSE)
 			{
 				return false;
 			}
 
-			if (line->lineRasterizationMode == VK_LINE_RASTERIZATION_MODE_BRESENHAM_EXT &&
+			if (line->lineRasterizationMode == VK_LINE_RASTERIZATION_MODE_BRESENHAM_KHR &&
 			    features.line_rasterization.bresenhamLines == VK_FALSE)
 			{
 				return false;
 			}
 
-			if (line->lineRasterizationMode == VK_LINE_RASTERIZATION_MODE_RECTANGULAR_SMOOTH_EXT &&
+			if (line->lineRasterizationMode == VK_LINE_RASTERIZATION_MODE_RECTANGULAR_SMOOTH_KHR &&
 			    features.line_rasterization.smoothLines == VK_FALSE)
 			{
 				return false;
@@ -979,19 +994,19 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 
 			if (line->stippledLineEnable == VK_TRUE)
 			{
-				if (line->lineRasterizationMode == VK_LINE_RASTERIZATION_MODE_RECTANGULAR_EXT &&
+				if (line->lineRasterizationMode == VK_LINE_RASTERIZATION_MODE_RECTANGULAR_KHR &&
 				    features.line_rasterization.stippledRectangularLines == VK_FALSE)
 				{
 					return false;
 				}
 
-				if (line->lineRasterizationMode == VK_LINE_RASTERIZATION_MODE_BRESENHAM_EXT &&
+				if (line->lineRasterizationMode == VK_LINE_RASTERIZATION_MODE_BRESENHAM_KHR &&
 				    features.line_rasterization.stippledBresenhamLines == VK_FALSE)
 				{
 					return false;
 				}
 
-				if (line->lineRasterizationMode == VK_LINE_RASTERIZATION_MODE_RECTANGULAR_SMOOTH_EXT &&
+				if (line->lineRasterizationMode == VK_LINE_RASTERIZATION_MODE_RECTANGULAR_SMOOTH_KHR &&
 				    features.line_rasterization.stippledSmoothLines == VK_FALSE)
 				{
 					return false;
@@ -1093,6 +1108,10 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 				if (!cond)
 					return false;
 			}
+
+			if (resolve->depthResolveMode == VK_RESOLVE_MODE_EXTERNAL_FORMAT_DOWNSAMPLE_ANDROID ||
+			    resolve->stencilResolveMode == VK_RESOLVE_MODE_EXTERNAL_FORMAT_DOWNSAMPLE_ANDROID)
+				return false;
 
 			break;
 		}
@@ -1215,6 +1234,19 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 		{
 			if (!enabled_extensions.count(VK_EXT_SAMPLER_FILTER_MINMAX_EXTENSION_NAME) && !features.vk12.samplerFilterMinmax)
 				return false;
+
+			auto *info = static_cast<const VkSamplerReductionModeCreateInfo *>(pNext);
+			switch (info->reductionMode)
+			{
+			case VK_SAMPLER_REDUCTION_MODE_MAX:
+			case VK_SAMPLER_REDUCTION_MODE_MIN:
+			case VK_SAMPLER_REDUCTION_MODE_WEIGHTED_AVERAGE:
+				break;
+
+			default:
+				return false;
+			}
+
 			break;
 		}
 
@@ -1449,7 +1481,8 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 			VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT |
 			VK_DESCRIPTOR_SET_LAYOUT_CREATE_DESCRIPTOR_BUFFER_BIT_EXT |
 			VK_DESCRIPTOR_SET_LAYOUT_CREATE_EMBEDDED_IMMUTABLE_SAMPLERS_BIT_EXT |
-			VK_DESCRIPTOR_SET_LAYOUT_CREATE_INDIRECT_BINDABLE_BIT_NV;
+			VK_DESCRIPTOR_SET_LAYOUT_CREATE_INDIRECT_BINDABLE_BIT_NV |
+			VK_DESCRIPTOR_SET_LAYOUT_CREATE_PER_STAGE_BIT_NV;
 
 	if ((info->flags & ~supported_flags) != 0)
 		return false;
@@ -1486,6 +1519,10 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 
 	if ((info->flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_INDIRECT_BINDABLE_BIT_NV) != 0 &&
 	    features.device_generated_commands_compute_nv.deviceGeneratedCompute == VK_FALSE)
+		return false;
+
+	if ((info->flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_PER_STAGE_BIT_NV) != 0 &&
+	    features.per_stage_descriptor_set_nv.perStageDescriptorSet == VK_FALSE)
 		return false;
 
 	struct DescriptorCounts
@@ -2803,6 +2840,10 @@ bool FeatureFilter::Impl::access_mask_is_supported(VkAccessFlags2 access) const
 			VK_ACCESS_2_SHADER_BINDING_TABLE_READ_BIT_KHR |
 			VK_ACCESS_2_MICROMAP_READ_BIT_EXT |
 			VK_ACCESS_2_MICROMAP_WRITE_BIT_EXT |
+			VK_ACCESS_2_COMMAND_PREPROCESS_READ_BIT_NV |
+			VK_ACCESS_2_COMMAND_PREPROCESS_WRITE_BIT_NV |
+			VK_ACCESS_2_OPTICAL_FLOW_READ_BIT_NV |
+			VK_ACCESS_2_OPTICAL_FLOW_WRITE_BIT_NV |
 			sync2_flags;
 
 	if (access & ~supported_flags)
@@ -2856,6 +2897,16 @@ bool FeatureFilter::Impl::access_mask_is_supported(VkAccessFlags2 access) const
 
 	if ((access & (VK_ACCESS_2_MICROMAP_WRITE_BIT_EXT | VK_ACCESS_2_MICROMAP_READ_BIT_EXT)) != 0 &&
 	    features.opacity_micromap.micromap == VK_FALSE)
+		return false;
+
+	if ((access & (VK_ACCESS_2_COMMAND_PREPROCESS_READ_BIT_NV |
+	               VK_ACCESS_2_COMMAND_PREPROCESS_WRITE_BIT_NV)) != 0 &&
+	    features.device_generated_commands_nv.deviceGeneratedCommands == VK_FALSE)
+		return false;
+
+	if ((access & (VK_ACCESS_2_OPTICAL_FLOW_READ_BIT_NV |
+	               VK_ACCESS_2_OPTICAL_FLOW_WRITE_BIT_NV)) != 0 &&
+	    features.optical_flow_nv.opticalFlow == VK_FALSE)
 		return false;
 
 	return true;
@@ -2951,6 +3002,8 @@ bool FeatureFilter::Impl::pipeline_stage_mask_is_supported(VkPipelineStageFlags2
 			VK_PIPELINE_STAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR |
 			VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_COPY_BIT_KHR |
 			VK_PIPELINE_STAGE_2_MICROMAP_BUILD_BIT_EXT |
+			VK_PIPELINE_STAGE_COMMAND_PREPROCESS_BIT_NV |
+			VK_PIPELINE_STAGE_2_OPTICAL_FLOW_BIT_NV |
 			sync2_stages;
 
 	if (stages & ~supported_flags)
@@ -2997,6 +3050,14 @@ bool FeatureFilter::Impl::pipeline_stage_mask_is_supported(VkPipelineStageFlags2
 
 	if ((stages & VK_PIPELINE_STAGE_2_MICROMAP_BUILD_BIT_EXT) != 0 &&
 	    features.opacity_micromap.micromap == VK_FALSE)
+		return false;
+
+	if ((stages & VK_PIPELINE_STAGE_COMMAND_PREPROCESS_BIT_NV) != 0 &&
+	    features.device_generated_commands_nv.deviceGeneratedCommands == VK_FALSE)
+		return false;
+
+	if ((stages & VK_PIPELINE_STAGE_2_OPTICAL_FLOW_BIT_NV) != 0 &&
+	    features.optical_flow_nv.opticalFlow == VK_FALSE)
 		return false;
 
 	return true;
@@ -3187,7 +3248,8 @@ bool FeatureFilter::Impl::subpass_description_flags_is_supported(VkSubpassDescri
 			VK_SUBPASS_DESCRIPTION_PER_VIEW_ATTRIBUTES_BIT_NVX |
 			VK_SUBPASS_DESCRIPTION_PER_VIEW_POSITION_X_ONLY_BIT_NVX |
 			VK_SUBPASS_DESCRIPTION_FRAGMENT_REGION_BIT_QCOM |
-			VK_SUBPASS_DESCRIPTION_SHADER_RESOLVE_BIT_QCOM;
+			VK_SUBPASS_DESCRIPTION_SHADER_RESOLVE_BIT_QCOM |
+			VK_SUBPASS_DESCRIPTION_ENABLE_LEGACY_DITHERING_BIT_EXT;
 
 	if (flags & ~supported_flags)
 		return false;
@@ -3200,6 +3262,10 @@ bool FeatureFilter::Impl::subpass_description_flags_is_supported(VkSubpassDescri
 	if ((flags & (VK_SUBPASS_DESCRIPTION_FRAGMENT_REGION_BIT_QCOM |
 	              VK_SUBPASS_DESCRIPTION_SHADER_RESOLVE_BIT_QCOM)) != 0 &&
 	    enabled_extensions.count(VK_QCOM_RENDER_PASS_SHADER_RESOLVE_EXTENSION_NAME) == 0)
+		return false;
+
+	if ((flags & VK_SUBPASS_DESCRIPTION_ENABLE_LEGACY_DITHERING_BIT_EXT) != 0 &&
+	    features.legacy_dithering.legacyDithering == VK_FALSE)
 		return false;
 
 	return true;
@@ -3696,7 +3762,9 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 			VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT |
 			VK_PIPELINE_CREATE_COLOR_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT |
 			VK_PIPELINE_CREATE_DEPTH_STENCIL_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT |
-			VK_PIPELINE_CREATE_INDIRECT_BINDABLE_BIT_NV;
+			VK_PIPELINE_CREATE_INDIRECT_BINDABLE_BIT_NV |
+			VK_PIPELINE_CREATE_PROTECTED_ACCESS_ONLY_BIT_EXT |
+			VK_PIPELINE_CREATE_NO_PROTECTED_ACCESS_BIT_EXT;
 
 	if ((info->flags & ~supported_flags) != 0)
 		return false;
@@ -3745,6 +3813,11 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 
 	if ((info->flags & VK_PIPELINE_CREATE_INDIRECT_BINDABLE_BIT_NV) != 0 &&
 	    features.device_generated_commands_nv.deviceGeneratedCommands == VK_FALSE)
+		return false;
+
+	if ((info->flags & (VK_PIPELINE_CREATE_PROTECTED_ACCESS_ONLY_BIT_EXT |
+	                    VK_PIPELINE_CREATE_NO_PROTECTED_ACCESS_BIT_EXT)) != 0 &&
+	    features.pipeline_protected_access.pipelineProtectedAccess == VK_FALSE)
 		return false;
 
 	const VkDynamicState *dynamic_states = nullptr;
@@ -3960,6 +4033,11 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 			DYN_STATE3(COVERAGE_REDUCTION_MODE_NV, CoverageReductionMode);
 #undef DYN_STATE3
 
+			case VK_DYNAMIC_STATE_ATTACHMENT_FEEDBACK_LOOP_ENABLE_EXT:
+				if (features.attachment_feedback_loop_dynamic_state.attachmentFeedbackLoopDynamicState == VK_FALSE)
+					return false;
+				break;
+
 			case VK_DYNAMIC_STATE_VIEWPORT:
 			case VK_DYNAMIC_STATE_SCISSOR:
 			case VK_DYNAMIC_STATE_LINE_WIDTH:
@@ -4039,7 +4117,9 @@ bool FeatureFilter::Impl::compute_pipeline_is_supported(const VkComputePipelineC
 			VK_PIPELINE_CREATE_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR |
 			VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR |
 			VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT |
-			VK_PIPELINE_CREATE_INDIRECT_BINDABLE_BIT_NV;
+			VK_PIPELINE_CREATE_INDIRECT_BINDABLE_BIT_NV |
+			VK_PIPELINE_CREATE_PROTECTED_ACCESS_ONLY_BIT_EXT |
+			VK_PIPELINE_CREATE_NO_PROTECTED_ACCESS_BIT_EXT;
 
 	if ((info->flags & ~supported_flags) != 0)
 		return false;
@@ -4053,6 +4133,11 @@ bool FeatureFilter::Impl::compute_pipeline_is_supported(const VkComputePipelineC
 
 	if ((info->flags & VK_PIPELINE_CREATE_INDIRECT_BINDABLE_BIT_NV) != 0 &&
 	    features.device_generated_commands_compute_nv.deviceGeneratedCompute == VK_FALSE)
+		return false;
+
+	if ((info->flags & (VK_PIPELINE_CREATE_PROTECTED_ACCESS_ONLY_BIT_EXT |
+	                    VK_PIPELINE_CREATE_NO_PROTECTED_ACCESS_BIT_EXT)) != 0 &&
+	    features.pipeline_protected_access.pipelineProtectedAccess == VK_FALSE)
 		return false;
 
 	if ((info->flags & VK_PIPELINE_CREATE_DISPATCH_BASE_BIT) != 0 &&
@@ -4088,7 +4173,9 @@ bool FeatureFilter::Impl::raytracing_pipeline_is_supported(const VkRayTracingPip
 			VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR |
 			VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT |
 			VK_PIPELINE_CREATE_RAY_TRACING_ALLOW_MOTION_BIT_NV |
-			VK_PIPELINE_CREATE_RAY_TRACING_OPACITY_MICROMAP_BIT_EXT;
+			VK_PIPELINE_CREATE_RAY_TRACING_OPACITY_MICROMAP_BIT_EXT |
+			VK_PIPELINE_CREATE_PROTECTED_ACCESS_ONLY_BIT_EXT |
+			VK_PIPELINE_CREATE_NO_PROTECTED_ACCESS_BIT_EXT;
 
 	if ((info->flags & ~supported_flags) != 0)
 		return false;
@@ -4119,6 +4206,11 @@ bool FeatureFilter::Impl::raytracing_pipeline_is_supported(const VkRayTracingPip
 
 	if ((info->flags & VK_PIPELINE_CREATE_RAY_TRACING_OPACITY_MICROMAP_BIT_EXT) != 0 &&
 	    features.opacity_micromap.micromap == VK_FALSE)
+		return false;
+
+	if ((info->flags & (VK_PIPELINE_CREATE_PROTECTED_ACCESS_ONLY_BIT_EXT |
+	                    VK_PIPELINE_CREATE_NO_PROTECTED_ACCESS_BIT_EXT)) != 0 &&
+	    features.pipeline_protected_access.pipelineProtectedAccess == VK_FALSE)
 		return false;
 
 	if (features.ray_tracing_pipeline.rayTracingPipeline == VK_FALSE)

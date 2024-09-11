@@ -30,7 +30,7 @@ PE(RAY_TRACING_PIPELINE, ray_tracing_pipeline, KHR);
 PE(ACCELERATION_STRUCTURE, acceleration_structure, KHR);
 PE(SUBGROUP_SIZE_CONTROL, subgroup_size_control, EXT);
 PE(INLINE_UNIFORM_BLOCK, inline_uniform_block, EXT);
-PE(VERTEX_ATTRIBUTE_DIVISOR, attribute_divisor, EXT);
+PE_ALIAS(VERTEX_ATTRIBUTE_DIVISOR, attribute_divisor, KHR, EXT);
 PE(PUSH_DESCRIPTOR, push_descriptor, KHR);
 PE(SAMPLE_LOCATIONS, sample_locations, EXT);
 PE(EXTENDED_DYNAMIC_STATE_3, extended_dynamic_state3, EXT);
