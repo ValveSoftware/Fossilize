@@ -1426,6 +1426,11 @@ bool FeatureFilter::Impl::sampler_is_supported(const VkSamplerCreateInfo *info) 
 	    features.fragment_density.fragmentDensityMap == VK_FALSE)
 		return false;
 
+	if ((info->borderColor == VK_BORDER_COLOR_FLOAT_CUSTOM_EXT ||
+	     info->borderColor == VK_BORDER_COLOR_INT_CUSTOM_EXT) &&
+	    features.custom_border_color.customBorderColors == VK_FALSE)
+		return false;
+
 	return pnext_chain_is_supported(info->pNext);
 }
 
@@ -2840,10 +2845,14 @@ bool FeatureFilter::Impl::shader_stage_mask_is_supported(VkShaderStageFlags stag
 		return false;
 	}
 
-	if ((stages & VK_SHADER_STAGE_MESH_BIT_EXT) != 0 && features.mesh_shader.meshShader == VK_FALSE)
+	if ((stages & VK_SHADER_STAGE_MESH_BIT_EXT) != 0 &&
+	    features.mesh_shader.meshShader == VK_FALSE &&
+	    features.mesh_shader_nv.meshShader == VK_FALSE)
 		return false;
 
-	if ((stages & VK_SHADER_STAGE_TASK_BIT_EXT) != 0 && features.mesh_shader.taskShader == VK_FALSE)
+	if ((stages & VK_SHADER_STAGE_TASK_BIT_EXT) != 0 &&
+	    features.mesh_shader.taskShader == VK_FALSE &&
+	    features.mesh_shader_nv.taskShader == VK_FALSE)
 		return false;
 
 	return true;
@@ -3782,6 +3791,8 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 				break;
 
 			case VK_DYNAMIC_STATE_EXCLUSIVE_SCISSOR_NV:
+				// Technically this is part of v2, but whatever.
+			case VK_DYNAMIC_STATE_EXCLUSIVE_SCISSOR_ENABLE_NV:
 				if (!enabled_extensions.count(VK_NV_SCISSOR_EXCLUSIVE_EXTENSION_NAME))
 					return false;
 				break;

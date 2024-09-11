@@ -143,6 +143,8 @@ def main():
         print(e)
 
     completed_extensions = set(completed['extensions']) if 'extensions' in completed else set()
+    ignored_extensions = set(completed['fully-ignored']) if 'fully-ignored' in completed else set()
+    cherry_picked = set(completed['cherry-pick']) if 'cherry-pick' in completed else set()
     completed_spirv_capabilities = set(completed['spirvcapabilities']) if 'spirvcapabilities' in completed else set()
 
     print('\n\n=== Completed extensions ===')
@@ -151,12 +153,14 @@ def main():
             ext_name = ext.attrib['name']
             if ext_name in completed_extensions:
                 print(ext_name, '|| Completed')
+            elif ext_name in ignored_extensions:
+                print(ext_name, '|| Ignored')
 
     print('\n\n=== Additions ===')
     for ext in root.find('extensions').iter('extension'):
         if 'vulkan' in ext.attrib['supported'].split(','):
             ext_name = ext.attrib['name']
-            if ext_name in completed_extensions:
+            if ext_name in completed_extensions or ext_name in ignored_extensions:
                 continue
             new_structs = []
             new_enums = []
@@ -169,9 +173,11 @@ def main():
                     type_name = t.attrib['name']
                     type_name = type_aliases.get(type_name, type_name)
                     if type_name in active_types or type_name in extending_types:
-                        new_structs.append(type_name)
+                        if type_name not in cherry_picked:
+                            new_structs.append(type_name)
                     elif type_name in active_enums:
-                        new_enums.append(type_name)
+                        if type_name not in cherry_picked:
+                            new_enums.append(type_name)
 
                     if type_name in struct_types:
                         extends = struct_types[type_name].extends
@@ -182,9 +188,10 @@ def main():
 
                 for e in reqs.iter('enum'):
                     enum_name = e.attrib['name']
-                    enum_name = type_aliases.get(enum_name, enum_name)
-                    if 'extends' in e.attrib and e.attrib['extends'] in active_enums:
-                        extended_enums.append((e.attrib['extends'], enum_name))
+                    if enum_name not in cherry_picked:
+                        enum_name = type_aliases.get(enum_name, enum_name)
+                        if 'extends' in e.attrib and e.attrib['extends'] in active_enums:
+                            extended_enums.append((e.attrib['extends'], enum_name))
 
             if len(new_structs) + len(new_enums) + len(extended_enums) > 0:
                 print('===', ext_name, '===')
