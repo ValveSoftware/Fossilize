@@ -1399,7 +1399,8 @@ bool FeatureFilter::Impl::sampler_is_supported(const VkSamplerCreateInfo *info) 
 	constexpr VkSamplerCreateFlags supported_flags =
 			VK_SAMPLER_CREATE_NON_SEAMLESS_CUBE_MAP_BIT_EXT |
 			VK_SAMPLER_CREATE_SUBSAMPLED_BIT_EXT |
-			VK_SAMPLER_CREATE_SUBSAMPLED_COARSE_RECONSTRUCTION_BIT_EXT;
+			VK_SAMPLER_CREATE_SUBSAMPLED_COARSE_RECONSTRUCTION_BIT_EXT |
+			VK_SAMPLER_CREATE_IMAGE_PROCESSING_BIT_QCOM;
 	if ((info->flags & ~supported_flags) != 0)
 		return false;
 
@@ -1431,6 +1432,10 @@ bool FeatureFilter::Impl::sampler_is_supported(const VkSamplerCreateInfo *info) 
 	    features.custom_border_color.customBorderColors == VK_FALSE)
 		return false;
 
+	if ((info->flags & VK_SAMPLER_CREATE_IMAGE_PROCESSING_BIT_QCOM) != 0 &&
+	    enabled_extensions.count(VK_QCOM_IMAGE_PROCESSING_EXTENSION_NAME) == 0)
+		return false;
+
 	return pnext_chain_is_supported(info->pNext);
 }
 
@@ -1443,7 +1448,8 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 			VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR |
 			VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT |
 			VK_DESCRIPTOR_SET_LAYOUT_CREATE_DESCRIPTOR_BUFFER_BIT_EXT |
-			VK_DESCRIPTOR_SET_LAYOUT_CREATE_EMBEDDED_IMMUTABLE_SAMPLERS_BIT_EXT;
+			VK_DESCRIPTOR_SET_LAYOUT_CREATE_EMBEDDED_IMMUTABLE_SAMPLERS_BIT_EXT |
+			VK_DESCRIPTOR_SET_LAYOUT_CREATE_INDIRECT_BINDABLE_BIT_NV;
 
 	if ((info->flags & ~supported_flags) != 0)
 		return false;
@@ -1477,6 +1483,10 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 				return false;
 		}
 	}
+
+	if ((info->flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_INDIRECT_BINDABLE_BIT_NV) != 0 &&
+	    features.device_generated_commands_compute_nv.deviceGeneratedCompute == VK_FALSE)
+		return false;
 
 	struct DescriptorCounts
 	{
@@ -1672,6 +1682,14 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 			counts.ssbo += info->pBindings[i].descriptorCount * mutable_counts.ssbo;
 			break;
 		}
+
+		case VK_DESCRIPTOR_TYPE_BLOCK_MATCH_IMAGE_QCOM:
+		case VK_DESCRIPTOR_TYPE_SAMPLE_WEIGHT_IMAGE_QCOM:
+			if (enabled_extensions.count(VK_QCOM_IMAGE_PROCESSING_EXTENSION_NAME) == 0)
+				return false;
+			// *shrug*
+			count = nullptr;
+			break;
 
 		default:
 			return false;
@@ -2782,6 +2800,9 @@ bool FeatureFilter::Impl::access_mask_is_supported(VkAccessFlags2 access) const
 			VK_ACCESS_2_VIDEO_ENCODE_WRITE_BIT_KHR |
 			VK_ACCESS_2_VIDEO_ENCODE_READ_BIT_KHR |
 			VK_ACCESS_2_DESCRIPTOR_BUFFER_READ_BIT_EXT |
+			VK_ACCESS_2_SHADER_BINDING_TABLE_READ_BIT_KHR |
+			VK_ACCESS_2_MICROMAP_READ_BIT_EXT |
+			VK_ACCESS_2_MICROMAP_WRITE_BIT_EXT |
 			sync2_flags;
 
 	if (access & ~supported_flags)
@@ -2827,6 +2848,14 @@ bool FeatureFilter::Impl::access_mask_is_supported(VkAccessFlags2 access) const
 
 	if ((access & VK_ACCESS_2_DESCRIPTOR_BUFFER_READ_BIT_EXT) != 0 &&
 	    features.descriptor_buffer.descriptorBuffer == VK_FALSE)
+		return false;
+
+	if ((access & VK_ACCESS_2_SHADER_BINDING_TABLE_READ_BIT_KHR) != 0 &&
+	    features.ray_tracing_maintenance1.rayTracingMaintenance1 == VK_FALSE)
+		return false;
+
+	if ((access & (VK_ACCESS_2_MICROMAP_WRITE_BIT_EXT | VK_ACCESS_2_MICROMAP_READ_BIT_EXT)) != 0 &&
+	    features.opacity_micromap.micromap == VK_FALSE)
 		return false;
 
 	return true;
@@ -2920,6 +2949,8 @@ bool FeatureFilter::Impl::pipeline_stage_mask_is_supported(VkPipelineStageFlags2
 			VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR |
 			VK_PIPELINE_STAGE_FRAGMENT_DENSITY_PROCESS_BIT_EXT |
 			VK_PIPELINE_STAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR |
+			VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_COPY_BIT_KHR |
+			VK_PIPELINE_STAGE_2_MICROMAP_BUILD_BIT_EXT |
 			sync2_stages;
 
 	if (stages & ~supported_flags)
@@ -2958,6 +2989,14 @@ bool FeatureFilter::Impl::pipeline_stage_mask_is_supported(VkPipelineStageFlags2
 		return false;
 
 	if ((stages & sync2_stages) != 0 && features.synchronization2.synchronization2 == VK_FALSE)
+		return false;
+
+	if ((stages & VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_COPY_BIT_KHR) != 0 &&
+	    features.ray_tracing_maintenance1.rayTracingMaintenance1 == VK_FALSE)
+		return false;
+
+	if ((stages & VK_PIPELINE_STAGE_2_MICROMAP_BUILD_BIT_EXT) != 0 &&
+	    features.opacity_micromap.micromap == VK_FALSE)
 		return false;
 
 	return true;
@@ -3656,7 +3695,8 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 			VK_PIPELINE_CREATE_RETAIN_LINK_TIME_OPTIMIZATION_INFO_BIT_EXT |
 			VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT |
 			VK_PIPELINE_CREATE_COLOR_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT |
-			VK_PIPELINE_CREATE_DEPTH_STENCIL_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT;
+			VK_PIPELINE_CREATE_DEPTH_STENCIL_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT |
+			VK_PIPELINE_CREATE_INDIRECT_BINDABLE_BIT_NV;
 
 	if ((info->flags & ~supported_flags) != 0)
 		return false;
@@ -3702,6 +3742,10 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 		if (!features.attachment_feedback_loop_layout.attachmentFeedbackLoopLayout)
 			return false;
 	}
+
+	if ((info->flags & VK_PIPELINE_CREATE_INDIRECT_BINDABLE_BIT_NV) != 0 &&
+	    features.device_generated_commands_nv.deviceGeneratedCommands == VK_FALSE)
+		return false;
 
 	const VkDynamicState *dynamic_states = nullptr;
 	uint32_t num_dynamic_states = 0;
@@ -3994,7 +4038,8 @@ bool FeatureFilter::Impl::compute_pipeline_is_supported(const VkComputePipelineC
 			VK_PIPELINE_CREATE_DISPATCH_BASE_BIT |
 			VK_PIPELINE_CREATE_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR |
 			VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR |
-			VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT;
+			VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT |
+			VK_PIPELINE_CREATE_INDIRECT_BINDABLE_BIT_NV;
 
 	if ((info->flags & ~supported_flags) != 0)
 		return false;
@@ -4005,6 +4050,10 @@ bool FeatureFilter::Impl::compute_pipeline_is_supported(const VkComputePipelineC
 	if ((info->flags & VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT) != 0)
 		if (!features.descriptor_buffer.descriptorBuffer)
 			return false;
+
+	if ((info->flags & VK_PIPELINE_CREATE_INDIRECT_BINDABLE_BIT_NV) != 0 &&
+	    features.device_generated_commands_compute_nv.deviceGeneratedCompute == VK_FALSE)
+		return false;
 
 	if ((info->flags & VK_PIPELINE_CREATE_DISPATCH_BASE_BIT) != 0 &&
 	    api_version < VK_API_VERSION_1_1)
@@ -4038,7 +4087,8 @@ bool FeatureFilter::Impl::raytracing_pipeline_is_supported(const VkRayTracingPip
 			VK_PIPELINE_CREATE_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR |
 			VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR |
 			VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT |
-			VK_PIPELINE_CREATE_RAY_TRACING_ALLOW_MOTION_BIT_NV;
+			VK_PIPELINE_CREATE_RAY_TRACING_ALLOW_MOTION_BIT_NV |
+			VK_PIPELINE_CREATE_RAY_TRACING_OPACITY_MICROMAP_BIT_EXT;
 
 	if ((info->flags & ~supported_flags) != 0)
 		return false;
@@ -4065,6 +4115,10 @@ bool FeatureFilter::Impl::raytracing_pipeline_is_supported(const VkRayTracingPip
 
 	if ((info->flags & VK_PIPELINE_CREATE_RAY_TRACING_ALLOW_MOTION_BIT_NV) != 0 &&
 	    features.ray_tracing_motion_blur_nv.rayTracingMotionBlur == VK_FALSE)
+		return false;
+
+	if ((info->flags & VK_PIPELINE_CREATE_RAY_TRACING_OPACITY_MICROMAP_BIT_EXT) != 0 &&
+	    features.opacity_micromap.micromap == VK_FALSE)
 		return false;
 
 	if (features.ray_tracing_pipeline.rayTracingPipeline == VK_FALSE)

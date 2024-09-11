@@ -104,3 +104,5 @@ FE(PIPELINE_ROBUSTNESS, pipeline_robustness, EXT);
 FE(CONDITIONAL_RENDERING, conditional_rendering, EXT);
 FE(DYNAMIC_RENDERING_LOCAL_READ, dynamic_rendering_local_read, KHR);
 FE_ALIAS(RASTERIZATION_ORDER_ATTACHMENT_ACCESS, rasterization_order_attachment_access, EXT, ARM);
+FE(DEVICE_GENERATED_COMMANDS, device_generated_commands_nv, NV);
+FE(DEVICE_GENERATED_COMMANDS_COMPUTE, device_generated_commands_compute_nv, NV);

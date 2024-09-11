@@ -58,7 +58,18 @@
 		"VK_ARM_rasterization_order_attachment_access",
 		"VK_EXT_rasterization_order_attachment_access",
 		"VK_EXT_depth_clip_control",
-		"VK_EXT_extended_dynamic_state2"
+		"VK_EXT_extended_dynamic_state2",
+		"VK_EXT_vertex_input_dynamic_state",
+		"VK_EXT_color_write_enable",
+		"VK_KHR_ray_tracing_maintenance1",
+		"VK_EXT_opacity_micromap",
+		"VK_EXT_load_store_op_none",
+		"VK_KHR_maintenance4",
+		"VK_EXT_non_seamless_cube_map",
+		"VK_NV_device_generated_commands_compute",
+		"VK_QCOM_image_processing",
+		"VK_EXT_extended_dynamic_state3",
+		"VK_EXT_shader_module_identifier"
 	],
 	"fully-ignored" : [
 		"VK_AMD_rasterization_order",
@@ -74,11 +85,12 @@
 		"VK_AMD_pipeline_compiler_control",
 		"VK_NV_scissor_exclusive",
 		"VK_NV_coverage_reduction_mode",
-		"VK_NV_device_generated_commands",
 		"VK_NV_fragment_shading_rate_enums",
 		"VK_NV_clip_space_w_scaling",
 		"VK_HUAWEI_invocation_mask",
-		"VK_HUAWEI_subpass_shading"
+		"VK_HUAWEI_subpass_shading",
+		"VK_HUAWEI_cluster_culling_shader",
+		"VK_NV_displacement_micromap"
 	],
 	"cherry-pick": [
 		"VK_DYNAMIC_STATE_VIEWPORT_W_SCALING_NV",
@@ -96,7 +108,12 @@
 		"VK_ACCESS_FRAGMENT_SHADING_RATE_ATTACHMENT_READ_BIT_KHR",
 		"VK_PIPELINE_STAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR",
 		"VkFragmentShadingRateAttachmentInfoKHR",
-		"VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV"
+		"VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV",
+		"VK_PIPELINE_CREATE_INDIRECT_BINDABLE_NV",
+		"VkRenderPassCreationFeedbackCreateInfoEXT",
+		"VkRenderPassCreationFeedbackInfoEXT",
+		"VkRenderPassSubpassFeedbackCreateInfoEXT",
+		"VkRenderPassSubpassFeedbackInfoEXT"
 	],
 	"spirvcapabilities" : [
 		"Matrix",
