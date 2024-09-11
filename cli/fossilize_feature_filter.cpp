@@ -2745,6 +2745,11 @@ bool FeatureFilter::Impl::aspect_mask_is_supported(VkImageAspectFlags aspect) co
 
 bool FeatureFilter::Impl::access_mask_is_supported(VkAccessFlags2 access) const
 {
+	constexpr VkAccessFlags2 sync2_flags =
+			VK_ACCESS_2_SHADER_SAMPLED_READ_BIT |
+			VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT |
+			VK_ACCESS_2_SHADER_STORAGE_READ_BIT;
+
 	constexpr VkAccessFlags2 supported_flags =
 			VK_ACCESS_INDIRECT_COMMAND_READ_BIT |
 			VK_ACCESS_INDEX_READ_BIT |
@@ -2771,13 +2776,23 @@ bool FeatureFilter::Impl::access_mask_is_supported(VkAccessFlags2 access) const
 			VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR |
 			VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR |
 			VK_ACCESS_FRAGMENT_DENSITY_MAP_READ_BIT_EXT |
-			VK_ACCESS_FRAGMENT_SHADING_RATE_ATTACHMENT_READ_BIT_KHR;
+			VK_ACCESS_FRAGMENT_SHADING_RATE_ATTACHMENT_READ_BIT_KHR |
+			VK_ACCESS_2_VIDEO_DECODE_WRITE_BIT_KHR |
+			VK_ACCESS_2_VIDEO_DECODE_READ_BIT_KHR |
+			VK_ACCESS_2_VIDEO_ENCODE_WRITE_BIT_KHR |
+			VK_ACCESS_2_VIDEO_ENCODE_READ_BIT_KHR |
+			VK_ACCESS_2_DESCRIPTOR_BUFFER_READ_BIT_EXT |
+			sync2_flags;
 
 	if (access & ~supported_flags)
 		return false;
 
 	if ((access & (VK_ACCESS_2_VIDEO_DECODE_READ_BIT_KHR | VK_ACCESS_2_VIDEO_DECODE_WRITE_BIT_KHR)) != 0 &&
 	    enabled_extensions.count(VK_KHR_VIDEO_DECODE_QUEUE_EXTENSION_NAME) == 0)
+		return false;
+
+	if ((access & (VK_ACCESS_2_VIDEO_ENCODE_READ_BIT_KHR | VK_ACCESS_2_VIDEO_ENCODE_WRITE_BIT_KHR)) != 0 &&
+	    enabled_extensions.count(VK_KHR_VIDEO_ENCODE_QUEUE_EXTENSION_NAME) == 0)
 		return false;
 
 	if ((access & (VK_ACCESS_TRANSFORM_FEEDBACK_WRITE_BIT_EXT |
@@ -2805,6 +2820,13 @@ bool FeatureFilter::Impl::access_mask_is_supported(VkAccessFlags2 access) const
 
 	if ((access & VK_ACCESS_FRAGMENT_SHADING_RATE_ATTACHMENT_READ_BIT_KHR) != 0 &&
 	    features.fragment_shading_rate.attachmentFragmentShadingRate == VK_FALSE)
+		return false;
+
+	if ((access & sync2_flags) != 0 && features.synchronization2.synchronization2 == VK_FALSE)
+		return false;
+
+	if ((access & VK_ACCESS_2_DESCRIPTOR_BUFFER_READ_BIT_EXT) != 0 &&
+	    features.descriptor_buffer.descriptorBuffer == VK_FALSE)
 		return false;
 
 	return true;
@@ -2863,6 +2885,15 @@ bool FeatureFilter::Impl::pipeline_stage_mask_is_supported(VkPipelineStageFlags2
 	if (stages == VK_PIPELINE_STAGE_NONE && features.synchronization2.synchronization2 == VK_FALSE)
 		return false;
 
+	constexpr VkPipelineStageFlags2 sync2_stages =
+			VK_PIPELINE_STAGE_2_COPY_BIT |
+			VK_PIPELINE_STAGE_2_CLEAR_BIT |
+			VK_PIPELINE_STAGE_2_RESOLVE_BIT |
+			VK_PIPELINE_STAGE_2_BLIT_BIT |
+			VK_PIPELINE_STAGE_2_INDEX_INPUT_BIT |
+			VK_PIPELINE_STAGE_2_PRE_RASTERIZATION_SHADERS_BIT |
+			VK_PIPELINE_STAGE_2_VERTEX_ATTRIBUTE_INPUT_BIT;
+
 	constexpr VkPipelineStageFlags2 supported_flags =
 			VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT |
 			VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT |
@@ -2882,18 +2913,24 @@ bool FeatureFilter::Impl::pipeline_stage_mask_is_supported(VkPipelineStageFlags2
 			VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT |
 			VK_PIPELINE_STAGE_ALL_COMMANDS_BIT |
 			VK_PIPELINE_STAGE_2_VIDEO_DECODE_BIT_KHR |
+			VK_PIPELINE_STAGE_2_VIDEO_ENCODE_BIT_KHR |
 			VK_PIPELINE_STAGE_TRANSFORM_FEEDBACK_BIT_EXT |
 			VK_PIPELINE_STAGE_CONDITIONAL_RENDERING_BIT_EXT |
 			VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR |
 			VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR |
 			VK_PIPELINE_STAGE_FRAGMENT_DENSITY_PROCESS_BIT_EXT |
-			VK_PIPELINE_STAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR;
+			VK_PIPELINE_STAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR |
+			sync2_stages;
 
 	if (stages & ~supported_flags)
 		return false;
 
 	if ((stages & VK_PIPELINE_STAGE_2_VIDEO_DECODE_BIT_KHR) != 0 &&
 	    enabled_extensions.count(VK_KHR_VIDEO_DECODE_QUEUE_EXTENSION_NAME) == 0)
+		return false;
+
+	if ((stages & VK_PIPELINE_STAGE_2_VIDEO_ENCODE_BIT_KHR) != 0 &&
+	    enabled_extensions.count(VK_KHR_VIDEO_ENCODE_QUEUE_EXTENSION_NAME) == 0)
 		return false;
 
 	if ((stages & VK_PIPELINE_STAGE_TRANSFORM_FEEDBACK_BIT_EXT) != 0 &&
@@ -2918,6 +2955,9 @@ bool FeatureFilter::Impl::pipeline_stage_mask_is_supported(VkPipelineStageFlags2
 
 	if ((stages & VK_PIPELINE_STAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR) != 0 &&
 	    features.fragment_shading_rate.attachmentFragmentShadingRate == VK_FALSE)
+		return false;
+
+	if ((stages & sync2_stages) != 0 && features.synchronization2.synchronization2 == VK_FALSE)
 		return false;
 
 	return true;
@@ -3021,6 +3061,11 @@ bool FeatureFilter::Impl::image_layout_is_supported(VkImageLayout layout) const
 	case VK_IMAGE_LAYOUT_VIDEO_DECODE_SRC_KHR:
 	case VK_IMAGE_LAYOUT_VIDEO_DECODE_DST_KHR:
 		return enabled_extensions.count(VK_KHR_VIDEO_DECODE_QUEUE_EXTENSION_NAME) != 0;
+
+	case VK_IMAGE_LAYOUT_VIDEO_ENCODE_DPB_KHR:
+	case VK_IMAGE_LAYOUT_VIDEO_ENCODE_SRC_KHR:
+	case VK_IMAGE_LAYOUT_VIDEO_ENCODE_DST_KHR:
+		return enabled_extensions.count(VK_KHR_VIDEO_ENCODE_QUEUE_EXTENSION_NAME) != 0;
 
 	case VK_IMAGE_LAYOUT_FRAGMENT_DENSITY_MAP_OPTIMAL_EXT:
 		return features.fragment_density.fragmentDensityMap == VK_TRUE;
@@ -3962,7 +4007,8 @@ bool FeatureFilter::Impl::raytracing_pipeline_is_supported(const VkRayTracingPip
 			VK_PIPELINE_CREATE_LIBRARY_BIT_KHR |
 			VK_PIPELINE_CREATE_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR |
 			VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR |
-			VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT;
+			VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT |
+			VK_PIPELINE_CREATE_RAY_TRACING_ALLOW_MOTION_BIT_NV;
 
 	if ((info->flags & ~supported_flags) != 0)
 		return false;
@@ -3986,6 +4032,10 @@ bool FeatureFilter::Impl::raytracing_pipeline_is_supported(const VkRayTracingPip
 	if ((info->flags & VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT) != 0)
 		if (!features.descriptor_buffer.descriptorBuffer)
 			return false;
+
+	if ((info->flags & VK_PIPELINE_CREATE_RAY_TRACING_ALLOW_MOTION_BIT_NV) != 0 &&
+	    features.ray_tracing_motion_blur_nv.rayTracingMotionBlur == VK_FALSE)
+		return false;
 
 	if (features.ray_tracing_pipeline.rayTracingPipeline == VK_FALSE)
 		return false;

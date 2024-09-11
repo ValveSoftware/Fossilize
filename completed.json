@@ -45,7 +45,16 @@
 		"VK_NV_mesh_shader",
 		"VK_EXT_custom_border_color",
 		"VK_KHR_pipeline_library",
-		"VK_EXT_pipeline_creation_cache_control"
+		"VK_EXT_pipeline_creation_cache_control",
+		"VK_KHR_video_encode_queue",
+		"VK_QCOM_render_pass_store_ops",
+		"VK_KHR_synchronization2",
+		"VK_EXT_descriptor_buffer",
+		"VK_EXT_graphics_pipeline_library",
+		"VK_NV_ray_tracing_motion_blur",
+		"VK_EXT_mesh_shader",
+		"VK_EXT_attachment_feedback_loop_layout",
+		"VK_VALVE_mutable_descriptor_type"
 	],
 	"fully-ignored" : [
 		"VK_AMD_rasterization_order",
@@ -61,7 +70,8 @@
 		"VK_AMD_pipeline_compiler_control",
 		"VK_NV_scissor_exclusive",
 		"VK_NV_coverage_reduction_mode",
-		"VK_NV_device_generated_commands"
+		"VK_NV_device_generated_commands",
+		"VK_NV_fragment_shading_rate_enums"
 	],
 	"cherry-pick": [
 		"VK_DYNAMIC_STATE_VIEWPORT_W_SCALING_NV",
@@ -78,7 +88,8 @@
 		"VK_DYNAMIC_STATE_FRAGMENT_SHADING_RATE_KHR",
 		"VK_ACCESS_FRAGMENT_SHADING_RATE_ATTACHMENT_READ_BIT_KHR",
 		"VK_PIPELINE_STAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR",
-		"VkFragmentShadingRateAttachmentInfoKHR"
+		"VkFragmentShadingRateAttachmentInfoKHR",
+		"VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV"
 	],
 	"spirvcapabilities" : [
 		"Matrix",
