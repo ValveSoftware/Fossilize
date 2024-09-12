@@ -201,13 +201,14 @@ struct DynamicStateInfo
 	bool coverage_reduction_mode;
 };
 
-static VkPipelineCreateFlags normalize_pipeline_creation_flags(VkPipelineCreateFlags flags)
+static VkPipelineCreateFlags2KHR normalize_pipeline_creation_flags(VkPipelineCreateFlags2KHR flags)
 {
 	// Remove flags which do not meaningfully contribute to compilation.
 	flags &= ~(VK_PIPELINE_CREATE_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR |
 			VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR |
 			VK_PIPELINE_CREATE_EARLY_RETURN_ON_FAILURE_BIT_EXT |
-			VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT_EXT);
+			VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT_EXT |
+			VK_PIPELINE_CREATE_2_CAPTURE_DATA_BIT_KHR);
 	return flags;
 }
 
@@ -369,6 +370,8 @@ struct StateReplayer::Impl
 			VkPipelineLibraryCreateInfoKHR **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_viewport_depth_clip_control(
 			const Value &state, VkPipelineViewportDepthClipControlCreateInfoEXT **clip) FOSSILIZE_WARN_UNUSED;
+	bool parse_pipeline_create_flags2(
+			const Value &state, VkPipelineCreateFlags2CreateInfoKHR **flags2) FOSSILIZE_WARN_UNUSED;
 	bool parse_uints(const Value &attachments, const uint32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	bool parse_sints(const Value &attachments, const int32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	const char *duplicate_string(const char *str, size_t len);
@@ -485,31 +488,13 @@ struct StateRecorder::Impl
 	                          const DynamicStateInfo *dynamic_state_info,
 	                          VkGraphicsPipelineLibraryFlagsEXT state_flags) FOSSILIZE_WARN_UNUSED;
 
-	void *copy_pnext_struct(const VkPipelineTessellationDomainOriginStateCreateInfo *create_info,
-	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPipelineVertexInputDivisorStateCreateInfoKHR *create_info,
-	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
-	void *copy_pnext_struct(const VkPipelineRasterizationDepthClipStateCreateInfoEXT *create_info,
-	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
-	void *copy_pnext_struct(const VkPipelineRasterizationStateStreamCreateInfoEXT *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkRenderPassMultiviewCreateInfo *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkDescriptorSetLayoutBindingFlagsCreateInfoEXT *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
-	void *copy_pnext_struct(const VkPipelineColorBlendAdvancedStateCreateInfoEXT *create_info,
-	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
-	void *copy_pnext_struct(const VkPipelineRasterizationConservativeStateCreateInfoEXT *create_info,
-	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
-	void *copy_pnext_struct(const VkPipelineRasterizationLineStateCreateInfoKHR *create_info,
-	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
-	void *copy_pnext_struct(const VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT *create_info,
-	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkMutableDescriptorTypeCreateInfoEXT *create_info,
-	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
-	void *copy_pnext_struct(const VkAttachmentDescriptionStencilLayout *create_info,
-	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
-	void *copy_pnext_struct(const VkAttachmentReferenceStencilLayout *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkSubpassDescriptionDepthStencilResolve *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
@@ -518,51 +503,23 @@ struct StateRecorder::Impl
 	void *copy_pnext_struct(const VkPipelineRenderingCreateInfoKHR *create_info,
 	                        ScratchAllocator &alloc,
 	                        VkGraphicsPipelineLibraryFlagsEXT state_flags) FOSSILIZE_WARN_UNUSED;
-	void *copy_pnext_struct(const VkPhysicalDeviceRobustness2FeaturesEXT *create_info,
-	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
-	void *copy_pnext_struct(const VkPhysicalDeviceImageRobustnessFeaturesEXT *create_info,
-	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
-	void *copy_pnext_struct(const VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV *create_info,
-	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
-	void *copy_pnext_struct(const VkPhysicalDeviceFragmentShadingRateFeaturesKHR *create_info,
-	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
-	void *copy_pnext_struct(const VkPhysicalDeviceMeshShaderFeaturesNV *create_info,
-	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
-	void *copy_pnext_struct(const VkPhysicalDeviceMeshShaderFeaturesEXT *create_info,
-	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
-	void *copy_pnext_struct(const VkPhysicalDeviceDescriptorBufferFeaturesEXT *create_info,
-	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPipelineColorWriteCreateInfoEXT *create_info,
 	                        ScratchAllocator &alloc,
 	                        const DynamicStateInfo *dynamic_state_info) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPipelineSampleLocationsStateCreateInfoEXT *create_info,
 	                        ScratchAllocator &alloc,
 	                        const DynamicStateInfo *dynamic_state_info) FOSSILIZE_WARN_UNUSED;
-	void *copy_pnext_struct(const VkPipelineRasterizationProvokingVertexStateCreateInfoEXT *create_info,
-	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
-	void *copy_pnext_struct(const VkSamplerCustomBorderColorCreateInfoEXT *create_info,
-	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
-	void *copy_pnext_struct(const VkSamplerReductionModeCreateInfo *create_info,
-	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkRenderPassInputAttachmentAspectCreateInfo *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPipelineDiscardRectangleStateCreateInfoEXT *create_info,
 	                        ScratchAllocator &alloc,
 	                        const DynamicStateInfo *dynamic_state_info) FOSSILIZE_WARN_UNUSED;
-	void *copy_pnext_struct(const VkMemoryBarrier2KHR *create_info,
-	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
-	void *copy_pnext_struct(const VkPipelineFragmentShadingRateStateCreateInfoKHR *create_info,
-	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
-	void *copy_pnext_struct(const VkSamplerYcbcrConversionCreateInfo *create_info,
-	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
-	void *copy_pnext_struct(const VkGraphicsPipelineLibraryCreateInfoEXT *create_info,
-	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPipelineLibraryCreateInfoKHR *create_info,
-	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
-	void *copy_pnext_struct(const VkPipelineViewportDepthClipControlCreateInfoEXT *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPipelineShaderStageModuleIdentifierCreateInfoEXT *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	template <typename T>
+	void *copy_pnext_struct_simple(const T *create_info, ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 
 	bool remap_sampler_handle(VkSampler sampler, VkSampler *out_sampler) const FOSSILIZE_WARN_UNUSED;
 	bool remap_descriptor_set_layout_handle(VkDescriptorSetLayout layout, VkDescriptorSetLayout *out_layout) const FOSSILIZE_WARN_UNUSED;
@@ -745,6 +702,14 @@ static void hash_pnext_struct(const StateRecorder *,
 	h.u32(info.descriptorBufferCaptureReplay);
 	h.u32(info.descriptorBufferImageLayoutIgnored);
 	h.u32(info.descriptorBufferPushDescriptors);
+}
+
+static void hash_pnext_struct(const StateRecorder *,
+                              Hasher &h,
+                              const VkPipelineCreateFlags2CreateInfoKHR &info)
+{
+	auto flags = normalize_pipeline_creation_flags(info.flags);
+	h.u64(flags);
 }
 
 static bool hash_pnext_chain_pdf2(const StateRecorder *recorder, Hasher &h, const void *pNext)
@@ -1521,6 +1486,10 @@ static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const voi
 			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineViewportDepthClipControlCreateInfoEXT *>(pNext), dynamic_state_info);
 			break;
 
+		case VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO_KHR:
+			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineCreateFlags2CreateInfoKHR *>(pNext));
+			break;
+
 		default:
 			log_error_pnext_chain("Unsupported pNext found, cannot hash.", pNext);
 			return false;
@@ -1773,7 +1742,10 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 	Hasher h;
 	Hash hash;
 
-	h.u32(create_info.flags);
+	if (find_pnext<VkPipelineCreateFlags2CreateInfoKHR>(VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO_KHR, create_info.pNext))
+		h.u32(0);
+	else
+		h.u32(normalize_pipeline_creation_flags(create_info.flags));
 
 	if ((create_info.flags & VK_PIPELINE_CREATE_DERIVATIVE_BIT) != 0 &&
 	    create_info.basePipelineHandle != VK_NULL_HANDLE)
@@ -2116,7 +2088,10 @@ bool compute_hash_compute_pipeline(const StateRecorder &recorder, const VkComput
 		return false;
 	h.u64(hash);
 
-	h.u32(create_info.flags);
+	if (find_pnext<VkPipelineCreateFlags2CreateInfoKHR>(VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO_KHR, create_info.pNext))
+		h.u32(0);
+	else
+		h.u32(normalize_pipeline_creation_flags(create_info.flags));
 
 	if ((create_info.flags & VK_PIPELINE_CREATE_DERIVATIVE_BIT) != 0 &&
 	    create_info.basePipelineHandle != VK_NULL_HANDLE)
@@ -2179,7 +2154,11 @@ bool compute_hash_raytracing_pipeline(const StateRecorder &recorder,
 	Hasher h;
 	Hash hash;
 
-	h.u32(create_info.flags);
+	if (find_pnext<VkPipelineCreateFlags2CreateInfoKHR>(VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO_KHR, create_info.pNext))
+		h.u32(0);
+	else
+		h.u32(normalize_pipeline_creation_flags(create_info.flags));
+
 	h.u32(create_info.maxPipelineRayRecursionDepth);
 
 	if (!recorder.get_hash_for_pipeline_layout(create_info.layout, &hash))
@@ -4560,6 +4539,15 @@ bool StateReplayer::Impl::parse_viewport_depth_clip_control(const Value &state,
 	return true;
 }
 
+bool StateReplayer::Impl::parse_pipeline_create_flags2(const Value &state,
+                                                       VkPipelineCreateFlags2CreateInfoKHR **flags2)
+{
+	auto *info = allocator.allocate_cleared<VkPipelineCreateFlags2CreateInfoKHR>();
+	*flags2 = info;
+	info->flags = state["flags"].GetUint64();
+	return true;
+}
+
 bool StateReplayer::Impl::parse_mutable_descriptor_type(const Value &state,
                                                         VkMutableDescriptorTypeCreateInfoEXT **out_info)
 {
@@ -4902,6 +4890,15 @@ bool StateReplayer::Impl::parse_pnext_chain(
 			if (!parse_viewport_depth_clip_control(next, &clip))
 				return false;
 			new_struct = reinterpret_cast<VkBaseInStructure *>(clip);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO_KHR:
+		{
+			VkPipelineCreateFlags2CreateInfoKHR *flags2 = nullptr;
+			if (!parse_pipeline_create_flags2(next, &flags2))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(flags2);
 			break;
 		}
 
@@ -5289,13 +5286,6 @@ T *StateRecorder::Impl::copy(const T *src, size_t count, ScratchAllocator &alloc
 }
 
 void *StateRecorder::Impl::copy_pnext_struct(
-		const VkPipelineTessellationDomainOriginStateCreateInfo *create_info,
-		ScratchAllocator &alloc)
-{
-	return copy(create_info, 1, alloc);
-}
-
-void *StateRecorder::Impl::copy_pnext_struct(
 		const VkPipelineVertexInputDivisorStateCreateInfoKHR *create_info,
 		ScratchAllocator &alloc)
 {
@@ -5334,30 +5324,6 @@ void *StateRecorder::Impl::copy_pnext_struct(const VkDescriptorSetLayoutBindingF
 	return info;
 }
 
-void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineColorBlendAdvancedStateCreateInfoEXT *create_info,
-                                             ScratchAllocator &alloc)
-{
-	return copy(create_info, 1, alloc);
-}
-
-void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineRasterizationConservativeStateCreateInfoEXT *create_info,
-                                             ScratchAllocator &alloc)
-{
-	return copy(create_info, 1, alloc);
-}
-
-void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineRasterizationLineStateCreateInfoKHR *create_info,
-                                             ScratchAllocator &alloc)
-{
-	return copy(create_info, 1, alloc);
-}
-
-void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT *create_info,
-                                             ScratchAllocator &alloc)
-{
-	return copy(create_info, 1, alloc);
-}
-
 void *StateRecorder::Impl::copy_pnext_struct(const VkMutableDescriptorTypeCreateInfoEXT *create_info,
                                              ScratchAllocator &alloc)
 {
@@ -5373,32 +5339,6 @@ void *StateRecorder::Impl::copy_pnext_struct(const VkMutableDescriptorTypeCreate
 	}
 
 	return info;
-}
-
-void *StateRecorder::Impl::copy_pnext_struct(
-		const VkPipelineRasterizationDepthClipStateCreateInfoEXT *create_info,
-		ScratchAllocator &alloc)
-{
-	return copy(create_info, 1, alloc);
-}
-
-void *StateRecorder::Impl::copy_pnext_struct(
-		const VkPipelineRasterizationStateStreamCreateInfoEXT *create_info,
-		ScratchAllocator &alloc)
-{
-	return copy(create_info, 1, alloc);
-}
-
-void *StateRecorder::Impl::copy_pnext_struct(const VkAttachmentDescriptionStencilLayout *create_info,
-                                             ScratchAllocator &alloc)
-{
-	return copy(create_info, 1, alloc);
-}
-
-void *StateRecorder::Impl::copy_pnext_struct(const VkAttachmentReferenceStencilLayout *create_info,
-                                             ScratchAllocator &alloc)
-{
-	return copy(create_info, 1, alloc);
 }
 
 void *StateRecorder::Impl::copy_pnext_struct(const VkSubpassDescriptionDepthStencilResolve *create_info,
@@ -5499,27 +5439,6 @@ void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineSampleLocationsStat
 	return sample_locations;
 }
 
-void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineRasterizationProvokingVertexStateCreateInfoEXT *create_info,
-                                             ScratchAllocator &alloc)
-{
-	auto *provoking_vertex = copy(create_info, 1, alloc);
-	return provoking_vertex;
-}
-
-void *StateRecorder::Impl::copy_pnext_struct(const VkSamplerCustomBorderColorCreateInfoEXT *create_info,
-                                             ScratchAllocator &alloc)
-{
-	auto *custom_border_color = copy(create_info, 1, alloc);
-	return custom_border_color;
-}
-
-void *StateRecorder::Impl::copy_pnext_struct(const VkSamplerReductionModeCreateInfo *create_info,
-                                             ScratchAllocator &alloc)
-{
-	auto *reduction_mode = copy(create_info, 1, alloc);
-	return reduction_mode;
-}
-
 void *StateRecorder::Impl::copy_pnext_struct(const VkRenderPassInputAttachmentAspectCreateInfo *create_info,
                                              ScratchAllocator &alloc)
 {
@@ -5540,47 +5459,12 @@ void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineDiscardRectangleSta
 	return discard_rectangles;
 }
 
-void *StateRecorder::Impl::copy_pnext_struct(const VkMemoryBarrier2KHR *create_info,
-                                             ScratchAllocator &alloc)
-{
-	auto *memory_barrier2 = copy(create_info, 1, alloc);
-	return memory_barrier2;
-}
-
-void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineFragmentShadingRateStateCreateInfoKHR *create_info,
-                                             ScratchAllocator &alloc)
-{
-	auto *fragment_shading_rate = copy(create_info, 1, alloc);
-	return fragment_shading_rate;
-}
-
-void *StateRecorder::Impl::copy_pnext_struct(const VkSamplerYcbcrConversionCreateInfo *create_info,
-                                             ScratchAllocator &alloc)
-{
-	auto *conv = copy(create_info, 1, alloc);
-	return conv;
-}
-
-void *StateRecorder::Impl::copy_pnext_struct(const VkGraphicsPipelineLibraryCreateInfoEXT *create_info,
-                                             ScratchAllocator &alloc)
-{
-	auto *gpl = copy(create_info, 1, alloc);
-	return gpl;
-}
-
 void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineLibraryCreateInfoKHR *create_info,
                                              ScratchAllocator &alloc)
 {
 	auto *libraries = copy(create_info, 1, alloc);
 	libraries->pLibraries = copy(libraries->pLibraries, libraries->libraryCount, alloc);
 	return libraries;
-}
-
-void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineViewportDepthClipControlCreateInfoEXT *create_info,
-                                             ScratchAllocator &alloc)
-{
-	auto *clip = copy(create_info, 1, alloc);
-	return clip;
 }
 
 void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineShaderStageModuleIdentifierCreateInfoEXT *create_info,
@@ -5592,6 +5476,12 @@ void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineShaderStageModuleId
 			std::min<uint32_t>(identifier->identifierSize, VK_MAX_SHADER_MODULE_IDENTIFIER_SIZE_EXT);
 	identifier->pIdentifier = copy(identifier->pIdentifier, identifier->identifierSize, alloc);
 	return identifier;
+}
+
+template <typename T>
+void *StateRecorder::Impl::copy_pnext_struct_simple(const T *create_info, ScratchAllocator &alloc)
+{
+	return copy(create_info, 1, alloc);
 }
 
 template <typename T>
@@ -5621,7 +5511,7 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 		case VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_DOMAIN_ORIGIN_STATE_CREATE_INFO:
 		{
 			auto ci = static_cast<const VkPipelineTessellationDomainOriginStateCreateInfo *>(pNext);
-			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
 			break;
 		}
 
@@ -5635,14 +5525,14 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_DEPTH_CLIP_STATE_CREATE_INFO_EXT:
 		{
 			auto *ci = static_cast<const VkPipelineRasterizationDepthClipStateCreateInfoEXT *>(pNext);
-			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
 			break;
 		}
 
 		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_STREAM_CREATE_INFO_EXT:
 		{
 			auto *ci = static_cast<const VkPipelineRasterizationStateStreamCreateInfoEXT *>(pNext);
-			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
 			break;
 		}
 
@@ -5663,28 +5553,28 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 		case VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_ADVANCED_STATE_CREATE_INFO_EXT:
 		{
 			auto *ci = static_cast<const VkPipelineColorBlendAdvancedStateCreateInfoEXT *>(pNext);
-			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
 			break;
 		}
 
 		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_CONSERVATIVE_STATE_CREATE_INFO_EXT:
 		{
 			auto *ci = static_cast<const VkPipelineRasterizationConservativeStateCreateInfoEXT *>(pNext);
-			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
 			break;
 		}
 
 		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_LINE_STATE_CREATE_INFO_KHR:
 		{
 			auto *ci = static_cast<const VkPipelineRasterizationLineStateCreateInfoKHR *>(pNext);
-			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
 			break;
 		}
 
 		case VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT:
 		{
 			auto *ci = static_cast<const VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT *>(pNext);
-			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
 			break;
 		}
 
@@ -5698,14 +5588,14 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 		case VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_STENCIL_LAYOUT:
 		{
 			auto *ci = static_cast<const VkAttachmentDescriptionStencilLayout *>(pNext);
-			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
 			break;
 		}
 
 		case VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_STENCIL_LAYOUT:
 		{
 			auto *ci = static_cast<const VkAttachmentReferenceStencilLayout *>(pNext);
-			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
 			break;
 		}
 
@@ -5753,21 +5643,21 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_PROVOKING_VERTEX_STATE_CREATE_INFO_EXT:
 		{
 			auto *ci = static_cast<const VkPipelineRasterizationProvokingVertexStateCreateInfoEXT *>(pNext);
-			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
 			break;
 		}
 
 		case VK_STRUCTURE_TYPE_SAMPLER_CUSTOM_BORDER_COLOR_CREATE_INFO_EXT:
 		{
 			auto *ci = static_cast<const VkSamplerCustomBorderColorCreateInfoEXT *>(pNext);
-			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
 			break;
 		}
 
 		case VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO:
 		{
 			auto *ci = static_cast<const VkSamplerReductionModeCreateInfo *>(pNext);
-			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
 			break;
 		}
 
@@ -5788,21 +5678,21 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 		case VK_STRUCTURE_TYPE_MEMORY_BARRIER_2_KHR:
 		{
 			auto *ci = static_cast<const VkMemoryBarrier2KHR *>(pNext);
-			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
 			break;
 		}
 
 		case VK_STRUCTURE_TYPE_PIPELINE_FRAGMENT_SHADING_RATE_STATE_CREATE_INFO_KHR:
 		{
 			auto *ci = static_cast<const VkPipelineFragmentShadingRateStateCreateInfoKHR *>(pNext);
-			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
 			break;
 		}
 
 		case VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_CREATE_INFO:
 		{
 			auto *ci = static_cast<const VkSamplerYcbcrConversionCreateInfo *>(pNext);
-			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
 			break;
 		}
 
@@ -5826,7 +5716,7 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 		case VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT:
 		{
 			auto *ci = static_cast<const VkGraphicsPipelineLibraryCreateInfoEXT *>(pNext);
-			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
 			break;
 		}
 
@@ -5850,7 +5740,7 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 		case VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_DEPTH_CLIP_CONTROL_CREATE_INFO_EXT:
 		{
 			auto *ci = static_cast<const VkPipelineViewportDepthClipControlCreateInfoEXT *>(pNext);
-			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
 			break;
 		}
 
@@ -5858,6 +5748,15 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 		{
 			auto *ci = static_cast<const VkPipelineShaderStageModuleIdentifierCreateInfoEXT *>(pNext);
 			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO_KHR:
+		{
+			auto *ci = static_cast<const VkPipelineCreateFlags2CreateInfoKHR *>(pNext);
+			auto *flags2 = static_cast<VkPipelineCreateFlags2CreateInfoKHR *>(copy_pnext_struct_simple(ci, alloc));
+			flags2->flags = normalize_pipeline_creation_flags(flags2->flags);
+			*ppNext = reinterpret_cast<VkBaseInStructure *>(flags2);
 			break;
 		}
 
@@ -6572,55 +6471,6 @@ bool StateRecorder::Impl::copy_ycbcr_conversion(const VkSamplerYcbcrConversionCr
 	return true;
 }
 
-void *StateRecorder::Impl::copy_pnext_struct(
-		const VkPhysicalDeviceRobustness2FeaturesEXT *create_info,
-		ScratchAllocator &alloc)
-{
-	return copy(create_info, 1, alloc);
-}
-
-void *StateRecorder::Impl::copy_pnext_struct(
-		const VkPhysicalDeviceImageRobustnessFeaturesEXT *create_info,
-		ScratchAllocator &alloc)
-{
-	return copy(create_info, 1, alloc);
-}
-
-void *StateRecorder::Impl::copy_pnext_struct(
-		const VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV *create_info,
-		ScratchAllocator &alloc)
-{
-	return copy(create_info, 1, alloc);
-}
-
-void *StateRecorder::Impl::copy_pnext_struct(
-		const VkPhysicalDeviceFragmentShadingRateFeaturesKHR *create_info,
-		ScratchAllocator &alloc)
-{
-	return copy(create_info, 1, alloc);
-}
-
-void *StateRecorder::Impl::copy_pnext_struct(
-		const VkPhysicalDeviceMeshShaderFeaturesEXT *create_info,
-		ScratchAllocator &alloc)
-{
-	return copy(create_info, 1, alloc);
-}
-
-void *StateRecorder::Impl::copy_pnext_struct(
-		const VkPhysicalDeviceMeshShaderFeaturesNV *create_info,
-		ScratchAllocator &alloc)
-{
-	return copy(create_info, 1, alloc);
-}
-
-void *StateRecorder::Impl::copy_pnext_struct(
-		const VkPhysicalDeviceDescriptorBufferFeaturesEXT *create_info,
-		ScratchAllocator &alloc)
-{
-	return copy(create_info, 1, alloc);
-}
-
 bool StateRecorder::Impl::copy_pnext_chain_pdf2(const void *pNext, ScratchAllocator &alloc, void **out_pnext)
 {
 	VkBaseInStructure new_pnext = {};
@@ -6635,49 +6485,49 @@ bool StateRecorder::Impl::copy_pnext_chain_pdf2(const void *pNext, ScratchAlloca
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT:
 		{
 			auto *ci = static_cast<const VkPhysicalDeviceRobustness2FeaturesEXT *>(pNext);
-			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
 			break;
 		}
 
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_ROBUSTNESS_FEATURES_EXT:
 		{
 			auto *ci = static_cast<const VkPhysicalDeviceImageRobustnessFeaturesEXT *>(pNext);
-			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
 			break;
 		}
 
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_ENUMS_FEATURES_NV:
 		{
 			auto *ci = static_cast<const VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV *>(pNext);
-			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
 			break;
 		}
 
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR:
 		{
 			auto *ci = static_cast<const VkPhysicalDeviceFragmentShadingRateFeaturesKHR *>(pNext);
-			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
 			break;
 		}
 
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_NV:
 		{
 			auto *ci = static_cast<const VkPhysicalDeviceMeshShaderFeaturesNV *>(pNext);
-			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
 			break;
 		}
 
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT:
 		{
 			auto *ci = static_cast<const VkPhysicalDeviceMeshShaderFeaturesEXT *>(pNext);
-			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
 			break;
 		}
 
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT:
 		{
 			auto *ci = static_cast<const VkPhysicalDeviceDescriptorBufferFeaturesEXT *>(pNext);
-			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
 			break;
 		}
 
@@ -6925,6 +6775,8 @@ bool StateRecorder::Impl::copy_compute_pipeline(const VkComputePipelineCreateInf
 {
 	auto *info = copy(create_info, 1, alloc);
 	info->flags = normalize_pipeline_creation_flags(info->flags);
+	if (find_pnext<VkPipelineCreateFlags2CreateInfoKHR>(VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO_KHR, info->pNext))
+		info->flags = 0;
 
 	if (!update_derived_pipeline(info, base_pipelines, base_pipeline_count))
 		return false;
@@ -6956,6 +6808,8 @@ bool StateRecorder::Impl::copy_raytracing_pipeline(const VkRayTracingPipelineCre
 {
 	auto *info = copy(create_info, 1, alloc);
 	info->flags = normalize_pipeline_creation_flags(info->flags);
+	if (find_pnext<VkPipelineCreateFlags2CreateInfoKHR>(VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO_KHR, info->pNext))
+		info->flags = 0;
 
 	if (!update_derived_pipeline(info, base_pipelines, base_pipeline_count))
 		return false;
@@ -7043,6 +6897,8 @@ bool StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateI
 		info->layout = VK_NULL_HANDLE;
 
 	info->flags = normalize_pipeline_creation_flags(info->flags);
+	if (find_pnext<VkPipelineCreateFlags2CreateInfoKHR>(VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO_KHR, info->pNext))
+		info->flags = 0;
 
 	if (!update_derived_pipeline(info, base_pipelines, base_pipeline_count))
 		return false;
@@ -8887,6 +8743,16 @@ static bool json_value(const VkPipelineViewportDepthClipControlCreateInfoEXT &cr
 }
 
 template <typename Allocator>
+static bool json_value(const VkPipelineCreateFlags2CreateInfoKHR &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("flags", create_info.flags, alloc);
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
 static bool json_value(const VkSubpassDescriptionDepthStencilResolve &create_info, Allocator &alloc, Value *out_value);
 template <typename Allocator>
 static bool json_value(const VkFragmentShadingRateAttachmentInfoKHR &create_info, Allocator &alloc, Value *out_value);
@@ -9053,6 +8919,11 @@ static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *o
 
 		case VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_DEPTH_CLIP_CONTROL_CREATE_INFO_EXT:
 			if (!json_value(*static_cast<const VkPipelineViewportDepthClipControlCreateInfoEXT *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO_KHR:
+			if (!json_value(*static_cast<const VkPipelineCreateFlags2CreateInfoKHR *>(pNext), alloc, &next))
 				return false;
 			break;
 
