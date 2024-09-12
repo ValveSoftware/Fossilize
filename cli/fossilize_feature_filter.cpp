@@ -413,9 +413,9 @@ void *build_pnext_chain(VulkanProperties &props, uint32_t api_version,
 
 #define CHAIN(struct_type, member, min_api_version, required_extension, required_extension_alias) \
 	do { \
-        bool is_minimum_api_version = api_version >= min_api_version; \
+		bool is_minimum_api_version = api_version >= min_api_version; \
 		bool supports_extension = required_extension == nullptr || enabled_extension_set.count(required_extension) != 0; \
-        if (!supports_extension && required_extension_alias) \
+		if (!supports_extension && required_extension_alias) \
 			supports_extension = enabled_extension_set.count(required_extension_alias) != 0; \
 		if (supports_extension && is_minimum_api_version) { \
 			member.sType = struct_type; \
