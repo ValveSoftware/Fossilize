@@ -80,7 +80,8 @@
 		"VK_KHR_load_store_op_none",
 		"VK_KHR_line_rasterization",
 		"VK_KHR_maintenance5",
-		"VK_EXT_legacy_dithering"
+		"VK_EXT_legacy_dithering",
+		"VK_KHR_fragment_shading_rate"
 	],
 	"fully-ignored" : [
 		"VK_AMD_rasterization_order",

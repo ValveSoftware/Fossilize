@@ -518,6 +518,8 @@ struct StateRecorder::Impl
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkPipelineShaderStageModuleIdentifierCreateInfoEXT *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkSampleLocationsInfoEXT *create_info,
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	template <typename T>
 	void *copy_pnext_struct_simple(const T *create_info, ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 
@@ -710,6 +712,66 @@ static void hash_pnext_struct(const StateRecorder *,
 {
 	auto flags = normalize_pipeline_creation_flags(info.flags);
 	h.u64(flags);
+}
+
+static void hash_pnext_struct(const StateRecorder *, Hasher &h,
+                              const VkRenderPassCreationControlEXT &info)
+{
+	h.u32(info.disallowMerging);
+}
+
+static void hash_pnext_struct(const StateRecorder *, Hasher &h,
+                              const VkSamplerBorderColorComponentMappingCreateInfoEXT &info)
+{
+	h.u32(info.srgb);
+	h.u32(info.components.r);
+	h.u32(info.components.g);
+	h.u32(info.components.b);
+	h.u32(info.components.a);
+}
+
+static void hash_pnext_struct(const StateRecorder *, Hasher &h,
+                              const VkMultisampledRenderToSingleSampledInfoEXT &info)
+{
+	h.u32(info.multisampledRenderToSingleSampledEnable);
+	h.u32(info.rasterizationSamples);
+}
+
+static void hash_pnext_struct(const StateRecorder *, Hasher &h,
+                              const VkDepthBiasRepresentationInfoEXT &info)
+{
+	h.u32(info.depthBiasExact);
+	h.u32(info.depthBiasRepresentation);
+}
+
+static void hash_pnext_struct(const StateRecorder *, Hasher &h,
+                              const VkRenderPassFragmentDensityMapCreateInfoEXT &info)
+{
+	h.u32(info.fragmentDensityMapAttachment.attachment);
+	h.u32(info.fragmentDensityMapAttachment.layout);
+}
+
+static void hash_pnext_struct(const StateRecorder *, Hasher &h,
+                              const VkSampleLocationsInfoEXT &info)
+{
+	h.u32(info.sampleLocationsCount);
+	h.u32(info.sampleLocationGridSize.width);
+	h.u32(info.sampleLocationGridSize.height);
+	h.u32(info.sampleLocationsPerPixel);
+	for (uint32_t i = 0; i < info.sampleLocationsCount; i++)
+	{
+		h.f32(info.pSampleLocations[i].x);
+		h.f32(info.pSampleLocations[i].y);
+	}
+}
+
+static void hash_pnext_struct(const StateRecorder *, Hasher &h,
+                              const VkPipelineRobustnessCreateInfoEXT &info)
+{
+	h.u32(info.images);
+	h.u32(info.vertexInputs);
+	h.u32(info.uniformBuffers);
+	h.u32(info.storageBuffers);
 }
 
 static bool hash_pnext_chain_pdf2(const StateRecorder *recorder, Hasher &h, const void *pNext)
@@ -1488,6 +1550,34 @@ static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const voi
 
 		case VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO_KHR:
 			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineCreateFlags2CreateInfoKHR *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_RENDER_PASS_CREATION_CONTROL_EXT:
+			hash_pnext_struct(recorder, h, *static_cast<const VkRenderPassCreationControlEXT *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_SAMPLER_BORDER_COLOR_COMPONENT_MAPPING_CREATE_INFO_EXT:
+			hash_pnext_struct(recorder, h, *static_cast<const VkSamplerBorderColorComponentMappingCreateInfoEXT *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_MULTISAMPLED_RENDER_TO_SINGLE_SAMPLED_INFO_EXT:
+			hash_pnext_struct(recorder, h, *static_cast<const VkMultisampledRenderToSingleSampledInfoEXT *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_DEPTH_BIAS_REPRESENTATION_INFO_EXT:
+			hash_pnext_struct(recorder, h, *static_cast<const VkDepthBiasRepresentationInfoEXT *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_RENDER_PASS_FRAGMENT_DENSITY_MAP_CREATE_INFO_EXT:
+			hash_pnext_struct(recorder, h, *static_cast<const VkRenderPassFragmentDensityMapCreateInfoEXT *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_SAMPLE_LOCATIONS_INFO_EXT:
+			hash_pnext_struct(recorder, h, *static_cast<const VkSampleLocationsInfoEXT *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_ROBUSTNESS_CREATE_INFO_EXT:
+			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineRobustnessCreateInfoEXT *>(pNext));
 			break;
 
 		default:
@@ -5478,6 +5568,13 @@ void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineShaderStageModuleId
 	return identifier;
 }
 
+void *StateRecorder::Impl::copy_pnext_struct(const VkSampleLocationsInfoEXT *info, ScratchAllocator &alloc)
+{
+	auto *loc = copy(info, 1, alloc);
+	loc->pSampleLocations = copy(loc->pSampleLocations, loc->sampleLocationsCount, alloc);
+	return loc;
+}
+
 template <typename T>
 void *StateRecorder::Impl::copy_pnext_struct_simple(const T *create_info, ScratchAllocator &alloc)
 {
@@ -5757,6 +5854,55 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 			auto *flags2 = static_cast<VkPipelineCreateFlags2CreateInfoKHR *>(copy_pnext_struct_simple(ci, alloc));
 			flags2->flags = normalize_pipeline_creation_flags(flags2->flags);
 			*ppNext = reinterpret_cast<VkBaseInStructure *>(flags2);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_RENDER_PASS_CREATION_CONTROL_EXT:
+		{
+			auto *ci = static_cast<const VkRenderPassCreationControlEXT *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_SAMPLER_BORDER_COLOR_COMPONENT_MAPPING_CREATE_INFO_EXT:
+		{
+			auto *ci = static_cast<const VkSamplerBorderColorComponentMappingCreateInfoEXT *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_MULTISAMPLED_RENDER_TO_SINGLE_SAMPLED_INFO_EXT:
+		{
+			auto *ci = static_cast<const VkMultisampledRenderToSingleSampledInfoEXT *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_DEPTH_BIAS_REPRESENTATION_INFO_EXT:
+		{
+			auto *ci = static_cast<const VkDepthBiasRepresentationInfoEXT *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_RENDER_PASS_FRAGMENT_DENSITY_MAP_CREATE_INFO_EXT:
+		{
+			auto *ci = static_cast<const VkRenderPassFragmentDensityMapCreateInfoEXT *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_SAMPLE_LOCATIONS_INFO_EXT:
+		{
+			auto *ci = static_cast<const VkSampleLocationsInfoEXT *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_ROBUSTNESS_CREATE_INFO_EXT:
+		{
+			auto *ci = static_cast<const VkPipelineRobustnessCreateInfoEXT *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
 			break;
 		}
 
@@ -8743,6 +8889,115 @@ static bool json_value(const VkPipelineViewportDepthClipControlCreateInfoEXT &cr
 }
 
 template <typename Allocator>
+static bool json_value(const VkRenderPassCreationControlEXT &create_info,
+                       Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("disallowMerging", create_info.disallowMerging, alloc);
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
+static bool json_value(const VkSamplerBorderColorComponentMappingCreateInfoEXT &create_info,
+                       Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("srgb", create_info.srgb, alloc);
+	Value components(kObjectType);
+	components.AddMember("r", create_info.components.r, alloc);
+	components.AddMember("g", create_info.components.g, alloc);
+	components.AddMember("b", create_info.components.b, alloc);
+	components.AddMember("a", create_info.components.a, alloc);
+	value.AddMember("components", components, alloc);
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
+static bool json_value(const VkMultisampledRenderToSingleSampledInfoEXT &create_info,
+                       Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("rasterizationSamples", create_info.rasterizationSamples, alloc);
+	value.AddMember("multisampledRenderToSingleSampledEnable", create_info.multisampledRenderToSingleSampledEnable, alloc);
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
+static bool json_value(const VkDepthBiasRepresentationInfoEXT &create_info,
+                       Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("depthBiasRepresentation", create_info.depthBiasRepresentation, alloc);
+	value.AddMember("depthBiasExact", create_info.depthBiasExact, alloc);
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
+static bool json_value(const VkRenderPassFragmentDensityMapCreateInfoEXT &create_info,
+                       Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	Value attachment(kObjectType);
+	attachment.AddMember("attachment", create_info.fragmentDensityMapAttachment.attachment, alloc);
+	attachment.AddMember("layout", create_info.fragmentDensityMapAttachment.layout, alloc);
+	value.AddMember("fragmentDensityMapAttachment", attachment, alloc);
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
+static bool json_value(const VkSampleLocationsInfoEXT &create_info,
+                       Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+
+	value.AddMember("sampleLocationsPerPixel", create_info.sampleLocationsPerPixel, alloc);
+	{
+		Value extent(kObjectType);
+		extent.AddMember("width", create_info.sampleLocationGridSize.width, alloc);
+		extent.AddMember("height", create_info.sampleLocationGridSize.height, alloc);
+		value.AddMember("sampleLocationGridSize", extent, alloc);
+	}
+
+	if (create_info.sampleLocationsCount)
+	{
+		Value locs(kArrayType);
+		for (uint32_t i = 0; i < create_info.sampleLocationsCount; i++)
+		{
+			Value loc(kObjectType);
+			loc.AddMember("x", create_info.pSampleLocations[i].x, alloc);
+			loc.AddMember("y", create_info.pSampleLocations[i].y, alloc);
+			locs.PushBack(loc, alloc);
+		}
+		value.AddMember("sampleLocations", locs, alloc);
+	}
+
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
+static bool json_value(const VkPipelineRobustnessCreateInfoEXT &create_info,
+                       Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("storageBuffers", create_info.storageBuffers, alloc);
+	value.AddMember("vertexInputs", create_info.vertexInputs, alloc);
+	value.AddMember("uniformBuffers", create_info.uniformBuffers, alloc);
+	value.AddMember("images", create_info.images, alloc);
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
 static bool json_value(const VkPipelineCreateFlags2CreateInfoKHR &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -8924,6 +9179,41 @@ static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *o
 
 		case VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO_KHR:
 			if (!json_value(*static_cast<const VkPipelineCreateFlags2CreateInfoKHR *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_RENDER_PASS_CREATION_CONTROL_EXT:
+			if (!json_value(*static_cast<const VkRenderPassCreationControlEXT *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_SAMPLER_BORDER_COLOR_COMPONENT_MAPPING_CREATE_INFO_EXT:
+			if (!json_value(*static_cast<const VkSamplerBorderColorComponentMappingCreateInfoEXT *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_MULTISAMPLED_RENDER_TO_SINGLE_SAMPLED_INFO_EXT:
+			if (!json_value(*static_cast<const VkMultisampledRenderToSingleSampledInfoEXT *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_DEPTH_BIAS_REPRESENTATION_INFO_EXT:
+			if (!json_value(*static_cast<const VkDepthBiasRepresentationInfoEXT *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_RENDER_PASS_FRAGMENT_DENSITY_MAP_CREATE_INFO_EXT:
+			if (!json_value(*static_cast<const VkRenderPassFragmentDensityMapCreateInfoEXT *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_SAMPLE_LOCATIONS_INFO_EXT:
+			if (!json_value(*static_cast<const VkSampleLocationsInfoEXT *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_ROBUSTNESS_CREATE_INFO_EXT:
+			if (!json_value(*static_cast<const VkPipelineRobustnessCreateInfoEXT *>(pNext), alloc, &next))
 				return false;
 			break;
 
