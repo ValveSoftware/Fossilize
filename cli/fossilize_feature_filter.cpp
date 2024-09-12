@@ -3780,7 +3780,8 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 			VK_PIPELINE_CREATE_DEPTH_STENCIL_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT |
 			VK_PIPELINE_CREATE_INDIRECT_BINDABLE_BIT_NV |
 			VK_PIPELINE_CREATE_PROTECTED_ACCESS_ONLY_BIT_EXT |
-			VK_PIPELINE_CREATE_NO_PROTECTED_ACCESS_BIT_EXT;
+			VK_PIPELINE_CREATE_NO_PROTECTED_ACCESS_BIT_EXT |
+			VK_PIPELINE_CREATE_2_ENABLE_LEGACY_DITHERING_BIT_EXT;
 
 	auto flags = get_effective_flags(info);
 
@@ -3836,6 +3837,10 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 	if ((flags & (VK_PIPELINE_CREATE_PROTECTED_ACCESS_ONLY_BIT_EXT |
 	              VK_PIPELINE_CREATE_NO_PROTECTED_ACCESS_BIT_EXT)) != 0 &&
 	    features.pipeline_protected_access.pipelineProtectedAccess == VK_FALSE)
+		return false;
+
+	if ((flags & VK_PIPELINE_CREATE_2_ENABLE_LEGACY_DITHERING_BIT_EXT) != 0 &&
+	    features.legacy_dithering.legacyDithering == VK_FALSE)
 		return false;
 
 	const VkDynamicState *dynamic_states = nullptr;
