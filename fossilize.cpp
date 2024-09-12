@@ -204,11 +204,11 @@ struct DynamicStateInfo
 static VkPipelineCreateFlags2KHR normalize_pipeline_creation_flags(VkPipelineCreateFlags2KHR flags)
 {
 	// Remove flags which do not meaningfully contribute to compilation.
-	flags &= ~(VK_PIPELINE_CREATE_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR |
-			VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR |
-			VK_PIPELINE_CREATE_EARLY_RETURN_ON_FAILURE_BIT_EXT |
-			VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT_EXT |
-			VK_PIPELINE_CREATE_2_CAPTURE_DATA_BIT_KHR);
+	flags &= ~VkPipelineCreateFlags2KHR(VK_PIPELINE_CREATE_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR |
+	                                    VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR |
+	                                    VK_PIPELINE_CREATE_EARLY_RETURN_ON_FAILURE_BIT_EXT |
+	                                    VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT_EXT |
+	                                    VK_PIPELINE_CREATE_2_CAPTURE_DATA_BIT_KHR);
 	return flags;
 }
 
