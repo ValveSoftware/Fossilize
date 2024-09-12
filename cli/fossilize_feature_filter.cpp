@@ -1413,6 +1413,12 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 			break;
 		}
 
+		case VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO_KHR:
+			// Actual flags are validated separately.
+			if (features.maintenance5.maintenance5 == VK_FALSE)
+				return false;
+			break;
+
 		default:
 			LOGE("Unrecognized pNext sType: %u. Treating as unsupported.\n", unsigned(base->sType));
 			return false;
@@ -3744,10 +3750,20 @@ bool FeatureFilter::Impl::color_blend_state_is_supported(
 	return true;
 }
 
+template <typename T>
+static VkPipelineCreateFlagBits2KHR get_effective_flags(const T *info)
+{
+	auto *flags_info = find_pnext<VkPipelineCreateFlags2CreateInfoKHR>(VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO_KHR, info->pNext);
+	if (flags_info)
+		return flags_info->flags;
+	else
+		return info->flags;
+}
+
 bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelineCreateInfo *info) const
 {
 	// Only allow flags we recognize and validate.
-	constexpr VkPipelineCreateFlags supported_flags =
+	constexpr VkPipelineCreateFlags2KHR supported_flags =
 			VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT |
 			VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT |
 			VK_PIPELINE_CREATE_DERIVATIVE_BIT |
@@ -3766,57 +3782,59 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 			VK_PIPELINE_CREATE_PROTECTED_ACCESS_ONLY_BIT_EXT |
 			VK_PIPELINE_CREATE_NO_PROTECTED_ACCESS_BIT_EXT;
 
-	if ((info->flags & ~supported_flags) != 0)
+	auto flags = get_effective_flags(info);
+
+	if ((flags & ~supported_flags) != 0)
 		return false;
 
 	if (null_device)
 		return true;
 
-	if ((info->flags & VK_PIPELINE_CREATE_VIEW_INDEX_FROM_DEVICE_INDEX_BIT) != 0 &&
+	if ((flags & VK_PIPELINE_CREATE_VIEW_INDEX_FROM_DEVICE_INDEX_BIT) != 0 &&
 	    api_version < VK_API_VERSION_1_1)
 	{
 		return false;
 	}
 
-	if ((info->flags & VK_PIPELINE_CREATE_RENDERING_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR) != 0 &&
+	if ((flags & VK_PIPELINE_CREATE_RENDERING_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR) != 0 &&
 	    (enabled_extensions.count(VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME) == 0 ||
 	     enabled_extensions.count(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME) == 0))
 	{
 		return false;
 	}
 
-	if ((info->flags & VK_PIPELINE_CREATE_RENDERING_FRAGMENT_DENSITY_MAP_ATTACHMENT_BIT_EXT) != 0 &&
+	if ((flags & VK_PIPELINE_CREATE_RENDERING_FRAGMENT_DENSITY_MAP_ATTACHMENT_BIT_EXT) != 0 &&
 	    (enabled_extensions.count(VK_EXT_FRAGMENT_DENSITY_MAP_EXTENSION_NAME) == 0 ||
 	     enabled_extensions.count(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME) == 0))
 	{
 		return false;
 	}
 
-	if ((info->flags & (VK_PIPELINE_CREATE_LIBRARY_BIT_KHR |
-	                    VK_PIPELINE_CREATE_LINK_TIME_OPTIMIZATION_BIT_EXT |
-	                    VK_PIPELINE_CREATE_RETAIN_LINK_TIME_OPTIMIZATION_INFO_BIT_EXT)) != 0 &&
+	if ((flags & (VK_PIPELINE_CREATE_LIBRARY_BIT_KHR |
+	              VK_PIPELINE_CREATE_LINK_TIME_OPTIMIZATION_BIT_EXT |
+	              VK_PIPELINE_CREATE_RETAIN_LINK_TIME_OPTIMIZATION_INFO_BIT_EXT)) != 0 &&
 	    features.graphics_pipeline_library.graphicsPipelineLibrary == VK_FALSE)
 	{
 		return false;
 	}
 
-	if ((info->flags & VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT) != 0)
+	if ((flags & VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT) != 0)
 		if (!features.descriptor_buffer.descriptorBuffer)
 			return false;
 
-	if ((info->flags & (VK_PIPELINE_CREATE_COLOR_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT |
-	                    VK_PIPELINE_CREATE_DEPTH_STENCIL_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT)) != 0)
+	if ((flags & (VK_PIPELINE_CREATE_COLOR_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT |
+	              VK_PIPELINE_CREATE_DEPTH_STENCIL_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT)) != 0)
 	{
 		if (!features.attachment_feedback_loop_layout.attachmentFeedbackLoopLayout)
 			return false;
 	}
 
-	if ((info->flags & VK_PIPELINE_CREATE_INDIRECT_BINDABLE_BIT_NV) != 0 &&
+	if ((flags & VK_PIPELINE_CREATE_INDIRECT_BINDABLE_BIT_NV) != 0 &&
 	    features.device_generated_commands_nv.deviceGeneratedCommands == VK_FALSE)
 		return false;
 
-	if ((info->flags & (VK_PIPELINE_CREATE_PROTECTED_ACCESS_ONLY_BIT_EXT |
-	                    VK_PIPELINE_CREATE_NO_PROTECTED_ACCESS_BIT_EXT)) != 0 &&
+	if ((flags & (VK_PIPELINE_CREATE_PROTECTED_ACCESS_ONLY_BIT_EXT |
+	              VK_PIPELINE_CREATE_NO_PROTECTED_ACCESS_BIT_EXT)) != 0 &&
 	    features.pipeline_protected_access.pipelineProtectedAccess == VK_FALSE)
 		return false;
 
@@ -4109,7 +4127,7 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 bool FeatureFilter::Impl::compute_pipeline_is_supported(const VkComputePipelineCreateInfo *info) const
 {
 	// Only allow flags we recognize and validate.
-	constexpr VkPipelineCreateFlags supported_flags =
+	constexpr VkPipelineCreateFlags2KHR supported_flags =
 			VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT |
 			VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT |
 			VK_PIPELINE_CREATE_DERIVATIVE_BIT |
@@ -4121,26 +4139,28 @@ bool FeatureFilter::Impl::compute_pipeline_is_supported(const VkComputePipelineC
 			VK_PIPELINE_CREATE_PROTECTED_ACCESS_ONLY_BIT_EXT |
 			VK_PIPELINE_CREATE_NO_PROTECTED_ACCESS_BIT_EXT;
 
-	if ((info->flags & ~supported_flags) != 0)
+	auto flags = get_effective_flags(info);
+
+	if ((flags & ~supported_flags) != 0)
 		return false;
 
 	if (null_device)
 		return true;
 
-	if ((info->flags & VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT) != 0)
+	if ((flags & VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT) != 0)
 		if (!features.descriptor_buffer.descriptorBuffer)
 			return false;
 
-	if ((info->flags & VK_PIPELINE_CREATE_INDIRECT_BINDABLE_BIT_NV) != 0 &&
+	if ((flags & VK_PIPELINE_CREATE_INDIRECT_BINDABLE_BIT_NV) != 0 &&
 	    features.device_generated_commands_compute_nv.deviceGeneratedCompute == VK_FALSE)
 		return false;
 
-	if ((info->flags & (VK_PIPELINE_CREATE_PROTECTED_ACCESS_ONLY_BIT_EXT |
-	                    VK_PIPELINE_CREATE_NO_PROTECTED_ACCESS_BIT_EXT)) != 0 &&
+	if ((flags & (VK_PIPELINE_CREATE_PROTECTED_ACCESS_ONLY_BIT_EXT |
+	              VK_PIPELINE_CREATE_NO_PROTECTED_ACCESS_BIT_EXT)) != 0 &&
 	    features.pipeline_protected_access.pipelineProtectedAccess == VK_FALSE)
 		return false;
 
-	if ((info->flags & VK_PIPELINE_CREATE_DISPATCH_BASE_BIT) != 0 &&
+	if ((flags & VK_PIPELINE_CREATE_DISPATCH_BASE_BIT) != 0 &&
 	    api_version < VK_API_VERSION_1_1)
 	{
 		return false;
@@ -4158,7 +4178,7 @@ bool FeatureFilter::Impl::compute_pipeline_is_supported(const VkComputePipelineC
 bool FeatureFilter::Impl::raytracing_pipeline_is_supported(const VkRayTracingPipelineCreateInfoKHR *info) const
 {
 	// Only allow flags we recognize and validate.
-	constexpr VkPipelineCreateFlags supported_flags =
+	constexpr VkPipelineCreateFlags2KHR supported_flags =
 			VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT |
 			VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT |
 			VK_PIPELINE_CREATE_DERIVATIVE_BIT |
@@ -4177,39 +4197,41 @@ bool FeatureFilter::Impl::raytracing_pipeline_is_supported(const VkRayTracingPip
 			VK_PIPELINE_CREATE_PROTECTED_ACCESS_ONLY_BIT_EXT |
 			VK_PIPELINE_CREATE_NO_PROTECTED_ACCESS_BIT_EXT;
 
-	if ((info->flags & ~supported_flags) != 0)
+	auto flags = get_effective_flags(info);
+
+	if ((flags & ~supported_flags) != 0)
 		return false;
 
 	if (null_device)
 		return true;
 
-	if ((info->flags & (VK_PIPELINE_CREATE_RAY_TRACING_SKIP_AABBS_BIT_KHR |
-	                    VK_PIPELINE_CREATE_RAY_TRACING_SKIP_TRIANGLES_BIT_KHR)) != 0 &&
+	if ((flags & (VK_PIPELINE_CREATE_RAY_TRACING_SKIP_AABBS_BIT_KHR |
+	              VK_PIPELINE_CREATE_RAY_TRACING_SKIP_TRIANGLES_BIT_KHR)) != 0 &&
 	    features.ray_tracing_pipeline.rayTraversalPrimitiveCulling == VK_FALSE)
 	{
 		return false;
 	}
 
-	if ((info->flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0 &&
+	if ((flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0 &&
 	    !enabled_extensions.count(VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME))
 	{
 		return false;
 	}
 
-	if ((info->flags & VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT) != 0)
+	if ((flags & VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT) != 0)
 		if (!features.descriptor_buffer.descriptorBuffer)
 			return false;
 
-	if ((info->flags & VK_PIPELINE_CREATE_RAY_TRACING_ALLOW_MOTION_BIT_NV) != 0 &&
+	if ((flags & VK_PIPELINE_CREATE_RAY_TRACING_ALLOW_MOTION_BIT_NV) != 0 &&
 	    features.ray_tracing_motion_blur_nv.rayTracingMotionBlur == VK_FALSE)
 		return false;
 
-	if ((info->flags & VK_PIPELINE_CREATE_RAY_TRACING_OPACITY_MICROMAP_BIT_EXT) != 0 &&
+	if ((flags & VK_PIPELINE_CREATE_RAY_TRACING_OPACITY_MICROMAP_BIT_EXT) != 0 &&
 	    features.opacity_micromap.micromap == VK_FALSE)
 		return false;
 
-	if ((info->flags & (VK_PIPELINE_CREATE_PROTECTED_ACCESS_ONLY_BIT_EXT |
-	                    VK_PIPELINE_CREATE_NO_PROTECTED_ACCESS_BIT_EXT)) != 0 &&
+	if ((flags & (VK_PIPELINE_CREATE_PROTECTED_ACCESS_ONLY_BIT_EXT |
+	              VK_PIPELINE_CREATE_NO_PROTECTED_ACCESS_BIT_EXT)) != 0 &&
 	    features.pipeline_protected_access.pipelineProtectedAccess == VK_FALSE)
 		return false;
 
