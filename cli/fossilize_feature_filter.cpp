@@ -1419,6 +1419,48 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 				return false;
 			break;
 
+		case VK_STRUCTURE_TYPE_RENDER_PASS_CREATION_CONTROL_EXT:
+			if (features.subpass_merge_feedback.subpassMergeFeedback == VK_FALSE)
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_SAMPLER_BORDER_COLOR_COMPONENT_MAPPING_CREATE_INFO_EXT:
+			if (features.border_color_swizzle.borderColorSwizzle == VK_FALSE)
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_MULTISAMPLED_RENDER_TO_SINGLE_SAMPLED_INFO_EXT:
+			if (features.multisampled_render_to_single_sampled.multisampledRenderToSingleSampled == VK_FALSE)
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_DEPTH_BIAS_REPRESENTATION_INFO_EXT:
+		{
+			if (enabled_extensions.count(VK_EXT_DEPTH_BIAS_CONTROL_EXTENSION_NAME) == 0)
+				return false;
+
+			auto *info = static_cast<const VkDepthBiasRepresentationInfoEXT *>(pNext);
+			if (info->depthBiasRepresentation == VK_DEPTH_BIAS_REPRESENTATION_LEAST_REPRESENTABLE_VALUE_FORCE_UNORM_EXT &&
+			    features.depth_bias_control.leastRepresentableValueForceUnormRepresentation == VK_FALSE)
+				return false;
+
+			if (info->depthBiasRepresentation == VK_DEPTH_BIAS_REPRESENTATION_FLOAT_EXT &&
+			    features.depth_bias_control.floatRepresentation == VK_FALSE)
+				return false;
+
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_RENDER_PASS_FRAGMENT_DENSITY_MAP_CREATE_INFO_EXT:
+			if (features.fragment_density.fragmentDensityMap == VK_FALSE)
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_SAMPLE_LOCATIONS_INFO_EXT:
+			if (enabled_extensions.count(VK_EXT_SAMPLE_LOCATIONS_EXTENSION_NAME) == 0)
+				return false;
+			break;
+
 		default:
 			LOGE("Unrecognized pNext sType: %u. Treating as unsupported.\n", unsigned(base->sType));
 			return false;

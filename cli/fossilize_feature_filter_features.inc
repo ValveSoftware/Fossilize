@@ -111,3 +111,7 @@ FE(LEGACY_DITHERING, legacy_dithering, EXT);
 FE(PIPELINE_PROTECTED_ACCESS, pipeline_protected_access, EXT);
 FE(PER_STAGE_DESCRIPTOR_SET, per_stage_descriptor_set_nv, NV);
 FE(ATTACHMENT_FEEDBACK_LOOP_DYNAMIC_STATE, attachment_feedback_loop_dynamic_state, EXT);
+FE(SUBPASS_MERGE_FEEDBACK, subpass_merge_feedback, EXT);
+FE(BORDER_COLOR_SWIZZLE, border_color_swizzle, EXT);
+FE(MULTISAMPLED_RENDER_TO_SINGLE_SAMPLED, multisampled_render_to_single_sampled, EXT);
+FE(DEPTH_BIAS_CONTROL, depth_bias_control, EXT);

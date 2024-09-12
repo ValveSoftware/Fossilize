@@ -81,7 +81,14 @@
 		"VK_KHR_line_rasterization",
 		"VK_KHR_maintenance5",
 		"VK_EXT_legacy_dithering",
-		"VK_KHR_fragment_shading_rate"
+		"VK_KHR_fragment_shading_rate",
+		"VK_EXT_pipeline_robustness",
+		"VK_EXT_sample_locations",
+		"VK_EXT_fragment_density_map",
+		"VK_EXT_depth_bias_control",
+		"VK_EXT_multisampled_render_to_single_sampled",
+		"VK_EXT_border_color_swizzle",
+		"VK_EXT_subpass_merge_feedback"
 	],
 	"fully-ignored" : [
 		"VK_AMD_rasterization_order",
