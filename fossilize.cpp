@@ -372,6 +372,13 @@ struct StateReplayer::Impl
 			const Value &state, VkPipelineViewportDepthClipControlCreateInfoEXT **clip) FOSSILIZE_WARN_UNUSED;
 	bool parse_pipeline_create_flags2(
 			const Value &state, VkPipelineCreateFlags2CreateInfoKHR **flags2) FOSSILIZE_WARN_UNUSED;
+	bool parse_render_pass_creation_control(const Value &state, VkRenderPassCreationControlEXT **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_sampler_border_color_component_mapping(const Value &state, VkSamplerBorderColorComponentMappingCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_multisampled_render_to_single_sampled(const Value &state, VkMultisampledRenderToSingleSampledInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_depth_bias_representation(const Value &state, VkDepthBiasRepresentationInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_render_pass_fragment_density_map(const Value &state, VkRenderPassFragmentDensityMapCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_sample_locations_info(const Value &state, VkSampleLocationsInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_pipeline_robustness(const Value &state, VkPipelineRobustnessCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_uints(const Value &attachments, const uint32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	bool parse_sints(const Value &attachments, const int32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	const char *duplicate_string(const char *str, size_t len);
@@ -4638,6 +4645,91 @@ bool StateReplayer::Impl::parse_pipeline_create_flags2(const Value &state,
 	return true;
 }
 
+bool StateReplayer::Impl::parse_render_pass_creation_control(const Value &state, VkRenderPassCreationControlEXT **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkRenderPassCreationControlEXT>();
+	info->disallowMerging = state["disallowMerging"].GetUint();
+	*out_info = info;
+	return true;
+}
+
+bool StateReplayer::Impl::parse_sampler_border_color_component_mapping(const Value &state, VkSamplerBorderColorComponentMappingCreateInfoEXT **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkSamplerBorderColorComponentMappingCreateInfoEXT>();
+	info->srgb = state["srgb"].GetUint();
+	info->components.r = static_cast<VkComponentSwizzle>(state["components"]["r"].GetUint());
+	info->components.g = static_cast<VkComponentSwizzle>(state["components"]["g"].GetUint());
+	info->components.b = static_cast<VkComponentSwizzle>(state["components"]["b"].GetUint());
+	info->components.a = static_cast<VkComponentSwizzle>(state["components"]["a"].GetUint());
+	*out_info = info;
+	return true;
+}
+
+bool StateReplayer::Impl::parse_multisampled_render_to_single_sampled(const Value &state, VkMultisampledRenderToSingleSampledInfoEXT **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkMultisampledRenderToSingleSampledInfoEXT>();
+	info->multisampledRenderToSingleSampledEnable = state["multisampledRenderToSingleSampledEnable"].GetUint();
+	info->rasterizationSamples = static_cast<VkSampleCountFlagBits>(state["rasterizationSamples"].GetUint());
+	*out_info = info;
+	return true;
+}
+
+bool StateReplayer::Impl::parse_depth_bias_representation(const Value &state, VkDepthBiasRepresentationInfoEXT **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkDepthBiasRepresentationInfoEXT>();
+	info->depthBiasExact = state["depthBiasExact"].GetUint();
+	info->depthBiasRepresentation = static_cast<VkDepthBiasRepresentationEXT>(state["depthBiasRepresentation"].GetUint());
+	*out_info = info;
+	return true;
+}
+
+bool StateReplayer::Impl::parse_render_pass_fragment_density_map(const Value &state, VkRenderPassFragmentDensityMapCreateInfoEXT **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkRenderPassFragmentDensityMapCreateInfoEXT>();
+	info->fragmentDensityMapAttachment.attachment = state["fragmentDensityMapAttachment"]["attachment"].GetUint();
+	info->fragmentDensityMapAttachment.layout = static_cast<VkImageLayout>(state["fragmentDensityMapAttachment"]["layout"].GetUint());
+	*out_info = info;
+	return true;
+}
+
+bool StateReplayer::Impl::parse_sample_locations_info(const Value &state, VkSampleLocationsInfoEXT **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkSampleLocationsInfoEXT>();
+	info->sampleLocationGridSize.width = state["sampleLocationGridSize"]["width"].GetUint();
+	info->sampleLocationGridSize.height = state["sampleLocationGridSize"]["height"].GetUint();
+	info->sampleLocationsPerPixel = static_cast<VkSampleCountFlagBits>(state["sampleLocationsPerPixel"].GetUint());
+
+	if (state.HasMember("sampleLocations"))
+	{
+		auto &locs = state["sampleLocations"];
+		auto *locations = allocator.allocate_n<VkSampleLocationEXT>(locs.Size());
+		info->sampleLocationsCount = uint32_t(locs.Size());
+		info->pSampleLocations = locations;
+
+		for (auto itr = locs.Begin(); itr != locs.End(); ++itr)
+		{
+			auto &elem = *itr;
+			locations->x = elem["x"].GetFloat();
+			locations->y = elem["y"].GetFloat();
+			locations++;
+		}
+	}
+
+	*out_info = info;
+	return true;
+}
+
+bool StateReplayer::Impl::parse_pipeline_robustness(const Value &state, VkPipelineRobustnessCreateInfoEXT **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkPipelineRobustnessCreateInfoEXT>();
+	info->images = static_cast<VkPipelineRobustnessImageBehaviorEXT>(state["images"].GetUint());
+	info->uniformBuffers = static_cast<VkPipelineRobustnessBufferBehaviorEXT>(state["uniformBuffers"].GetUint());
+	info->storageBuffers = static_cast<VkPipelineRobustnessBufferBehaviorEXT>(state["storageBuffers"].GetUint());
+	info->vertexInputs = static_cast<VkPipelineRobustnessBufferBehaviorEXT>(state["vertexInputs"].GetUint());
+	*out_info = info;
+	return true;
+}
+
 bool StateReplayer::Impl::parse_mutable_descriptor_type(const Value &state,
                                                         VkMutableDescriptorTypeCreateInfoEXT **out_info)
 {
@@ -4989,6 +5081,69 @@ bool StateReplayer::Impl::parse_pnext_chain(
 			if (!parse_pipeline_create_flags2(next, &flags2))
 				return false;
 			new_struct = reinterpret_cast<VkBaseInStructure *>(flags2);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_RENDER_PASS_CREATION_CONTROL_EXT:
+		{
+			VkRenderPassCreationControlEXT *info = nullptr;
+			if (!parse_render_pass_creation_control(next, &info))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_SAMPLER_BORDER_COLOR_COMPONENT_MAPPING_CREATE_INFO_EXT:
+		{
+			VkSamplerBorderColorComponentMappingCreateInfoEXT *info = nullptr;
+			if (!parse_sampler_border_color_component_mapping(next, &info))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_MULTISAMPLED_RENDER_TO_SINGLE_SAMPLED_INFO_EXT:
+		{
+			VkMultisampledRenderToSingleSampledInfoEXT *info = nullptr;
+			if (!parse_multisampled_render_to_single_sampled(next, &info))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_DEPTH_BIAS_REPRESENTATION_INFO_EXT:
+		{
+			VkDepthBiasRepresentationInfoEXT *info = nullptr;
+			if (!parse_depth_bias_representation(next, &info))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_RENDER_PASS_FRAGMENT_DENSITY_MAP_CREATE_INFO_EXT:
+		{
+			VkRenderPassFragmentDensityMapCreateInfoEXT *info = nullptr;
+			if (!parse_render_pass_fragment_density_map(next, &info))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_SAMPLE_LOCATIONS_INFO_EXT:
+		{
+			VkSampleLocationsInfoEXT *info = nullptr;
+			if (!parse_sample_locations_info(next, &info))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_ROBUSTNESS_CREATE_INFO_EXT:
+		{
+			VkPipelineRobustnessCreateInfoEXT *info = nullptr;
+			if (!parse_pipeline_robustness(next, &info))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
 			break;
 		}
 
