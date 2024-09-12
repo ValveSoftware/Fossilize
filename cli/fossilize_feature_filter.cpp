@@ -411,9 +411,13 @@ void *build_pnext_chain(VulkanProperties &props, uint32_t api_version,
 	for (uint32_t i = 0; i < extension_count; i++)
 		enabled_extension_set.insert(enabled_extensions[i]);
 
-#define CHAIN(struct_type, member, min_api_version, required_extension) \
+#define CHAIN(struct_type, member, min_api_version, required_extension, required_extension_alias) \
 	do { \
-		if ((required_extension == nullptr || enabled_extension_set.count(required_extension) != 0) && api_version >= min_api_version) { \
+		bool is_minimum_api_version = api_version >= min_api_version; \
+		bool supports_extension = required_extension == nullptr || enabled_extension_set.count(required_extension) != 0; \
+		if (!supports_extension && required_extension_alias) \
+			supports_extension = enabled_extension_set.count(required_extension_alias) != 0; \
+		if (supports_extension && is_minimum_api_version) { \
 			member.sType = struct_type; \
 			if (!pNext) pNext = &member; \
 			if (ppNext) *ppNext = &member; \
@@ -423,13 +427,16 @@ void *build_pnext_chain(VulkanProperties &props, uint32_t api_version,
 
 #define P(struct_type, member, minimum_api_version, required_extension) \
 	CHAIN(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_PROPERTIES, props.member, \
-	VK_API_VERSION_##minimum_api_version, VK_##required_extension##_EXTENSION_NAME)
+	VK_API_VERSION_##minimum_api_version, VK_##required_extension##_EXTENSION_NAME, nullptr)
 #define P_CORE(struct_type, member, minimum_api_version) \
 	CHAIN(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_PROPERTIES, props.member, \
-	VK_API_VERSION_##minimum_api_version, nullptr)
+	VK_API_VERSION_##minimum_api_version, nullptr, nullptr)
 #define PE(struct_type, member, ext) \
 	CHAIN(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_PROPERTIES_##ext, props.member, \
-	VK_API_VERSION_1_0, VK_##ext##_##struct_type##_EXTENSION_NAME)
+	VK_API_VERSION_1_0, VK_##ext##_##struct_type##_EXTENSION_NAME, nullptr)
+#define PE_ALIAS(struct_type, member, ext, ext_alias) \
+	CHAIN(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_PROPERTIES_##ext, props.member, \
+	VK_API_VERSION_1_0, VK_##ext##_##struct_type##_EXTENSION_NAME, VK_##ext##_##struct_type##_EXTENSION_NAME)
 
 #include "fossilize_feature_filter_properties.inc"
 
@@ -437,6 +444,7 @@ void *build_pnext_chain(VulkanProperties &props, uint32_t api_version,
 #undef P
 #undef P_CORE
 #undef PE
+#undef PE_ALIAS
 
 	return pNext;
 }
@@ -456,6 +464,8 @@ struct FeatureFilter::Impl
 	bool render_pass_is_supported(const VkRenderPassCreateInfo *info) const;
 	bool render_pass2_is_supported(const VkRenderPassCreateInfo2 *info) const;
 	bool graphics_pipeline_is_supported(const VkGraphicsPipelineCreateInfo *info) const;
+	bool color_blend_state_is_supported(const VkPipelineColorBlendStateCreateInfo *info,
+	                                    const VkDynamicState *dynamic_states, uint32_t num_dynamic_states) const;
 	bool compute_pipeline_is_supported(const VkComputePipelineCreateInfo *info) const;
 	bool raytracing_pipeline_is_supported(const VkRayTracingPipelineCreateInfoKHR *info) const;
 
@@ -465,16 +475,24 @@ struct FeatureFilter::Impl
 	                                         VkFormatFeatureFlags format_features) const;
 	bool attachment_description2_is_supported(const VkAttachmentDescription2 &desc,
 	                                          VkFormatFeatureFlags format_features) const;
+	bool subpass_description_flags_is_supported(VkSubpassDescriptionFlags flags) const;
 	bool subpass_description_is_supported(const VkSubpassDescription &sub) const;
 	bool subpass_description2_is_supported(const VkSubpassDescription2 &sub) const;
 	bool subpass_dependency_is_supported(const VkSubpassDependency &dep) const;
 	bool subpass_dependency2_is_supported(const VkSubpassDependency2 &dep) const;
 	bool dependency_flags_is_supported(VkDependencyFlags deps) const;
+	bool store_op_is_supported(VkAttachmentStoreOp store_op) const;
+	bool load_op_is_supported(VkAttachmentLoadOp load_op) const;
 
 	bool subgroup_size_control_is_supported(const VkPipelineShaderStageCreateInfo &stage) const;
 
 	bool multiview_mask_is_supported(uint32_t mask) const;
 	bool image_layout_is_supported(VkImageLayout layout) const;
+	bool polygon_mode_is_supported(VkPolygonMode mode) const;
+	bool access_mask_is_supported(VkAccessFlags2 access) const;
+	bool pipeline_stage_mask_is_supported(VkPipelineStageFlags2 stages) const;
+	bool shader_stage_mask_is_supported(VkShaderStageFlags stages) const;
+	bool aspect_mask_is_supported(VkImageAspectFlags aspect) const;
 	bool format_is_supported(VkFormat, VkFormatFeatureFlags format_features) const;
 
 	bool stage_limits_are_supported(const VkPipelineShaderStageCreateInfo &info) const;
@@ -517,6 +535,7 @@ struct FeatureFilter::Impl
 	bool validate_module_capabilities(const uint32_t *data, size_t size) const;
 	bool parse_module_info(const uint32_t *data, size_t size, ModuleInfo &info);
 	bool validate_module_capability(spv::Capability cap) const;
+	bool validate_spirv_extension(const std::string &ext) const;
 };
 
 FeatureFilter::FeatureFilter()
@@ -677,6 +696,11 @@ void FeatureFilter::Impl::init_properties(const void *pNext)
 		props.member.pNext = nullptr; \
 		break
 
+#define PE_ALIAS(struct_type, member, ext, ext_alias) case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_PROPERTIES_##ext: \
+		memcpy(&props.member, base, sizeof(props.member)); \
+		props.member.pNext = nullptr; \
+		break
+
 #define PROP(struct_name, core_struct, prop) props.struct_name.prop = core_struct.prop
 		switch (base->sType)
 		{
@@ -781,6 +805,7 @@ void FeatureFilter::Impl::init_properties(const void *pNext)
 
 #undef P
 #undef PE
+#undef PE_ALIAS
 #undef PROP
 
 		pNext = base->pNext;
@@ -843,9 +868,10 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 				return false;
 			break;
 
-		case VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_DIVISOR_STATE_CREATE_INFO_EXT:
+		case VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_DIVISOR_STATE_CREATE_INFO_KHR:
 		{
-			if (!enabled_extensions.count(VK_EXT_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME))
+			if (!enabled_extensions.count(VK_EXT_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME) &&
+			    !enabled_extensions.count(VK_KHR_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME))
 				return false;
 
 			auto *divisor = static_cast<const VkPipelineVertexInputDivisorStateCreateInfoEXT *>(pNext);
@@ -945,22 +971,22 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 				return false;
 			break;
 
-		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_LINE_STATE_CREATE_INFO_EXT:
+		case VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_LINE_STATE_CREATE_INFO_KHR:
 		{
-			auto *line = static_cast<const VkPipelineRasterizationLineStateCreateInfoEXT *>(pNext);
-			if (line->lineRasterizationMode == VK_LINE_RASTERIZATION_MODE_RECTANGULAR_EXT &&
+			auto *line = static_cast<const VkPipelineRasterizationLineStateCreateInfoKHR *>(pNext);
+			if (line->lineRasterizationMode == VK_LINE_RASTERIZATION_MODE_RECTANGULAR_KHR &&
 			    features.line_rasterization.rectangularLines == VK_FALSE)
 			{
 				return false;
 			}
 
-			if (line->lineRasterizationMode == VK_LINE_RASTERIZATION_MODE_BRESENHAM_EXT &&
+			if (line->lineRasterizationMode == VK_LINE_RASTERIZATION_MODE_BRESENHAM_KHR &&
 			    features.line_rasterization.bresenhamLines == VK_FALSE)
 			{
 				return false;
 			}
 
-			if (line->lineRasterizationMode == VK_LINE_RASTERIZATION_MODE_RECTANGULAR_SMOOTH_EXT &&
+			if (line->lineRasterizationMode == VK_LINE_RASTERIZATION_MODE_RECTANGULAR_SMOOTH_KHR &&
 			    features.line_rasterization.smoothLines == VK_FALSE)
 			{
 				return false;
@@ -968,19 +994,19 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 
 			if (line->stippledLineEnable == VK_TRUE)
 			{
-				if (line->lineRasterizationMode == VK_LINE_RASTERIZATION_MODE_RECTANGULAR_EXT &&
+				if (line->lineRasterizationMode == VK_LINE_RASTERIZATION_MODE_RECTANGULAR_KHR &&
 				    features.line_rasterization.stippledRectangularLines == VK_FALSE)
 				{
 					return false;
 				}
 
-				if (line->lineRasterizationMode == VK_LINE_RASTERIZATION_MODE_BRESENHAM_EXT &&
+				if (line->lineRasterizationMode == VK_LINE_RASTERIZATION_MODE_BRESENHAM_KHR &&
 				    features.line_rasterization.stippledBresenhamLines == VK_FALSE)
 				{
 					return false;
 				}
 
-				if (line->lineRasterizationMode == VK_LINE_RASTERIZATION_MODE_RECTANGULAR_SMOOTH_EXT &&
+				if (line->lineRasterizationMode == VK_LINE_RASTERIZATION_MODE_RECTANGULAR_SMOOTH_KHR &&
 				    features.line_rasterization.stippledSmoothLines == VK_FALSE)
 				{
 					return false;
@@ -1082,6 +1108,10 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 				if (!cond)
 					return false;
 			}
+
+			if (resolve->depthResolveMode == VK_RESOLVE_MODE_EXTERNAL_FORMAT_DOWNSAMPLE_ANDROID ||
+			    resolve->stencilResolveMode == VK_RESOLVE_MODE_EXTERNAL_FORMAT_DOWNSAMPLE_ANDROID)
+				return false;
 
 			break;
 		}
@@ -1204,6 +1234,19 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 		{
 			if (!enabled_extensions.count(VK_EXT_SAMPLER_FILTER_MINMAX_EXTENSION_NAME) && !features.vk12.samplerFilterMinmax)
 				return false;
+
+			auto *info = static_cast<const VkSamplerReductionModeCreateInfo *>(pNext);
+			switch (info->reductionMode)
+			{
+			case VK_SAMPLER_REDUCTION_MODE_MAX:
+			case VK_SAMPLER_REDUCTION_MODE_MIN:
+			case VK_SAMPLER_REDUCTION_MODE_WEIGHTED_AVERAGE:
+				break;
+
+			default:
+				return false;
+			}
+
 			break;
 		}
 
@@ -1211,6 +1254,11 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 		{
 			if (!enabled_extensions.count(VK_KHR_MAINTENANCE_2_EXTENSION_NAME) && api_version < VK_API_VERSION_1_1)
 				return false;
+
+			auto *info = static_cast<const VkRenderPassInputAttachmentAspectCreateInfo *>(pNext);
+			for (uint32_t i = 0; i < info->aspectReferenceCount; i++)
+				if (!aspect_mask_is_supported(info->pAspectReferences[i].aspectMask))
+					return false;
 
 			break;
 		}
@@ -1295,6 +1343,124 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 			break;
 		}
 
+		case VK_STRUCTURE_TYPE_PIPELINE_ROBUSTNESS_CREATE_INFO_EXT:
+		{
+			if (enabled_extensions.count(VK_EXT_PIPELINE_ROBUSTNESS_EXTENSION_NAME) == 0)
+				return false;
+			auto *info = static_cast<const VkPipelineRobustnessCreateInfoEXT *>(pNext);
+
+			if ((info->storageBuffers != VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_DEVICE_DEFAULT_EXT ||
+			     info->images != VK_PIPELINE_ROBUSTNESS_IMAGE_BEHAVIOR_DEVICE_DEFAULT_EXT ||
+			     info->uniformBuffers != VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_DEVICE_DEFAULT_EXT ||
+			     info->vertexInputs != VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_DEVICE_DEFAULT_EXT) &&
+			    features.pipeline_robustness.pipelineRobustness == VK_FALSE)
+			{
+				return false;
+			}
+
+			if (!query)
+				return false;
+
+			bool need_robust_image =
+					info->images == VK_PIPELINE_ROBUSTNESS_IMAGE_BEHAVIOR_ROBUST_IMAGE_ACCESS_EXT;
+			bool need_robust_image2 =
+					info->images == VK_PIPELINE_ROBUSTNESS_IMAGE_BEHAVIOR_ROBUST_IMAGE_ACCESS_2_EXT;
+			bool need_robust_buffer2 =
+					info->storageBuffers == VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_ROBUST_BUFFER_ACCESS_2_EXT ||
+					info->vertexInputs == VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_ROBUST_BUFFER_ACCESS_2_EXT ||
+					info->uniformBuffers == VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_ROBUST_BUFFER_ACCESS_2_EXT;
+
+			// From spec:
+			// Any component of the implementation (the loader, any enabled layers, and drivers) must skip over,
+			// without processing (other than reading the sType and pNext members)
+			// any extending structures in the chain not defined by core versions
+			// or extensions supported by that component.
+			// I.e. it's safe for us to query the struct, even if the extension is not supported.
+
+			if (need_robust_image)
+			{
+				VkPhysicalDeviceFeatures2 pdf2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+				VkPhysicalDeviceImageRobustnessFeaturesEXT robust_image =
+						{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_ROBUSTNESS_FEATURES_EXT };
+				pdf2.pNext = &robust_image;
+				query->physical_device_feature_query(&pdf2);
+				if (robust_image.robustImageAccess == VK_FALSE)
+					return false;
+			}
+
+			if (need_robust_image2)
+			{
+				VkPhysicalDeviceFeatures2 pdf2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+				VkPhysicalDeviceRobustness2FeaturesEXT robust2 =
+						{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT };
+				pdf2.pNext = &robust2;
+				query->physical_device_feature_query(&pdf2);
+				if (robust2.robustImageAccess2 == VK_FALSE)
+					return false;
+			}
+
+			if (need_robust_buffer2)
+			{
+				VkPhysicalDeviceFeatures2 pdf2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+				VkPhysicalDeviceRobustness2FeaturesEXT robust2 =
+						{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT };
+				pdf2.pNext = &robust2;
+				query->physical_device_feature_query(&pdf2);
+				if (robust2.robustBufferAccess2 == VK_FALSE)
+					return false;
+			}
+
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO_KHR:
+			// Actual flags are validated separately.
+			if (features.maintenance5.maintenance5 == VK_FALSE)
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_RENDER_PASS_CREATION_CONTROL_EXT:
+			if (features.subpass_merge_feedback.subpassMergeFeedback == VK_FALSE)
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_SAMPLER_BORDER_COLOR_COMPONENT_MAPPING_CREATE_INFO_EXT:
+			if (features.border_color_swizzle.borderColorSwizzle == VK_FALSE)
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_MULTISAMPLED_RENDER_TO_SINGLE_SAMPLED_INFO_EXT:
+			if (features.multisampled_render_to_single_sampled.multisampledRenderToSingleSampled == VK_FALSE)
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_DEPTH_BIAS_REPRESENTATION_INFO_EXT:
+		{
+			if (enabled_extensions.count(VK_EXT_DEPTH_BIAS_CONTROL_EXTENSION_NAME) == 0)
+				return false;
+
+			auto *info = static_cast<const VkDepthBiasRepresentationInfoEXT *>(pNext);
+			if (info->depthBiasRepresentation == VK_DEPTH_BIAS_REPRESENTATION_LEAST_REPRESENTABLE_VALUE_FORCE_UNORM_EXT &&
+			    features.depth_bias_control.leastRepresentableValueForceUnormRepresentation == VK_FALSE)
+				return false;
+
+			if (info->depthBiasRepresentation == VK_DEPTH_BIAS_REPRESENTATION_FLOAT_EXT &&
+			    features.depth_bias_control.floatRepresentation == VK_FALSE)
+				return false;
+
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_RENDER_PASS_FRAGMENT_DENSITY_MAP_CREATE_INFO_EXT:
+			if (features.fragment_density.fragmentDensityMap == VK_FALSE)
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_SAMPLE_LOCATIONS_INFO_EXT:
+			if (enabled_extensions.count(VK_EXT_SAMPLE_LOCATIONS_EXTENSION_NAME) == 0)
+				return false;
+			break;
+
 		default:
 			LOGE("Unrecognized pNext sType: %u. Treating as unsupported.\n", unsigned(base->sType));
 			return false;
@@ -1310,7 +1476,11 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 bool FeatureFilter::Impl::sampler_is_supported(const VkSamplerCreateInfo *info) const
 {
 	// Only allow flags we recognize and validate.
-	constexpr VkSamplerCreateFlags supported_flags = VK_SAMPLER_CREATE_NON_SEAMLESS_CUBE_MAP_BIT_EXT;
+	constexpr VkSamplerCreateFlags supported_flags =
+			VK_SAMPLER_CREATE_NON_SEAMLESS_CUBE_MAP_BIT_EXT |
+			VK_SAMPLER_CREATE_SUBSAMPLED_BIT_EXT |
+			VK_SAMPLER_CREATE_SUBSAMPLED_COARSE_RECONSTRUCTION_BIT_EXT |
+			VK_SAMPLER_CREATE_IMAGE_PROCESSING_BIT_QCOM;
 	if ((info->flags & ~supported_flags) != 0)
 		return false;
 
@@ -1320,6 +1490,31 @@ bool FeatureFilter::Impl::sampler_is_supported(const VkSamplerCreateInfo *info) 
 	if ((info->flags & VK_SAMPLER_CREATE_NON_SEAMLESS_CUBE_MAP_BIT_EXT) != 0)
 		if (!features.non_seamless_cube_map.nonSeamlessCubeMap)
 			return false;
+
+	if ((info->addressModeU == VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE ||
+	     info->addressModeV == VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE ||
+	     info->addressModeW == VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE) &&
+	    enabled_extensions.count(VK_KHR_SAMPLER_MIRROR_CLAMP_TO_EDGE_EXTENSION_NAME) == 0)
+		return false;
+
+	if ((info->minFilter == VK_FILTER_CUBIC_IMG ||
+	     info->magFilter == VK_FILTER_CUBIC_IMG) &&
+	    enabled_extensions.count(VK_IMG_FILTER_CUBIC_EXTENSION_NAME) == 0)
+		return false;
+
+	if ((info->flags & (VK_SAMPLER_CREATE_SUBSAMPLED_BIT_EXT |
+	                    VK_SAMPLER_CREATE_SUBSAMPLED_COARSE_RECONSTRUCTION_BIT_EXT)) != 0 &&
+	    features.fragment_density.fragmentDensityMap == VK_FALSE)
+		return false;
+
+	if ((info->borderColor == VK_BORDER_COLOR_FLOAT_CUSTOM_EXT ||
+	     info->borderColor == VK_BORDER_COLOR_INT_CUSTOM_EXT) &&
+	    features.custom_border_color.customBorderColors == VK_FALSE)
+		return false;
+
+	if ((info->flags & VK_SAMPLER_CREATE_IMAGE_PROCESSING_BIT_QCOM) != 0 &&
+	    enabled_extensions.count(VK_QCOM_IMAGE_PROCESSING_EXTENSION_NAME) == 0)
+		return false;
 
 	return pnext_chain_is_supported(info->pNext);
 }
@@ -1333,7 +1528,9 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 			VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR |
 			VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT |
 			VK_DESCRIPTOR_SET_LAYOUT_CREATE_DESCRIPTOR_BUFFER_BIT_EXT |
-			VK_DESCRIPTOR_SET_LAYOUT_CREATE_EMBEDDED_IMMUTABLE_SAMPLERS_BIT_EXT;
+			VK_DESCRIPTOR_SET_LAYOUT_CREATE_EMBEDDED_IMMUTABLE_SAMPLERS_BIT_EXT |
+			VK_DESCRIPTOR_SET_LAYOUT_CREATE_INDIRECT_BINDABLE_BIT_NV |
+			VK_DESCRIPTOR_SET_LAYOUT_CREATE_PER_STAGE_BIT_NV;
 
 	if ((info->flags & ~supported_flags) != 0)
 		return false;
@@ -1368,6 +1565,14 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 		}
 	}
 
+	if ((info->flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_INDIRECT_BINDABLE_BIT_NV) != 0 &&
+	    features.device_generated_commands_compute_nv.deviceGeneratedCompute == VK_FALSE)
+		return false;
+
+	if ((info->flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_PER_STAGE_BIT_NV) != 0 &&
+	    features.per_stage_descriptor_set_nv.perStageDescriptorSet == VK_FALSE)
+		return false;
+
 	struct DescriptorCounts
 	{
 		uint32_t sampled_image;
@@ -1395,6 +1600,18 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 
 	for (unsigned i = 0; i < info->bindingCount; i++)
 	{
+		if (!shader_stage_mask_is_supported(info->pBindings[i].stageFlags))
+			return false;
+
+		constexpr VkDescriptorBindingFlags supported_binding_flags =
+				VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT |
+				VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT |
+				VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT |
+				VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT;
+
+		if (flags && (flags->pBindingFlags[i] & ~supported_binding_flags) != 0)
+			return false;
+
 		bool binding_is_update_after_bind =
 				flags && i < flags->bindingCount &&
 				(flags->pBindingFlags[i] & VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT) != 0;
@@ -1551,6 +1768,14 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 			break;
 		}
 
+		case VK_DESCRIPTOR_TYPE_BLOCK_MATCH_IMAGE_QCOM:
+		case VK_DESCRIPTOR_TYPE_SAMPLE_WEIGHT_IMAGE_QCOM:
+			if (enabled_extensions.count(VK_QCOM_IMAGE_PROCESSING_EXTENSION_NAME) == 0)
+				return false;
+			// *shrug*
+			count = nullptr;
+			break;
+
 		default:
 			return false;
 		}
@@ -1651,6 +1876,118 @@ bool FeatureFilter::Impl::pipeline_layout_is_supported(const VkPipelineLayoutCre
 	return pnext_chain_is_supported(info->pNext);
 }
 
+bool FeatureFilter::Impl::validate_spirv_extension(const std::string &ext) const
+{
+	static const struct
+	{
+		const char *spirv_ext;
+		const char *vulkan_ext;
+		uint32_t promoted_core_version;
+	} ext_mapping[] = {
+		// Autogenerated table.
+		{ "SPV_KHR_variable_pointers", "VK_KHR_variable_pointers", VK_API_VERSION_1_1 },
+		{ "SPV_AMD_shader_explicit_vertex_parameter", "VK_AMD_shader_explicit_vertex_parameter", 0 },
+		{ "SPV_AMD_gcn_shader", "VK_AMD_gcn_shader", 0 },
+		{ "SPV_AMD_gpu_shader_half_float", "VK_AMD_gpu_shader_half_float", 0 },
+		{ "SPV_AMD_gpu_shader_int16", "VK_AMD_gpu_shader_int16", 0 },
+		{ "SPV_AMD_shader_ballot", "VK_AMD_shader_ballot", 0 },
+		{ "SPV_AMD_shader_fragment_mask", "VK_AMD_shader_fragment_mask", 0 },
+		{ "SPV_AMD_shader_image_load_store_lod", "VK_AMD_shader_image_load_store_lod", 0 },
+		{ "SPV_AMD_shader_trinary_minmax", "VK_AMD_shader_trinary_minmax", 0 },
+		{ "SPV_AMD_texture_gather_bias_lod", "VK_AMD_texture_gather_bias_lod", 0 },
+		{ "SPV_AMD_shader_early_and_late_fragment_tests", "VK_AMD_shader_early_and_late_fragment_tests", 0 },
+		{ "SPV_KHR_shader_draw_parameters", "VK_KHR_shader_draw_parameters", VK_API_VERSION_1_1 },
+		{ "SPV_KHR_8bit_storage", "VK_KHR_8bit_storage", VK_API_VERSION_1_2 },
+		{ "SPV_KHR_16bit_storage", "VK_KHR_16bit_storage", VK_API_VERSION_1_1 },
+		{ "SPV_KHR_shader_clock", "VK_KHR_shader_clock", 0 },
+		{ "SPV_KHR_float_controls", "VK_KHR_shader_float_controls", VK_API_VERSION_1_2 },
+		{ "SPV_KHR_storage_buffer_storage_class", "VK_KHR_storage_buffer_storage_class", VK_API_VERSION_1_1 },
+		{ "SPV_KHR_post_depth_coverage", "VK_EXT_post_depth_coverage", 0 },
+		{ "SPV_EXT_shader_stencil_export", "VK_EXT_shader_stencil_export", 0 },
+		{ "SPV_KHR_shader_ballot", "VK_EXT_shader_subgroup_ballot", 0 },
+		{ "SPV_KHR_subgroup_vote", "VK_EXT_shader_subgroup_vote", 0 },
+		{ "SPV_NV_sample_mask_override_coverage", "VK_NV_sample_mask_override_coverage", 0 },
+		{ "SPV_NV_geometry_shader_passthrough", "VK_NV_geometry_shader_passthrough", 0 },
+		{ "SPV_NV_mesh_shader", "VK_NV_mesh_shader", 0 },
+		{ "SPV_NV_viewport_array2", "VK_NV_viewport_array2", 0 },
+		{ "SPV_NV_shader_subgroup_partitioned", "VK_NV_shader_subgroup_partitioned", 0 },
+		{ "SPV_NV_shader_invocation_reorder", "VK_NV_ray_tracing_invocation_reorder", 0 },
+		{ "SPV_EXT_shader_viewport_index_layer", "VK_EXT_shader_viewport_index_layer", VK_API_VERSION_1_2 },
+		{ "SPV_NVX_multiview_per_view_attributes", "VK_NVX_multiview_per_view_attributes", 0 },
+		{ "SPV_EXT_descriptor_indexing", "VK_EXT_descriptor_indexing", VK_API_VERSION_1_2 },
+		{ "SPV_KHR_vulkan_memory_model", "VK_KHR_vulkan_memory_model", VK_API_VERSION_1_2 },
+		{ "SPV_NV_compute_shader_derivatives", "VK_NV_compute_shader_derivatives", 0 },
+		{ "SPV_NV_fragment_shader_barycentric", "VK_NV_fragment_shader_barycentric", 0 },
+		{ "SPV_NV_shader_image_footprint", "VK_NV_shader_image_footprint", 0 },
+		{ "SPV_NV_shading_rate", "VK_NV_shading_rate_image", 0 },
+		{ "SPV_NV_ray_tracing", "VK_NV_ray_tracing", 0 },
+		{ "SPV_KHR_ray_tracing", "VK_KHR_ray_tracing_pipeline", 0 },
+		{ "SPV_KHR_ray_query", "VK_KHR_ray_query", 0 },
+		{ "SPV_KHR_ray_cull_mask", "VK_KHR_ray_tracing_maintenance1", 0 },
+		{ "SPV_GOOGLE_hlsl_functionality1", "VK_GOOGLE_hlsl_functionality1", 0 },
+		{ "SPV_GOOGLE_user_type", "VK_GOOGLE_user_type", 0 },
+		{ "SPV_GOOGLE_decorate_string", "VK_GOOGLE_decorate_string", 0 },
+		{ "SPV_EXT_fragment_invocation_density", "VK_EXT_fragment_density_map", 0 },
+		{ "SPV_KHR_physical_storage_buffer", "VK_KHR_buffer_device_address", VK_API_VERSION_1_2 },
+		{ "SPV_EXT_physical_storage_buffer", "VK_EXT_buffer_device_address", 0 },
+		{ "SPV_NV_cooperative_matrix", "VK_NV_cooperative_matrix", 0 },
+		{ "SPV_NV_shader_sm_builtins", "VK_NV_shader_sm_builtins", 0 },
+		{ "SPV_EXT_fragment_shader_interlock", "VK_EXT_fragment_shader_interlock", 0 },
+		{ "SPV_EXT_demote_to_helper_invocation", "VK_EXT_shader_demote_to_helper_invocation", VK_API_VERSION_1_3 },
+		{ "SPV_KHR_fragment_shading_rate", "VK_KHR_fragment_shading_rate", 0 },
+		{ "SPV_KHR_non_semantic_info", "VK_KHR_shader_non_semantic_info", VK_API_VERSION_1_3 },
+		{ "SPV_EXT_shader_image_int64", "VK_EXT_shader_image_atomic_int64", 0 },
+		{ "SPV_KHR_terminate_invocation", "VK_KHR_shader_terminate_invocation", VK_API_VERSION_1_3 },
+		{ "SPV_KHR_multiview", "VK_KHR_multiview", VK_API_VERSION_1_1 },
+		{ "SPV_KHR_workgroup_memory_explicit_layout", "VK_KHR_workgroup_memory_explicit_layout", 0 },
+		{ "SPV_EXT_shader_atomic_float_add", "VK_EXT_shader_atomic_float", 0 },
+		{ "SPV_KHR_fragment_shader_barycentric", "VK_KHR_fragment_shader_barycentric", 0 },
+		{ "SPV_KHR_subgroup_uniform_control_flow", "VK_KHR_shader_subgroup_uniform_control_flow", VK_API_VERSION_1_3 },
+		{ "SPV_EXT_shader_atomic_float_min_max", "VK_EXT_shader_atomic_float2", 0 },
+		{ "SPV_EXT_shader_atomic_float16_add", "VK_EXT_shader_atomic_float2", 0 },
+		{ "SPV_NV_shader_atomic_fp16_vector", "VK_NV_shader_atomic_float16_vector", 0 },
+		{ "SPV_EXT_fragment_fully_covered", "VK_EXT_conservative_rasterization", 0 },
+		{ "SPV_KHR_integer_dot_product", "VK_KHR_shader_integer_dot_product", VK_API_VERSION_1_3 },
+		{ "SPV_INTEL_shader_integer_functions2", "VK_INTEL_shader_integer_functions2", 0 },
+		{ "SPV_KHR_device_group", "VK_KHR_device_group", VK_API_VERSION_1_1 },
+		{ "SPV_QCOM_image_processing", "VK_QCOM_image_processing", 0 },
+		{ "SPV_QCOM_image_processing2", "VK_QCOM_image_processing2", 0 },
+		{ "SPV_EXT_mesh_shader", "VK_EXT_mesh_shader", 0 },
+		{ "SPV_KHR_ray_tracing_position_fetch", "VK_KHR_ray_tracing_position_fetch", 0 },
+		{ "SPV_EXT_shader_tile_image", "VK_EXT_shader_tile_image", 0 },
+		{ "SPV_EXT_opacity_micromap", "VK_EXT_opacity_micromap", 0 },
+		{ "SPV_KHR_cooperative_matrix", "VK_KHR_cooperative_matrix", 0 },
+		{ "SPV_ARM_core_builtins", "VK_ARM_shader_core_builtins", 0 },
+		{ "SPV_AMDX_shader_enqueue", "VK_AMDX_shader_enqueue", 0 },
+		{ "SPV_HUAWEI_cluster_culling_shader", "VK_HUAWEI_cluster_culling_shader", 0 },
+		{ "SPV_HUAWEI_subpass_shading", "VK_HUAWEI_subpass_shading", 0 },
+		{ "SPV_NV_ray_tracing_motion_blur", "VK_NV_ray_tracing_motion_blur", 0 },
+		{ "SPV_KHR_maximal_reconvergence", "VK_KHR_shader_maximal_reconvergence", 0 },
+		{ "SPV_KHR_subgroup_rotate", "VK_KHR_shader_subgroup_rotate", 0 },
+		{ "SPV_KHR_expect_assume", "VK_KHR_shader_expect_assume", 0 },
+		{ "SPV_KHR_float_controls2", "VK_KHR_shader_float_controls2", 0 },
+		{ "SPV_KHR_quad_control", "VK_KHR_shader_quad_control", 0 },
+		{ "SPV_NV_raw_access_chains", "VK_NV_raw_access_chains", 0 },
+		{ "SPV_KHR_compute_shader_derivatives", "VK_KHR_compute_shader_derivatives", 0 },
+		{ "SPV_EXT_replicated_composites", "VK_EXT_shader_replicated_composites", 0 },
+		{ "SPV_KHR_relaxed_extended_instruction", "VK_KHR_shader_relaxed_extended_instruction", 0 },
+	};
+
+	for (auto &mapping : ext_mapping)
+	{
+		if (ext == mapping.spirv_ext)
+		{
+			if (mapping.promoted_core_version && api_version >= mapping.promoted_core_version)
+				return true;
+			if (enabled_extensions.count(mapping.vulkan_ext) != 0)
+				return true;
+			break;
+		}
+	}
+
+	return false;
+}
+
 bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 {
 	// From table 75 in Vulkan spec.
@@ -1667,8 +2004,10 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 	case spv::CapabilityImageQuery:
 	case spv::CapabilityDerivativeControl:
 	case spv::CapabilityStorageImageExtendedFormats:
-	case spv::CapabilityDeviceGroup:
 		return true;
+
+	case spv::CapabilityDeviceGroup:
+		return api_version >= VK_API_VERSION_1_1;
 
 	case spv::CapabilityGeometry:
 		return features2.features.geometryShader == VK_TRUE;
@@ -1780,9 +2119,9 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 	case spv::CapabilityGeometryShaderPassthroughNV:
 		return enabled_extensions.count(VK_NV_GEOMETRY_SHADER_PASSTHROUGH_EXTENSION_NAME) != 0;
 	case spv::CapabilityShaderViewportIndex:
-		return features.vk12.shaderOutputViewportIndex;
+		return features.vk12.shaderOutputViewportIndex || enabled_extensions.count(VK_EXT_SHADER_VIEWPORT_INDEX_LAYER_EXTENSION_NAME) != 0;
 	case spv::CapabilityShaderLayer:
-		return features.vk12.shaderOutputLayer;
+		return features.vk12.shaderOutputLayer || enabled_extensions.count(VK_EXT_SHADER_VIEWPORT_INDEX_LAYER_EXTENSION_NAME) != 0;
 	case spv::CapabilityShaderViewportIndexLayerEXT:
 		// NV version is a cloned enum.
 		return enabled_extensions.count(VK_EXT_SHADER_VIEWPORT_INDEX_LAYER_EXTENSION_NAME) != 0 ||
@@ -1882,9 +2221,9 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 		return props.float_control.shaderRoundingModeRTZFloat16 == VK_TRUE ||
 		       props.float_control.shaderRoundingModeRTZFloat32 == VK_TRUE ||
 		       props.float_control.shaderRoundingModeRTZFloat64 == VK_TRUE;
-	case spv::CapabilityComputeDerivativeGroupQuadsNV:
+	case spv::CapabilityComputeDerivativeGroupQuadsKHR:
 		return features.compute_shader_derivatives.computeDerivativeGroupQuads == VK_TRUE;
-	case spv::CapabilityComputeDerivativeGroupLinearNV:
+	case spv::CapabilityComputeDerivativeGroupLinearKHR:
 		return features.compute_shader_derivatives.computeDerivativeGroupLinear == VK_TRUE;
 	case spv::CapabilityFragmentBarycentricKHR:
 		return features.barycentric.fragmentShaderBarycentric == VK_TRUE;
@@ -1943,6 +2282,52 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 		return features.shader_integer_dot_product.shaderIntegerDotProduct == VK_TRUE;
 	case spv::CapabilityMeshShadingEXT:
 		return features.mesh_shader.meshShader == VK_TRUE;
+	case spv::CapabilityFragmentFullyCoveredEXT:
+		return enabled_extensions.count(VK_EXT_CONSERVATIVE_RASTERIZATION_EXTENSION_NAME) != 0;
+	// AtomicFloat16VectorNV does not seem to exist.
+	case spv::CapabilityRayCullMaskKHR:
+		return features.ray_tracing_maintenance1.rayTracingMaintenance1 == VK_TRUE;
+	case spv::CapabilityRayTracingMotionBlurNV:
+		return features.ray_tracing_motion_blur_nv.rayTracingMotionBlur == VK_TRUE;
+	case spv::CapabilityRayTracingOpacityMicromapEXT:
+		return enabled_extensions.count(VK_EXT_OPACITY_MICROMAP_EXTENSION_NAME) != 0;
+	case spv::CapabilityTextureSampleWeightedQCOM:
+		return features.image_processing_qcom.textureSampleWeighted == VK_TRUE;
+	case spv::CapabilityTextureBoxFilterQCOM:
+		return features.image_processing_qcom.textureBoxFilter == VK_TRUE;
+	case spv::CapabilityTextureBlockMatchQCOM:
+		return features.image_processing_qcom.textureBlockMatch == VK_TRUE;
+	case spv::CapabilityTextureBlockMatch2QCOM:
+		return features.image_processing2_qcom.textureBlockMatch2 == VK_TRUE;
+	case spv::CapabilityCoreBuiltinsARM:
+		return features.shader_core_builtins_arm.shaderCoreBuiltins == VK_TRUE;
+	case spv::CapabilityShaderInvocationReorderNV:
+		return enabled_extensions.count(VK_NV_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME) != 0;
+	// Ignore CapabilityClusterCullingShadingHUAWEI. It does not exist in SPIR-V headers.
+	case spv::CapabilityRayTracingPositionFetchKHR:
+	case spv::CapabilityRayQueryPositionFetchKHR:
+		return features.ray_tracing_position_fetch.rayTracingPositionFetch == VK_TRUE;
+	case spv::CapabilityTileImageColorReadAccessEXT:
+		return features.shader_tile_image.shaderTileImageColorReadAccess == VK_TRUE;
+	case spv::CapabilityTileImageDepthReadAccessEXT:
+		return features.shader_tile_image.shaderTileImageDepthReadAccess == VK_TRUE;
+	case spv::CapabilityTileImageStencilReadAccessEXT:
+		return features.shader_tile_image.shaderTileImageStencilReadAccess == VK_TRUE;
+	case spv::CapabilityCooperativeMatrixKHR:
+		return features.cooperative_matrix.cooperativeMatrix == VK_TRUE;
+	// Ignore ShaderEnqueueAMDX, it's a beta extension.
+	case spv::CapabilityGroupNonUniformRotateKHR:
+		return features.shader_subgroup_rotate.shaderSubgroupRotate == VK_TRUE;
+	case spv::CapabilityExpectAssumeKHR:
+		return features.expect_assume.shaderExpectAssume == VK_TRUE;
+	case spv::CapabilityFloatControls2:
+		return features.shader_float_controls2.shaderFloatControls2 == VK_TRUE;
+	case spv::CapabilityQuadControlKHR:
+		return features.shader_quad_control.shaderQuadControl == VK_TRUE;
+	case spv::CapabilityRawAccessChainsNV:
+		return features.raw_access_chains_nv.shaderRawAccessChains == VK_TRUE;
+	case spv::CapabilityReplicatedCompositesEXT:
+		return features.shader_replicated_composites.shaderReplicatedComposites == VK_TRUE;
 
 	default:
 		LOGE("Unrecognized SPIR-V capability %u, treating as unsupported.\n", unsigned(cap));
@@ -2310,6 +2695,20 @@ bool FeatureFilter::Impl::validate_module_capabilities(const uint32_t *data, siz
 				return false;
 			}
 		}
+		else if (op == spv::OpExtension)
+		{
+			if (count < 2)
+			{
+				LOGE("Instruction length for OpExtension is wrong.\n");
+				return false;
+			}
+			auto name = extract_string(&data[offset + 1], num_words - (offset + 1));
+			if (!validate_spirv_extension(name))
+			{
+				LOGE("SPIR-V extension %s is not supported on this device, ignoring shader module.\n",
+				     name.c_str());
+			}
+		}
 		else if (op == spv::OpFunction)
 		{
 			// We're now declaring code, so just stop parsing, there cannot be any capability ops after this.
@@ -2340,8 +2739,12 @@ bool FeatureFilter::Impl::shader_module_is_supported(const VkShaderModuleCreateI
 bool FeatureFilter::Impl::render_pass_is_supported(const VkRenderPassCreateInfo *info) const
 {
 	// Only allow flags we recognize and validate.
-	constexpr VkRenderPassCreateFlags supported_flags = 0;
+	constexpr VkRenderPassCreateFlags supported_flags = VK_RENDER_PASS_CREATE_TRANSFORM_BIT_QCOM;
 	if ((info->flags & ~supported_flags) != 0)
+		return false;
+
+	if ((info->flags & VK_RENDER_PASS_CREATE_TRANSFORM_BIT_QCOM) != 0 &&
+	    enabled_extensions.count(VK_QCOM_RENDER_PASS_TRANSFORM_EXTENSION_NAME) == 0)
 		return false;
 
 	if (null_device)
@@ -2406,6 +2809,361 @@ bool FeatureFilter::Impl::format_is_supported(VkFormat format, VkFormatFeatureFl
 	return query->format_is_supported(format, format_features);
 }
 
+bool FeatureFilter::Impl::aspect_mask_is_supported(VkImageAspectFlags aspect) const
+{
+	if (aspect == VK_IMAGE_ASPECT_NONE && features.maintenance4.maintenance4 == VK_FALSE)
+		return false;
+
+	constexpr VkImageAspectFlags supported_flags =
+			VK_IMAGE_ASPECT_COLOR_BIT |
+			VK_IMAGE_ASPECT_DEPTH_BIT |
+			VK_IMAGE_ASPECT_STENCIL_BIT |
+			VK_IMAGE_ASPECT_METADATA_BIT |
+			VK_IMAGE_ASPECT_PLANE_0_BIT |
+			VK_IMAGE_ASPECT_PLANE_1_BIT |
+			VK_IMAGE_ASPECT_PLANE_2_BIT |
+			VK_IMAGE_ASPECT_MEMORY_PLANE_0_BIT_EXT |
+			VK_IMAGE_ASPECT_MEMORY_PLANE_1_BIT_EXT |
+			VK_IMAGE_ASPECT_MEMORY_PLANE_2_BIT_EXT |
+			VK_IMAGE_ASPECT_MEMORY_PLANE_3_BIT_EXT;
+
+	if (aspect & ~supported_flags)
+		return false;
+
+	if ((aspect & (VK_IMAGE_ASPECT_PLANE_0_BIT |
+	               VK_IMAGE_ASPECT_PLANE_1_BIT |
+	               VK_IMAGE_ASPECT_PLANE_2_BIT)) != 0 &&
+	    features.ycbcr_conversion.samplerYcbcrConversion == VK_FALSE)
+		return false;
+
+	if ((aspect & (VK_IMAGE_ASPECT_MEMORY_PLANE_0_BIT_EXT |
+	               VK_IMAGE_ASPECT_MEMORY_PLANE_1_BIT_EXT |
+	               VK_IMAGE_ASPECT_MEMORY_PLANE_2_BIT_EXT |
+	               VK_IMAGE_ASPECT_MEMORY_PLANE_3_BIT_EXT)) != 0 &&
+	    enabled_extensions.count(VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME) == 0)
+		return false;
+
+	return true;
+}
+
+bool FeatureFilter::Impl::access_mask_is_supported(VkAccessFlags2 access) const
+{
+	constexpr VkAccessFlags2 sync2_flags =
+			VK_ACCESS_2_SHADER_SAMPLED_READ_BIT |
+			VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT |
+			VK_ACCESS_2_SHADER_STORAGE_READ_BIT;
+
+	constexpr VkAccessFlags2 supported_flags =
+			VK_ACCESS_INDIRECT_COMMAND_READ_BIT |
+			VK_ACCESS_INDEX_READ_BIT |
+			VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT |
+			VK_ACCESS_UNIFORM_READ_BIT |
+			VK_ACCESS_INPUT_ATTACHMENT_READ_BIT |
+			VK_ACCESS_SHADER_READ_BIT |
+			VK_ACCESS_SHADER_WRITE_BIT |
+			VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+			VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+			VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+			VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
+			VK_ACCESS_TRANSFER_READ_BIT |
+			VK_ACCESS_TRANSFER_WRITE_BIT |
+			VK_ACCESS_HOST_READ_BIT |
+			VK_ACCESS_HOST_WRITE_BIT |
+			VK_ACCESS_MEMORY_READ_BIT |
+			VK_ACCESS_MEMORY_WRITE_BIT |
+			VK_ACCESS_TRANSFORM_FEEDBACK_WRITE_BIT_EXT |
+			VK_ACCESS_TRANSFORM_FEEDBACK_COUNTER_READ_BIT_EXT |
+			VK_ACCESS_TRANSFORM_FEEDBACK_COUNTER_WRITE_BIT_EXT |
+			VK_ACCESS_CONDITIONAL_RENDERING_READ_BIT_EXT |
+			VK_ACCESS_COLOR_ATTACHMENT_READ_NONCOHERENT_BIT_EXT |
+			VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR |
+			VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR |
+			VK_ACCESS_FRAGMENT_DENSITY_MAP_READ_BIT_EXT |
+			VK_ACCESS_FRAGMENT_SHADING_RATE_ATTACHMENT_READ_BIT_KHR |
+			VK_ACCESS_2_VIDEO_DECODE_WRITE_BIT_KHR |
+			VK_ACCESS_2_VIDEO_DECODE_READ_BIT_KHR |
+			VK_ACCESS_2_VIDEO_ENCODE_WRITE_BIT_KHR |
+			VK_ACCESS_2_VIDEO_ENCODE_READ_BIT_KHR |
+			VK_ACCESS_2_DESCRIPTOR_BUFFER_READ_BIT_EXT |
+			VK_ACCESS_2_SHADER_BINDING_TABLE_READ_BIT_KHR |
+			VK_ACCESS_2_MICROMAP_READ_BIT_EXT |
+			VK_ACCESS_2_MICROMAP_WRITE_BIT_EXT |
+			VK_ACCESS_2_COMMAND_PREPROCESS_READ_BIT_NV |
+			VK_ACCESS_2_COMMAND_PREPROCESS_WRITE_BIT_NV |
+			VK_ACCESS_2_OPTICAL_FLOW_READ_BIT_NV |
+			VK_ACCESS_2_OPTICAL_FLOW_WRITE_BIT_NV |
+			sync2_flags;
+
+	if (access & ~supported_flags)
+		return false;
+
+	if ((access & (VK_ACCESS_2_VIDEO_DECODE_READ_BIT_KHR | VK_ACCESS_2_VIDEO_DECODE_WRITE_BIT_KHR)) != 0 &&
+	    enabled_extensions.count(VK_KHR_VIDEO_DECODE_QUEUE_EXTENSION_NAME) == 0)
+		return false;
+
+	if ((access & (VK_ACCESS_2_VIDEO_ENCODE_READ_BIT_KHR | VK_ACCESS_2_VIDEO_ENCODE_WRITE_BIT_KHR)) != 0 &&
+	    enabled_extensions.count(VK_KHR_VIDEO_ENCODE_QUEUE_EXTENSION_NAME) == 0)
+		return false;
+
+	if ((access & (VK_ACCESS_TRANSFORM_FEEDBACK_WRITE_BIT_EXT |
+	               VK_ACCESS_TRANSFORM_FEEDBACK_COUNTER_READ_BIT_EXT |
+	               VK_ACCESS_TRANSFORM_FEEDBACK_COUNTER_WRITE_BIT_EXT)) != 0 &&
+	    features.transform_feedback.transformFeedback == VK_FALSE)
+		return false;
+
+	if ((access & VK_ACCESS_CONDITIONAL_RENDERING_READ_BIT_EXT) != 0 &&
+	    features.conditional_rendering.conditionalRendering == VK_FALSE)
+		return false;
+
+	if ((access & VK_ACCESS_COLOR_ATTACHMENT_READ_NONCOHERENT_BIT_EXT) != 0 &&
+	    enabled_extensions.count(VK_EXT_BLEND_OPERATION_ADVANCED_EXTENSION_NAME) == 0)
+		return false;
+
+	if ((access & (VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR |
+	               VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR)) != 0 &&
+	    features.acceleration_structure.accelerationStructure == VK_FALSE)
+		return false;
+
+	if ((access & VK_ACCESS_FRAGMENT_DENSITY_MAP_READ_BIT_EXT) != 0 &&
+	    features.fragment_density.fragmentDensityMap == VK_FALSE)
+		return false;
+
+	if ((access & VK_ACCESS_FRAGMENT_SHADING_RATE_ATTACHMENT_READ_BIT_KHR) != 0 &&
+	    features.fragment_shading_rate.attachmentFragmentShadingRate == VK_FALSE)
+		return false;
+
+	if ((access & sync2_flags) != 0 && features.synchronization2.synchronization2 == VK_FALSE)
+		return false;
+
+	if ((access & VK_ACCESS_2_DESCRIPTOR_BUFFER_READ_BIT_EXT) != 0 &&
+	    features.descriptor_buffer.descriptorBuffer == VK_FALSE)
+		return false;
+
+	if ((access & VK_ACCESS_2_SHADER_BINDING_TABLE_READ_BIT_KHR) != 0 &&
+	    features.ray_tracing_maintenance1.rayTracingMaintenance1 == VK_FALSE)
+		return false;
+
+	if ((access & (VK_ACCESS_2_MICROMAP_WRITE_BIT_EXT | VK_ACCESS_2_MICROMAP_READ_BIT_EXT)) != 0 &&
+	    features.opacity_micromap.micromap == VK_FALSE)
+		return false;
+
+	if ((access & (VK_ACCESS_2_COMMAND_PREPROCESS_READ_BIT_NV |
+	               VK_ACCESS_2_COMMAND_PREPROCESS_WRITE_BIT_NV)) != 0 &&
+	    features.device_generated_commands_nv.deviceGeneratedCommands == VK_FALSE)
+		return false;
+
+	if ((access & (VK_ACCESS_2_OPTICAL_FLOW_READ_BIT_NV |
+	               VK_ACCESS_2_OPTICAL_FLOW_WRITE_BIT_NV)) != 0 &&
+	    features.optical_flow_nv.opticalFlow == VK_FALSE)
+		return false;
+
+	return true;
+}
+
+bool FeatureFilter::Impl::shader_stage_mask_is_supported(VkShaderStageFlags stages) const
+{
+	if (stages == VK_SHADER_STAGE_ALL || stages == VK_SHADER_STAGE_ALL_GRAPHICS)
+		return true;
+
+	constexpr VkShaderStageFlags supported_flags =
+			VK_SHADER_STAGE_VERTEX_BIT |
+			VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT |
+			VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT |
+			VK_SHADER_STAGE_GEOMETRY_BIT |
+			VK_SHADER_STAGE_FRAGMENT_BIT |
+			VK_SHADER_STAGE_COMPUTE_BIT |
+			VK_SHADER_STAGE_RAYGEN_BIT_KHR |
+			VK_SHADER_STAGE_CALLABLE_BIT_KHR |
+			VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR |
+			VK_SHADER_STAGE_MISS_BIT_KHR |
+			VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
+			VK_SHADER_STAGE_INTERSECTION_BIT_KHR |
+			VK_SHADER_STAGE_MESH_BIT_EXT |
+			VK_SHADER_STAGE_TASK_BIT_EXT;
+
+	if (stages & ~supported_flags)
+		return false;
+
+	if ((stages & (VK_SHADER_STAGE_RAYGEN_BIT_KHR |
+	               VK_SHADER_STAGE_CALLABLE_BIT_KHR |
+	               VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR |
+	               VK_SHADER_STAGE_MISS_BIT_KHR |
+	               VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
+	               VK_SHADER_STAGE_INTERSECTION_BIT_KHR)) != 0 &&
+	    features.ray_tracing_pipeline.rayTracingPipeline == VK_FALSE)
+	{
+		return false;
+	}
+
+	if ((stages & VK_SHADER_STAGE_MESH_BIT_EXT) != 0 &&
+	    features.mesh_shader.meshShader == VK_FALSE &&
+	    features.mesh_shader_nv.meshShader == VK_FALSE)
+		return false;
+
+	if ((stages & VK_SHADER_STAGE_TASK_BIT_EXT) != 0 &&
+	    features.mesh_shader.taskShader == VK_FALSE &&
+	    features.mesh_shader_nv.taskShader == VK_FALSE)
+		return false;
+
+	return true;
+}
+
+bool FeatureFilter::Impl::pipeline_stage_mask_is_supported(VkPipelineStageFlags2 stages) const
+{
+	if (stages == VK_PIPELINE_STAGE_NONE && features.synchronization2.synchronization2 == VK_FALSE)
+		return false;
+
+	constexpr VkPipelineStageFlags2 sync2_stages =
+			VK_PIPELINE_STAGE_2_COPY_BIT |
+			VK_PIPELINE_STAGE_2_CLEAR_BIT |
+			VK_PIPELINE_STAGE_2_RESOLVE_BIT |
+			VK_PIPELINE_STAGE_2_BLIT_BIT |
+			VK_PIPELINE_STAGE_2_INDEX_INPUT_BIT |
+			VK_PIPELINE_STAGE_2_PRE_RASTERIZATION_SHADERS_BIT |
+			VK_PIPELINE_STAGE_2_VERTEX_ATTRIBUTE_INPUT_BIT;
+
+	constexpr VkPipelineStageFlags2 supported_flags =
+			VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT |
+			VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT |
+			VK_PIPELINE_STAGE_VERTEX_INPUT_BIT |
+			VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
+			VK_PIPELINE_STAGE_TESSELLATION_CONTROL_SHADER_BIT |
+			VK_PIPELINE_STAGE_TESSELLATION_EVALUATION_SHADER_BIT |
+			VK_PIPELINE_STAGE_GEOMETRY_SHADER_BIT |
+			VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
+			VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+			VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT |
+			VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
+			VK_PIPELINE_STAGE_TRANSFER_BIT |
+			VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT |
+			VK_PIPELINE_STAGE_HOST_BIT |
+			VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT |
+			VK_PIPELINE_STAGE_ALL_COMMANDS_BIT |
+			VK_PIPELINE_STAGE_2_VIDEO_DECODE_BIT_KHR |
+			VK_PIPELINE_STAGE_2_VIDEO_ENCODE_BIT_KHR |
+			VK_PIPELINE_STAGE_TRANSFORM_FEEDBACK_BIT_EXT |
+			VK_PIPELINE_STAGE_CONDITIONAL_RENDERING_BIT_EXT |
+			VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR |
+			VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR |
+			VK_PIPELINE_STAGE_FRAGMENT_DENSITY_PROCESS_BIT_EXT |
+			VK_PIPELINE_STAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR |
+			VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_COPY_BIT_KHR |
+			VK_PIPELINE_STAGE_2_MICROMAP_BUILD_BIT_EXT |
+			VK_PIPELINE_STAGE_COMMAND_PREPROCESS_BIT_NV |
+			VK_PIPELINE_STAGE_2_OPTICAL_FLOW_BIT_NV |
+			sync2_stages;
+
+	if (stages & ~supported_flags)
+		return false;
+
+	if ((stages & VK_PIPELINE_STAGE_2_VIDEO_DECODE_BIT_KHR) != 0 &&
+	    enabled_extensions.count(VK_KHR_VIDEO_DECODE_QUEUE_EXTENSION_NAME) == 0)
+		return false;
+
+	if ((stages & VK_PIPELINE_STAGE_2_VIDEO_ENCODE_BIT_KHR) != 0 &&
+	    enabled_extensions.count(VK_KHR_VIDEO_ENCODE_QUEUE_EXTENSION_NAME) == 0)
+		return false;
+
+	if ((stages & VK_PIPELINE_STAGE_TRANSFORM_FEEDBACK_BIT_EXT) != 0 &&
+	    features.transform_feedback.transformFeedback == VK_FALSE)
+		return false;
+
+	if ((stages & VK_PIPELINE_STAGE_CONDITIONAL_RENDERING_BIT_EXT) != 0 &&
+	    features.conditional_rendering.conditionalRendering == VK_FALSE)
+		return false;
+
+	if ((stages & VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR) != 0 &&
+	    features.acceleration_structure.accelerationStructure == VK_FALSE)
+		return false;
+
+	if ((stages & VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR) != 0 &&
+	    features.ray_tracing_pipeline.rayTracingPipeline == VK_FALSE)
+		return false;
+
+	if ((stages & VK_PIPELINE_STAGE_FRAGMENT_DENSITY_PROCESS_BIT_EXT) != 0 &&
+	    features.fragment_density.fragmentDensityMap == VK_FALSE)
+		return false;
+
+	if ((stages & VK_PIPELINE_STAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR) != 0 &&
+	    features.fragment_shading_rate.attachmentFragmentShadingRate == VK_FALSE)
+		return false;
+
+	if ((stages & sync2_stages) != 0 && features.synchronization2.synchronization2 == VK_FALSE)
+		return false;
+
+	if ((stages & VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_COPY_BIT_KHR) != 0 &&
+	    features.ray_tracing_maintenance1.rayTracingMaintenance1 == VK_FALSE)
+		return false;
+
+	if ((stages & VK_PIPELINE_STAGE_2_MICROMAP_BUILD_BIT_EXT) != 0 &&
+	    features.opacity_micromap.micromap == VK_FALSE)
+		return false;
+
+	if ((stages & VK_PIPELINE_STAGE_COMMAND_PREPROCESS_BIT_NV) != 0 &&
+	    features.device_generated_commands_nv.deviceGeneratedCommands == VK_FALSE)
+		return false;
+
+	if ((stages & VK_PIPELINE_STAGE_2_OPTICAL_FLOW_BIT_NV) != 0 &&
+	    features.optical_flow_nv.opticalFlow == VK_FALSE)
+		return false;
+
+	return true;
+}
+
+bool FeatureFilter::Impl::load_op_is_supported(VkAttachmentLoadOp load_op) const
+{
+	switch (load_op)
+	{
+	case VK_ATTACHMENT_LOAD_OP_CLEAR:
+	case VK_ATTACHMENT_LOAD_OP_LOAD:
+	case VK_ATTACHMENT_LOAD_OP_DONT_CARE:
+		return true;
+	case VK_ATTACHMENT_LOAD_OP_NONE_KHR:
+		return enabled_extensions.count(VK_KHR_LOAD_STORE_OP_NONE_EXTENSION_NAME) != 0 ||
+		       enabled_extensions.count(VK_EXT_LOAD_STORE_OP_NONE_EXTENSION_NAME) != 0;
+	default:
+		return false;
+	}
+}
+
+bool FeatureFilter::Impl::store_op_is_supported(VkAttachmentStoreOp store_op) const
+{
+	switch (store_op)
+	{
+	case VK_ATTACHMENT_STORE_OP_DONT_CARE:
+	case VK_ATTACHMENT_STORE_OP_STORE:
+		return true;
+	case VK_ATTACHMENT_STORE_OP_NONE_KHR:
+		return api_version >= VK_API_VERSION_1_3 ||
+		       enabled_extensions.count(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME) != 0 ||
+		       enabled_extensions.count(VK_EXT_LOAD_STORE_OP_NONE_EXTENSION_NAME) != 0 ||
+		       enabled_extensions.count(VK_KHR_LOAD_STORE_OP_NONE_EXTENSION_NAME) != 0 ||
+		       enabled_extensions.count(VK_QCOM_RENDER_PASS_STORE_OPS_EXTENSION_NAME) != 0;
+	default:
+		return false;
+	}
+}
+
+bool FeatureFilter::Impl::polygon_mode_is_supported(VkPolygonMode mode) const
+{
+	switch (mode)
+	{
+	case VK_POLYGON_MODE_FILL:
+		return true;
+
+	case VK_POLYGON_MODE_POINT:
+	case VK_POLYGON_MODE_LINE:
+		return features2.features.fillModeNonSolid == VK_TRUE;
+
+	case VK_POLYGON_MODE_FILL_RECTANGLE_NV:
+		return enabled_extensions.count(VK_NV_FILL_RECTANGLE_EXTENSION_NAME) != 0;
+
+	default:
+		return false;
+	}
+}
+
 bool FeatureFilter::Impl::image_layout_is_supported(VkImageLayout layout) const
 {
 	switch (layout)
@@ -2447,6 +3205,22 @@ bool FeatureFilter::Impl::image_layout_is_supported(VkImageLayout layout) const
 	case VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT:
 		return features.attachment_feedback_loop_layout.attachmentFeedbackLoopLayout == VK_TRUE;
 
+	case VK_IMAGE_LAYOUT_VIDEO_DECODE_DPB_KHR:
+	case VK_IMAGE_LAYOUT_VIDEO_DECODE_SRC_KHR:
+	case VK_IMAGE_LAYOUT_VIDEO_DECODE_DST_KHR:
+		return enabled_extensions.count(VK_KHR_VIDEO_DECODE_QUEUE_EXTENSION_NAME) != 0;
+
+	case VK_IMAGE_LAYOUT_VIDEO_ENCODE_DPB_KHR:
+	case VK_IMAGE_LAYOUT_VIDEO_ENCODE_SRC_KHR:
+	case VK_IMAGE_LAYOUT_VIDEO_ENCODE_DST_KHR:
+		return enabled_extensions.count(VK_KHR_VIDEO_ENCODE_QUEUE_EXTENSION_NAME) != 0;
+
+	case VK_IMAGE_LAYOUT_FRAGMENT_DENSITY_MAP_OPTIMAL_EXT:
+		return features.fragment_density.fragmentDensityMap == VK_TRUE;
+
+	case VK_IMAGE_LAYOUT_RENDERING_LOCAL_READ_KHR:
+		return features.dynamic_rendering_local_read.dynamicRenderingLocalRead == VK_TRUE;
+
 	default:
 		return false;
 	}
@@ -2466,6 +3240,8 @@ bool FeatureFilter::Impl::attachment_reference2_is_supported(const VkAttachmentR
 		return false;
 	if (!image_layout_is_supported(ref.layout))
 		return false;
+	if (!aspect_mask_is_supported(ref.aspectMask))
+		return false;
 
 	return true;
 }
@@ -2478,6 +3254,14 @@ bool FeatureFilter::Impl::attachment_description_is_supported(const VkAttachment
 	if (!image_layout_is_supported(desc.finalLayout))
 		return false;
 	if (format_features && !format_is_supported(desc.format, format_features))
+		return false;
+	if (!load_op_is_supported(desc.loadOp))
+		return false;
+	if (!load_op_is_supported(desc.stencilLoadOp))
+		return false;
+	if (!store_op_is_supported(desc.storeOp))
+		return false;
+	if (!store_op_is_supported(desc.stencilStoreOp))
 		return false;
 
 	return true;
@@ -2494,12 +3278,52 @@ bool FeatureFilter::Impl::attachment_description2_is_supported(const VkAttachmen
 		return false;
 	if (format_features && !format_is_supported(desc.format, format_features))
 		return false;
+	if (!load_op_is_supported(desc.loadOp))
+		return false;
+	if (!load_op_is_supported(desc.stencilLoadOp))
+		return false;
+	if (!store_op_is_supported(desc.storeOp))
+		return false;
+	if (!store_op_is_supported(desc.stencilStoreOp))
+		return false;
+
+	return true;
+}
+
+bool FeatureFilter::Impl::subpass_description_flags_is_supported(VkSubpassDescriptionFlags flags) const
+{
+	constexpr VkSubpassDescriptionFlags supported_flags =
+			VK_SUBPASS_DESCRIPTION_PER_VIEW_ATTRIBUTES_BIT_NVX |
+			VK_SUBPASS_DESCRIPTION_PER_VIEW_POSITION_X_ONLY_BIT_NVX |
+			VK_SUBPASS_DESCRIPTION_FRAGMENT_REGION_BIT_QCOM |
+			VK_SUBPASS_DESCRIPTION_SHADER_RESOLVE_BIT_QCOM |
+			VK_SUBPASS_DESCRIPTION_ENABLE_LEGACY_DITHERING_BIT_EXT;
+
+	if (flags & ~supported_flags)
+		return false;
+
+	if ((flags & (VK_SUBPASS_DESCRIPTION_PER_VIEW_ATTRIBUTES_BIT_NVX |
+	              VK_SUBPASS_DESCRIPTION_PER_VIEW_POSITION_X_ONLY_BIT_NVX)) != 0 &&
+	    enabled_extensions.count(VK_NVX_MULTIVIEW_PER_VIEW_ATTRIBUTES_EXTENSION_NAME) == 0)
+		return false;
+
+	if ((flags & (VK_SUBPASS_DESCRIPTION_FRAGMENT_REGION_BIT_QCOM |
+	              VK_SUBPASS_DESCRIPTION_SHADER_RESOLVE_BIT_QCOM)) != 0 &&
+	    enabled_extensions.count(VK_QCOM_RENDER_PASS_SHADER_RESOLVE_EXTENSION_NAME) == 0)
+		return false;
+
+	if ((flags & VK_SUBPASS_DESCRIPTION_ENABLE_LEGACY_DITHERING_BIT_EXT) != 0 &&
+	    features.legacy_dithering.legacyDithering == VK_FALSE)
+		return false;
 
 	return true;
 }
 
 bool FeatureFilter::Impl::subpass_description_is_supported(const VkSubpassDescription &sub) const
 {
+	if (!subpass_description_flags_is_supported(sub.flags))
+		return false;
+
 	for (uint32_t j = 0; j < sub.colorAttachmentCount; j++)
 	{
 		if (!attachment_reference_is_supported(sub.pColorAttachments[j]))
@@ -2520,6 +3344,9 @@ bool FeatureFilter::Impl::subpass_description_is_supported(const VkSubpassDescri
 
 bool FeatureFilter::Impl::subpass_description2_is_supported(const VkSubpassDescription2 &sub) const
 {
+	if (!subpass_description_flags_is_supported(sub.flags))
+		return false;
+
 	if (!pnext_chain_is_supported(sub.pNext))
 		return false;
 
@@ -2548,7 +3375,8 @@ bool FeatureFilter::Impl::dependency_flags_is_supported(VkDependencyFlags deps) 
 {
 	constexpr VkDependencyFlags supported_flags = VK_DEPENDENCY_BY_REGION_BIT |
 	                                              VK_DEPENDENCY_FEEDBACK_LOOP_BIT_EXT |
-	                                              VK_DEPENDENCY_VIEW_LOCAL_BIT;
+	                                              VK_DEPENDENCY_VIEW_LOCAL_BIT |
+	                                              VK_DEPENDENCY_DEVICE_GROUP_BIT;
 
 	if ((deps & ~supported_flags) != 0)
 		return false;
@@ -2560,6 +3388,9 @@ bool FeatureFilter::Impl::dependency_flags_is_supported(VkDependencyFlags deps) 
 	if ((deps & VK_DEPENDENCY_VIEW_LOCAL_BIT) != 0)
 		if (!features.multiview.multiview)
 			return false;
+
+	if ((deps & VK_DEPENDENCY_DEVICE_GROUP_BIT) != 0 && api_version < VK_API_VERSION_1_1)
+		return false;
 
 	return true;
 }
@@ -2744,8 +3575,12 @@ bool FeatureFilter::Impl::subgroup_size_control_is_supported(const VkPipelineSha
 bool FeatureFilter::Impl::render_pass2_is_supported(const VkRenderPassCreateInfo2 *info) const
 {
 	// Only allow flags we recognize and validate.
-	constexpr VkRenderPassCreateFlags supported_flags = 0;
+	constexpr VkRenderPassCreateFlags supported_flags = VK_RENDER_PASS_CREATE_TRANSFORM_BIT_QCOM;
 	if ((info->flags & ~supported_flags) != 0)
+		return false;
+
+	if ((info->flags & VK_RENDER_PASS_CREATE_TRANSFORM_BIT_QCOM) != 0 &&
+	    enabled_extensions.count(VK_QCOM_RENDER_PASS_TRANSFORM_EXTENSION_NAME) == 0)
 		return false;
 
 	if (null_device)
@@ -2827,10 +3662,150 @@ bool FeatureFilter::Impl::render_pass2_is_supported(const VkRenderPassCreateInfo
 	return true;
 }
 
+static bool blend_op_is_advanced(VkBlendOp blend_op)
+{
+	switch (blend_op)
+	{
+	case VK_BLEND_OP_ZERO_EXT:
+	case VK_BLEND_OP_SRC_EXT:
+	case VK_BLEND_OP_DST_EXT:
+	case VK_BLEND_OP_SRC_OVER_EXT:
+	case VK_BLEND_OP_DST_OVER_EXT:
+	case VK_BLEND_OP_SRC_IN_EXT:
+	case VK_BLEND_OP_DST_IN_EXT:
+	case VK_BLEND_OP_SRC_OUT_EXT:
+	case VK_BLEND_OP_DST_OUT_EXT:
+	case VK_BLEND_OP_SRC_ATOP_EXT:
+	case VK_BLEND_OP_DST_ATOP_EXT:
+	case VK_BLEND_OP_XOR_EXT:
+	case VK_BLEND_OP_MULTIPLY_EXT:
+	case VK_BLEND_OP_SCREEN_EXT:
+	case VK_BLEND_OP_OVERLAY_EXT:
+	case VK_BLEND_OP_DARKEN_EXT:
+	case VK_BLEND_OP_LIGHTEN_EXT:
+	case VK_BLEND_OP_COLORDODGE_EXT:
+	case VK_BLEND_OP_COLORBURN_EXT:
+	case VK_BLEND_OP_HARDLIGHT_EXT:
+	case VK_BLEND_OP_SOFTLIGHT_EXT:
+	case VK_BLEND_OP_DIFFERENCE_EXT:
+	case VK_BLEND_OP_EXCLUSION_EXT:
+	case VK_BLEND_OP_INVERT_EXT:
+	case VK_BLEND_OP_INVERT_RGB_EXT:
+	case VK_BLEND_OP_LINEARDODGE_EXT:
+	case VK_BLEND_OP_LINEARBURN_EXT:
+	case VK_BLEND_OP_VIVIDLIGHT_EXT:
+	case VK_BLEND_OP_LINEARLIGHT_EXT:
+	case VK_BLEND_OP_PINLIGHT_EXT:
+	case VK_BLEND_OP_HARDMIX_EXT:
+	case VK_BLEND_OP_HSL_HUE_EXT:
+	case VK_BLEND_OP_HSL_SATURATION_EXT:
+	case VK_BLEND_OP_HSL_COLOR_EXT:
+	case VK_BLEND_OP_HSL_LUMINOSITY_EXT:
+	case VK_BLEND_OP_PLUS_EXT:
+	case VK_BLEND_OP_PLUS_CLAMPED_EXT:
+	case VK_BLEND_OP_PLUS_CLAMPED_ALPHA_EXT:
+	case VK_BLEND_OP_PLUS_DARKER_EXT:
+	case VK_BLEND_OP_MINUS_EXT:
+	case VK_BLEND_OP_MINUS_CLAMPED_EXT:
+	case VK_BLEND_OP_CONTRAST_EXT:
+	case VK_BLEND_OP_INVERT_OVG_EXT:
+	case VK_BLEND_OP_RED_EXT:
+	case VK_BLEND_OP_GREEN_EXT:
+	case VK_BLEND_OP_BLUE_EXT:
+		return true;
+
+	default:
+		return false;
+	}
+}
+
+static bool has_dynamic_state(const VkDynamicState *dynamic_states, uint32_t num_dynamic_states, VkDynamicState dyn_state)
+{
+	for (uint32_t i = 0; i < num_dynamic_states; i++)
+		if (dynamic_states[i] == dyn_state)
+			return true;
+	return false;
+}
+
+bool FeatureFilter::Impl::color_blend_state_is_supported(
+		const VkPipelineColorBlendStateCreateInfo *info,
+		const VkDynamicState *dynamic_states, uint32_t num_dynamic_states) const
+{
+	constexpr VkPipelineColorBlendStateCreateFlags supported_flags =
+			VK_PIPELINE_COLOR_BLEND_STATE_CREATE_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_BIT_EXT;
+
+	if (info->flags & ~supported_flags)
+		return false;
+
+	if ((info->flags & VK_PIPELINE_COLOR_BLEND_STATE_CREATE_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_BIT_EXT) != 0 &&
+	    features.rasterization_order_attachment_access.rasterizationOrderColorAttachmentAccess == VK_FALSE)
+		return false;
+
+	if (!has_dynamic_state(dynamic_states, num_dynamic_states, VK_DYNAMIC_STATE_LOGIC_OP_ENABLE_EXT) &&
+	    info->logicOpEnable && !features2.features.logicOp)
+	{
+		return false;
+	}
+
+	if (!has_dynamic_state(dynamic_states, num_dynamic_states, VK_DYNAMIC_STATE_COLOR_BLEND_EQUATION_EXT) &&
+	    !has_dynamic_state(dynamic_states, num_dynamic_states, VK_DYNAMIC_STATE_COLOR_BLEND_ADVANCED_EXT))
+	{
+		bool has_advanced_color_blend = false;
+		bool has_advanced_alpha_blend = false;
+
+		for (uint32_t i = 0; i < info->attachmentCount; i++)
+		{
+			auto &att = info->pAttachments[i];
+
+			bool advanced_color = blend_op_is_advanced(att.colorBlendOp);
+			bool advanced_alpha = blend_op_is_advanced(att.alphaBlendOp);
+			has_advanced_color_blend = has_advanced_color_blend || advanced_color;
+			has_advanced_alpha_blend = has_advanced_alpha_blend || advanced_alpha;
+
+			if (advanced_color || advanced_alpha)
+			{
+				if (att.alphaBlendOp != att.colorBlendOp)
+					return false;
+				if (!props.blend_operation_advanced.advancedBlendAllOperations)
+					return false;
+			}
+		}
+
+		if (has_advanced_color_blend || has_advanced_alpha_blend)
+		{
+			if (info->attachmentCount > props.blend_operation_advanced.advancedBlendMaxColorAttachments)
+				return false;
+
+			if (!props.blend_operation_advanced.advancedBlendIndependentBlend)
+			{
+				for (uint32_t i = 1; i < info->attachmentCount; i++)
+				{
+					if (info->pAttachments[i].alphaBlendOp != info->pAttachments[0].alphaBlendOp)
+						return false;
+					if (info->pAttachments[i].colorBlendOp != info->pAttachments[0].colorBlendOp)
+						return false;
+				}
+			}
+		}
+	}
+
+	return true;
+}
+
+template <typename T>
+static VkPipelineCreateFlagBits2KHR get_effective_flags(const T *info)
+{
+	auto *flags_info = find_pnext<VkPipelineCreateFlags2CreateInfoKHR>(VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO_KHR, info->pNext);
+	if (flags_info)
+		return flags_info->flags;
+	else
+		return info->flags;
+}
+
 bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelineCreateInfo *info) const
 {
 	// Only allow flags we recognize and validate.
-	constexpr VkPipelineCreateFlags supported_flags =
+	constexpr VkPipelineCreateFlags2KHR supported_flags =
 			VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT |
 			VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT |
 			VK_PIPELINE_CREATE_DERIVATIVE_BIT |
@@ -2844,55 +3819,88 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 			VK_PIPELINE_CREATE_RETAIN_LINK_TIME_OPTIMIZATION_INFO_BIT_EXT |
 			VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT |
 			VK_PIPELINE_CREATE_COLOR_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT |
-			VK_PIPELINE_CREATE_DEPTH_STENCIL_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT;
+			VK_PIPELINE_CREATE_DEPTH_STENCIL_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT |
+			VK_PIPELINE_CREATE_INDIRECT_BINDABLE_BIT_NV |
+			VK_PIPELINE_CREATE_PROTECTED_ACCESS_ONLY_BIT_EXT |
+			VK_PIPELINE_CREATE_NO_PROTECTED_ACCESS_BIT_EXT |
+			VK_PIPELINE_CREATE_2_ENABLE_LEGACY_DITHERING_BIT_EXT;
 
-	if ((info->flags & ~supported_flags) != 0)
+	auto flags = get_effective_flags(info);
+
+	if ((flags & ~supported_flags) != 0)
 		return false;
 
 	if (null_device)
 		return true;
 
-	if ((info->flags & VK_PIPELINE_CREATE_VIEW_INDEX_FROM_DEVICE_INDEX_BIT) != 0 &&
+	if ((flags & VK_PIPELINE_CREATE_VIEW_INDEX_FROM_DEVICE_INDEX_BIT) != 0 &&
 	    api_version < VK_API_VERSION_1_1)
 	{
 		return false;
 	}
 
-	if ((info->flags & VK_PIPELINE_CREATE_RENDERING_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR) != 0 &&
+	if ((flags & VK_PIPELINE_CREATE_RENDERING_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR) != 0 &&
 	    (enabled_extensions.count(VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME) == 0 ||
 	     enabled_extensions.count(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME) == 0))
 	{
 		return false;
 	}
 
-	if ((info->flags & VK_PIPELINE_CREATE_RENDERING_FRAGMENT_DENSITY_MAP_ATTACHMENT_BIT_EXT) != 0 &&
+	if ((flags & VK_PIPELINE_CREATE_RENDERING_FRAGMENT_DENSITY_MAP_ATTACHMENT_BIT_EXT) != 0 &&
 	    (enabled_extensions.count(VK_EXT_FRAGMENT_DENSITY_MAP_EXTENSION_NAME) == 0 ||
 	     enabled_extensions.count(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME) == 0))
 	{
 		return false;
 	}
 
-	if ((info->flags & (VK_PIPELINE_CREATE_LIBRARY_BIT_KHR |
-	                    VK_PIPELINE_CREATE_LINK_TIME_OPTIMIZATION_BIT_EXT |
-	                    VK_PIPELINE_CREATE_RETAIN_LINK_TIME_OPTIMIZATION_INFO_BIT_EXT)) != 0 &&
+	if ((flags & (VK_PIPELINE_CREATE_LIBRARY_BIT_KHR |
+	              VK_PIPELINE_CREATE_LINK_TIME_OPTIMIZATION_BIT_EXT |
+	              VK_PIPELINE_CREATE_RETAIN_LINK_TIME_OPTIMIZATION_INFO_BIT_EXT)) != 0 &&
 	    features.graphics_pipeline_library.graphicsPipelineLibrary == VK_FALSE)
 	{
 		return false;
 	}
 
-	if ((info->flags & VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT) != 0)
+	if ((flags & VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT) != 0)
 		if (!features.descriptor_buffer.descriptorBuffer)
 			return false;
 
-	if ((info->flags & (VK_PIPELINE_CREATE_COLOR_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT |
-	                    VK_PIPELINE_CREATE_DEPTH_STENCIL_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT)) != 0)
+	if ((flags & (VK_PIPELINE_CREATE_COLOR_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT |
+	              VK_PIPELINE_CREATE_DEPTH_STENCIL_ATTACHMENT_FEEDBACK_LOOP_BIT_EXT)) != 0)
 	{
 		if (!features.attachment_feedback_loop_layout.attachmentFeedbackLoopLayout)
 			return false;
 	}
 
+	if ((flags & VK_PIPELINE_CREATE_INDIRECT_BINDABLE_BIT_NV) != 0 &&
+	    features.device_generated_commands_nv.deviceGeneratedCommands == VK_FALSE)
+		return false;
+
+	if ((flags & (VK_PIPELINE_CREATE_PROTECTED_ACCESS_ONLY_BIT_EXT |
+	              VK_PIPELINE_CREATE_NO_PROTECTED_ACCESS_BIT_EXT)) != 0 &&
+	    features.pipeline_protected_access.pipelineProtectedAccess == VK_FALSE)
+		return false;
+
+	if ((flags & VK_PIPELINE_CREATE_2_ENABLE_LEGACY_DITHERING_BIT_EXT) != 0 &&
+	    features.legacy_dithering.legacyDithering == VK_FALSE)
+		return false;
+
+	const VkDynamicState *dynamic_states = nullptr;
+	uint32_t num_dynamic_states = 0;
+
+	if (info->pDynamicState)
+	{
+		dynamic_states = info->pDynamicState->pDynamicStates;
+		num_dynamic_states = info->pDynamicState->dynamicStateCount;
+	}
+
 	if (info->pColorBlendState && !pnext_chain_is_supported(info->pColorBlendState->pNext))
 		return false;
+
+	if (info->pColorBlendState && !color_blend_state_is_supported(
+			info->pColorBlendState, dynamic_states, num_dynamic_states))
+		return false;
+
 	if (info->pVertexInputState && !pnext_chain_is_supported(info->pVertexInputState->pNext))
 		return false;
 	if (info->pDepthStencilState && !pnext_chain_is_supported(info->pDepthStencilState->pNext))
@@ -2909,6 +3917,37 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 		return false;
 	if (info->pRasterizationState && !pnext_chain_is_supported(info->pRasterizationState->pNext))
 		return false;
+
+	if (info->pRasterizationState)
+	{
+		if (!has_dynamic_state(dynamic_states, num_dynamic_states, VK_DYNAMIC_STATE_POLYGON_MODE_EXT) &&
+		    !polygon_mode_is_supported(info->pRasterizationState->polygonMode))
+			return false;
+
+		if (!has_dynamic_state(dynamic_states, num_dynamic_states, VK_DYNAMIC_STATE_DEPTH_CLAMP_ENABLE_EXT) &&
+		    info->pRasterizationState->depthClampEnable && features2.features.depthClamp == VK_FALSE)
+			return false;
+	}
+
+	if (info->pDepthStencilState)
+	{
+		constexpr VkPipelineDepthStencilStateCreateFlags supported_ds_flags =
+				VK_PIPELINE_DEPTH_STENCIL_STATE_CREATE_RASTERIZATION_ORDER_ATTACHMENT_DEPTH_ACCESS_BIT_EXT |
+				VK_PIPELINE_DEPTH_STENCIL_STATE_CREATE_RASTERIZATION_ORDER_ATTACHMENT_STENCIL_ACCESS_BIT_EXT;
+
+		if (info->pDepthStencilState->flags & ~supported_ds_flags)
+			return false;
+
+		if ((info->pDepthStencilState->flags &
+		     VK_PIPELINE_DEPTH_STENCIL_STATE_CREATE_RASTERIZATION_ORDER_ATTACHMENT_DEPTH_ACCESS_BIT_EXT) != 0 &&
+		    features.rasterization_order_attachment_access.rasterizationOrderDepthAttachmentAccess == VK_FALSE)
+			return false;
+
+		if ((info->pDepthStencilState->flags &
+		     VK_PIPELINE_DEPTH_STENCIL_STATE_CREATE_RASTERIZATION_ORDER_ATTACHMENT_STENCIL_ACCESS_BIT_EXT) != 0 &&
+		    features.rasterization_order_attachment_access.rasterizationOrderStencilAttachmentAccess == VK_FALSE)
+			return false;
+	}
 
 	if (info->renderPass == VK_NULL_HANDLE && features.dynamic_rendering.dynamicRendering == VK_FALSE)
 		return false;
@@ -2986,6 +4025,9 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 				break;
 
 			case VK_DYNAMIC_STATE_DISCARD_RECTANGLE_EXT:
+				// Technically we have to check v2, but whatever.
+			case VK_DYNAMIC_STATE_DISCARD_RECTANGLE_MODE_EXT:
+			case VK_DYNAMIC_STATE_DISCARD_RECTANGLE_ENABLE_EXT:
 				if (!enabled_extensions.count(VK_EXT_DISCARD_RECTANGLES_EXTENSION_NAME))
 					return false;
 				break;
@@ -3006,6 +4048,8 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 				break;
 
 			case VK_DYNAMIC_STATE_EXCLUSIVE_SCISSOR_NV:
+				// Technically this is part of v2, but whatever.
+			case VK_DYNAMIC_STATE_EXCLUSIVE_SCISSOR_ENABLE_NV:
 				if (!enabled_extensions.count(VK_NV_SCISSOR_EXCLUSIVE_EXTENSION_NAME))
 					return false;
 				break;
@@ -3053,6 +4097,11 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 			DYN_STATE3(REPRESENTATIVE_FRAGMENT_TEST_ENABLE_NV, RepresentativeFragmentTestEnable);
 			DYN_STATE3(COVERAGE_REDUCTION_MODE_NV, CoverageReductionMode);
 #undef DYN_STATE3
+
+			case VK_DYNAMIC_STATE_ATTACHMENT_FEEDBACK_LOOP_ENABLE_EXT:
+				if (features.attachment_feedback_loop_dynamic_state.attachmentFeedbackLoopDynamicState == VK_FALSE)
+					return false;
+				break;
 
 			case VK_DYNAMIC_STATE_VIEWPORT:
 			case VK_DYNAMIC_STATE_SCISSOR:
@@ -3125,26 +4174,40 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 bool FeatureFilter::Impl::compute_pipeline_is_supported(const VkComputePipelineCreateInfo *info) const
 {
 	// Only allow flags we recognize and validate.
-	constexpr VkPipelineCreateFlags supported_flags =
+	constexpr VkPipelineCreateFlags2KHR supported_flags =
 			VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT |
 			VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT |
 			VK_PIPELINE_CREATE_DERIVATIVE_BIT |
 			VK_PIPELINE_CREATE_DISPATCH_BASE_BIT |
 			VK_PIPELINE_CREATE_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR |
 			VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR |
-			VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT;
+			VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT |
+			VK_PIPELINE_CREATE_INDIRECT_BINDABLE_BIT_NV |
+			VK_PIPELINE_CREATE_PROTECTED_ACCESS_ONLY_BIT_EXT |
+			VK_PIPELINE_CREATE_NO_PROTECTED_ACCESS_BIT_EXT;
 
-	if ((info->flags & ~supported_flags) != 0)
+	auto flags = get_effective_flags(info);
+
+	if ((flags & ~supported_flags) != 0)
 		return false;
 
 	if (null_device)
 		return true;
 
-	if ((info->flags & VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT) != 0)
+	if ((flags & VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT) != 0)
 		if (!features.descriptor_buffer.descriptorBuffer)
 			return false;
 
-	if ((info->flags & VK_PIPELINE_CREATE_DISPATCH_BASE_BIT) != 0 &&
+	if ((flags & VK_PIPELINE_CREATE_INDIRECT_BINDABLE_BIT_NV) != 0 &&
+	    features.device_generated_commands_compute_nv.deviceGeneratedCompute == VK_FALSE)
+		return false;
+
+	if ((flags & (VK_PIPELINE_CREATE_PROTECTED_ACCESS_ONLY_BIT_EXT |
+	              VK_PIPELINE_CREATE_NO_PROTECTED_ACCESS_BIT_EXT)) != 0 &&
+	    features.pipeline_protected_access.pipelineProtectedAccess == VK_FALSE)
+		return false;
+
+	if ((flags & VK_PIPELINE_CREATE_DISPATCH_BASE_BIT) != 0 &&
 	    api_version < VK_API_VERSION_1_1)
 	{
 		return false;
@@ -3162,7 +4225,7 @@ bool FeatureFilter::Impl::compute_pipeline_is_supported(const VkComputePipelineC
 bool FeatureFilter::Impl::raytracing_pipeline_is_supported(const VkRayTracingPipelineCreateInfoKHR *info) const
 {
 	// Only allow flags we recognize and validate.
-	constexpr VkPipelineCreateFlags supported_flags =
+	constexpr VkPipelineCreateFlags2KHR supported_flags =
 			VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT |
 			VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT |
 			VK_PIPELINE_CREATE_DERIVATIVE_BIT |
@@ -3175,30 +4238,49 @@ bool FeatureFilter::Impl::raytracing_pipeline_is_supported(const VkRayTracingPip
 			VK_PIPELINE_CREATE_LIBRARY_BIT_KHR |
 			VK_PIPELINE_CREATE_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR |
 			VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR |
-			VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT;
+			VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT |
+			VK_PIPELINE_CREATE_RAY_TRACING_ALLOW_MOTION_BIT_NV |
+			VK_PIPELINE_CREATE_RAY_TRACING_OPACITY_MICROMAP_BIT_EXT |
+			VK_PIPELINE_CREATE_PROTECTED_ACCESS_ONLY_BIT_EXT |
+			VK_PIPELINE_CREATE_NO_PROTECTED_ACCESS_BIT_EXT;
 
-	if ((info->flags & ~supported_flags) != 0)
+	auto flags = get_effective_flags(info);
+
+	if ((flags & ~supported_flags) != 0)
 		return false;
 
 	if (null_device)
 		return true;
 
-	if ((info->flags & (VK_PIPELINE_CREATE_RAY_TRACING_SKIP_AABBS_BIT_KHR |
-	                    VK_PIPELINE_CREATE_RAY_TRACING_SKIP_TRIANGLES_BIT_KHR)) != 0 &&
+	if ((flags & (VK_PIPELINE_CREATE_RAY_TRACING_SKIP_AABBS_BIT_KHR |
+	              VK_PIPELINE_CREATE_RAY_TRACING_SKIP_TRIANGLES_BIT_KHR)) != 0 &&
 	    features.ray_tracing_pipeline.rayTraversalPrimitiveCulling == VK_FALSE)
 	{
 		return false;
 	}
 
-	if ((info->flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0 &&
+	if ((flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0 &&
 	    !enabled_extensions.count(VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME))
 	{
 		return false;
 	}
 
-	if ((info->flags & VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT) != 0)
+	if ((flags & VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT) != 0)
 		if (!features.descriptor_buffer.descriptorBuffer)
 			return false;
+
+	if ((flags & VK_PIPELINE_CREATE_RAY_TRACING_ALLOW_MOTION_BIT_NV) != 0 &&
+	    features.ray_tracing_motion_blur_nv.rayTracingMotionBlur == VK_FALSE)
+		return false;
+
+	if ((flags & VK_PIPELINE_CREATE_RAY_TRACING_OPACITY_MICROMAP_BIT_EXT) != 0 &&
+	    features.opacity_micromap.micromap == VK_FALSE)
+		return false;
+
+	if ((flags & (VK_PIPELINE_CREATE_PROTECTED_ACCESS_ONLY_BIT_EXT |
+	              VK_PIPELINE_CREATE_NO_PROTECTED_ACCESS_BIT_EXT)) != 0 &&
+	    features.pipeline_protected_access.pipelineProtectedAccess == VK_FALSE)
+		return false;
 
 	if (features.ray_tracing_pipeline.rayTracingPipeline == VK_FALSE)
 		return false;

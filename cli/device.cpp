@@ -601,6 +601,17 @@ bool VulkanDevice::descriptor_set_layout_is_supported(const VkDescriptorSetLayou
 	return set_layout_support.supported;
 }
 
+void VulkanDevice::physical_device_feature_query(VkPhysicalDeviceFeatures2 *pdf2)
+{
+	if (is_null_device)
+		return;
+
+	if (vkGetPhysicalDeviceFeatures2)
+		vkGetPhysicalDeviceFeatures2(gpu, pdf2);
+	else if (vkGetPhysicalDeviceFeatures)
+		vkGetPhysicalDeviceFeatures(gpu, &pdf2->features);
+}
+
 template <typename T>
 static T allocate_dummy(size_t size)
 {
