@@ -2119,9 +2119,9 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 	case spv::CapabilityGeometryShaderPassthroughNV:
 		return enabled_extensions.count(VK_NV_GEOMETRY_SHADER_PASSTHROUGH_EXTENSION_NAME) != 0;
 	case spv::CapabilityShaderViewportIndex:
-		return features.vk12.shaderOutputViewportIndex;
+		return features.vk12.shaderOutputViewportIndex || enabled_extensions.count(VK_EXT_SHADER_VIEWPORT_INDEX_LAYER_EXTENSION_NAME) != 0;
 	case spv::CapabilityShaderLayer:
-		return features.vk12.shaderOutputLayer;
+		return features.vk12.shaderOutputLayer || enabled_extensions.count(VK_EXT_SHADER_VIEWPORT_INDEX_LAYER_EXTENSION_NAME) != 0;
 	case spv::CapabilityShaderViewportIndexLayerEXT:
 		// NV version is a cloned enum.
 		return enabled_extensions.count(VK_EXT_SHADER_VIEWPORT_INDEX_LAYER_EXTENSION_NAME) != 0 ||
