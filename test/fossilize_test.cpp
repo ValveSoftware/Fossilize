@@ -254,6 +254,17 @@ static void record_samplers(StateRecorder &recorder)
 
 	if (!recorder.record_sampler(fake_handle<VkSampler>(104), sampler))
 		abort();
+
+	VkSamplerBorderColorComponentMappingCreateInfoEXT border_color_mapping =
+			{ VK_STRUCTURE_TYPE_SAMPLER_BORDER_COLOR_COMPONENT_MAPPING_CREATE_INFO_EXT };
+	sampler.pNext = &border_color_mapping;
+	border_color_mapping.components.r = VK_COMPONENT_SWIZZLE_A;
+	border_color_mapping.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+	border_color_mapping.components.b = VK_COMPONENT_SWIZZLE_R;
+	border_color_mapping.components.a = VK_COMPONENT_SWIZZLE_B;
+	border_color_mapping.srgb = VK_TRUE;
+	if (!recorder.record_sampler(fake_handle<VkSampler>(105), sampler))
+		abort();
 }
 
 static void record_set_layouts(StateRecorder &recorder)
@@ -492,7 +503,16 @@ static void record_render_passes2(StateRecorder &recorder)
 	subpasses[1].viewMask = 0x7;
 	subpasses[1].pNext = &ds_resolve;
 
+	VkMultisampledRenderToSingleSampledInfoEXT ms2ss =
+			{ VK_STRUCTURE_TYPE_MULTISAMPLED_RENDER_TO_SINGLE_SAMPLED_INFO_EXT };
+	ms2ss.rasterizationSamples = VK_SAMPLE_COUNT_4_BIT;
+	ms2ss.multisampledRenderToSingleSampledEnable = VK_TRUE;
+
 	if (!recorder.record_render_pass2(fake_handle<VkRenderPass>(40000), pass))
+		abort();
+
+	subpasses[0].pNext = &ms2ss;
+	if (!recorder.record_render_pass2(fake_handle<VkRenderPass>(40002), pass))
 		abort();
 
 	VkMemoryBarrier2KHR memory_barrier2 =
@@ -505,6 +525,13 @@ static void record_render_passes2(StateRecorder &recorder)
 	deps[0].pNext = &memory_barrier2;
 
 	if (!recorder.record_render_pass2(fake_handle<VkRenderPass>(40001), pass))
+		abort();
+
+	VkRenderPassCreationControlEXT creation_control =
+			{ VK_STRUCTURE_TYPE_RENDER_PASS_CREATION_CONTROL_EXT };
+	creation_control.disallowMerging = VK_TRUE;
+	pass.pNext = &creation_control;
+	if (!recorder.record_render_pass2(fake_handle<VkRenderPass>(40002), pass))
 		abort();
 }
 
@@ -601,6 +628,32 @@ static void record_render_passes(StateRecorder &recorder)
 	blank_multiview.pNext = &input_att_aspect;
 
 	if (!recorder.record_render_pass(fake_handle<VkRenderPass>(30002), pass))
+		abort();
+
+	VkRenderPassFragmentDensityMapCreateInfoEXT density_map =
+			{ VK_STRUCTURE_TYPE_RENDER_PASS_FRAGMENT_DENSITY_MAP_CREATE_INFO_EXT };
+	density_map.fragmentDensityMapAttachment.attachment = 5;
+	density_map.fragmentDensityMapAttachment.layout = VK_IMAGE_LAYOUT_FRAGMENT_DENSITY_MAP_OPTIMAL_EXT;
+	pass.pNext = &density_map;
+	if (!recorder.record_render_pass(fake_handle<VkRenderPass>(30003), pass))
+		abort();
+
+	VkSampleLocationsInfoEXT loc_info =
+			{ VK_STRUCTURE_TYPE_SAMPLE_LOCATIONS_INFO_EXT };
+	loc_info.sampleLocationGridSize.width = 9;
+	loc_info.sampleLocationGridSize.height = 14;
+	loc_info.sampleLocationsPerPixel = VK_SAMPLE_COUNT_2_BIT;
+	loc_info.sampleLocationsCount = 3;
+	VkSampleLocationEXT sample_locs[3];
+	loc_info.pSampleLocations = sample_locs;
+	sample_locs[0].x = 0.2f;
+	sample_locs[0].y = 0.3f;
+	sample_locs[1].x = 0.4f;
+	sample_locs[1].y = 0.2f;
+	sample_locs[2].x = 0.8f;
+	sample_locs[2].y = 0.1f;
+	pass.pNext = &loc_info;
+	if (!recorder.record_render_pass(fake_handle<VkRenderPass>(30004), pass))
 		abort();
 }
 
@@ -2196,6 +2249,27 @@ static void record_graphics_pipelines(StateRecorder &recorder)
 		abort();
 	clip_control.negativeOneToOne = VK_TRUE;
 	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100008), pipe, nullptr, 0))
+		abort();
+
+	VkPipelineRobustnessCreateInfoEXT robustness_info = { VK_STRUCTURE_TYPE_PIPELINE_ROBUSTNESS_CREATE_INFO_EXT };
+	robustness_info.vertexInputs = VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_ROBUST_BUFFER_ACCESS_2_EXT;
+	robustness_info.uniformBuffers = VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_ROBUST_BUFFER_ACCESS_EXT;
+	robustness_info.storageBuffers = VK_PIPELINE_ROBUSTNESS_BUFFER_BEHAVIOR_DISABLED_EXT;
+	robustness_info.images = VK_PIPELINE_ROBUSTNESS_IMAGE_BEHAVIOR_ROBUST_IMAGE_ACCESS_2_EXT;
+	pipe.pNext = &robustness_info;
+	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100009), pipe, nullptr, 0))
+		abort();
+	robustness_info.images = VK_PIPELINE_ROBUSTNESS_IMAGE_BEHAVIOR_DISABLED_EXT;
+	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100010), pipe, nullptr, 0))
+		abort();
+
+	VkDepthBiasRepresentationInfoEXT depth_bias_representation_info =
+			{ VK_STRUCTURE_TYPE_DEPTH_BIAS_REPRESENTATION_INFO_EXT };
+	depth_bias_representation_info.depthBiasRepresentation =
+			VK_DEPTH_BIAS_REPRESENTATION_LEAST_REPRESENTABLE_VALUE_FORCE_UNORM_EXT;
+	depth_bias_representation_info.depthBiasExact = VK_TRUE;
+	rs.pNext = &depth_bias_representation_info;
+	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100011), pipe, nullptr, 0))
 		abort();
 }
 

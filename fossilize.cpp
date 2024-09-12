@@ -745,10 +745,15 @@ static void hash_pnext_struct(const StateRecorder *, Hasher &h,
 }
 
 static void hash_pnext_struct(const StateRecorder *, Hasher &h,
-                              const VkDepthBiasRepresentationInfoEXT &info)
+                              const VkDepthBiasRepresentationInfoEXT &info, const DynamicStateInfo *dynamic_state)
 {
-	h.u32(info.depthBiasExact);
-	h.u32(info.depthBiasRepresentation);
+	if (!dynamic_state || !dynamic_state->depth_bias)
+	{
+		h.u32(info.depthBiasExact);
+		h.u32(info.depthBiasRepresentation);
+	}
+	else
+		h.u32(0);
 }
 
 static void hash_pnext_struct(const StateRecorder *, Hasher &h,
@@ -1572,7 +1577,7 @@ static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const voi
 			break;
 
 		case VK_STRUCTURE_TYPE_DEPTH_BIAS_REPRESENTATION_INFO_EXT:
-			hash_pnext_struct(recorder, h, *static_cast<const VkDepthBiasRepresentationInfoEXT *>(pNext));
+			hash_pnext_struct(recorder, h, *static_cast<const VkDepthBiasRepresentationInfoEXT *>(pNext), dynamic_state_info);
 			break;
 
 		case VK_STRUCTURE_TYPE_RENDER_PASS_FRAGMENT_DENSITY_MAP_CREATE_INFO_EXT:
@@ -9100,6 +9105,7 @@ static bool json_value(const VkRenderPassFragmentDensityMapCreateInfoEXT &create
                        Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
 	Value attachment(kObjectType);
 	attachment.AddMember("attachment", create_info.fragmentDensityMapAttachment.attachment, alloc);
 	attachment.AddMember("layout", create_info.fragmentDensityMapAttachment.layout, alloc);
@@ -9113,6 +9119,7 @@ static bool json_value(const VkSampleLocationsInfoEXT &create_info,
                        Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
 
 	value.AddMember("sampleLocationsPerPixel", create_info.sampleLocationsPerPixel, alloc);
 	{
@@ -9144,6 +9151,7 @@ static bool json_value(const VkPipelineRobustnessCreateInfoEXT &create_info,
                        Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
 	value.AddMember("storageBuffers", create_info.storageBuffers, alloc);
 	value.AddMember("vertexInputs", create_info.vertexInputs, alloc);
 	value.AddMember("uniformBuffers", create_info.uniformBuffers, alloc);
