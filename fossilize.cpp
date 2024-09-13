@@ -6360,6 +6360,14 @@ bool StateRecorder::record_graphics_pipeline(VkPipeline pipeline, const VkGraphi
                                              VkDevice device,
                                              PFN_vkGetShaderModuleCreateInfoIdentifierEXT gsmcii)
 {
+	// Silently ignore if we have pipeline binaries.
+	// We have no way of recording these unless we go the extra mile to
+	// override the global key and add extra metadata blocks.
+	// Hopefully applications are well-behaved ...
+	auto *binaries = find_pnext<VkPipelineBinaryInfoKHR>(VK_STRUCTURE_TYPE_PIPELINE_BINARY_INFO_KHR, create_info.pNext);
+	if (binaries && binaries->binaryCount)
+		return true;
+
 	// Ignore pipelines that cannot result in meaningful replay.
 	// We are not allowed to look at pStages unless we're emitting pre-raster / fragment shader interface.
 	// If we are using module identifier data + on use, we need to push it for record.
@@ -6373,7 +6381,8 @@ bool StateRecorder::record_graphics_pipeline(VkPipeline pipeline, const VkGraphi
 			{
 				// Have to forget any reference if this API handle is recycled.
 				std::lock_guard<std::mutex> lock(impl->record_lock);
-				impl->push_unregister_locked(VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, pipeline);
+				if (pipeline != VK_NULL_HANDLE)
+					impl->push_unregister_locked(VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, pipeline);
 				return true;
 			}
 		}
@@ -6389,7 +6398,8 @@ bool StateRecorder::record_graphics_pipeline(VkPipeline pipeline, const VkGraphi
 		                                  &new_info))
 		{
 			// Have to forget any reference if this API handle is recycled.
-			impl->push_unregister_locked(VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, pipeline);
+			if (pipeline != VK_NULL_HANDLE)
+				impl->push_unregister_locked(VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, pipeline);
 			return false;
 		}
 
@@ -6407,6 +6417,14 @@ bool StateRecorder::record_compute_pipeline(VkPipeline pipeline, const VkCompute
                                             VkDevice device,
                                             PFN_vkGetShaderModuleCreateInfoIdentifierEXT gsmcii)
 {
+	// Silently ignore if we have pipeline binaries.
+	// We have no way of recording these unless we go the extra mile to
+	// override the global key and add extra metadata blocks.
+	// Hopefully applications are well-behaved ...
+	auto *binaries = find_pnext<VkPipelineBinaryInfoKHR>(VK_STRUCTURE_TYPE_PIPELINE_BINARY_INFO_KHR, create_info.pNext);
+	if (binaries && binaries->binaryCount)
+		return true;
+
 	// Ignore pipelines that cannot result in meaningful replay.
 	// If we are using module identifier data + on use, we need to push it for record.
 	if (shader_stage_is_identifier_only(create_info.stage) &&
@@ -6414,7 +6432,8 @@ bool StateRecorder::record_compute_pipeline(VkPipeline pipeline, const VkCompute
 	{
 		std::lock_guard<std::mutex> lock(impl->record_lock);
 		// Have to forget any reference if this API handle is recycled.
-		impl->push_unregister_locked(VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO, pipeline);
+		if (pipeline != VK_NULL_HANDLE)
+			impl->push_unregister_locked(VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO, pipeline);
 		return true;
 	}
 
@@ -6428,7 +6447,8 @@ bool StateRecorder::record_compute_pipeline(VkPipeline pipeline, const VkCompute
 		                                 &new_info))
 		{
 			// Have to forget any reference if this API handle is recycled.
-			impl->push_unregister_locked(VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO, pipeline);
+			if (pipeline != VK_NULL_HANDLE)
+				impl->push_unregister_locked(VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO, pipeline);
 			return false;
 		}
 
@@ -6447,6 +6467,14 @@ bool StateRecorder::record_raytracing_pipeline(
 		VkDevice device,
 		PFN_vkGetShaderModuleCreateInfoIdentifierEXT gsmcii)
 {
+	// Silently ignore if we have pipeline binaries.
+	// We have no way of recording these unless we go the extra mile to
+	// override the global key and add extra metadata blocks.
+	// Hopefully applications are well-behaved ...
+	auto *binaries = find_pnext<VkPipelineBinaryInfoKHR>(VK_STRUCTURE_TYPE_PIPELINE_BINARY_INFO_KHR, create_info.pNext);
+	if (binaries && binaries->binaryCount)
+		return true;
+
 	// Ignore pipelines that cannot result in meaningful replay.
 	// If we are using module identifier data + on use, we need to push it for record.
 	for (uint32_t i = 0; i < create_info.stageCount; i++)
@@ -6456,7 +6484,8 @@ bool StateRecorder::record_raytracing_pipeline(
 		{
 			std::lock_guard<std::mutex> lock(impl->record_lock);
 			// Have to forget any reference if this API handle is recycled.
-			impl->push_unregister_locked(VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR, pipeline);
+			if (pipeline != VK_NULL_HANDLE)
+				impl->push_unregister_locked(VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR, pipeline);
 			return true;
 		}
 	}
@@ -6471,7 +6500,8 @@ bool StateRecorder::record_raytracing_pipeline(
 		                                    &new_info))
 		{
 			// Have to forget any reference if this API handle is recycled.
-			impl->push_unregister_locked(VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR, pipeline);
+			if (pipeline != VK_NULL_HANDLE)
+				impl->push_unregister_locked(VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR, pipeline);
 			return false;
 		}
 
@@ -8290,7 +8320,8 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 			{
 				if (!create_info || !Hashing::compute_hash_raytracing_pipeline(*recorder, *create_info, &hash))
 				{
-					raytracing_pipeline_to_hash.erase(vk_object);
+					if (vk_object)
+						raytracing_pipeline_to_hash.erase(vk_object);
 					break;
 				}
 			}
@@ -8299,11 +8330,13 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 			if (!copy_raytracing_pipeline(create_info, allocator, nullptr, 0, nullptr, nullptr, &create_info_copy) ||
 			    !remap_raytracing_pipeline_ci(create_info_copy))
 			{
-				raytracing_pipeline_to_hash.erase(vk_object);
+				if (vk_object)
+					raytracing_pipeline_to_hash.erase(vk_object);
 				break;
 			}
 
-			raytracing_pipeline_to_hash[vk_object] = hash;
+			if (vk_object)
+				raytracing_pipeline_to_hash[vk_object] = hash;
 
 			if (database_iface)
 			{
@@ -8347,7 +8380,8 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 			{
 				if (!create_info || !Hashing::compute_hash_graphics_pipeline(*recorder, *create_info, &hash))
 				{
-					graphics_pipeline_to_hash.erase(vk_object);
+					if (vk_object)
+						graphics_pipeline_to_hash.erase(vk_object);
 					break;
 				}
 			}
@@ -8356,11 +8390,13 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 			if (!copy_graphics_pipeline(create_info, allocator, nullptr, 0, nullptr, nullptr, &create_info_copy) ||
 			    !remap_graphics_pipeline_ci(create_info_copy))
 			{
-				graphics_pipeline_to_hash.erase(vk_object);
+				if (vk_object)
+					graphics_pipeline_to_hash.erase(vk_object);
 				break;
 			}
 
-			graphics_pipeline_to_hash[vk_object] = hash;
+			if (vk_object)
+				graphics_pipeline_to_hash[vk_object] = hash;
 
 			if (database_iface)
 			{
@@ -8403,7 +8439,8 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 			{
 				if (!create_info || !Hashing::compute_hash_compute_pipeline(*recorder, *create_info, &hash))
 				{
-					compute_pipeline_to_hash.erase(vk_object);
+					if (vk_object)
+						compute_pipeline_to_hash.erase(vk_object);
 					break;
 				}
 			}
@@ -8412,11 +8449,13 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 			if (!copy_compute_pipeline(create_info, allocator, nullptr, 0, nullptr, nullptr, &create_info_copy) ||
 			    !remap_compute_pipeline_ci(create_info_copy))
 			{
-				compute_pipeline_to_hash.erase(vk_object);
+				if (vk_object)
+					compute_pipeline_to_hash.erase(vk_object);
 				break;
 			}
 
-			compute_pipeline_to_hash[vk_object] = hash;
+			if (vk_object)
+				compute_pipeline_to_hash[vk_object] = hash;
 
 			if (database_iface)
 			{
@@ -10972,6 +11011,7 @@ static const void *pnext_chain_skip_ignored_entries(const void *pNext)
 		case VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT:
 		case VK_STRUCTURE_TYPE_RENDER_PASS_CREATION_FEEDBACK_CREATE_INFO_EXT:
 		case VK_STRUCTURE_TYPE_RENDER_PASS_SUBPASS_FEEDBACK_CREATE_INFO_EXT:
+		case VK_STRUCTURE_TYPE_PIPELINE_BINARY_INFO_KHR:
 			// We need to ignore any pNext struct which represents output information from a pipeline object, or
 			// irrelevant information which only tooling would care about.
 			ignored = true;

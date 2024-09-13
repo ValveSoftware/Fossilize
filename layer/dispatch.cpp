@@ -149,6 +149,34 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(const VkInstanceCreateInfo 
 	return VK_SUCCESS;
 }
 
+static VKAPI_ATTR void VKAPI_CALL GetPhysicalDeviceProperties2(VkPhysicalDevice gpu, VkPhysicalDeviceProperties2 *props2)
+{
+	Instance *layer;
+	{
+		void *key = getDispatchKey(gpu);
+		lock_guard<mutex> holder{ globalLock };
+		layer = getLayerData(key, instanceData);
+	}
+
+	// If the pointer is non-null, it is valid to call.
+	// We're guaranteed that at least one of these pointers is valid.
+	if (layer->getTable()->GetPhysicalDeviceProperties2)
+		layer->getTable()->GetPhysicalDeviceProperties2(gpu, props2);
+	else if (layer->getTable()->GetPhysicalDeviceProperties2KHR)
+		layer->getTable()->GetPhysicalDeviceProperties2KHR(gpu, props2);
+
+	auto *binary_props = static_cast<VkPhysicalDevicePipelineBinaryPropertiesKHR *>(
+			findpNext(props2, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_BINARY_PROPERTIES_KHR));
+
+	// If we're using Fossilize, we prefer to use internal caches when possible.
+	// Gently asks that applications do not try to be clever and let the layer do its thing.
+	if (binary_props && binary_props->pipelineBinaryInternalCache)
+	{
+		binary_props->pipelineBinaryPrefersInternalCache = VK_TRUE;
+		binary_props->pipelineBinaryPrecompiledInternalCache = VK_TRUE;
+	}
+}
+
 static VKAPI_ATTR void VKAPI_CALL DestroyInstance(VkInstance instance, const VkAllocationCallbacks *pAllocator)
 {
 	lock_guard<mutex> holder{ globalLock };
@@ -542,9 +570,28 @@ static PFN_vkVoidFunction interceptCoreInstanceCommand(const char *pName)
 		{ "vkDestroyInstance", reinterpret_cast<PFN_vkVoidFunction>(DestroyInstance) },
 		{ "vkGetInstanceProcAddr", reinterpret_cast<PFN_vkVoidFunction>(VK_LAYER_fossilize_GetInstanceProcAddr) },
 		{ "vkCreateDevice", reinterpret_cast<PFN_vkVoidFunction>(CreateDevice) },
+		{ "vkGetPhysicalDeviceProperties2", reinterpret_cast<PFN_vkVoidFunction>(GetPhysicalDeviceProperties2) },
+		{ "vkGetPhysicalDeviceProperties2KHR", reinterpret_cast<PFN_vkVoidFunction>(GetPhysicalDeviceProperties2) },
 	};
 
 	for (auto &cmd : coreInstanceCommands)
+		if (strcmp(cmd.name, pName) == 0)
+			return cmd.proc;
+	return nullptr;
+}
+
+static PFN_vkVoidFunction interceptInstanceCommand(const char *pName)
+{
+	static const struct
+	{
+		const char *name;
+		PFN_vkVoidFunction proc;
+	} instanceCommands[] = {
+		{ "vkGetPhysicalDeviceProperties2", reinterpret_cast<PFN_vkVoidFunction>(GetPhysicalDeviceProperties2) },
+		{ "vkGetPhysicalDeviceProperties2KHR", reinterpret_cast<PFN_vkVoidFunction>(GetPhysicalDeviceProperties2) },
+	};
+
+	for (auto &cmd : instanceCommands)
 		if (strcmp(cmd.name, pName) == 0)
 			return cmd.proc;
 	return nullptr;
@@ -696,7 +743,60 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateSamplerYcbcrConversionKHR(
 	return res;
 }
 
-static PFN_vkVoidFunction interceptCoreDeviceCommand(Instance *instance, const char *pName)
+static VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineBinariesKHR(
+		VkDevice                                    device,
+		const VkPipelineBinaryCreateInfoKHR*        pCreateInfo,
+		const VkAllocationCallbacks*                pAllocator,
+		VkPipelineBinaryHandlesInfoKHR*             pBinaries)
+{
+	auto *layer = get_device_layer(device);
+	auto res = layer->getTable()->CreatePipelineBinariesKHR(device, pCreateInfo, pAllocator, pBinaries);
+
+	if (res == VK_SUCCESS && pCreateInfo->pPipelineCreateInfo)
+	{
+		// If we successfully created binaries from a pipeline create info (internal cache),
+		// this should be seen as compiling the pipeline early.
+		// Later, we will see a pipeline compile with binary, which will not be possible to record.
+
+		if (pCreateInfo->pPipelineCreateInfo->pNext)
+		{
+			const void *pnext = pCreateInfo->pPipelineCreateInfo->pNext;
+			auto *create_info = static_cast<const VkBaseInStructure *>(pnext);
+
+			switch (create_info->sType)
+			{
+			case VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO:
+				// We don't have a concrete VkPipeline.
+				if (!layer->getRecorder().record_graphics_pipeline(
+						VK_NULL_HANDLE, *static_cast<const VkGraphicsPipelineCreateInfo *>(pnext), nullptr, 0, 0,
+						device, layer->requiresModuleIdentifiers() ? layer->getTable()->GetShaderModuleCreateInfoIdentifierEXT : nullptr))
+					LOGW_LEVEL("Recording graphics pipeline failed, usually caused by unsupported pNext.\n");
+				break;
+
+			case VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO:
+				if (!layer->getRecorder().record_compute_pipeline(
+						VK_NULL_HANDLE, *static_cast<const VkComputePipelineCreateInfo *>(pnext), nullptr, 0, 0,
+						device, layer->requiresModuleIdentifiers() ? layer->getTable()->GetShaderModuleCreateInfoIdentifierEXT : nullptr))
+					LOGW_LEVEL("Recording compute pipeline failed, usually caused by unsupported pNext.\n");
+				break;
+
+			case VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR:
+				if (!layer->getRecorder().record_raytracing_pipeline(
+						VK_NULL_HANDLE, *static_cast<const VkRayTracingPipelineCreateInfoKHR *>(pnext), nullptr, 0, 0,
+						device, layer->requiresModuleIdentifiers() ? layer->getTable()->GetShaderModuleCreateInfoIdentifierEXT : nullptr))
+					LOGW_LEVEL("Recording ray tracing pipeline failed, usually caused by unsupported pNext.\n");
+				break;
+
+			default:
+				break;
+			}
+		}
+	}
+
+	return res;
+}
+
+static PFN_vkVoidFunction interceptDeviceCommand(Instance *instance, const char *pName)
 {
 	static const struct
 	{
@@ -719,6 +819,7 @@ static PFN_vkVoidFunction interceptCoreDeviceCommand(Instance *instance, const c
 		{ "vkCreateSamplerYcbcrConversion", reinterpret_cast<PFN_vkVoidFunction>(CreateSamplerYcbcrConversion), true },
 		{ "vkCreateSamplerYcbcrConversionKHR", reinterpret_cast<PFN_vkVoidFunction>(CreateSamplerYcbcrConversionKHR), true },
 		{ "vkCreateRayTracingPipelinesKHR", reinterpret_cast<PFN_vkVoidFunction>(CreateRayTracingPipelinesKHR) },
+		{ "vkCreatePipelineBinariesKHR", reinterpret_cast<PFN_vkVoidFunction>(CreatePipelineBinariesKHR) },
 	};
 
 	for (auto &cmd : coreDeviceCommands)
@@ -752,7 +853,7 @@ VK_LAYER_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL VK_LAYER_fossilize_GetD
 	// This means we never expose wrappers which will end up dispatching into nullptr.
 	if (proc)
 	{
-		auto wrapped_proc = interceptCoreDeviceCommand(layer->getInstance(), pName);
+		auto wrapped_proc = interceptDeviceCommand(layer->getInstance(), pName);
 		if (wrapped_proc)
 			proc = wrapped_proc;
 	}
@@ -775,13 +876,20 @@ VK_LAYER_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL VK_LAYER_fossilize_GetI
 
 	proc = layer->getProcAddr(pName);
 
+	if (proc)
+	{
+		auto wrapped_proc = interceptInstanceCommand(pName);
+		if (wrapped_proc)
+			return wrapped_proc;
+	}
+
 	// If the underlying implementation returns nullptr, we also need to return nullptr.
 	// This means we never expose wrappers which will end up dispatching into nullptr.
 	if (proc)
 	{
-		auto wrapped_proc = interceptCoreDeviceCommand(layer, pName);
+		auto wrapped_proc = interceptDeviceCommand(layer, pName);
 		if (wrapped_proc)
-			proc = wrapped_proc;
+			return wrapped_proc;
 	}
 
 	return proc;
@@ -789,7 +897,7 @@ VK_LAYER_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL VK_LAYER_fossilize_GetI
 
 #ifdef ANDROID
 static const VkLayerProperties layerProps[] = {
-	{ VK_LAYER_fossilize, VK_MAKE_VERSION(1, 2, 136), 1, "Fossilize capture layer" },
+	{ VK_LAYER_fossilize, VK_MAKE_VERSION(1, 3, 136), 1, "Fossilize capture layer" },
 };
 
 VK_LAYER_EXPORT VKAPI_ATTR VkResult VKAPI_CALL

@@ -66,6 +66,7 @@ struct VkLayerDispatchTable
 	PFN_vkCreateRayTracingPipelinesKHR CreateRayTracingPipelinesKHR;
 	PFN_vkGetShaderModuleIdentifierEXT GetShaderModuleIdentifierEXT;
 	PFN_vkGetShaderModuleCreateInfoIdentifierEXT GetShaderModuleCreateInfoIdentifierEXT;
+	PFN_vkCreatePipelineBinariesKHR CreatePipelineBinariesKHR;
 };
 
 using InstanceTable = std::unordered_map<void *, std::unique_ptr<VkLayerInstanceDispatchTable>>;
@@ -92,6 +93,14 @@ static inline VkLayerDeviceCreateInfo *getChainInfo(const VkDeviceCreateInfo *pC
 static inline const void *findpNext(const void *pCreateInfo, VkStructureType sType)
 {
 	auto *s = static_cast<const VkBaseInStructure *>(pCreateInfo);
+	while (s && s->sType != sType)
+		s = s->pNext;
+	return s;
+}
+
+static inline void *findpNext(void *pCreateInfo, VkStructureType sType)
+{
+	auto *s = static_cast<VkBaseOutStructure *>(pCreateInfo);
 	while (s && s->sType != sType)
 		s = s->pNext;
 	return s;
