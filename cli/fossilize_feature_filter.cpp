@@ -2893,8 +2893,8 @@ bool FeatureFilter::Impl::access_mask_is_supported(VkAccessFlags2 access) const
 			VK_ACCESS_2_SHADER_BINDING_TABLE_READ_BIT_KHR |
 			VK_ACCESS_2_MICROMAP_READ_BIT_EXT |
 			VK_ACCESS_2_MICROMAP_WRITE_BIT_EXT |
-			VK_ACCESS_2_COMMAND_PREPROCESS_READ_BIT_NV |
-			VK_ACCESS_2_COMMAND_PREPROCESS_WRITE_BIT_NV |
+			VK_ACCESS_2_COMMAND_PREPROCESS_READ_BIT_EXT |
+			VK_ACCESS_2_COMMAND_PREPROCESS_WRITE_BIT_EXT |
 			VK_ACCESS_2_OPTICAL_FLOW_READ_BIT_NV |
 			VK_ACCESS_2_OPTICAL_FLOW_WRITE_BIT_NV |
 			sync2_flags;
@@ -2952,9 +2952,10 @@ bool FeatureFilter::Impl::access_mask_is_supported(VkAccessFlags2 access) const
 	    features.opacity_micromap.micromap == VK_FALSE)
 		return false;
 
-	if ((access & (VK_ACCESS_2_COMMAND_PREPROCESS_READ_BIT_NV |
-	               VK_ACCESS_2_COMMAND_PREPROCESS_WRITE_BIT_NV)) != 0 &&
-	    features.device_generated_commands_nv.deviceGeneratedCommands == VK_FALSE)
+	if ((access & (VK_ACCESS_2_COMMAND_PREPROCESS_READ_BIT_EXT |
+	               VK_ACCESS_2_COMMAND_PREPROCESS_WRITE_BIT_EXT)) != 0 &&
+	    features.device_generated_commands_nv.deviceGeneratedCommands == VK_FALSE &&
+	    features.device_generated_commands.deviceGeneratedCommands == VK_FALSE)
 		return false;
 
 	if ((access & (VK_ACCESS_2_OPTICAL_FLOW_READ_BIT_NV |
@@ -3055,7 +3056,7 @@ bool FeatureFilter::Impl::pipeline_stage_mask_is_supported(VkPipelineStageFlags2
 			VK_PIPELINE_STAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR |
 			VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_COPY_BIT_KHR |
 			VK_PIPELINE_STAGE_2_MICROMAP_BUILD_BIT_EXT |
-			VK_PIPELINE_STAGE_COMMAND_PREPROCESS_BIT_NV |
+			VK_PIPELINE_STAGE_COMMAND_PREPROCESS_BIT_EXT |
 			VK_PIPELINE_STAGE_2_OPTICAL_FLOW_BIT_NV |
 			sync2_stages;
 
@@ -3105,8 +3106,9 @@ bool FeatureFilter::Impl::pipeline_stage_mask_is_supported(VkPipelineStageFlags2
 	    features.opacity_micromap.micromap == VK_FALSE)
 		return false;
 
-	if ((stages & VK_PIPELINE_STAGE_COMMAND_PREPROCESS_BIT_NV) != 0 &&
-	    features.device_generated_commands_nv.deviceGeneratedCommands == VK_FALSE)
+	if ((stages & VK_PIPELINE_STAGE_COMMAND_PREPROCESS_BIT_EXT) != 0 &&
+	    features.device_generated_commands_nv.deviceGeneratedCommands == VK_FALSE &&
+	    features.device_generated_commands.deviceGeneratedCommands == VK_FALSE)
 		return false;
 
 	if ((stages & VK_PIPELINE_STAGE_2_OPTICAL_FLOW_BIT_NV) != 0 &&
@@ -3828,7 +3830,8 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 			VK_PIPELINE_CREATE_INDIRECT_BINDABLE_BIT_NV |
 			VK_PIPELINE_CREATE_PROTECTED_ACCESS_ONLY_BIT_EXT |
 			VK_PIPELINE_CREATE_NO_PROTECTED_ACCESS_BIT_EXT |
-			VK_PIPELINE_CREATE_2_ENABLE_LEGACY_DITHERING_BIT_EXT;
+			VK_PIPELINE_CREATE_2_ENABLE_LEGACY_DITHERING_BIT_EXT |
+			VK_PIPELINE_CREATE_2_INDIRECT_BINDABLE_BIT_EXT;
 
 	auto flags = get_effective_flags(info);
 
@@ -3888,6 +3891,10 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 
 	if ((flags & VK_PIPELINE_CREATE_2_ENABLE_LEGACY_DITHERING_BIT_EXT) != 0 &&
 	    features.legacy_dithering.legacyDithering == VK_FALSE)
+		return false;
+
+	if ((flags & VK_PIPELINE_CREATE_2_INDIRECT_BINDABLE_BIT_EXT) != 0 &&
+	    features.device_generated_commands.deviceGeneratedCommands == VK_FALSE)
 		return false;
 
 	const VkDynamicState *dynamic_states = nullptr;
@@ -4194,7 +4201,8 @@ bool FeatureFilter::Impl::compute_pipeline_is_supported(const VkComputePipelineC
 			VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT |
 			VK_PIPELINE_CREATE_INDIRECT_BINDABLE_BIT_NV |
 			VK_PIPELINE_CREATE_PROTECTED_ACCESS_ONLY_BIT_EXT |
-			VK_PIPELINE_CREATE_NO_PROTECTED_ACCESS_BIT_EXT;
+			VK_PIPELINE_CREATE_NO_PROTECTED_ACCESS_BIT_EXT |
+			VK_PIPELINE_CREATE_2_INDIRECT_BINDABLE_BIT_EXT;
 
 	auto flags = get_effective_flags(info);
 
@@ -4222,6 +4230,10 @@ bool FeatureFilter::Impl::compute_pipeline_is_supported(const VkComputePipelineC
 	{
 		return false;
 	}
+
+	if ((flags & VK_PIPELINE_CREATE_2_INDIRECT_BINDABLE_BIT_EXT) != 0 &&
+	    features.device_generated_commands.deviceGeneratedCommands == VK_FALSE)
+		return false;
 
 	if (!subgroup_size_control_is_supported(info->stage))
 		return false;

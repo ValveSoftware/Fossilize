@@ -90,7 +90,8 @@
 		"VK_EXT_border_color_swizzle",
 		"VK_EXT_subpass_merge_feedback",
 		"VK_KHR_pipeline_binary",
-		"VK_EXT_depth_clamp_control"
+		"VK_EXT_depth_clamp_control",
+		"VK_EXT_device_generated_commands"
 	],
 	"fully-ignored" : [
 		"VK_AMD_rasterization_order",

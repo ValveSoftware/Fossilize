@@ -127,6 +127,7 @@ struct VulkanFeatures
 	VkPhysicalDeviceMultisampledRenderToSingleSampledFeaturesEXT multisampled_render_to_single_sampled;
 	VkPhysicalDeviceDepthBiasControlFeaturesEXT depth_bias_control;
 	VkPhysicalDeviceDepthClampControlFeaturesEXT depth_clamp_control;
+	VkPhysicalDeviceDeviceGeneratedCommandsFeaturesEXT device_generated_commands;
 
 	struct
 	{
