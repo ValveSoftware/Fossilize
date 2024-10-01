@@ -1461,6 +1461,11 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 				return false;
 			break;
 
+		case VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_DEPTH_CLAMP_CONTROL_CREATE_INFO_EXT:
+			if (features.depth_clamp_control.depthClampControl == VK_FALSE)
+				return false;
+			break;
+
 		default:
 			LOGE("Unrecognized pNext sType: %u. Treating as unsupported.\n", unsigned(base->sType));
 			return false;
@@ -4100,6 +4105,11 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 
 			case VK_DYNAMIC_STATE_ATTACHMENT_FEEDBACK_LOOP_ENABLE_EXT:
 				if (features.attachment_feedback_loop_dynamic_state.attachmentFeedbackLoopDynamicState == VK_FALSE)
+					return false;
+				break;
+
+			case VK_DYNAMIC_STATE_DEPTH_CLAMP_RANGE_EXT:
+				if (features.depth_clamp_control.depthClampControl == VK_FALSE)
 					return false;
 				break;
 

@@ -199,6 +199,8 @@ struct DynamicStateInfo
 	bool shading_rate_image_enable;
 	bool representative_fragment_test_enable;
 	bool coverage_reduction_mode;
+
+	bool depth_clamp_range;
 };
 
 static VkPipelineCreateFlags2KHR normalize_pipeline_creation_flags(VkPipelineCreateFlags2KHR flags)
@@ -379,6 +381,7 @@ struct StateReplayer::Impl
 	bool parse_render_pass_fragment_density_map(const Value &state, VkRenderPassFragmentDensityMapCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_sample_locations_info(const Value &state, VkSampleLocationsInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_pipeline_robustness(const Value &state, VkPipelineRobustnessCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_depth_clamp_control(const Value &state, VkPipelineViewportDepthClampControlCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_uints(const Value &attachments, const uint32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	bool parse_sints(const Value &attachments, const int32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	const char *duplicate_string(const char *str, size_t len);
@@ -527,6 +530,9 @@ struct StateRecorder::Impl
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkSampleLocationsInfoEXT *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkPipelineViewportDepthClampControlCreateInfoEXT *create_info,
+	                        ScratchAllocator &alloc,
+	                        const DynamicStateInfo *dynamic_state_info) FOSSILIZE_WARN_UNUSED;
 	template <typename T>
 	void *copy_pnext_struct_simple(const T *create_info, ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 
@@ -784,6 +790,23 @@ static void hash_pnext_struct(const StateRecorder *, Hasher &h,
 	h.u32(info.vertexInputs);
 	h.u32(info.uniformBuffers);
 	h.u32(info.storageBuffers);
+}
+
+static void hash_pnext_struct(const StateRecorder *, Hasher &h,
+                              const VkPipelineViewportDepthClampControlCreateInfoEXT &info,
+							  const DynamicStateInfo *dynamic_state)
+{
+	if (dynamic_state && dynamic_state->depth_clamp_range)
+		return;
+
+	h.u32(info.depthClampMode);
+	if (info.depthClampMode == VK_DEPTH_CLAMP_MODE_USER_DEFINED_RANGE_EXT && info.pDepthClampRange)
+	{
+		h.f32(info.pDepthClampRange->minDepthClamp);
+		h.f32(info.pDepthClampRange->maxDepthClamp);
+	}
+	else
+		h.u32(0);
 }
 
 static bool hash_pnext_chain_pdf2(const StateRecorder *recorder, Hasher &h, const void *pNext)
@@ -1592,6 +1615,10 @@ static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const voi
 			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineRobustnessCreateInfoEXT *>(pNext));
 			break;
 
+		case VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_DEPTH_CLAMP_CONTROL_CREATE_INFO_EXT:
+			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineViewportDepthClampControlCreateInfoEXT *>(pNext), dynamic_state_info);
+			break;
+
 		default:
 			log_error_pnext_chain("Unsupported pNext found, cannot hash.", pNext);
 			return false;
@@ -1826,6 +1853,8 @@ static DynamicStateInfo parse_dynamic_state_info(const VkPipelineDynamicStateCre
 			info.viewport_count = true;
 			info.viewport = true;
 			break;
+
+		DYN_STATE(DEPTH_CLAMP_RANGE_EXT, depth_clamp_range);
 
 		default:
 			break;
@@ -4735,6 +4764,22 @@ bool StateReplayer::Impl::parse_pipeline_robustness(const Value &state, VkPipeli
 	return true;
 }
 
+bool StateReplayer::Impl::parse_depth_clamp_control(const Value &state, VkPipelineViewportDepthClampControlCreateInfoEXT **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkPipelineViewportDepthClampControlCreateInfoEXT>();
+	info->depthClampMode = static_cast<VkDepthClampModeEXT>(state["depthClampMode"].GetUint());
+	if (state.HasMember("depthClampRange"))
+	{
+		auto *range = allocator.allocate_cleared<VkDepthClampRangeEXT>();
+		info->pDepthClampRange = range;
+		auto &v = state["depthClampRange"];
+		range->minDepthClamp = v["minDepthClamp"].GetFloat();
+		range->maxDepthClamp = v["maxDepthClamp"].GetFloat();
+	}
+	*out_info = info;
+	return true;
+}
+
 bool StateReplayer::Impl::parse_mutable_descriptor_type(const Value &state,
                                                         VkMutableDescriptorTypeCreateInfoEXT **out_info)
 {
@@ -5147,6 +5192,15 @@ bool StateReplayer::Impl::parse_pnext_chain(
 		{
 			VkPipelineRobustnessCreateInfoEXT *info = nullptr;
 			if (!parse_pipeline_robustness(next, &info))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_DEPTH_CLAMP_CONTROL_CREATE_INFO_EXT:
+		{
+			VkPipelineViewportDepthClampControlCreateInfoEXT *info = nullptr;
+			if (!parse_depth_clamp_control(next, &info))
 				return false;
 			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
 			break;
@@ -5735,6 +5789,22 @@ void *StateRecorder::Impl::copy_pnext_struct(const VkSampleLocationsInfoEXT *inf
 	return loc;
 }
 
+void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineViewportDepthClampControlCreateInfoEXT *info, ScratchAllocator &alloc,
+                                             const DynamicStateInfo *dynamic_state)
+{
+	auto *clamp_control = copy(info, 1, alloc);
+	if ((!dynamic_state || !dynamic_state->depth_clamp_range) &&
+	    clamp_control->depthClampMode == VK_DEPTH_CLAMP_MODE_USER_DEFINED_RANGE_EXT &&
+	    clamp_control->pDepthClampRange)
+	{
+		clamp_control->pDepthClampRange = copy(clamp_control->pDepthClampRange, 1, alloc);
+	}
+	else
+		clamp_control->pDepthClampRange = nullptr;
+
+	return clamp_control;
+}
+
 template <typename T>
 void *StateRecorder::Impl::copy_pnext_struct_simple(const T *create_info, ScratchAllocator &alloc)
 {
@@ -6063,6 +6133,13 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 		{
 			auto *ci = static_cast<const VkPipelineRobustnessCreateInfoEXT *>(pNext);
 			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_DEPTH_CLAMP_CONTROL_CREATE_INFO_EXT:
+		{
+			auto *ci = static_cast<const VkPipelineViewportDepthClampControlCreateInfoEXT *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc, dynamic_state_info));
 			break;
 		}
 
@@ -9210,6 +9287,25 @@ static bool json_value(const VkPipelineCreateFlags2CreateInfoKHR &create_info, A
 }
 
 template <typename Allocator>
+static bool json_value(const VkPipelineViewportDepthClampControlCreateInfoEXT &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("depthClampMode", create_info.depthClampMode, alloc);
+
+	if (create_info.pDepthClampRange)
+	{
+		Value range(kObjectType);
+		range.AddMember("minDepthClamp", create_info.pDepthClampRange->minDepthClamp, alloc);
+		range.AddMember("maxDepthClamp", create_info.pDepthClampRange->maxDepthClamp, alloc);
+		value.AddMember("depthClampRange", range, alloc);
+	}
+
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
 static bool json_value(const VkSubpassDescriptionDepthStencilResolve &create_info, Allocator &alloc, Value *out_value);
 template <typename Allocator>
 static bool json_value(const VkFragmentShadingRateAttachmentInfoKHR &create_info, Allocator &alloc, Value *out_value);
@@ -9416,6 +9512,11 @@ static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *o
 
 		case VK_STRUCTURE_TYPE_PIPELINE_ROBUSTNESS_CREATE_INFO_EXT:
 			if (!json_value(*static_cast<const VkPipelineRobustnessCreateInfoEXT *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_DEPTH_CLAMP_CONTROL_CREATE_INFO_EXT:
+			if (!json_value(*static_cast<const VkPipelineViewportDepthClampControlCreateInfoEXT *>(pNext), alloc, &next))
 				return false;
 			break;
 

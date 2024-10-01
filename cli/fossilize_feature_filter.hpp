@@ -126,6 +126,7 @@ struct VulkanFeatures
 	VkPhysicalDeviceBorderColorSwizzleFeaturesEXT border_color_swizzle;
 	VkPhysicalDeviceMultisampledRenderToSingleSampledFeaturesEXT multisampled_render_to_single_sampled;
 	VkPhysicalDeviceDepthBiasControlFeaturesEXT depth_bias_control;
+	VkPhysicalDeviceDepthClampControlFeaturesEXT depth_clamp_control;
 
 	struct
 	{

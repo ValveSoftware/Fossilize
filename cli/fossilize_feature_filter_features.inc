@@ -115,3 +115,4 @@ FE(SUBPASS_MERGE_FEEDBACK, subpass_merge_feedback, EXT);
 FE(BORDER_COLOR_SWIZZLE, border_color_swizzle, EXT);
 FE(MULTISAMPLED_RENDER_TO_SINGLE_SAMPLED, multisampled_render_to_single_sampled, EXT);
 FE(DEPTH_BIAS_CONTROL, depth_bias_control, EXT);
+FE(DEPTH_CLAMP_CONTROL, depth_clamp_control, EXT);

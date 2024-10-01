@@ -2271,6 +2271,20 @@ static void record_graphics_pipelines(StateRecorder &recorder)
 	rs.pNext = &depth_bias_representation_info;
 	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100011), pipe, nullptr, 0))
 		abort();
+
+	VkPipelineViewportDepthClampControlCreateInfoEXT clamp_control = { VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_DEPTH_CLAMP_CONTROL_CREATE_INFO_EXT };
+	vp.pNext = &clamp_control;
+	clamp_control.depthClampMode = VK_DEPTH_CLAMP_MODE_VIEWPORT_RANGE_EXT;
+	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100012), pipe, nullptr, 0))
+		abort();
+	clamp_control.depthClampMode = VK_DEPTH_CLAMP_MODE_USER_DEFINED_RANGE_EXT;
+	VkDepthClampRangeEXT range = { 0.5f, 0.8f };
+	clamp_control.pDepthClampRange = &range;
+	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100013), pipe, nullptr, 0))
+		abort();
+	range = { 0.8f, 0.2f };
+	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100013), pipe, nullptr, 0))
+		abort();
 }
 
 static void record_raytracing_pipelines(StateRecorder &recorder)
