@@ -149,22 +149,8 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(const VkInstanceCreateInfo 
 	return VK_SUCCESS;
 }
 
-static VKAPI_ATTR void VKAPI_CALL GetPhysicalDeviceProperties2(VkPhysicalDevice gpu, VkPhysicalDeviceProperties2 *props2)
+static void fixup_props2_chain(VkPhysicalDeviceProperties2 *props2)
 {
-	Instance *layer;
-	{
-		void *key = getDispatchKey(gpu);
-		lock_guard<mutex> holder{ globalLock };
-		layer = getLayerData(key, instanceData);
-	}
-
-	// If the pointer is non-null, it is valid to call.
-	// We're guaranteed that at least one of these pointers is valid.
-	if (layer->getTable()->GetPhysicalDeviceProperties2)
-		layer->getTable()->GetPhysicalDeviceProperties2(gpu, props2);
-	else if (layer->getTable()->GetPhysicalDeviceProperties2KHR)
-		layer->getTable()->GetPhysicalDeviceProperties2KHR(gpu, props2);
-
 	auto *binary_props = static_cast<VkPhysicalDevicePipelineBinaryPropertiesKHR *>(
 			findpNext(props2, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_BINARY_PROPERTIES_KHR));
 
@@ -175,6 +161,32 @@ static VKAPI_ATTR void VKAPI_CALL GetPhysicalDeviceProperties2(VkPhysicalDevice 
 		binary_props->pipelineBinaryPrefersInternalCache = VK_TRUE;
 		binary_props->pipelineBinaryPrecompiledInternalCache = VK_TRUE;
 	}
+}
+
+static VKAPI_ATTR void VKAPI_CALL GetPhysicalDeviceProperties2(VkPhysicalDevice gpu, VkPhysicalDeviceProperties2 *props2)
+{
+	Instance *layer;
+	{
+		void *key = getDispatchKey(gpu);
+		lock_guard<mutex> holder{ globalLock };
+		layer = getLayerData(key, instanceData);
+	}
+
+	layer->getTable()->GetPhysicalDeviceProperties2(gpu, props2);
+	fixup_props2_chain(props2);
+}
+
+static VKAPI_ATTR void VKAPI_CALL GetPhysicalDeviceProperties2KHR(VkPhysicalDevice gpu, VkPhysicalDeviceProperties2 *props2)
+{
+	Instance *layer;
+	{
+		void *key = getDispatchKey(gpu);
+		lock_guard<mutex> holder{ globalLock };
+		layer = getLayerData(key, instanceData);
+	}
+
+	layer->getTable()->GetPhysicalDeviceProperties2KHR(gpu, props2);
+	fixup_props2_chain(props2);
 }
 
 static VKAPI_ATTR void VKAPI_CALL DestroyInstance(VkInstance instance, const VkAllocationCallbacks *pAllocator)
@@ -570,8 +582,6 @@ static PFN_vkVoidFunction interceptCoreInstanceCommand(const char *pName)
 		{ "vkDestroyInstance", reinterpret_cast<PFN_vkVoidFunction>(DestroyInstance) },
 		{ "vkGetInstanceProcAddr", reinterpret_cast<PFN_vkVoidFunction>(VK_LAYER_fossilize_GetInstanceProcAddr) },
 		{ "vkCreateDevice", reinterpret_cast<PFN_vkVoidFunction>(CreateDevice) },
-		{ "vkGetPhysicalDeviceProperties2", reinterpret_cast<PFN_vkVoidFunction>(GetPhysicalDeviceProperties2) },
-		{ "vkGetPhysicalDeviceProperties2KHR", reinterpret_cast<PFN_vkVoidFunction>(GetPhysicalDeviceProperties2) },
 	};
 
 	for (auto &cmd : coreInstanceCommands)
@@ -588,7 +598,7 @@ static PFN_vkVoidFunction interceptInstanceCommand(const char *pName)
 		PFN_vkVoidFunction proc;
 	} instanceCommands[] = {
 		{ "vkGetPhysicalDeviceProperties2", reinterpret_cast<PFN_vkVoidFunction>(GetPhysicalDeviceProperties2) },
-		{ "vkGetPhysicalDeviceProperties2KHR", reinterpret_cast<PFN_vkVoidFunction>(GetPhysicalDeviceProperties2) },
+		{ "vkGetPhysicalDeviceProperties2KHR", reinterpret_cast<PFN_vkVoidFunction>(GetPhysicalDeviceProperties2KHR) },
 	};
 
 	for (auto &cmd : instanceCommands)
