@@ -863,10 +863,17 @@ VK_LAYER_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL VK_LAYER_fossilize_GetD
 
 VK_LAYER_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL VK_LAYER_fossilize_GetInstanceProcAddr(VkInstance instance, const char *pName)
 {
+	if (!pName)
+		return nullptr;
+
 	// We only wrap core Vulkan 1.0 instance commands, no need to check for availability of underlying implementation.
 	auto proc = interceptCoreInstanceCommand(pName);
 	if (proc)
 		return proc;
+
+	// For global instance functions, the assumption is that we cannot call down the chain.
+	if (!instance)
+		return nullptr;
 
 	Instance *layer;
 	{
