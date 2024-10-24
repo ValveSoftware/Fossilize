@@ -169,11 +169,20 @@ struct FilterReplayer : StateCreatorInterface
 		return true;
 	}
 
+	void set_application_info(Hash, const VkApplicationInfo *info, const VkPhysicalDeviceFeatures2 *features2) override
+	{
+		app = info;
+		pdf2 = features2;
+	}
+
 	unordered_set<Hash> filter_graphics;
 	unordered_set<Hash> filter_compute;
 	unordered_set<Hash> filter_raytracing;
 	unordered_set<Hash> filter_modules;
 	unordered_set<Hash> filter_modules_promoted;
+
+	const VkApplicationInfo *app = nullptr;
+	const VkPhysicalDeviceFeatures2 *pdf2 = nullptr;
 };
 
 struct DisasmReplayer : StateCreatorInterface
@@ -1010,11 +1019,26 @@ int main(int argc, char *argv[])
 		return EXIT_FAILURE;
 	}
 
+	auto resolver = unique_ptr<DatabaseInterface>(create_database(json_path.c_str(), DatabaseMode::ReadOnly));
+	if (!resolver->prepare())
+	{
+		LOGE("Failed to open database: %s\n", json_path.c_str());
+		return EXIT_FAILURE;
+	}
+
+	FilterReplayer filter_replayer;
+	vector<uint8_t> state_json;
+
 	VulkanDevice device;
 	if (method == DisasmMethod::ISA)
 	{
+		StateReplayer application_info_replayer;
+		replay_all_hashes(RESOURCE_APPLICATION_INFO, *resolver, application_info_replayer, filter_replayer, state_json, nullptr);
+
 		opts.want_amd_shader_info = true;
 		opts.want_pipeline_stats = true;
+		opts.application_info = filter_replayer.app;
+		opts.features = filter_replayer.pdf2;
 
 		if (module_only)
 		{
@@ -1035,21 +1059,11 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	auto resolver = unique_ptr<DatabaseInterface>(create_database(json_path.c_str(), DatabaseMode::ReadOnly));
-	if (!resolver->prepare())
-	{
-		LOGE("Failed to open database: %s\n", json_path.c_str());
-		return EXIT_FAILURE;
-	}
-
-	vector<uint8_t> state_json;
-
 	bool use_filter = !filter_graphics.empty() || !filter_compute.empty() ||
 	                  !filter_raytracing.empty() || !filter_modules.empty();
 
 	if (use_filter && !module_only)
 	{
-		FilterReplayer filter_replayer;
 		StateReplayer state_replayer;
 
 		state_replayer.set_resolve_derivative_pipeline_handles(false);
