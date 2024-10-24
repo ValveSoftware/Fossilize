@@ -787,10 +787,12 @@ static string disassemble_spirv_isa(const VulkanDevice &device, VkPipeline pipel
 
 		for (auto &stat : statistics)
 		{
+			char hex_value[17];
 			result += stat.name;
 			result += " (";
 			result += stat.description;
 			result += "): ";
+
 			switch (stat.format)
 			{
 			case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_BOOL32_KHR:
@@ -798,9 +800,15 @@ static string disassemble_spirv_isa(const VulkanDevice &device, VkPipeline pipel
 				break;
 			case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_INT64_KHR:
 				result += to_string(stat.value.i64);
+				result += " / 0x";
+				snprintf(hex_value, sizeof(hex_value), "%016llx", static_cast<unsigned long long>(stat.value.i64));
+				result += hex_value;
 				break;
 			case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_UINT64_KHR:
 				result += to_string(stat.value.u64);
+				result += " / 0x";
+				snprintf(hex_value, sizeof(hex_value), "%016llx", static_cast<unsigned long long>(stat.value.u64));
+				result += hex_value;
 				break;
 			case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_FLOAT64_KHR:
 				result += to_string(stat.value.f64);
