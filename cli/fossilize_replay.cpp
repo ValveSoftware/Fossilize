@@ -842,7 +842,18 @@ struct ThreadedReplayer : StateCreatorInterface
 							stat.AddMember("value", std::to_string(st.value.i64), alloc);
 							break;
 						case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_UINT64_KHR:
-							stat.AddMember("value", std::to_string(st.value.u64), alloc);
+							if (strstr(st.name, " hash") != nullptr)
+							{
+								// If the format has "hash" in its name, let's assume it's a hex value.
+								// Ideally the Vulkan extension would have XINT64_KHR, but it is what it is.
+								char hex_str[16 + 2 + 1];
+								snprintf(hex_str, sizeof(hex_str), "0x%016" PRIx64, st.value.u64);
+								stat.AddMember("value", std::string(hex_str), alloc);
+							}
+							else
+							{
+								stat.AddMember("value", std::to_string(st.value.u64), alloc);
+							}
 							break;
 						case VK_PIPELINE_EXECUTABLE_STATISTIC_FORMAT_FLOAT64_KHR:
 							stat.AddMember("value", std::to_string(st.value.f64), alloc);
