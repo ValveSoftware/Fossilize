@@ -29,6 +29,25 @@
 
 namespace Fossilize
 {
+Device::Device()
+{
+	precompileQAFailCount.store(0, std::memory_order_relaxed);
+	precompileQASuccessCount.store(0, std::memory_order_relaxed);
+}
+
+void Device::registerPrecompileQASuccess(uint32_t numPipelines)
+{
+	uint64_t totalSuccess = precompileQASuccessCount.fetch_add(numPipelines, std::memory_order_relaxed) + numPipelines;
+	LOGI("QA: Successfully created total of %llu pipelines without compilation.\n",
+	     static_cast<unsigned long long>(totalSuccess));
+}
+
+void Device::registerPrecompileQAFailure(uint32_t numPipelines)
+{
+	uint64_t totalFailure = precompileQAFailCount.fetch_add(numPipelines, std::memory_order_relaxed) + numPipelines;
+	LOGI("QA: Required fallback compilation for a total of %llu pipelines.\n",
+	     static_cast<unsigned long long>(totalFailure));
+}
 
 void Device::init(VkPhysicalDevice gpu_, VkDevice device_, Instance *pInstance_,
                   const void *device_pnext,

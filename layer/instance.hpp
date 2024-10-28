@@ -34,6 +34,8 @@ class Instance
 public:
 	Instance();
 
+	static bool queryPrecompileQA();
+
 	VkInstance getInstance()
 	{
 		return instance;
@@ -74,6 +76,11 @@ public:
 		return shouldRecordImmutableSamplers;
 	}
 
+	bool enablesPrecompileQA() const
+	{
+		return enablePrecompileQA;
+	}
+
 	static void braceForGraphicsPipelineCrash(StateRecorder *recorder, const VkGraphicsPipelineCreateInfo *info);
 	static void braceForComputePipelineCrash(StateRecorder *recorder, const VkComputePipelineCreateInfo *info);
 	static void braceForRayTracingPipelineCrash(StateRecorder *recorder, const VkRayTracingPipelineCreateInfoKHR *info);
@@ -88,6 +95,7 @@ private:
 	ApplicationInfoFilter *infoFilter = nullptr;
 	bool enableCrashHandler = false;
 	bool synchronized = false;
+	bool enablePrecompileQA = false;
 	bool shouldRecordImmutableSamplers = true;
 };
 }
