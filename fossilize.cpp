@@ -352,6 +352,9 @@ struct StateReplayer::Impl
 	bool parse_mesh_shader_features(const Value &state, VkPhysicalDeviceMeshShaderFeaturesEXT **out_features) FOSSILIZE_WARN_UNUSED;
 	bool parse_mesh_shader_features_nv(const Value &state, VkPhysicalDeviceMeshShaderFeaturesNV **out_features) FOSSILIZE_WARN_UNUSED;
 	bool parse_descriptor_buffer_features(const Value &state, VkPhysicalDeviceDescriptorBufferFeaturesEXT **out_features) FOSSILIZE_WARN_UNUSED;
+	bool parse_shader_object_features(const Value &state, VkPhysicalDeviceShaderObjectFeaturesEXT **out_features) FOSSILIZE_WARN_UNUSED;
+	bool parse_primitives_generated_query_features(const Value &state, VkPhysicalDevicePrimitivesGeneratedQueryFeaturesEXT **out_features) FOSSILIZE_WARN_UNUSED;
+	bool parse_2d_view_of_3d_features(const Value &state, VkPhysicalDeviceImage2DViewOf3DFeaturesEXT **out_features) FOSSILIZE_WARN_UNUSED;
 
 	bool parse_color_write(const Value &state, VkPipelineColorWriteCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_sample_locations(const Value &state, VkPipelineSampleLocationsStateCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
@@ -721,6 +724,30 @@ static void hash_pnext_struct(const StateRecorder *,
 
 static void hash_pnext_struct(const StateRecorder *,
                               Hasher &h,
+                              const VkPhysicalDeviceShaderObjectFeaturesEXT &info)
+{
+	h.u32(info.shaderObject);
+}
+
+static void hash_pnext_struct(const StateRecorder *,
+                              Hasher &h,
+                              const VkPhysicalDevicePrimitivesGeneratedQueryFeaturesEXT &info)
+{
+	h.u32(info.primitivesGeneratedQuery);
+	h.u32(info.primitivesGeneratedQueryWithNonZeroStreams);
+	h.u32(info.primitivesGeneratedQueryWithRasterizerDiscard);
+}
+
+static void hash_pnext_struct(const StateRecorder *,
+                              Hasher &h,
+                              const VkPhysicalDeviceImage2DViewOf3DFeaturesEXT &info)
+{
+	h.u32(info.image2DViewOf3D);
+	h.u32(info.sampler2DViewOf3D);
+}
+
+static void hash_pnext_struct(const StateRecorder *,
+                              Hasher &h,
                               const VkPipelineCreateFlags2CreateInfoKHR &info)
 {
 	auto flags = normalize_pipeline_creation_flags(info.flags);
@@ -845,6 +872,18 @@ static bool hash_pnext_chain_pdf2(const StateRecorder *recorder, Hasher &h, cons
 
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT:
 			hash_pnext_struct(recorder, h, *static_cast<const VkPhysicalDeviceDescriptorBufferFeaturesEXT *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT:
+			hash_pnext_struct(recorder, h, *static_cast<const VkPhysicalDeviceShaderObjectFeaturesEXT *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIMITIVES_GENERATED_QUERY_FEATURES_EXT:
+			hash_pnext_struct(recorder, h, *static_cast<const VkPhysicalDevicePrimitivesGeneratedQueryFeaturesEXT *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_2D_VIEW_OF_3D_FEATURES_EXT:
+			hash_pnext_struct(recorder, h, *static_cast<const VkPhysicalDeviceImage2DViewOf3DFeaturesEXT *>(pNext));
 			break;
 
 		default:
@@ -5320,6 +5359,42 @@ bool StateReplayer::Impl::parse_descriptor_buffer_features(
 	return true;
 }
 
+bool StateReplayer::Impl::parse_shader_object_features(
+		const Value &state,
+		VkPhysicalDeviceShaderObjectFeaturesEXT **out_features)
+{
+	auto *features = allocator.allocate_cleared<VkPhysicalDeviceShaderObjectFeaturesEXT>();
+	*out_features = features;
+
+	features->shaderObject = state["shaderObject"].GetUint();
+	return true;
+}
+
+bool StateReplayer::Impl::parse_primitives_generated_query_features(
+		const Value &state,
+		VkPhysicalDevicePrimitivesGeneratedQueryFeaturesEXT **out_features)
+{
+	auto *features = allocator.allocate_cleared<VkPhysicalDevicePrimitivesGeneratedQueryFeaturesEXT>();
+	*out_features = features;
+
+	features->primitivesGeneratedQuery = state["primitivesGeneratedQuery"].GetUint();
+	features->primitivesGeneratedQueryWithNonZeroStreams = state["primitivesGeneratedQueryWithNonZeroStreams"].GetUint();
+	features->primitivesGeneratedQueryWithRasterizerDiscard = state["primitivesGeneratedQueryWithRasterizerDiscard"].GetUint();
+	return true;
+}
+
+bool StateReplayer::Impl::parse_2d_view_of_3d_features(
+		const Value &state,
+		VkPhysicalDeviceImage2DViewOf3DFeaturesEXT **out_features)
+{
+	auto *features = allocator.allocate_cleared<VkPhysicalDeviceImage2DViewOf3DFeaturesEXT>();
+	*out_features = features;
+
+	features->image2DViewOf3D = state["image2DViewOf3D"].GetUint();
+	features->sampler2DViewOf3D = state["sampler2DViewOf3D"].GetUint();
+	return true;
+}
+
 bool StateReplayer::Impl::parse_pnext_chain_pdf2(const Value &pnext, void **outpNext)
 {
 	VkBaseInStructure *ret = nullptr;
@@ -5393,6 +5468,33 @@ bool StateReplayer::Impl::parse_pnext_chain_pdf2(const Value &pnext, void **outp
 			if (!parse_descriptor_buffer_features(next, &descriptor_buffer))
 				return false;
 			new_struct = reinterpret_cast<VkBaseInStructure *>(descriptor_buffer);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT:
+		{
+			VkPhysicalDeviceShaderObjectFeaturesEXT *shader_object = nullptr;
+			if (!parse_shader_object_features(next, &shader_object))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(shader_object);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIMITIVES_GENERATED_QUERY_FEATURES_EXT:
+		{
+			VkPhysicalDevicePrimitivesGeneratedQueryFeaturesEXT *prim_generated = nullptr;
+			if (!parse_primitives_generated_query_features(next, &prim_generated))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(prim_generated);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_2D_VIEW_OF_3D_FEATURES_EXT:
+		{
+			VkPhysicalDeviceImage2DViewOf3DFeaturesEXT *view_2d_of_3d = nullptr;
+			if (!parse_2d_view_of_3d_features(next, &view_2d_of_3d))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(view_2d_of_3d);
 			break;
 		}
 
@@ -6940,6 +7042,27 @@ bool StateRecorder::Impl::copy_pnext_chain_pdf2(const void *pNext, ScratchAlloca
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT:
 		{
 			auto *ci = static_cast<const VkPhysicalDeviceDescriptorBufferFeaturesEXT *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT:
+		{
+			auto *ci = static_cast<const VkPhysicalDeviceShaderObjectFeaturesEXT *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIMITIVES_GENERATED_QUERY_FEATURES_EXT:
+		{
+			auto *ci = static_cast<const VkPhysicalDevicePrimitivesGeneratedQueryFeaturesEXT *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_2D_VIEW_OF_3D_FEATURES_EXT:
+		{
+			auto *ci = static_cast<const VkPhysicalDeviceImage2DViewOf3DFeaturesEXT *>(pNext);
 			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
 			break;
 		}
@@ -10487,6 +10610,39 @@ static bool json_value(const VkPhysicalDeviceDescriptorBufferFeaturesEXT &create
 }
 
 template <typename Allocator>
+static bool json_value(const VkPhysicalDeviceShaderObjectFeaturesEXT &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("shaderObject", create_info.shaderObject, alloc);
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
+static bool json_value(const VkPhysicalDevicePrimitivesGeneratedQueryFeaturesEXT &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("primitivesGeneratedQuery", create_info.primitivesGeneratedQuery, alloc);
+	value.AddMember("primitivesGeneratedQueryWithRasterizerDiscard", create_info.primitivesGeneratedQueryWithRasterizerDiscard, alloc);
+	value.AddMember("primitivesGeneratedQueryWithNonZeroStreams", create_info.primitivesGeneratedQueryWithNonZeroStreams, alloc);
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
+static bool json_value(const VkPhysicalDeviceImage2DViewOf3DFeaturesEXT &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("image2DViewOf3D", create_info.image2DViewOf3D, alloc);
+	value.AddMember("sampler2DViewOf3D", create_info.sampler2DViewOf3D, alloc);
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
 static bool pnext_chain_pdf2_json_value(const void *pNext, Allocator &alloc, Value *out_value)
 {
 	Value nexts(kArrayType);
@@ -10529,6 +10685,21 @@ static bool pnext_chain_pdf2_json_value(const void *pNext, Allocator &alloc, Val
 
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT:
 			if (!json_value(*static_cast<const VkPhysicalDeviceDescriptorBufferFeaturesEXT *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT:
+			if (!json_value(*static_cast<const VkPhysicalDeviceShaderObjectFeaturesEXT *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIMITIVES_GENERATED_QUERY_FEATURES_EXT:
+			if (!json_value(*static_cast<const VkPhysicalDevicePrimitivesGeneratedQueryFeaturesEXT *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_2D_VIEW_OF_3D_FEATURES_EXT:
+			if (!json_value(*static_cast<const VkPhysicalDeviceImage2DViewOf3DFeaturesEXT *>(pNext), alloc, &next))
 				return false;
 			break;
 
@@ -11153,6 +11324,10 @@ static const void *pnext_chain_pdf2_skip_ignored_entries(const void *pNext)
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT:
 		// RADV: Might want to turn off FMASK at some point based on this.
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT:
+		// RADV uses these :(
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT:
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIMITIVES_GENERATED_QUERY_FEATURES_EXT:
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_2D_VIEW_OF_3D_FEATURES_EXT:
 			ignored = false;
 			break;
 

@@ -3802,6 +3802,12 @@ static bool test_pdf_recording()
 			VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_NV, nullptr, 80, 90 };
 	VkPhysicalDeviceDescriptorBufferFeaturesEXT descriptor_buffer = {
 			VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT, nullptr, 100, 200, 300, 400 };
+	VkPhysicalDeviceShaderObjectFeaturesEXT shader_object = {
+			VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT, nullptr, 500 };
+	VkPhysicalDevicePrimitivesGeneratedQueryFeaturesEXT prim_generated_query = {
+			VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIMITIVES_GENERATED_QUERY_FEATURES_EXT, nullptr, 501, 502, 503 };
+	VkPhysicalDeviceImage2DViewOf3DFeaturesEXT image_2d_view_of_3d = {
+			VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_2D_VIEW_OF_3D_FEATURES_EXT, nullptr, 504 };
 
 	// Expect to fail here.
 	if (test_pdf_recording(&dummy, h))
@@ -3831,7 +3837,7 @@ static bool test_pdf_recording()
 	}
 
 	{
-		constexpr size_t hash_count = 8;
+		constexpr size_t hash_count = 11;
 		Hash hashes[hash_count] = {};
 
 		pdf2.pNext = nullptr;
@@ -3858,6 +3864,15 @@ static bool test_pdf_recording()
 		mesh_nv.pNext = &descriptor_buffer;
 		if (!test_pdf_recording(&pdf2, hashes[7]))
 			return false;
+		descriptor_buffer.pNext = &shader_object;
+		if (!test_pdf_recording(&pdf2, hashes[8]))
+			return false;
+		shader_object.pNext = &prim_generated_query;
+		if (!test_pdf_recording(&pdf2, hashes[9]))
+			return false;
+		prim_generated_query.pNext = &image_2d_view_of_3d;
+		if (!test_pdf_recording(&pdf2, hashes[10]))
+			return false;
 
 		// Make sure all of these are serialized.
 		for (unsigned i = 1; i < hash_count; i++)
@@ -3865,7 +3880,7 @@ static bool test_pdf_recording()
 				return false;
 
 		// If we move PDF2 last, hash should still be invariant.
-		descriptor_buffer.pNext = &pdf2;
+		image_2d_view_of_3d.pNext = &pdf2;
 		pdf2.pNext = nullptr;
 		if (!test_pdf_recording(&robustness2, hashes[0]))
 			return false;
