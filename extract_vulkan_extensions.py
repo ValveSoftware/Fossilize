@@ -75,6 +75,12 @@ def main():
     tree = ET.parse(args.xml)
     root = tree.getroot()
 
+    top_level_types_pipeline = set([
+        'VkGraphicsPipelineCreateInfo',
+        'VkComputePipelineCreateInfo',
+        'VkRayTracingPipelineCreateInfoKHR',
+        'VkDeviceCreateInfo'])
+
     top_level_types = set([
         'VkGraphicsPipelineCreateInfo',
         'VkComputePipelineCreateInfo',
@@ -95,6 +101,8 @@ def main():
         if 'alias' in t.attrib:
             type_aliases[t.attrib['name']] = t.attrib['alias']
 
+    shallow_copy_pnext_size_lut = ''
+
     for t in root.find('types').iter('type'):
         if 'category' not in t.attrib:
             continue
@@ -107,6 +115,13 @@ def main():
             if 'structextends' in t.attrib:
                 extends = t.attrib['structextends'].split(',')
                 extends = set([type_aliases.get(x, x) for x in extends])
+
+                for ext in extends:
+                    if ext in top_level_types_pipeline:
+                        stype = t.find('member').attrib['values']
+                        shallow_copy_pnext_size_lut += '{ ' + stype + ', sizeof(' + name + ') },\n'
+                        break
+
             for elem in t.iter('member'):
                 member_type = elem.find('type').text
                 member_type = type_aliases.get(member_type, member_type)
@@ -129,6 +144,9 @@ def main():
 
     with open(args.completed_work, 'r') as file:
         completed = json.loads(file.read())
+
+    print('\n\n=== pNext LUT ===')
+    print(shallow_copy_pnext_size_lut)
 
     print('\n\n=== Base Types ===')
     for t in active_types:
