@@ -128,6 +128,9 @@ struct VulkanFeatures
 	VkPhysicalDeviceDepthBiasControlFeaturesEXT depth_bias_control;
 	VkPhysicalDeviceDepthClampControlFeaturesEXT depth_clamp_control;
 	VkPhysicalDeviceDeviceGeneratedCommandsFeaturesEXT device_generated_commands;
+	VkPhysicalDeviceShaderObjectFeaturesEXT shader_object;
+	VkPhysicalDevicePrimitivesGeneratedQueryFeaturesEXT primitives_generated_query;
+	VkPhysicalDeviceImage2DViewOf3DFeaturesEXT image_2d_view_of_3d;
 
 	struct
 	{
@@ -293,5 +296,23 @@ static inline void reset_features(VkPhysicalDeviceDescriptorBufferFeaturesEXT &f
 	features.descriptorBufferCaptureReplay = state;
 	features.descriptorBufferImageLayoutIgnored = state;
 	features.descriptorBufferPushDescriptors = state;
+}
+
+static inline void reset_features(VkPhysicalDeviceShaderObjectFeaturesEXT &features, VkBool32 state)
+{
+	features.shaderObject = state;
+}
+
+static inline void reset_features(VkPhysicalDevicePrimitivesGeneratedQueryFeaturesEXT &features, VkBool32 state)
+{
+	features.primitivesGeneratedQuery = state;
+	features.primitivesGeneratedQueryWithRasterizerDiscard = state;
+	features.primitivesGeneratedQueryWithNonZeroStreams = state;
+}
+
+static inline void reset_features(VkPhysicalDeviceImage2DViewOf3DFeaturesEXT &features, VkBool32 state)
+{
+	features.image2DViewOf3D = state;
+	features.sampler2DViewOf3D = state;
 }
 }

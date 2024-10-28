@@ -238,6 +238,63 @@ static void filter_feature_enablement(
 		{
 			reset_features(features.descriptor_buffer, VK_FALSE);
 		}
+
+		const auto *shader_object = find_pnext<VkPhysicalDeviceShaderObjectFeaturesEXT>(
+				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT,
+				target_features->pNext);
+
+		if (shader_object)
+		{
+			features.shader_object.shaderObject =
+					features.shader_object.shaderObject &&
+					shader_object->shaderObject;
+		}
+		else
+		{
+			reset_features(features.shader_object, VK_FALSE);
+		}
+
+		const auto *prim_generated = find_pnext<VkPhysicalDevicePrimitivesGeneratedQueryFeaturesEXT>(
+				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIMITIVES_GENERATED_QUERY_FEATURES_EXT,
+				target_features->pNext);
+
+		if (prim_generated)
+		{
+			features.primitives_generated_query.primitivesGeneratedQuery =
+					features.primitives_generated_query.primitivesGeneratedQuery &&
+					prim_generated->primitivesGeneratedQuery;
+
+			features.primitives_generated_query.primitivesGeneratedQueryWithNonZeroStreams =
+					features.primitives_generated_query.primitivesGeneratedQueryWithNonZeroStreams &&
+					prim_generated->primitivesGeneratedQueryWithNonZeroStreams;
+
+			features.primitives_generated_query.primitivesGeneratedQueryWithRasterizerDiscard =
+					features.primitives_generated_query.primitivesGeneratedQueryWithRasterizerDiscard &&
+					prim_generated->primitivesGeneratedQueryWithRasterizerDiscard;
+		}
+		else
+		{
+			reset_features(features.primitives_generated_query, VK_FALSE);
+		}
+
+		const auto *image_2d_view_of_3d = find_pnext<VkPhysicalDeviceImage2DViewOf3DFeaturesEXT>(
+				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_2D_VIEW_OF_3D_FEATURES_EXT,
+				target_features->pNext);
+
+		if (image_2d_view_of_3d)
+		{
+			features.image_2d_view_of_3d.image2DViewOf3D =
+					features.image_2d_view_of_3d.image2DViewOf3D &&
+					image_2d_view_of_3d->image2DViewOf3D;
+
+			features.image_2d_view_of_3d.sampler2DViewOf3D =
+					features.image_2d_view_of_3d.sampler2DViewOf3D &&
+					image_2d_view_of_3d->sampler2DViewOf3D;
+		}
+		else
+		{
+			reset_features(features.image_2d_view_of_3d, VK_FALSE);
+		}
 	}
 	else
 	{
@@ -249,6 +306,9 @@ static void filter_feature_enablement(
 		reset_features(features.mesh_shader, VK_FALSE);
 		reset_features(features.mesh_shader_nv, VK_FALSE);
 		reset_features(features.descriptor_buffer, VK_FALSE);
+		reset_features(features.shader_object, VK_FALSE);
+		reset_features(features.primitives_generated_query, VK_FALSE);
+		reset_features(features.image_2d_view_of_3d, VK_FALSE);
 	}
 }
 
@@ -373,6 +433,42 @@ static void filter_active_extensions(VkPhysicalDeviceFeatures2 &pdf,
 			    feature->descriptorBufferPushDescriptors == VK_FALSE)
 			{
 				remove_extension(active_extensions, out_extension_count, VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME);
+				accept = false;
+			}
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT:
+		{
+			auto *feature = reinterpret_cast<VkPhysicalDeviceShaderObjectFeaturesEXT *>(s);
+			if (feature->shaderObject == VK_FALSE)
+			{
+				remove_extension(active_extensions, out_extension_count, VK_EXT_SHADER_OBJECT_EXTENSION_NAME);
+				accept = false;
+			}
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIMITIVES_GENERATED_QUERY_FEATURES_EXT:
+		{
+			auto *feature = reinterpret_cast<VkPhysicalDevicePrimitivesGeneratedQueryFeaturesEXT *>(s);
+			if (feature->primitivesGeneratedQuery == VK_FALSE &&
+			    feature->primitivesGeneratedQueryWithNonZeroStreams == VK_FALSE &&
+			    feature->primitivesGeneratedQueryWithRasterizerDiscard == VK_FALSE)
+			{
+				remove_extension(active_extensions, out_extension_count, VK_EXT_PRIMITIVES_GENERATED_QUERY_EXTENSION_NAME);
+				accept = false;
+			}
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_2D_VIEW_OF_3D_FEATURES_EXT:
+		{
+			auto *feature = reinterpret_cast<VkPhysicalDeviceImage2DViewOf3DFeaturesEXT *>(s);
+			if (feature->image2DViewOf3D == VK_FALSE &&
+			    feature->sampler2DViewOf3D == VK_FALSE)
+			{
+				remove_extension(active_extensions, out_extension_count, VK_EXT_IMAGE_2D_VIEW_OF_3D_EXTENSION_NAME);
 				accept = false;
 			}
 			break;
