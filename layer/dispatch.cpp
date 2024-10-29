@@ -613,7 +613,11 @@ static VkResult compileNonBlockingPipelines(Device *layer, uint32_t createInfoCo
 		{
 			if (pPipelines[i] == VK_NULL_HANDLE)
 			{
-				LOGW_LEVEL("QA: Pipeline compilation required for pipeline.\n");
+				auto *flags2 = static_cast<VkPipelineCreateFlags2CreateInfoKHR *>(const_cast<void *>(
+						findpNext(pCreateInfos[i].pNext, VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO_KHR)));
+				VkPipelineCreateFlags2KHR flags = flags2 ? flags2->flags : pCreateInfos[i].flags;
+				LOGW_LEVEL("QA: Pipeline compilation required for pipeline, flags %08x'%08x.\n",
+				           uint32_t(flags >> 32), uint32_t(flags));
 				layer->registerPrecompileQAFailure(1);
 				// Record all entries first in case we have derived pipeline references which went through unharmed.
 				rec(i);
