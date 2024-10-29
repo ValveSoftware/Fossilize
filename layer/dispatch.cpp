@@ -26,6 +26,7 @@
 #include "instance.hpp"
 #include "fossilize_errors.hpp"
 #include <mutex>
+#include <memory>
 
 // VALVE: do exports without .def file, see vk_layer.h for definition on non-Windows platforms
 #ifdef _MSC_VER
@@ -76,6 +77,8 @@ static Instance *get_instance_layer(VkPhysicalDevice gpu)
 	return getLayerData(getDispatchKey(gpu), instanceData);
 }
 
+static bool shallowCopyPnextChain(ScratchAllocator &alloc, const void *pNext, const void **outpNext);
+
 static VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(VkPhysicalDevice gpu, const VkDeviceCreateInfo *pCreateInfo,
                                                    const VkAllocationCallbacks *pAllocator, VkDevice *pDevice)
 {
@@ -89,10 +92,64 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateDevice(VkPhysicalDevice gpu, const V
 	if (!fpCreateDevice)
 		return VK_ERROR_INITIALIZATION_FAILED;
 
+	// Safely overwrite the device creation infos to support pipeline cache control when using QA mode.
+	// We don't care about fallbacks since we want to fail if device doesn't support it.
+	VkPhysicalDevicePipelineCreationCacheControlFeatures cacheControlFeatures;
+	auto tmpCreateInfo = *pCreateInfo;
+	std::unique_ptr<const char * []> enabledExtensions;
+	ScratchAllocator alloc;
+
+	if (layer->enablesPrecompileQA())
+	{
+		// Make sure the relevant EXT is enabled.
+		// Just assume it works, since precompile QA is developer-only feature and everyone supports it since it's core 1.3.
+		uint32_t i;
+		for (i = 0; i < tmpCreateInfo.enabledExtensionCount; i++)
+			if (strcmp(tmpCreateInfo.ppEnabledExtensionNames[i], VK_EXT_PIPELINE_CREATION_CACHE_CONTROL_EXTENSION_NAME) == 0)
+				break;
+
+		if (i == tmpCreateInfo.enabledExtensionCount)
+		{
+			enabledExtensions.reset(new const char *[tmpCreateInfo.enabledExtensionCount + 1]);
+			memcpy(enabledExtensions.get(), tmpCreateInfo.ppEnabledExtensionNames,
+			       tmpCreateInfo.enabledExtensionCount * sizeof(const char *));
+			enabledExtensions[tmpCreateInfo.enabledExtensionCount++] = VK_EXT_PIPELINE_CREATION_CACHE_CONTROL_EXTENSION_NAME;
+			tmpCreateInfo.ppEnabledExtensionNames = enabledExtensions.get();
+		}
+
+		if (!shallowCopyPnextChain(alloc, tmpCreateInfo.pNext, &tmpCreateInfo.pNext))
+		{
+			LOGE_LEVEL("Failed to shallow copy pNext chain.");
+			return VK_ERROR_INITIALIZATION_FAILED;
+		}
+
+		if (void *vk13 = findpNext(const_cast<void *>(tmpCreateInfo.pNext), VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES))
+		{
+			static_cast<VkPhysicalDeviceVulkan13Features *>(vk13)->pipelineCreationCacheControl = VK_TRUE;
+		}
+		else if (void *ccf = findpNext(const_cast<void *>(tmpCreateInfo.pNext), VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_CREATION_CACHE_CONTROL_FEATURES))
+		{
+			static_cast<VkPhysicalDevicePipelineCreationCacheControlFeatures *>(ccf)->pipelineCreationCacheControl = VK_TRUE;
+		}
+		else
+		{
+			cacheControlFeatures = {
+				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_CREATION_CACHE_CONTROL_FEATURES,
+				const_cast<void *>(tmpCreateInfo.pNext),
+				VK_TRUE
+			};
+
+			tmpCreateInfo.pNext = &cacheControlFeatures;
+		}
+
+		// We shallow copied this too, make sure we update the right thing.
+		chainInfo = getChainInfo(&tmpCreateInfo, VK_LAYER_LINK_INFO);
+	}
+
 	// Advance the link info for the next element on the chain
 	chainInfo->u.pLayerInfo = chainInfo->u.pLayerInfo->pNext;
 
-	auto res = fpCreateDevice(gpu, pCreateInfo, pAllocator, pDevice);
+	auto res = fpCreateDevice(gpu, &tmpCreateInfo, pAllocator, pDevice);
 	if (res != VK_SUCCESS)
 		return res;
 
@@ -134,8 +191,30 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateInstance(const VkInstanceCreateInfo 
 	if (!fpCreateInstance)
 		return VK_ERROR_INITIALIZATION_FAILED;
 
+	auto tmpCreateInfo = *pCreateInfo;
+	std::unique_ptr<const char * []> enabledExtensions;
+
+	if (Instance::queryPrecompileQA())
+	{
+		// Need GDP2 for pipeline cache control.
+		// Only relevant when using Vulkan 1.1 instance.
+		uint32_t i;
+		for (i = 0; i < tmpCreateInfo.enabledExtensionCount; i++)
+			if (strcmp(tmpCreateInfo.ppEnabledExtensionNames[i], VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME) == 0)
+				break;
+
+		if (i == tmpCreateInfo.enabledExtensionCount)
+		{
+			enabledExtensions.reset(new const char *[tmpCreateInfo.enabledExtensionCount + 1]);
+			memcpy(enabledExtensions.get(), tmpCreateInfo.ppEnabledExtensionNames,
+			       tmpCreateInfo.enabledExtensionCount * sizeof(const char *));
+			enabledExtensions[tmpCreateInfo.enabledExtensionCount++] = VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME;
+			tmpCreateInfo.ppEnabledExtensionNames = enabledExtensions.get();
+		}
+	}
+
 	chainInfo->u.pLayerInfo = chainInfo->u.pLayerInfo->pNext;
-	auto res = fpCreateInstance(pCreateInfo, pAllocator, pInstance);
+	auto res = fpCreateInstance(&tmpCreateInfo, pAllocator, pInstance);
 	if (res != VK_SUCCESS)
 		return res;
 
@@ -199,6 +278,382 @@ static VKAPI_ATTR void VKAPI_CALL DestroyInstance(VkInstance instance, const VkA
 	destroyLayerData(key, instanceData);
 }
 
+template <typename T>
+static VkPipelineCreateFlags2KHR getEffectivePipelineFlags(const T &info)
+{
+	auto *flags2 = static_cast<const VkPipelineCreateFlags2CreateInfoKHR *>(
+			findpNext(info.pNext, VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO_KHR));
+	return flags2 ? flags2->flags : info.flags;
+}
+
+template <typename T>
+static bool pipelineCreationIsNonBlocking(const T &info)
+{
+	auto flags = getEffectivePipelineFlags(info);
+
+	auto *libraries = static_cast<const VkPipelineLibraryCreateInfoKHR *>(
+			findpNext(info.pNext, VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR));
+
+	// Fast link pipelines are expected to be non-blocking always, and at least RADV does not cache it.
+	// Don't bother checking if this PSO is in cache, since there's no reason for it to be.
+	if (libraries && libraries->libraryCount && (flags & VK_PIPELINE_CREATE_LINK_TIME_OPTIMIZATION_BIT_EXT) == 0)
+		return true;
+
+	return (flags & VK_PIPELINE_CREATE_2_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT_KHR) != 0;
+}
+
+template <typename T>
+static bool shouldAttemptNonBlockingCreation(Device *layer, uint32_t createInfoCount, const T *pCreateInfos)
+{
+	if (layer->getInstance()->enablesPrecompileQA() && createInfoCount)
+	{
+		// If app is already trying non-blocking compile, the app will handle fallback case.
+		for (uint32_t i = 0; i < createInfoCount; i++)
+			if (pipelineCreationIsNonBlocking(pCreateInfos[i]))
+				return false;
+
+		return true;
+	}
+	else
+	{
+		return false;
+	}
+}
+
+static size_t getPnextStructSize(VkStructureType type)
+{
+	// Table autogenerated by extract_vulkan_extensions.py
+	static const struct
+	{
+		VkStructureType type;
+		size_t size;
+	} sizes[] = {
+		{ VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_INDIRECT_BUFFER_INFO_NV, sizeof(VkComputePipelineIndirectBufferInfoNV) },
+		{ VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO_KHR, sizeof(VkPipelineCreateFlags2CreateInfoKHR) },
+		{ VK_STRUCTURE_TYPE_PIPELINE_BINARY_INFO_KHR, sizeof(VkPipelineBinaryInfoKHR) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEVICE_GENERATED_COMMANDS_FEATURES_NV, sizeof(VkPhysicalDeviceDeviceGeneratedCommandsFeaturesNV) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEVICE_GENERATED_COMMANDS_COMPUTE_FEATURES_NV, sizeof(VkPhysicalDeviceDeviceGeneratedCommandsComputeFeaturesNV) },
+		{ VK_STRUCTURE_TYPE_DEVICE_PRIVATE_DATA_CREATE_INFO, sizeof(VkDevicePrivateDataCreateInfo) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIVATE_DATA_FEATURES, sizeof(VkPhysicalDevicePrivateDataFeatures) },
+		{ VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_SHADER_GROUPS_CREATE_INFO_NV, sizeof(VkGraphicsPipelineShaderGroupsCreateInfoNV) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, sizeof(VkPhysicalDeviceFeatures2) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VARIABLE_POINTERS_FEATURES, sizeof(VkPhysicalDeviceVariablePointersFeatures) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES, sizeof(VkPhysicalDeviceMultiviewFeatures) },
+		{ VK_STRUCTURE_TYPE_DEVICE_GROUP_DEVICE_CREATE_INFO, sizeof(VkDeviceGroupDeviceCreateInfo) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_ID_FEATURES_KHR, sizeof(VkPhysicalDevicePresentIdFeaturesKHR) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_WAIT_FEATURES_KHR, sizeof(VkPhysicalDevicePresentWaitFeaturesKHR) },
+		{ VK_STRUCTURE_TYPE_PIPELINE_DISCARD_RECTANGLE_STATE_CREATE_INFO_EXT, sizeof(VkPipelineDiscardRectangleStateCreateInfoEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES, sizeof(VkPhysicalDevice16BitStorageFeatures) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SUBGROUP_EXTENDED_TYPES_FEATURES, sizeof(VkPhysicalDeviceShaderSubgroupExtendedTypesFeatures) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES, sizeof(VkPhysicalDeviceSamplerYcbcrConversionFeatures) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROTECTED_MEMORY_FEATURES, sizeof(VkPhysicalDeviceProtectedMemoryFeatures) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BLEND_OPERATION_ADVANCED_FEATURES_EXT, sizeof(VkPhysicalDeviceBlendOperationAdvancedFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTI_DRAW_FEATURES_EXT, sizeof(VkPhysicalDeviceMultiDrawFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INLINE_UNIFORM_BLOCK_FEATURES, sizeof(VkPhysicalDeviceInlineUniformBlockFeatures) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_4_FEATURES, sizeof(VkPhysicalDeviceMaintenance4Features) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_FEATURES_KHR, sizeof(VkPhysicalDeviceMaintenance5FeaturesKHR) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_6_FEATURES_KHR, sizeof(VkPhysicalDeviceMaintenance6FeaturesKHR) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_7_FEATURES_KHR, sizeof(VkPhysicalDeviceMaintenance7FeaturesKHR) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES, sizeof(VkPhysicalDeviceShaderDrawParametersFeatures) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES, sizeof(VkPhysicalDeviceShaderFloat16Int8Features) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_QUERY_RESET_FEATURES, sizeof(VkPhysicalDeviceHostQueryResetFeatures) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GLOBAL_PRIORITY_QUERY_FEATURES_KHR, sizeof(VkPhysicalDeviceGlobalPriorityQueryFeaturesKHR) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEVICE_MEMORY_REPORT_FEATURES_EXT, sizeof(VkPhysicalDeviceDeviceMemoryReportFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_DEVICE_DEVICE_MEMORY_REPORT_CREATE_INFO_EXT, sizeof(VkDeviceDeviceMemoryReportCreateInfoEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES, sizeof(VkPhysicalDeviceDescriptorIndexingFeatures) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES, sizeof(VkPhysicalDeviceTimelineSemaphoreFeatures) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES, sizeof(VkPhysicalDevice8BitStorageFeatures) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CONDITIONAL_RENDERING_FEATURES_EXT, sizeof(VkPhysicalDeviceConditionalRenderingFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES, sizeof(VkPhysicalDeviceVulkanMemoryModelFeatures) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_INT64_FEATURES, sizeof(VkPhysicalDeviceShaderAtomicInt64Features) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT, sizeof(VkPhysicalDeviceShaderAtomicFloatFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_2_FEATURES_EXT, sizeof(VkPhysicalDeviceShaderAtomicFloat2FeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_ATTRIBUTE_DIVISOR_FEATURES_KHR, sizeof(VkPhysicalDeviceVertexAttributeDivisorFeaturesKHR) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ASTC_DECODE_FEATURES_EXT, sizeof(VkPhysicalDeviceASTCDecodeFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TRANSFORM_FEEDBACK_FEATURES_EXT, sizeof(VkPhysicalDeviceTransformFeedbackFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_REPRESENTATIVE_FRAGMENT_TEST_FEATURES_NV, sizeof(VkPhysicalDeviceRepresentativeFragmentTestFeaturesNV) },
+		{ VK_STRUCTURE_TYPE_PIPELINE_REPRESENTATIVE_FRAGMENT_TEST_STATE_CREATE_INFO_NV, sizeof(VkPipelineRepresentativeFragmentTestStateCreateInfoNV) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXCLUSIVE_SCISSOR_FEATURES_NV, sizeof(VkPhysicalDeviceExclusiveScissorFeaturesNV) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CORNER_SAMPLED_IMAGE_FEATURES_NV, sizeof(VkPhysicalDeviceCornerSampledImageFeaturesNV) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_KHR, sizeof(VkPhysicalDeviceComputeShaderDerivativesFeaturesKHR) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_IMAGE_FOOTPRINT_FEATURES_NV, sizeof(VkPhysicalDeviceShaderImageFootprintFeaturesNV) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEDICATED_ALLOCATION_IMAGE_ALIASING_FEATURES_NV, sizeof(VkPhysicalDeviceDedicatedAllocationImageAliasingFeaturesNV) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COPY_MEMORY_INDIRECT_FEATURES_NV, sizeof(VkPhysicalDeviceCopyMemoryIndirectFeaturesNV) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_DECOMPRESSION_FEATURES_NV, sizeof(VkPhysicalDeviceMemoryDecompressionFeaturesNV) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADING_RATE_IMAGE_FEATURES_NV, sizeof(VkPhysicalDeviceShadingRateImageFeaturesNV) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INVOCATION_MASK_FEATURES_HUAWEI, sizeof(VkPhysicalDeviceInvocationMaskFeaturesHUAWEI) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_NV, sizeof(VkPhysicalDeviceMeshShaderFeaturesNV) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT, sizeof(VkPhysicalDeviceMeshShaderFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR, sizeof(VkPhysicalDeviceAccelerationStructureFeaturesKHR) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR, sizeof(VkPhysicalDeviceRayTracingPipelineFeaturesKHR) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR, sizeof(VkPhysicalDeviceRayQueryFeaturesKHR) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_MAINTENANCE_1_FEATURES_KHR, sizeof(VkPhysicalDeviceRayTracingMaintenance1FeaturesKHR) },
+		{ VK_STRUCTURE_TYPE_DEVICE_MEMORY_OVERALLOCATION_CREATE_INFO_AMD, sizeof(VkDeviceMemoryOverallocationCreateInfoAMD) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_FEATURES_EXT, sizeof(VkPhysicalDeviceFragmentDensityMapFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_2_FEATURES_EXT, sizeof(VkPhysicalDeviceFragmentDensityMap2FeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_OFFSET_FEATURES_QCOM, sizeof(VkPhysicalDeviceFragmentDensityMapOffsetFeaturesQCOM) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SCALAR_BLOCK_LAYOUT_FEATURES, sizeof(VkPhysicalDeviceScalarBlockLayoutFeatures) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_UNIFORM_BUFFER_STANDARD_LAYOUT_FEATURES, sizeof(VkPhysicalDeviceUniformBufferStandardLayoutFeatures) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLIP_ENABLE_FEATURES_EXT, sizeof(VkPhysicalDeviceDepthClipEnableFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PRIORITY_FEATURES_EXT, sizeof(VkPhysicalDeviceMemoryPriorityFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PAGEABLE_DEVICE_LOCAL_MEMORY_FEATURES_EXT, sizeof(VkPhysicalDevicePageableDeviceLocalMemoryFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES, sizeof(VkPhysicalDeviceBufferDeviceAddressFeatures) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES_EXT, sizeof(VkPhysicalDeviceBufferDeviceAddressFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGELESS_FRAMEBUFFER_FEATURES, sizeof(VkPhysicalDeviceImagelessFramebufferFeatures) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TEXTURE_COMPRESSION_ASTC_HDR_FEATURES, sizeof(VkPhysicalDeviceTextureCompressionASTCHDRFeatures) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_NV, sizeof(VkPhysicalDeviceCooperativeMatrixFeaturesNV) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_YCBCR_IMAGE_ARRAYS_FEATURES_EXT, sizeof(VkPhysicalDeviceYcbcrImageArraysFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO, sizeof(VkPipelineCreationFeedbackCreateInfo) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_BARRIER_FEATURES_NV, sizeof(VkPhysicalDevicePresentBarrierFeaturesNV) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PERFORMANCE_QUERY_FEATURES_KHR, sizeof(VkPhysicalDevicePerformanceQueryFeaturesKHR) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COVERAGE_REDUCTION_MODE_FEATURES_NV, sizeof(VkPhysicalDeviceCoverageReductionModeFeaturesNV) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_FUNCTIONS_2_FEATURES_INTEL, sizeof(VkPhysicalDeviceShaderIntegerFunctions2FeaturesINTEL) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_CLOCK_FEATURES_KHR, sizeof(VkPhysicalDeviceShaderClockFeaturesKHR) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INDEX_TYPE_UINT8_FEATURES_KHR, sizeof(VkPhysicalDeviceIndexTypeUint8FeaturesKHR) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SM_BUILTINS_FEATURES_NV, sizeof(VkPhysicalDeviceShaderSMBuiltinsFeaturesNV) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADER_INTERLOCK_FEATURES_EXT, sizeof(VkPhysicalDeviceFragmentShaderInterlockFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SEPARATE_DEPTH_STENCIL_LAYOUTS_FEATURES, sizeof(VkPhysicalDeviceSeparateDepthStencilLayoutsFeatures) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIMITIVE_TOPOLOGY_LIST_RESTART_FEATURES_EXT, sizeof(VkPhysicalDevicePrimitiveTopologyListRestartFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_EXECUTABLE_PROPERTIES_FEATURES_KHR, sizeof(VkPhysicalDevicePipelineExecutablePropertiesFeaturesKHR) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DEMOTE_TO_HELPER_INVOCATION_FEATURES, sizeof(VkPhysicalDeviceShaderDemoteToHelperInvocationFeatures) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TEXEL_BUFFER_ALIGNMENT_FEATURES_EXT, sizeof(VkPhysicalDeviceTexelBufferAlignmentFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_FEATURES, sizeof(VkPhysicalDeviceSubgroupSizeControlFeatures) },
+		{ VK_STRUCTURE_TYPE_SUBPASS_SHADING_PIPELINE_CREATE_INFO_HUAWEI, sizeof(VkSubpassShadingPipelineCreateInfoHUAWEI) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_LINE_RASTERIZATION_FEATURES_KHR, sizeof(VkPhysicalDeviceLineRasterizationFeaturesKHR) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_CREATION_CACHE_CONTROL_FEATURES, sizeof(VkPhysicalDevicePipelineCreationCacheControlFeatures) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES, sizeof(VkPhysicalDeviceVulkan11Features) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, sizeof(VkPhysicalDeviceVulkan12Features) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES, sizeof(VkPhysicalDeviceVulkan13Features) },
+		{ VK_STRUCTURE_TYPE_PIPELINE_COMPILER_CONTROL_CREATE_INFO_AMD, sizeof(VkPipelineCompilerControlCreateInfoAMD) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COHERENT_MEMORY_FEATURES_AMD, sizeof(VkPhysicalDeviceCoherentMemoryFeaturesAMD) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_BORDER_COLOR_FEATURES_EXT, sizeof(VkPhysicalDeviceCustomBorderColorFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BORDER_COLOR_SWIZZLE_FEATURES_EXT, sizeof(VkPhysicalDeviceBorderColorSwizzleFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR, sizeof(VkPipelineLibraryCreateInfoKHR) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT, sizeof(VkPhysicalDeviceExtendedDynamicStateFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_2_FEATURES_EXT, sizeof(VkPhysicalDeviceExtendedDynamicState2FeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_3_FEATURES_EXT, sizeof(VkPhysicalDeviceExtendedDynamicState3FeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DIAGNOSTICS_CONFIG_FEATURES_NV, sizeof(VkPhysicalDeviceDiagnosticsConfigFeaturesNV) },
+		{ VK_STRUCTURE_TYPE_DEVICE_DIAGNOSTICS_CONFIG_CREATE_INFO_NV, sizeof(VkDeviceDiagnosticsConfigCreateInfoNV) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ZERO_INITIALIZE_WORKGROUP_MEMORY_FEATURES, sizeof(VkPhysicalDeviceZeroInitializeWorkgroupMemoryFeatures) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SUBGROUP_UNIFORM_CONTROL_FLOW_FEATURES_KHR, sizeof(VkPhysicalDeviceShaderSubgroupUniformControlFlowFeaturesKHR) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT, sizeof(VkPhysicalDeviceRobustness2FeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_ROBUSTNESS_FEATURES, sizeof(VkPhysicalDeviceImageRobustnessFeatures) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_FEATURES_KHR, sizeof(VkPhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_4444_FORMATS_FEATURES_EXT, sizeof(VkPhysicalDevice4444FormatsFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBPASS_SHADING_FEATURES_HUAWEI, sizeof(VkPhysicalDeviceSubpassShadingFeaturesHUAWEI) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CLUSTER_CULLING_SHADER_FEATURES_HUAWEI, sizeof(VkPhysicalDeviceClusterCullingShaderFeaturesHUAWEI) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_IMAGE_ATOMIC_INT64_FEATURES_EXT, sizeof(VkPhysicalDeviceShaderImageAtomicInt64FeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PIPELINE_FRAGMENT_SHADING_RATE_STATE_CREATE_INFO_KHR, sizeof(VkPipelineFragmentShadingRateStateCreateInfoKHR) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR, sizeof(VkPhysicalDeviceFragmentShadingRateFeaturesKHR) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_TERMINATE_INVOCATION_FEATURES, sizeof(VkPhysicalDeviceShaderTerminateInvocationFeatures) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_ENUMS_FEATURES_NV, sizeof(VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV) },
+		{ VK_STRUCTURE_TYPE_PIPELINE_FRAGMENT_SHADING_RATE_ENUM_STATE_CREATE_INFO_NV, sizeof(VkPipelineFragmentShadingRateEnumStateCreateInfoNV) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_2D_VIEW_OF_3D_FEATURES_EXT, sizeof(VkPhysicalDeviceImage2DViewOf3DFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_SLICED_VIEW_OF_3D_FEATURES_EXT, sizeof(VkPhysicalDeviceImageSlicedViewOf3DFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ATTACHMENT_FEEDBACK_LOOP_DYNAMIC_STATE_FEATURES_EXT, sizeof(VkPhysicalDeviceAttachmentFeedbackLoopDynamicStateFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_LEGACY_VERTEX_ATTRIBUTES_FEATURES_EXT, sizeof(VkPhysicalDeviceLegacyVertexAttributesFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MUTABLE_DESCRIPTOR_TYPE_FEATURES_EXT, sizeof(VkPhysicalDeviceMutableDescriptorTypeFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLIP_CONTROL_FEATURES_EXT, sizeof(VkPhysicalDeviceDepthClipControlFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEVICE_GENERATED_COMMANDS_FEATURES_EXT, sizeof(VkPhysicalDeviceDeviceGeneratedCommandsFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLAMP_CONTROL_FEATURES_EXT, sizeof(VkPhysicalDeviceDepthClampControlFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_INPUT_DYNAMIC_STATE_FEATURES_EXT, sizeof(VkPhysicalDeviceVertexInputDynamicStateFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_MEMORY_RDMA_FEATURES_NV, sizeof(VkPhysicalDeviceExternalMemoryRDMAFeaturesNV) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_RELAXED_EXTENDED_INSTRUCTION_FEATURES_KHR, sizeof(VkPhysicalDeviceShaderRelaxedExtendedInstructionFeaturesKHR) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COLOR_WRITE_ENABLE_FEATURES_EXT, sizeof(VkPhysicalDeviceColorWriteEnableFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES, sizeof(VkPhysicalDeviceSynchronization2Features) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_IMAGE_COPY_FEATURES_EXT, sizeof(VkPhysicalDeviceHostImageCopyFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIMITIVES_GENERATED_QUERY_FEATURES_EXT, sizeof(VkPhysicalDevicePrimitivesGeneratedQueryFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_LEGACY_DITHERING_FEATURES_EXT, sizeof(VkPhysicalDeviceLegacyDitheringFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTISAMPLED_RENDER_TO_SINGLE_SAMPLED_FEATURES_EXT, sizeof(VkPhysicalDeviceMultisampledRenderToSingleSampledFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_PROTECTED_ACCESS_FEATURES_EXT, sizeof(VkPhysicalDevicePipelineProtectedAccessFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VIDEO_MAINTENANCE_1_FEATURES_KHR, sizeof(VkPhysicalDeviceVideoMaintenance1FeaturesKHR) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_INHERITED_VIEWPORT_SCISSOR_FEATURES_NV, sizeof(VkPhysicalDeviceInheritedViewportScissorFeaturesNV) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_YCBCR_2_PLANE_444_FORMATS_FEATURES_EXT, sizeof(VkPhysicalDeviceYcbcr2Plane444FormatsFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROVOKING_VERTEX_FEATURES_EXT, sizeof(VkPhysicalDeviceProvokingVertexFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT, sizeof(VkPhysicalDeviceDescriptorBufferFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_FEATURES, sizeof(VkPhysicalDeviceShaderIntegerDotProductFeatures) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADER_BARYCENTRIC_FEATURES_KHR, sizeof(VkPhysicalDeviceFragmentShaderBarycentricFeaturesKHR) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_MOTION_BLUR_FEATURES_NV, sizeof(VkPhysicalDeviceRayTracingMotionBlurFeaturesNV) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_VALIDATION_FEATURES_NV, sizeof(VkPhysicalDeviceRayTracingValidationFeaturesNV) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RGBA10X6_FORMATS_FEATURES_EXT, sizeof(VkPhysicalDeviceRGBA10X6FormatsFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO, sizeof(VkPipelineRenderingCreateInfo) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES, sizeof(VkPhysicalDeviceDynamicRenderingFeatures) },
+		{ VK_STRUCTURE_TYPE_ATTACHMENT_SAMPLE_COUNT_INFO_AMD, sizeof(VkAttachmentSampleCountInfoAMD) },
+		{ VK_STRUCTURE_TYPE_MULTIVIEW_PER_VIEW_ATTRIBUTES_INFO_NVX, sizeof(VkMultiviewPerViewAttributesInfoNVX) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_VIEW_MIN_LOD_FEATURES_EXT, sizeof(VkPhysicalDeviceImageViewMinLodFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RASTERIZATION_ORDER_ATTACHMENT_ACCESS_FEATURES_EXT, sizeof(VkPhysicalDeviceRasterizationOrderAttachmentAccessFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_LINEAR_COLOR_ATTACHMENT_FEATURES_NV, sizeof(VkPhysicalDeviceLinearColorAttachmentFeaturesNV) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_FEATURES_EXT, sizeof(VkPhysicalDeviceGraphicsPipelineLibraryFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_BINARY_FEATURES_KHR, sizeof(VkPhysicalDevicePipelineBinaryFeaturesKHR) },
+		{ VK_STRUCTURE_TYPE_DEVICE_PIPELINE_BINARY_INTERNAL_CACHE_CONTROL_KHR, sizeof(VkDevicePipelineBinaryInternalCacheControlKHR) },
+		{ VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_LIBRARY_CREATE_INFO_EXT, sizeof(VkGraphicsPipelineLibraryCreateInfoEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_SET_HOST_MAPPING_FEATURES_VALVE, sizeof(VkPhysicalDeviceDescriptorSetHostMappingFeaturesVALVE) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_NESTED_COMMAND_BUFFER_FEATURES_EXT, sizeof(VkPhysicalDeviceNestedCommandBufferFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_MODULE_IDENTIFIER_FEATURES_EXT, sizeof(VkPhysicalDeviceShaderModuleIdentifierFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_COMPRESSION_CONTROL_FEATURES_EXT, sizeof(VkPhysicalDeviceImageCompressionControlFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_COMPRESSION_CONTROL_SWAPCHAIN_FEATURES_EXT, sizeof(VkPhysicalDeviceImageCompressionControlSwapchainFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBPASS_MERGE_FEEDBACK_FEATURES_EXT, sizeof(VkPhysicalDeviceSubpassMergeFeedbackFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_OPACITY_MICROMAP_FEATURES_EXT, sizeof(VkPhysicalDeviceOpacityMicromapFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_PROPERTIES_FEATURES_EXT, sizeof(VkPhysicalDevicePipelinePropertiesFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_EARLY_AND_LATE_FRAGMENT_TESTS_FEATURES_AMD, sizeof(VkPhysicalDeviceShaderEarlyAndLateFragmentTestsFeaturesAMD) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_NON_SEAMLESS_CUBE_MAP_FEATURES_EXT, sizeof(VkPhysicalDeviceNonSeamlessCubeMapFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_ROBUSTNESS_FEATURES_EXT, sizeof(VkPhysicalDevicePipelineRobustnessFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PIPELINE_ROBUSTNESS_CREATE_INFO_EXT, sizeof(VkPipelineRobustnessCreateInfoEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_PROCESSING_FEATURES_QCOM, sizeof(VkPhysicalDeviceImageProcessingFeaturesQCOM) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TILE_PROPERTIES_FEATURES_QCOM, sizeof(VkPhysicalDeviceTilePropertiesFeaturesQCOM) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_AMIGO_PROFILING_FEATURES_SEC, sizeof(VkPhysicalDeviceAmigoProfilingFeaturesSEC) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_FEATURES_EXT, sizeof(VkPhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLAMP_ZERO_ONE_FEATURES_EXT, sizeof(VkPhysicalDeviceDepthClampZeroOneFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ADDRESS_BINDING_REPORT_FEATURES_EXT, sizeof(VkPhysicalDeviceAddressBindingReportFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_OPTICAL_FLOW_FEATURES_NV, sizeof(VkPhysicalDeviceOpticalFlowFeaturesNV) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT, sizeof(VkPhysicalDeviceFaultFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_LIBRARY_GROUP_HANDLES_FEATURES_EXT, sizeof(VkPhysicalDevicePipelineLibraryGroupHandlesFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_CORE_BUILTINS_FEATURES_ARM, sizeof(VkPhysicalDeviceShaderCoreBuiltinsFeaturesARM) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAME_BOUNDARY_FEATURES_EXT, sizeof(VkPhysicalDeviceFrameBoundaryFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_UNUSED_ATTACHMENTS_FEATURES_EXT, sizeof(VkPhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_EXT, sizeof(VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_BIAS_CONTROL_FEATURES_EXT, sizeof(VkPhysicalDeviceDepthBiasControlFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_FEATURES_NV, sizeof(VkPhysicalDeviceRayTracingInvocationReorderFeaturesNV) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_SPARSE_ADDRESS_SPACE_FEATURES_NV, sizeof(VkPhysicalDeviceExtendedSparseAddressSpaceFeaturesNV) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_PER_VIEW_VIEWPORTS_FEATURES_QCOM, sizeof(VkPhysicalDeviceMultiviewPerViewViewportsFeaturesQCOM) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_POSITION_FETCH_FEATURES_KHR, sizeof(VkPhysicalDeviceRayTracingPositionFetchFeaturesKHR) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_PER_VIEW_RENDER_AREAS_FEATURES_QCOM, sizeof(VkPhysicalDeviceMultiviewPerViewRenderAreasFeaturesQCOM) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT, sizeof(VkPhysicalDeviceShaderObjectFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_TILE_IMAGE_FEATURES_EXT, sizeof(VkPhysicalDeviceShaderTileImageFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR, sizeof(VkPhysicalDeviceCooperativeMatrixFeaturesKHR) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ANTI_LAG_FEATURES_AMD, sizeof(VkPhysicalDeviceAntiLagFeaturesAMD) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUBIC_CLAMP_FEATURES_QCOM, sizeof(VkPhysicalDeviceCubicClampFeaturesQCOM) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_YCBCR_DEGAMMA_FEATURES_QCOM, sizeof(VkPhysicalDeviceYcbcrDegammaFeaturesQCOM) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUBIC_WEIGHTS_FEATURES_QCOM, sizeof(VkPhysicalDeviceCubicWeightsFeaturesQCOM) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_PROCESSING_2_FEATURES_QCOM, sizeof(VkPhysicalDeviceImageProcessing2FeaturesQCOM) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_POOL_OVERALLOCATION_FEATURES_NV, sizeof(VkPhysicalDeviceDescriptorPoolOverallocationFeaturesNV) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PER_STAGE_DESCRIPTOR_SET_FEATURES_NV, sizeof(VkPhysicalDevicePerStageDescriptorSetFeaturesNV) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUDA_KERNEL_LAUNCH_FEATURES_NV, sizeof(VkPhysicalDeviceCudaKernelLaunchFeaturesNV) },
+		{ VK_STRUCTURE_TYPE_DEVICE_QUEUE_SHADER_CORE_CONTROL_CREATE_INFO_ARM, sizeof(VkDeviceQueueShaderCoreControlCreateInfoARM) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SCHEDULING_CONTROLS_FEATURES_ARM, sizeof(VkPhysicalDeviceSchedulingControlsFeaturesARM) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RELAXED_LINE_RASTERIZATION_FEATURES_IMG, sizeof(VkPhysicalDeviceRelaxedLineRasterizationFeaturesIMG) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RENDER_PASS_STRIPED_FEATURES_ARM, sizeof(VkPhysicalDeviceRenderPassStripedFeaturesARM) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_MAXIMAL_RECONVERGENCE_FEATURES_KHR, sizeof(VkPhysicalDeviceShaderMaximalReconvergenceFeaturesKHR) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SUBGROUP_ROTATE_FEATURES_KHR, sizeof(VkPhysicalDeviceShaderSubgroupRotateFeaturesKHR) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_EXPECT_ASSUME_FEATURES_KHR, sizeof(VkPhysicalDeviceShaderExpectAssumeFeaturesKHR) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT_CONTROLS_2_FEATURES_KHR, sizeof(VkPhysicalDeviceShaderFloatControls2FeaturesKHR) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES_KHR, sizeof(VkPhysicalDeviceDynamicRenderingLocalReadFeaturesKHR) },
+		{ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_LOCATION_INFO_KHR, sizeof(VkRenderingAttachmentLocationInfoKHR) },
+		{ VK_STRUCTURE_TYPE_RENDERING_INPUT_ATTACHMENT_INDEX_INFO_KHR, sizeof(VkRenderingInputAttachmentIndexInfoKHR) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_QUAD_CONTROL_FEATURES_KHR, sizeof(VkPhysicalDeviceShaderQuadControlFeaturesKHR) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT16_VECTOR_FEATURES_NV, sizeof(VkPhysicalDeviceShaderAtomicFloat16VectorFeaturesNV) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAP_MEMORY_PLACED_FEATURES_EXT, sizeof(VkPhysicalDeviceMapMemoryPlacedFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAW_ACCESS_CHAINS_FEATURES_NV, sizeof(VkPhysicalDeviceRawAccessChainsFeaturesNV) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COMMAND_BUFFER_INHERITANCE_FEATURES_NV, sizeof(VkPhysicalDeviceCommandBufferInheritanceFeaturesNV) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_ALIGNMENT_CONTROL_FEATURES_MESA, sizeof(VkPhysicalDeviceImageAlignmentControlFeaturesMESA) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_REPLICATED_COMPOSITES_FEATURES_EXT, sizeof(VkPhysicalDeviceShaderReplicatedCompositesFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_MODE_FIFO_LATEST_READY_FEATURES_EXT, sizeof(VkPhysicalDevicePresentModeFifoLatestReadyFeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_2_FEATURES_NV, sizeof(VkPhysicalDeviceCooperativeMatrix2FeaturesNV) },
+	};
+
+	for (auto &siz : sizes)
+		if (siz.type == type)
+			return siz.size;
+
+	return 0;
+}
+
+static bool shallowCopyPnextChain(ScratchAllocator &alloc, const void *pNext, const void **outpNext)
+{
+	VkBaseInStructure new_pnext = {};
+	const VkBaseInStructure **ppNext = &new_pnext.pNext;
+
+	while (pNext)
+	{
+		auto *pin = static_cast<const VkBaseInStructure *>(pNext);
+
+		size_t copy_size;
+
+		// Magic pNext type which only exists in loader, not XML.
+		if (pin->sType == VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO)
+			copy_size = sizeof(VkLayerDeviceCreateInfo);
+		else
+			copy_size = getPnextStructSize(pin->sType);
+
+		if (!copy_size)
+		{
+			LOGE_LEVEL("Cannot shallow copy unknown pNext sType: %d.\n", int(pin->sType));
+			return false;
+		}
+
+		auto *buffer = alloc.allocate_raw(copy_size, 16);
+		memcpy(buffer, pin, copy_size);
+		*ppNext = static_cast<VkBaseInStructure *>(buffer);
+
+		pNext = pin->pNext;
+		ppNext = const_cast<const VkBaseInStructure **>(&(*ppNext)->pNext);
+		*ppNext = nullptr;
+	}
+
+	*outpNext = new_pnext.pNext;
+	return true;
+}
+
+template <typename CreateInfo, typename CompileFunc, typename PipelineRecorder>
+static VkResult compileNonBlockingPipelines(Device *layer, uint32_t createInfoCount, const CreateInfo *pCreateInfos,
+                                            VkPipeline *pPipelines, const VkAllocationCallbacks *pAllocator,
+                                            const CompileFunc &compileFunc, const PipelineRecorder &rec)
+{
+	ScratchAllocator alloc;
+	auto *modifiedCreateInfos = alloc.allocate_n<CreateInfo>(createInfoCount);
+	memcpy(modifiedCreateInfos, pCreateInfos, createInfoCount * sizeof(*modifiedCreateInfos));
+
+	for (uint32_t i = 0; i < createInfoCount; i++)
+	{
+		modifiedCreateInfos[i].flags |= VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT;
+
+		if (!shallowCopyPnextChain(alloc, modifiedCreateInfos[i].pNext, &modifiedCreateInfos[i].pNext))
+			return VK_PIPELINE_COMPILE_REQUIRED;
+
+		auto *flags2 = static_cast<VkPipelineCreateFlags2CreateInfoKHR *>(const_cast<void *>(
+				findpNext(modifiedCreateInfos[i].pNext, VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO_KHR)));
+
+		if (flags2)
+			flags2->flags |= VK_PIPELINE_CREATE_2_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT_KHR;
+	}
+
+	VkResult res = compileFunc(modifiedCreateInfos);
+
+	if (res == VK_PIPELINE_COMPILE_REQUIRED)
+	{
+		for (uint32_t i = 0; i < createInfoCount; i++)
+		{
+			if (pPipelines[i] == VK_NULL_HANDLE)
+			{
+				auto *flags2 = static_cast<VkPipelineCreateFlags2CreateInfoKHR *>(const_cast<void *>(
+						findpNext(pCreateInfos[i].pNext, VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO_KHR)));
+				VkPipelineCreateFlags2KHR flags = flags2 ? flags2->flags : pCreateInfos[i].flags;
+				LOGW_LEVEL("QA: Pipeline compilation required for pipeline, flags %08x'%08x.\n",
+				           uint32_t(flags >> 32), uint32_t(flags));
+				layer->registerPrecompileQAFailure(1);
+				// Record all entries first in case we have derived pipeline references which went through unharmed.
+				rec(i);
+			}
+			else
+			{
+				layer->registerPrecompileQASuccess(1);
+			}
+		}
+
+		for (uint32_t i = 0; i < createInfoCount; i++)
+		{
+			layer->getTable()->DestroyPipeline(layer->getDevice(), pPipelines[i], pAllocator);
+			pPipelines[i] = VK_NULL_HANDLE;
+		}
+	}
+	else
+	{
+		layer->registerPrecompileQASuccess(createInfoCount);
+	}
+
+	return res;
+}
+
 static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelinesNormal(Device *layer,
                                                                     VkDevice device, VkPipelineCache pipelineCache,
                                                                     uint32_t createInfoCount,
@@ -206,20 +661,62 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelinesNormal(Device *laye
                                                                     const VkAllocationCallbacks *pAllocator,
                                                                     VkPipeline *pPipelines)
 {
+	VkResult res = VK_PIPELINE_COMPILE_REQUIRED;
+	bool shouldRecord = true;
+
+	if (shouldAttemptNonBlockingCreation(layer, createInfoCount, pCreateInfos))
+	{
+		// Explicitly ignore pipeline cache since we want to test the internal cache for hits.
+		const auto compileFunc = [&](const VkGraphicsPipelineCreateInfo *modifiedInfos) {
+			return layer->getTable()->CreateGraphicsPipelines(
+					device, VK_NULL_HANDLE, createInfoCount, modifiedInfos, pAllocator, pPipelines);
+		};
+
+		const auto recordFunc = [&](uint32_t index) {
+			if (!layer->getRecorder().record_graphics_pipeline(
+					pPipelines[index], pCreateInfos[index], pPipelines, createInfoCount, 0,
+					device,
+					layer->requiresModuleIdentifiers()
+					? layer->getTable()->GetShaderModuleCreateInfoIdentifierEXT : nullptr))
+			{
+				LOGW_LEVEL("Recording graphics pipeline failed, usually caused by unsupported pNext.\n");
+			}
+		};
+
+		res = compileNonBlockingPipelines(layer, createInfoCount, pCreateInfos, pPipelines, pAllocator, compileFunc, recordFunc);
+
+		// Only record the pipelines which failed to compile so we can debug why.
+		shouldRecord = false;
+		for (uint32_t i = 0; i < createInfoCount; i++)
+		{
+			// If we're creating a library, there might be future pipelines which depend on this pipeline to record properly,
+			// so just record it anyway.
+			if (getEffectivePipelineFlags(pCreateInfos[i]) & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR)
+			{
+				shouldRecord = true;
+				break;
+			}
+		}
+	}
+
 	// Have to create all pipelines here, in case the application makes use of basePipelineIndex.
-	auto res = layer->getTable()->CreateGraphicsPipelines(device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
+	if (res == VK_PIPELINE_COMPILE_REQUIRED)
+		res = layer->getTable()->CreateGraphicsPipelines(device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
 
 	// If pipeline compile fails due to pipeline cache control we get a null handle for pipeline, so we need to
 	// treat it as a failure.
-	if (res != VK_SUCCESS)
+	if (res != VK_SUCCESS || !shouldRecord)
 		return res;
 
 	for (uint32_t i = 0; i < createInfoCount; i++)
 	{
 		if (!layer->getRecorder().record_graphics_pipeline(
 				pPipelines[i], pCreateInfos[i], pPipelines, createInfoCount, 0,
-				device, layer->requiresModuleIdentifiers() ? layer->getTable()->GetShaderModuleCreateInfoIdentifierEXT : nullptr))
+				device,
+				layer->requiresModuleIdentifiers() ? layer->getTable()->GetShaderModuleCreateInfoIdentifierEXT : nullptr))
+		{
 			LOGW_LEVEL("Recording graphics pipeline failed, usually caused by unsupported pNext.\n");
+		}
 	}
 
 	return VK_SUCCESS;
@@ -313,19 +810,48 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateComputePipelinesNormal(Device *layer
                                                                    const VkAllocationCallbacks *pAllocator,
                                                                    VkPipeline *pPipelines)
 {
+	VkResult res = VK_PIPELINE_COMPILE_REQUIRED;
+	bool shouldRecord = true;
+
+	if (shouldAttemptNonBlockingCreation(layer, createInfoCount, pCreateInfos))
+	{
+		const auto compileFunc = [&](const VkComputePipelineCreateInfo *modifiedInfos) {
+			// Explicitly ignore pipeline cache since we want to test the internal cache for hits.
+			return layer->getTable()->CreateComputePipelines(
+					device, VK_NULL_HANDLE, createInfoCount, modifiedInfos, pAllocator, pPipelines);
+		};
+
+		const auto recordFunc = [&](uint32_t index) {
+			if (!layer->getRecorder().record_compute_pipeline(
+					pPipelines[index], pCreateInfos[index], pPipelines, createInfoCount, 0,
+					device,
+					layer->requiresModuleIdentifiers()
+					? layer->getTable()->GetShaderModuleCreateInfoIdentifierEXT : nullptr))
+			{
+				LOGW_LEVEL("Recording graphics pipeline failed, usually caused by unsupported pNext.\n");
+			}
+		};
+
+		res = compileNonBlockingPipelines(layer, createInfoCount, pCreateInfos, pPipelines, pAllocator, compileFunc, recordFunc);
+		// Only record the pipelines which failed to compile so we can debug why.
+		shouldRecord = false;
+	}
+
 	// Have to create all pipelines here, in case the application makes use of basePipelineIndex.
-	auto res = layer->getTable()->CreateComputePipelines(device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
+	if (res == VK_PIPELINE_COMPILE_REQUIRED)
+		res = layer->getTable()->CreateComputePipelines(device, pipelineCache, createInfoCount, pCreateInfos, pAllocator, pPipelines);
 
 	// If pipeline compile fails due to pipeline cache control we get a null handle for pipeline, so we need to
 	// treat it as a failure.
-	if (res != VK_SUCCESS)
+	if (res != VK_SUCCESS || !shouldRecord)
 		return res;
 
 	for (uint32_t i = 0; i < createInfoCount; i++)
 	{
 		if (!layer->getRecorder().record_compute_pipeline(
 				pPipelines[i], pCreateInfos[i], pPipelines, createInfoCount, 0,
-				device, layer->requiresModuleIdentifiers() ? layer->getTable()->GetShaderModuleCreateInfoIdentifierEXT : nullptr))
+				device,
+				layer->requiresModuleIdentifiers() ? layer->getTable()->GetShaderModuleCreateInfoIdentifierEXT : nullptr))
 		{
 			LOGW_LEVEL("Failed to record compute pipeline, usually caused by unsupported pNext.\n");
 		}
@@ -423,6 +949,53 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesNormal(Device *la
                                                                       const VkAllocationCallbacks *pAllocator,
                                                                       VkPipeline *pPipelines)
 {
+	bool shouldRecord = true;
+
+	if (shouldAttemptNonBlockingCreation(layer, createInfoCount, pCreateInfos))
+	{
+		const auto compileFunc = [&](const VkRayTracingPipelineCreateInfoKHR *modifiedInfos) {
+			// Explicitly ignore pipeline cache since we want to test the internal cache for hits.
+			return layer->getTable()->CreateRayTracingPipelinesKHR(
+					device, VK_NULL_HANDLE, VK_NULL_HANDLE, createInfoCount, modifiedInfos, pAllocator, pPipelines);
+		};
+
+		const auto recordFunc = [&](uint32_t index) {
+			if (!layer->getRecorder().record_raytracing_pipeline(
+					pPipelines[index], pCreateInfos[index], pPipelines, createInfoCount, 0,
+					device,
+					layer->requiresModuleIdentifiers()
+					? layer->getTable()->GetShaderModuleCreateInfoIdentifierEXT : nullptr))
+			{
+				LOGW_LEVEL("Recording graphics pipeline failed, usually caused by unsupported pNext.\n");
+			}
+		};
+
+		auto res = compileNonBlockingPipelines(layer, createInfoCount, pCreateInfos, pPipelines, pAllocator, compileFunc, recordFunc);
+		// Only record the pipelines which failed to compile so we can debug why.
+		shouldRecord = false;
+
+		for (uint32_t i = 0; i < createInfoCount; i++)
+		{
+			// If we're creating a library, there might be future pipelines which depend on this pipeline to record properly,
+			// so just record it anyway.
+			if (getEffectivePipelineFlags(pCreateInfos[i]) & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR)
+			{
+				shouldRecord = true;
+				break;
+			}
+		}
+
+		// If app asked for deferredOperations, need to recreate the PSO, but with proper deferred operations this time.
+		if (res == VK_SUCCESS && deferredOperation != VK_NULL_HANDLE)
+		{
+			for (uint32_t i = 0; i < createInfoCount; i++)
+			{
+				layer->getTable()->DestroyPipeline(device, pPipelines[i], pAllocator);
+				pPipelines[i] = VK_NULL_HANDLE;
+			}
+		}
+	}
+
 	// Have to create all pipelines here, in case the application makes use of basePipelineIndex.
 	auto res = layer->getTable()->CreateRayTracingPipelinesKHR(
 			device, deferredOperation, pipelineCache,
@@ -430,7 +1003,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesNormal(Device *la
 
 	// If pipeline compile fails due to pipeline cache control we get a null handle for pipeline, so we need to
 	// treat it as a failure.
-	if (res != VK_SUCCESS)
+	if (res != VK_SUCCESS || !shouldRecord)
 		return res;
 
 	for (uint32_t i = 0; i < createInfoCount; i++)

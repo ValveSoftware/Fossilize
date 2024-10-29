@@ -169,6 +169,10 @@ static std::string getSystemProperty(const char *key)
 #define FOSSILIZE_LAST_USE_TAG_ENV "FOSSILIZE_LAST_USE_TAG"
 #endif
 
+#ifndef FOSSILIZE_PRECOMPILE_QA_ENV
+#define FOSSILIZE_PRECOMPILE_QA_ENV "FOSSILIZE_PRECOMPILE_QA"
+#endif
+
 #ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
 static thread_local const VkComputePipelineCreateInfo *tls_compute_create_info = nullptr;
 static thread_local const VkGraphicsPipelineCreateInfo *tls_graphics_create_info = nullptr;
@@ -297,6 +301,12 @@ void Instance::completedPipelineCompilation()
 #endif
 }
 
+bool Instance::queryPrecompileQA()
+{
+	const char *precompileQA = getenv(FOSSILIZE_PRECOMPILE_QA_ENV);
+	return precompileQA && strtoul(precompileQA, nullptr, 0) != 0;
+}
+
 Instance::Instance()
 {
 #ifdef FOSSILIZE_LAYER_CAPTURE_SIGSEGV
@@ -322,6 +332,8 @@ Instance::Instance()
 	if (sync && strtoul(sync, nullptr, 0) != 0)
 		synchronized = true;
 #endif
+
+	enablePrecompileQA = queryPrecompileQA();
 }
 
 StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDeviceProperties2 *props,

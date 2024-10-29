@@ -117,3 +117,6 @@ FE(MULTISAMPLED_RENDER_TO_SINGLE_SAMPLED, multisampled_render_to_single_sampled,
 FE(DEPTH_BIAS_CONTROL, depth_bias_control, EXT);
 FE(DEPTH_CLAMP_CONTROL, depth_clamp_control, EXT);
 FE(DEVICE_GENERATED_COMMANDS, device_generated_commands, EXT);
+FE(SHADER_OBJECT, shader_object, EXT);
+FE(PRIMITIVES_GENERATED_QUERY, primitives_generated_query, EXT);
+FE(IMAGE_2D_VIEW_OF_3D, image_2d_view_of_3d, EXT);

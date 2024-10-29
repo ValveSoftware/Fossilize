@@ -23,6 +23,7 @@
 #pragma once
 
 #include "dispatch_helper.hpp"
+#include <atomic>
 
 namespace Fossilize
 {
@@ -31,6 +32,8 @@ class StateRecorder;
 class Device
 {
 public:
+	Device();
+
 	void init(VkPhysicalDevice gpu, VkDevice device,
 	          Instance *pInstance,
 	          const void *device_pnext, // Guaranteed to contain PDF2
@@ -61,6 +64,9 @@ public:
 		return usesModuleIdentifiers;
 	}
 
+	void registerPrecompileQASuccess(uint32_t numPipelines);
+	void registerPrecompileQAFailure(uint32_t numPipelines);
+
 private:
 	VkPhysicalDevice gpu = VK_NULL_HANDLE;
 	VkDevice device = VK_NULL_HANDLE;
@@ -69,5 +75,8 @@ private:
 	StateRecorder *recorder = nullptr;
 	Instance *pInstance = nullptr;
 	bool usesModuleIdentifiers = false;
+
+	std::atomic<uint64_t> precompileQASuccessCount;
+	std::atomic<uint64_t> precompileQAFailCount;
 };
 }
