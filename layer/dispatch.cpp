@@ -279,15 +279,27 @@ static VKAPI_ATTR void VKAPI_CALL DestroyInstance(VkInstance instance, const VkA
 }
 
 template <typename T>
-static bool pipelineCreationIsNonBlocking(const T &info)
+static VkPipelineCreateFlags2KHR getEffectivePipelineFlags(const T &info)
 {
 	auto *flags2 = static_cast<const VkPipelineCreateFlags2CreateInfoKHR *>(
 			findpNext(info.pNext, VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO_KHR));
+	return flags2 ? flags2->flags : info.flags;
+}
 
-	if (flags2)
-		return flags2->flags & VK_PIPELINE_CREATE_2_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT_KHR;
-	else
-		return info.flags & VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT;
+template <typename T>
+static bool pipelineCreationIsNonBlocking(const T &info)
+{
+	auto flags = getEffectivePipelineFlags(info);
+
+	auto *libraries = static_cast<const VkPipelineLibraryCreateInfoKHR *>(
+			findpNext(info.pNext, VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR));
+
+	// Fast link pipelines are expected to be non-blocking always, and at least RADV does not cache it.
+	// Don't bother checking if this PSO is in cache, since there's no reason for it to be.
+	if (libraries && libraries->libraryCount && (flags & VK_PIPELINE_CREATE_LINK_TIME_OPTIMIZATION_BIT_EXT) == 0)
+		return true;
+
+	return (flags & VK_PIPELINE_CREATE_2_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT_KHR) != 0;
 }
 
 template <typename T>
@@ -672,8 +684,19 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateGraphicsPipelinesNormal(Device *laye
 		};
 
 		res = compileNonBlockingPipelines(layer, createInfoCount, pCreateInfos, pPipelines, pAllocator, compileFunc, recordFunc);
+
 		// Only record the pipelines which failed to compile so we can debug why.
 		shouldRecord = false;
+		for (uint32_t i = 0; i < createInfoCount; i++)
+		{
+			// If we're creating a library, there might be future pipelines which depend on this pipeline to record properly,
+			// so just record it anyway.
+			if (getEffectivePipelineFlags(pCreateInfos[i]) & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR)
+			{
+				shouldRecord = true;
+				break;
+			}
+		}
 	}
 
 	// Have to create all pipelines here, in case the application makes use of basePipelineIndex.
@@ -950,6 +973,17 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesNormal(Device *la
 		auto res = compileNonBlockingPipelines(layer, createInfoCount, pCreateInfos, pPipelines, pAllocator, compileFunc, recordFunc);
 		// Only record the pipelines which failed to compile so we can debug why.
 		shouldRecord = false;
+
+		for (uint32_t i = 0; i < createInfoCount; i++)
+		{
+			// If we're creating a library, there might be future pipelines which depend on this pipeline to record properly,
+			// so just record it anyway.
+			if (getEffectivePipelineFlags(pCreateInfos[i]) & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR)
+			{
+				shouldRecord = true;
+				break;
+			}
+		}
 
 		// If app asked for deferredOperations, need to recreate the PSO, but with proper deferred operations this time.
 		if (res == VK_SUCCESS && deferredOperation != VK_NULL_HANDLE)
