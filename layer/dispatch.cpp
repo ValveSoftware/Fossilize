@@ -294,6 +294,13 @@ static bool pipelineCreationIsNonBlocking(const T &info)
 	auto *libraries = static_cast<const VkPipelineLibraryCreateInfoKHR *>(
 			findpNext(info.pNext, VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR));
 
+	auto *binaries = static_cast<const VkPipelineBinaryInfoKHR *>(
+			findpNext(info.pNext, VK_STRUCTURE_TYPE_PIPELINE_BINARY_INFO_KHR));
+
+	// Creating pipelines from binaries are always non-blocking.
+	if (binaries && binaries->binaryCount)
+		return true;
+
 	// Fast link pipelines are expected to be non-blocking always, and at least RADV does not cache it.
 	// Don't bother checking if this PSO is in cache, since there's no reason for it to be.
 	if (libraries && libraries->libraryCount && (flags & VK_PIPELINE_CREATE_LINK_TIME_OPTIMIZATION_BIT_EXT) == 0)
