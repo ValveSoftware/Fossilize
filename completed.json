@@ -30,7 +30,6 @@
 		"VK_EXT_pipeline_creation_feedback",
 		"VK_KHR_depth_stencil_resolve",
 		"VK_EXT_subgroup_size_control",
-		"VK_KHR_dynamic_rendering_local_read",
 		"VK_KHR_separate_depth_stencil_layouts",
 		"VK_EXT_validation_features",
 		"VK_EXT_provoking_vertex",
