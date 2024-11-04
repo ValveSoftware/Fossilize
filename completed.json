@@ -90,9 +90,11 @@
 		"VK_EXT_subpass_merge_feedback",
 		"VK_KHR_pipeline_binary",
 		"VK_EXT_depth_clamp_control",
-		"VK_EXT_device_generated_commands"
+		"VK_EXT_device_generated_commands",
+		"VK_KHR_dynamic_rendering_local_read"
 	],
 	"fully-ignored" : [
+		"VK_AMD_mixed_attachment_samples",
 		"VK_AMD_rasterization_order",
 		"VK_NV_viewport_swizzle",
 		"VK_ANDROID_external_memory_android_hardware_buffer",
