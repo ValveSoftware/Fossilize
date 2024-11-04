@@ -117,7 +117,8 @@
 		"VK_EXT_shader_object",
 		"VK_QCOM_image_processing2",
 		"VK_QCOM_filter_cubic_weights",
-		"VK_QCOM_filter_cubic_clamp"
+		"VK_QCOM_filter_cubic_clamp",
+		"VK_NV_device_generated_commands"
 	],
 	"cherry-pick": [
 		"VK_DYNAMIC_STATE_VIEWPORT_W_SCALING_NV",
@@ -269,7 +270,7 @@
 		"FragmentShaderSampleInterlockEXT",
 		"FragmentShaderPixelInterlockEXT",
 		"FragmentShaderShadingRateInterlockEXT",
-		"DemoteToHelperInvocationEXT",
+		"DemoteToHelperInvocation",
 		"FragmentShadingRateKHR",
 		"RayQueryKHR",
 		"RayTracingKHR",
@@ -277,10 +278,10 @@
 		"WorkgroupMemoryExplicitLayoutKHR",
 		"WorkgroupMemoryExplicitLayout8BitAccessKHR",
 		"WorkgroupMemoryExplicitLayout16BitAccessKHR",
-		"DotProductKHR",
-		"DotProductInputAllKHR",
-		"DotProductInput4x8BitKHR",
-		"DotProductInput4x8BitPackedKHR",
+		"DotProduct",
+		"DotProductInputAll",
+		"DotProductInput4x8Bit",
+		"DotProductInput4x8BitPacked",
 		"MeshShadingEXT",
 		"FragmentFullyCoveredEXT",
 		"AtomicFloat16VectorNV",

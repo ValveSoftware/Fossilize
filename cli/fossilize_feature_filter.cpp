@@ -2367,7 +2367,7 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 	case spv::CapabilityFragmentShaderShadingRateInterlockEXT:
 		return features.shader_interlock.fragmentShaderShadingRateInterlock == VK_TRUE ||
 		       features.shading_rate_nv.shadingRateImage == VK_TRUE;
-	case spv::CapabilityDemoteToHelperInvocationEXT:
+	case spv::CapabilityDemoteToHelperInvocation:
 		return features.demote_to_helper.shaderDemoteToHelperInvocation == VK_TRUE;
 	case spv::CapabilityFragmentShadingRateKHR:
 		return features.fragment_shading_rate.primitiveFragmentShadingRate == VK_TRUE;
@@ -2384,10 +2384,10 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 		return features.workgroup_memory_explicit_layout.workgroupMemoryExplicitLayout8BitAccess == VK_TRUE;
 	case spv::CapabilityWorkgroupMemoryExplicitLayout16BitAccessKHR:
 		return features.workgroup_memory_explicit_layout.workgroupMemoryExplicitLayout16BitAccess == VK_TRUE;
-	case spv::CapabilityDotProductKHR:
-	case spv::CapabilityDotProductInputAllKHR:
-	case spv::CapabilityDotProductInput4x8BitKHR:
-	case spv::CapabilityDotProductInput4x8BitPackedKHR:
+	case spv::CapabilityDotProduct:
+	case spv::CapabilityDotProductInputAll:
+	case spv::CapabilityDotProductInput4x8Bit:
+	case spv::CapabilityDotProductInput4x8BitPacked:
 		return features.shader_integer_dot_product.shaderIntegerDotProduct == VK_TRUE;
 	case spv::CapabilityMeshShadingEXT:
 		return features.mesh_shader.meshShader == VK_TRUE;
