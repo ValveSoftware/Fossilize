@@ -385,6 +385,8 @@ struct StateReplayer::Impl
 	bool parse_sample_locations_info(const Value &state, VkSampleLocationsInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_pipeline_robustness(const Value &state, VkPipelineRobustnessCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_depth_clamp_control(const Value &state, VkPipelineViewportDepthClampControlCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_rendering_attachment_location_info(const Value &state, VkRenderingAttachmentLocationInfoKHR **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_rendering_input_attachment_index_info(const Value &state, VkRenderingInputAttachmentIndexInfoKHR **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_uints(const Value &attachments, const uint32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	bool parse_sints(const Value &attachments, const int32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	const char *duplicate_string(const char *str, size_t len);
@@ -536,6 +538,10 @@ struct StateRecorder::Impl
 	void *copy_pnext_struct(const VkPipelineViewportDepthClampControlCreateInfoEXT *create_info,
 	                        ScratchAllocator &alloc,
 	                        const DynamicStateInfo *dynamic_state_info) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkRenderingAttachmentLocationInfoKHR *create_info,
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkRenderingInputAttachmentIndexInfoKHR *create_info,
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	template <typename T>
 	void *copy_pnext_struct_simple(const T *create_info, ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 
@@ -834,6 +840,43 @@ static void hash_pnext_struct(const StateRecorder *, Hasher &h,
 	}
 	else
 		h.u32(0);
+}
+
+static void hash_pnext_struct(const StateRecorder *, Hasher &h,
+                              const VkRenderingAttachmentLocationInfoKHR &info)
+{
+	h.u32(info.colorAttachmentCount);
+	if (info.pColorAttachmentLocations)
+	{
+		for (uint32_t i = 0; i < info.colorAttachmentCount; i++)
+			h.u32(info.pColorAttachmentLocations[i]);
+	}
+	else
+		h.u32(0);
+}
+
+static void hash_pnext_struct(const StateRecorder *, Hasher &h,
+                              const VkRenderingInputAttachmentIndexInfoKHR &info)
+{
+	h.u32(info.colorAttachmentCount);
+
+	if (info.pColorAttachmentInputIndices)
+	{
+		for (uint32_t i = 0; i < info.colorAttachmentCount; i++)
+			h.u32(info.pColorAttachmentInputIndices[i]);
+	}
+	else
+		h.u32(0);
+
+	if (info.pDepthInputAttachmentIndex)
+		h.u32(*info.pDepthInputAttachmentIndex);
+	else
+		h.u32(0xffff); // Use an arbitrary invalid attachment value.
+
+	if (info.pStencilInputAttachmentIndex)
+		h.u32(*info.pStencilInputAttachmentIndex);
+	else
+		h.u32(0xffff); // Use an arbitrary invalid attachment value.
 }
 
 static bool hash_pnext_chain_pdf2(const StateRecorder *recorder, Hasher &h, const void *pNext)
@@ -1656,6 +1699,14 @@ static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const voi
 
 		case VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_DEPTH_CLAMP_CONTROL_CREATE_INFO_EXT:
 			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineViewportDepthClampControlCreateInfoEXT *>(pNext), dynamic_state_info);
+			break;
+
+		case VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_LOCATION_INFO_KHR:
+			hash_pnext_struct(recorder, h, *static_cast<const VkRenderingAttachmentLocationInfoKHR *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_RENDERING_INPUT_ATTACHMENT_INDEX_INFO_KHR:
+			hash_pnext_struct(recorder, h, *static_cast<const VkRenderingInputAttachmentIndexInfoKHR *>(pNext));
 			break;
 
 		default:
@@ -4819,6 +4870,52 @@ bool StateReplayer::Impl::parse_depth_clamp_control(const Value &state, VkPipeli
 	return true;
 }
 
+bool StateReplayer::Impl::parse_rendering_attachment_location_info(const Value &state, VkRenderingAttachmentLocationInfoKHR **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkRenderingAttachmentLocationInfoKHR>();
+	info->colorAttachmentCount = state["colorAttachmentCount"].GetUint();
+	if (state.HasMember("colorAttachmentLocations"))
+	{
+		auto *locs = allocator.allocate_n_cleared<uint32_t>(info->colorAttachmentCount);
+		for (uint32_t i = 0; i < info->colorAttachmentCount; i++)
+			locs[i] = state["colorAttachmentLocations"][i].GetUint();
+		info->pColorAttachmentLocations = locs;
+	}
+
+	*out_info = info;
+	return true;
+}
+
+bool StateReplayer::Impl::parse_rendering_input_attachment_index_info(const Value &state, VkRenderingInputAttachmentIndexInfoKHR **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkRenderingInputAttachmentIndexInfoKHR>();
+	info->colorAttachmentCount = state["colorAttachmentCount"].GetUint();
+	if (state.HasMember("colorAttachmentInputIndices"))
+	{
+		auto *locs = allocator.allocate_n<uint32_t>(info->colorAttachmentCount);
+		for (uint32_t i = 0; i < info->colorAttachmentCount; i++)
+			locs[i] = state["colorAttachmentInputIndices"][i].GetUint();
+		info->pColorAttachmentInputIndices = locs;
+	}
+
+	if (state.HasMember("depthInputAttachmentIndex"))
+	{
+		auto *loc = allocator.allocate<uint32_t>();
+		*loc = state["depthInputAttachmentIndex"].GetUint();
+		info->pDepthInputAttachmentIndex = loc;
+	}
+
+	if (state.HasMember("stencilInputAttachmentIndex"))
+	{
+		auto *loc = allocator.allocate<uint32_t>();
+		*loc = state["stencilInputAttachmentIndex"].GetUint();
+		info->pStencilInputAttachmentIndex = loc;
+	}
+
+	*out_info = info;
+	return true;
+}
+
 bool StateReplayer::Impl::parse_mutable_descriptor_type(const Value &state,
                                                         VkMutableDescriptorTypeCreateInfoEXT **out_info)
 {
@@ -5240,6 +5337,24 @@ bool StateReplayer::Impl::parse_pnext_chain(
 		{
 			VkPipelineViewportDepthClampControlCreateInfoEXT *info = nullptr;
 			if (!parse_depth_clamp_control(next, &info))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_LOCATION_INFO_KHR:
+		{
+			VkRenderingAttachmentLocationInfoKHR *info = nullptr;
+			if (!parse_rendering_attachment_location_info(next, &info))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_RENDERING_INPUT_ATTACHMENT_INDEX_INFO_KHR:
+		{
+			VkRenderingInputAttachmentIndexInfoKHR *info = nullptr;
+			if (!parse_rendering_input_attachment_index_info(next, &info))
 				return false;
 			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
 			break;
@@ -5907,6 +6022,26 @@ void *StateRecorder::Impl::copy_pnext_struct(const VkPipelineViewportDepthClampC
 	return clamp_control;
 }
 
+void *StateRecorder::Impl::copy_pnext_struct(const VkRenderingAttachmentLocationInfoKHR *info, ScratchAllocator &alloc)
+{
+	auto *loc_info = copy(info, 1, alloc);
+	if (loc_info->pColorAttachmentLocations)
+		loc_info->pColorAttachmentLocations = copy(loc_info->pColorAttachmentLocations, info->colorAttachmentCount, alloc);
+	return loc_info;
+}
+
+void *StateRecorder::Impl::copy_pnext_struct(const VkRenderingInputAttachmentIndexInfoKHR *info, ScratchAllocator &alloc)
+{
+	auto *loc_info = copy(info, 1, alloc);
+	if (loc_info->pColorAttachmentInputIndices)
+		loc_info->pColorAttachmentInputIndices = copy(loc_info->pColorAttachmentInputIndices, info->colorAttachmentCount, alloc);
+	if (loc_info->pDepthInputAttachmentIndex)
+		loc_info->pDepthInputAttachmentIndex = copy(loc_info->pDepthInputAttachmentIndex, 1, alloc);
+	if (loc_info->pStencilInputAttachmentIndex)
+		loc_info->pStencilInputAttachmentIndex = copy(loc_info->pStencilInputAttachmentIndex, 1, alloc);
+	return loc_info;
+}
+
 template <typename T>
 void *StateRecorder::Impl::copy_pnext_struct_simple(const T *create_info, ScratchAllocator &alloc)
 {
@@ -6242,6 +6377,20 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 		{
 			auto *ci = static_cast<const VkPipelineViewportDepthClampControlCreateInfoEXT *>(pNext);
 			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc, dynamic_state_info));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_LOCATION_INFO_KHR:
+		{
+			auto *ci = static_cast<const VkRenderingAttachmentLocationInfoKHR *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_RENDERING_INPUT_ATTACHMENT_INDEX_INFO_KHR:
+		{
+			auto *ci = static_cast<const VkRenderingInputAttachmentIndexInfoKHR *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
 			break;
 		}
 
@@ -9429,6 +9578,49 @@ static bool json_value(const VkPipelineViewportDepthClampControlCreateInfoEXT &c
 }
 
 template <typename Allocator>
+static bool json_value(const VkRenderingAttachmentLocationInfoKHR &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("colorAttachmentCount", create_info.colorAttachmentCount, alloc);
+
+	if (create_info.pColorAttachmentLocations)
+	{
+		Value range(kArrayType);
+		for (uint32_t i = 0; i < create_info.colorAttachmentCount; i++)
+			range.PushBack(create_info.pColorAttachmentLocations[i], alloc);
+		value.AddMember("colorAttachmentLocations", range, alloc);
+	}
+
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
+static bool json_value(const VkRenderingInputAttachmentIndexInfoKHR &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("colorAttachmentCount", create_info.colorAttachmentCount, alloc);
+
+	if (create_info.pColorAttachmentInputIndices)
+	{
+		Value range(kArrayType);
+		for (uint32_t i = 0; i < create_info.colorAttachmentCount; i++)
+			range.PushBack(create_info.pColorAttachmentInputIndices[i], alloc);
+		value.AddMember("colorAttachmentInputIndices", range, alloc);
+	}
+
+	if (create_info.pDepthInputAttachmentIndex)
+		value.AddMember("depthInputAttachmentIndex", *create_info.pDepthInputAttachmentIndex, alloc);
+	if (create_info.pStencilInputAttachmentIndex)
+		value.AddMember("stencilInputAttachmentIndex", *create_info.pStencilInputAttachmentIndex, alloc);
+
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
 static bool json_value(const VkSubpassDescriptionDepthStencilResolve &create_info, Allocator &alloc, Value *out_value);
 template <typename Allocator>
 static bool json_value(const VkFragmentShadingRateAttachmentInfoKHR &create_info, Allocator &alloc, Value *out_value);
@@ -9640,6 +9832,16 @@ static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *o
 
 		case VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_DEPTH_CLAMP_CONTROL_CREATE_INFO_EXT:
 			if (!json_value(*static_cast<const VkPipelineViewportDepthClampControlCreateInfoEXT *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_LOCATION_INFO_KHR:
+			if (!json_value(*static_cast<const VkRenderingAttachmentLocationInfoKHR *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_RENDERING_INPUT_ATTACHMENT_INDEX_INFO_KHR:
+			if (!json_value(*static_cast<const VkRenderingInputAttachmentIndexInfoKHR *>(pNext), alloc, &next))
 				return false;
 			break;
 

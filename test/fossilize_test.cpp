@@ -2283,7 +2283,36 @@ static void record_graphics_pipelines(StateRecorder &recorder)
 	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100013), pipe, nullptr, 0))
 		abort();
 	range = { 0.8f, 0.2f };
-	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100013), pipe, nullptr, 0))
+	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100014), pipe, nullptr, 0))
+		abort();
+
+	VkRenderingAttachmentLocationInfoKHR attachment_location_info = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_LOCATION_INFO_KHR };
+	pipe.pNext = &attachment_location_info;
+	attachment_location_info.colorAttachmentCount = 1;
+	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100015), pipe, nullptr, 0))
+		abort();
+	attachment_location_info.colorAttachmentCount = 2;
+	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100016), pipe, nullptr, 0))
+		abort();
+
+	const uint32_t color_locs[] = { 5, 4, UINT32_MAX };
+	attachment_location_info.pColorAttachmentLocations = color_locs;
+	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100017), pipe, nullptr, 0))
+		abort();
+
+	VkRenderingInputAttachmentIndexInfoKHR input_attachment_info = { VK_STRUCTURE_TYPE_RENDERING_INPUT_ATTACHMENT_INDEX_INFO_KHR };
+	input_attachment_info.colorAttachmentCount = 2;
+	pipe.pNext = &input_attachment_info;
+	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100018), pipe, nullptr, 0))
+		abort();
+	input_attachment_info.pColorAttachmentInputIndices = color_locs;
+	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100019), pipe, nullptr, 0))
+		abort();
+	input_attachment_info.pDepthInputAttachmentIndex = color_locs + 1;
+	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100020), pipe, nullptr, 0))
+		abort();
+	input_attachment_info.pStencilInputAttachmentIndex = color_locs + 2;
+	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100021), pipe, nullptr, 0))
 		abort();
 }
 
