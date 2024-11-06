@@ -55,6 +55,7 @@ struct VulkanFeatures
 	VkPhysicalDeviceDynamicRenderingFeaturesKHR dynamic_rendering;
 	VkPhysicalDeviceMaintenance4FeaturesKHR maintenance4;
 	VkPhysicalDeviceMaintenance5FeaturesKHR maintenance5;
+	VkPhysicalDeviceMaintenance7FeaturesKHR maintenance7;
 	VkPhysicalDeviceZeroInitializeWorkgroupMemoryFeaturesKHR zero_initialize_workgroup_memory;
 	VkPhysicalDeviceTransformFeedbackFeaturesEXT transform_feedback;
 	VkPhysicalDeviceDepthClipEnableFeaturesEXT depth_clip;
@@ -175,6 +176,7 @@ struct VulkanProperties
 	VkPhysicalDeviceMeshShaderPropertiesEXT mesh_shader;
 	VkPhysicalDeviceShaderModuleIdentifierPropertiesEXT shader_module_identifier;
 	VkPhysicalDeviceBlendOperationAdvancedPropertiesEXT blend_operation_advanced;
+	VkPhysicalDeviceMaintenance7PropertiesKHR maintenance7;
 
 	struct
 	{

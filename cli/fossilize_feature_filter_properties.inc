@@ -37,3 +37,4 @@ PE(EXTENDED_DYNAMIC_STATE_3, extended_dynamic_state3, EXT);
 PE(MESH_SHADER, mesh_shader, EXT);
 PE(SHADER_MODULE_IDENTIFIER, shader_module_identifier, EXT);
 PE(BLEND_OPERATION_ADVANCED, blend_operation_advanced, EXT);
+PE(MAINTENANCE_7, maintenance7, KHR);

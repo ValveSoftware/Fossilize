@@ -85,6 +85,7 @@ FE(NON_SEAMLESS_CUBE_MAP, non_seamless_cube_map, EXT);
 FE(ATTACHMENT_FEEDBACK_LOOP_LAYOUT, attachment_feedback_loop_layout, EXT);
 FE(MAINTENANCE_4, maintenance4, KHR);
 FE(MAINTENANCE_5, maintenance5, KHR);
+FE(MAINTENANCE_7, maintenance7, KHR);
 FE(SHADER_MODULE_IDENTIFIER, shader_module_identifier, EXT);
 FE(RAY_TRACING_MAINTENANCE_1, ray_tracing_maintenance1, KHR);
 FE(RAY_TRACING_MOTION_BLUR, ray_tracing_motion_blur_nv, NV);
