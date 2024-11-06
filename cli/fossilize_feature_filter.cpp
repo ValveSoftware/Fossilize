@@ -1896,10 +1896,22 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 
 	if (pool_is_update_after_bind)
 	{
-		if (counts.ubo_dynamic > props.descriptor_indexing.maxDescriptorSetUpdateAfterBindUniformBuffersDynamic)
-			return false;
-		if (counts.ssbo_dynamic > props.descriptor_indexing.maxDescriptorSetUpdateAfterBindStorageBuffersDynamic)
-			return false;
+		if (features.maintenance7.maintenance7)
+		{
+			if (counts.ubo_dynamic > props.maintenance7.maxDescriptorSetUpdateAfterBindTotalUniformBuffersDynamic)
+				return false;
+			if (counts.ssbo_dynamic > props.maintenance7.maxDescriptorSetUpdateAfterBindTotalStorageBuffersDynamic)
+				return false;
+			if ((counts.ubo_dynamic + counts.ssbo_dynamic) > props.maintenance7.maxDescriptorSetUpdateAfterBindTotalBuffersDynamic)
+				return false;
+		}
+		else
+		{
+			if (counts.ubo_dynamic > props.descriptor_indexing.maxDescriptorSetUpdateAfterBindUniformBuffersDynamic)
+				return false;
+			if (counts.ssbo_dynamic > props.descriptor_indexing.maxDescriptorSetUpdateAfterBindStorageBuffersDynamic)
+				return false;
+		}
 		if (counts.ubo > props.descriptor_indexing.maxDescriptorSetUpdateAfterBindUniformBuffers)
 			return false;
 		if (counts.ssbo > props.descriptor_indexing.maxDescriptorSetUpdateAfterBindStorageBuffers)
@@ -1917,10 +1929,22 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 	}
 	else
 	{
-		if (counts.ubo_dynamic > props2.properties.limits.maxDescriptorSetUniformBuffersDynamic)
-			return false;
-		if (counts.ssbo_dynamic > props2.properties.limits.maxDescriptorSetStorageBuffersDynamic)
-			return false;
+		if (features.maintenance7.maintenance7)
+		{
+			if (counts.ubo_dynamic > props.maintenance7.maxDescriptorSetTotalUniformBuffersDynamic)
+				return false;
+			if (counts.ssbo_dynamic > props.maintenance7.maxDescriptorSetTotalStorageBuffersDynamic)
+				return false;
+			if ((counts.ubo_dynamic + counts.ssbo_dynamic) > props.maintenance7.maxDescriptorSetTotalBuffersDynamic)
+				return false;
+		}
+		else
+		{
+			if (counts.ubo_dynamic > props2.properties.limits.maxDescriptorSetUniformBuffersDynamic)
+				return false;
+			if (counts.ssbo_dynamic > props2.properties.limits.maxDescriptorSetStorageBuffersDynamic)
+				return false;
+		}
 		if (counts.ubo > props2.properties.limits.maxDescriptorSetUniformBuffers)
 			return false;
 		if (counts.ssbo > props2.properties.limits.maxDescriptorSetStorageBuffers)
