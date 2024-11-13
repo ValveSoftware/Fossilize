@@ -70,34 +70,59 @@ ExternalReplayer::PollResult ExternalReplayer::poll_progress(Progress &progress)
 
 void ExternalReplayer::compute_condensed_progress(const Progress &progress, unsigned &completed, unsigned &total)
 {
-	// Pipelines go through parsing and then compilation, each of which stage gets a report.
 	// Some pipelines might be compiled twice if they are derivable pipelines especially when using multi-process replays.
 	// There are also shenanigans when pipelines are compiled multiple times as a result of crash recoveries.
 	// We do not know ahead of time how many modules we are going to compile from the archive.
 	// This depends entirely on which modules the pipelines refer to.
 	// Due to all these quirks, it is somewhat complicated to provide an accurate metric on completion.
-	unsigned total_actions = 2 * progress.total_graphics_pipeline_blobs +
-	                         2 * progress.total_compute_pipeline_blobs +
-	                         2 * progress.total_raytracing_pipeline_blobs +
-	                         progress.total_modules;
+
+	// As modules are pulled in, they increase the total progress.
+	// Since it may look like progress is moving backwards in this scenario,
+	// it's better to heavily discount shader module progress.
+	constexpr unsigned ModuleWeightDivider = 10;
+	unsigned weighted_total_modules = (progress.total_modules + ModuleWeightDivider - 1) / ModuleWeightDivider;
+
+	// Skipped pipelines (i.e. we only did parsing) mostly lower the total,
+	// but to get some semblance of forward progress in the total,
+	// increment the progress by 1 for every 100 skipped pipelines.
+	// This is mostly relevant for cached pipeline replays.
+	constexpr unsigned SkipWeightDivider = 100;
 
 	// If we have crashes or other unexpected behavior, these values might increase beyond the expected value.
 	// Just clamp it to never report obviously wrong values.
 	// The only glitch we risk is that we're stuck at "100%" a bit longer,
 	// but UI can always report something here when we know we're not done yet.
-	unsigned parsed_graphics = (std::min)(progress.graphics.parsed + progress.graphics.parsed_fail + progress.graphics.cached, progress.total_graphics_pipeline_blobs);
-	unsigned parsed_compute = (std::min)(progress.compute.parsed + progress.compute.parsed_fail + progress.compute.cached, progress.total_compute_pipeline_blobs);
-	unsigned parsed_raytracing = (std::min)(progress.raytracing.parsed + progress.raytracing.parsed_fail + progress.raytracing.cached, progress.total_raytracing_pipeline_blobs);
-	unsigned compiled_graphics = (std::min)(progress.graphics.completed + progress.graphics.skipped + progress.graphics.cached, progress.total_graphics_pipeline_blobs);
-	unsigned compiled_compute = (std::min)(progress.compute.completed + progress.compute.skipped + progress.compute.cached, progress.total_compute_pipeline_blobs);
-	unsigned compiled_raytracing = (std::min)(progress.raytracing.completed + progress.raytracing.skipped + progress.raytracing.cached, progress.total_raytracing_pipeline_blobs);
+
+	// To aim for good forward progress metrics, skipped or cached pipelines where we're not doing anything useful should subtract from the total instead.
+	unsigned skipped_graphics = progress.graphics.cached + progress.graphics.skipped;
+	unsigned total_work_graphics = progress.total_graphics_pipeline_blobs -
+	                               (std::min)(progress.total_graphics_pipeline_blobs, skipped_graphics);
+	unsigned weighted_skipped_graphics = (skipped_graphics + SkipWeightDivider - 1) / SkipWeightDivider;
+
+	unsigned skipped_compute = progress.compute.cached + progress.compute.skipped;
+	unsigned total_work_compute = progress.total_compute_pipeline_blobs -
+	                              (std::min)(progress.total_compute_pipeline_blobs, skipped_compute);
+	unsigned weighted_skipped_compute = (skipped_compute + SkipWeightDivider - 1) / SkipWeightDivider;
+
+	unsigned skipped_raytracing = progress.raytracing.cached + progress.raytracing.skipped;
+	unsigned total_work_raytracing = progress.total_raytracing_pipeline_blobs -
+	                                 (std::min)(progress.total_raytracing_pipeline_blobs, skipped_raytracing);
+	unsigned weighted_skipped_raytracing = (skipped_raytracing + SkipWeightDivider - 1) / SkipWeightDivider;
+
 	unsigned decompressed_modules = (std::min)(progress.completed_modules + progress.module_validation_failures +
 	                                           progress.banned_modules + progress.missing_modules, progress.total_modules);
+	unsigned weighted_decompressed_modules = (decompressed_modules + ModuleWeightDivider - 1) / ModuleWeightDivider;
 
-	completed = parsed_graphics + parsed_compute + parsed_raytracing +
-	            compiled_graphics + compiled_compute + compiled_raytracing +
-	            decompressed_modules;
-	total = total_actions;
+	unsigned compiled_graphics = (std::min)(progress.graphics.completed, total_work_graphics);
+	unsigned compiled_compute = (std::min)(progress.compute.completed, total_work_compute);
+	unsigned compiled_raytracing = (std::min)(progress.raytracing.completed, total_work_raytracing);
+
+	completed = compiled_graphics + compiled_compute + compiled_raytracing + weighted_decompressed_modules;
+	total = total_work_graphics + total_work_compute + total_work_raytracing + weighted_total_modules;
+
+	unsigned total_weighted_skipped = weighted_skipped_graphics + weighted_skipped_compute + weighted_skipped_raytracing;
+	completed += total_weighted_skipped;
+	total += total_weighted_skipped;
 }
 
 bool ExternalReplayer::is_process_complete(int *return_status)
