@@ -761,6 +761,29 @@ void FeatureFilter::Impl::init_features(const void *pNext)
 			break;
 		}
 
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES:
+		{
+			auto &vk14 = *reinterpret_cast<const VkPhysicalDeviceVulkan14Features *>(base);
+			FEATURE(dynamic_rendering_local_read, vk14, dynamicRenderingLocalRead);
+			FEATURE(shader_subgroup_rotate, vk14, shaderSubgroupRotate);
+			FEATURE(shader_subgroup_rotate, vk14, shaderSubgroupRotateClustered);
+			FEATURE(shader_float_controls2, vk14, shaderFloatControls2);
+			FEATURE(expect_assume, vk14, shaderExpectAssume);
+			FEATURE(line_rasterization, vk14, rectangularLines);
+			FEATURE(line_rasterization, vk14, bresenhamLines);
+			FEATURE(line_rasterization, vk14, smoothLines);
+			FEATURE(line_rasterization, vk14, stippledRectangularLines);
+			FEATURE(line_rasterization, vk14, stippledBresenhamLines);
+			FEATURE(line_rasterization, vk14, stippledSmoothLines);
+			FEATURE(attribute_divisor, vk14, vertexAttributeInstanceRateDivisor);
+			FEATURE(attribute_divisor, vk14, vertexAttributeInstanceRateZeroDivisor);
+			FEATURE(maintenance5, vk14, maintenance5);
+			FEATURE(pipeline_protected_access, vk14, pipelineProtectedAccess);
+			FEATURE(pipeline_robustness, vk14, pipelineRobustness);
+			FEATURE(vk14, vk14, pushDescriptor);
+			break;
+		}
+
 		default:
 			break;
 		}
@@ -892,6 +915,14 @@ void FeatureFilter::Impl::init_properties(const void *pNext)
 			//uniformTexelBufferOffsetAlignmentBytes;
 			//uniformTexelBufferOffsetSingleTexelAlignment;
 			//maxBufferSize;
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_PROPERTIES:
+		{
+			auto &vk14 = *reinterpret_cast<const VkPhysicalDeviceVulkan14Properties *>(base);
+			PROP(attribute_divisor, vk14, maxVertexAttribDivisor);
+			PROP(push_descriptor, vk14, maxPushDescriptors);
 			break;
 		}
 
@@ -1649,7 +1680,7 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 
 	if ((info->flags & VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR) != 0)
 	{
-		if (enabled_extensions.count(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME) == 0)
+		if (enabled_extensions.count(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME) == 0 && features.vk14.pushDescriptor == 0)
 			return false;
 	}
 
