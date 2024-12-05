@@ -4,7 +4,7 @@
         "name": "VK_LAYER_fossilize",
         "type": "GLOBAL",
         "library_path": "@FOSSILIZE_LAYER_PATH@",
-        "api_version": "1.3.300",
+        "api_version": "1.4.303",
         "implementation_version": "1",
         "description": "Fossilize capture layer",
         "functions": {
