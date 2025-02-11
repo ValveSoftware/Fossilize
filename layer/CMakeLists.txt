@@ -82,4 +82,45 @@ target_link_libraries(VkLayer_fossilize fossilize)
 
 if (ANDROID)
 	target_link_libraries(VkLayer_fossilize log)
+	option(FOSSILIZE_LAYER_APK "Enable Fossilize layer APK build." OFF)
+	if (FOSSILIZE_LAYER_APK)
+		set(ANDROID_PROJECT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android")
+		set(ANDROID_BUILD_DIR "${CMAKE_BINARY_DIR}/android")
+		set(ANDROID_GRADLE "${ANDROID_BUILD_DIR}/gradlew")
+		if (WIN32)
+			set(ANDROID_GRADLE "${ANDROID_GRADLE}.bat")
+		endif()
+
+		option(ANDROID_SDK "Path to the Android SDK" "")
+		if (NOT ANDROID_SDK)
+			if (DEFINED ENV{ANDROID_SDK})
+				set(ANDROID_SDK "$ENV{ANDROID_SDK}")
+			else()
+				message(FATAL_ERROR "ANDROID_SDK must be set either as a CMake option or an environment variable.")
+			endif()
+		endif()
+		get_filename_component(ANDROID_SDK_PATH "${ANDROID_SDK}" ABSOLUTE)
+
+		file(COPY ${ANDROID_PROJECT_DIR} DESTINATION ${CMAKE_BINARY_DIR})
+
+		add_custom_target(copy_layer_so ALL
+			COMMAND ${CMAKE_COMMAND} -E copy
+			${CMAKE_BINARY_DIR}/layer/libVkLayer_fossilize.so
+			${ANDROID_BUILD_DIR}/app/src/main/jniLibs/arm64-v8a/libVkLayer_fossilize.so
+			DEPENDS VkLayer_fossilize
+		)
+
+		add_custom_target(build_apk ALL
+			COMMAND ${CMAKE_COMMAND} -E env "ANDROID_HOME=${ANDROID_SDK_PATH}" ${ANDROID_GRADLE} assembleDebug
+			WORKING_DIRECTORY ${ANDROID_BUILD_DIR}
+			DEPENDS copy_layer_so
+		)
+
+		add_custom_target(copy_apk ALL
+			COMMAND ${CMAKE_COMMAND} -E copy
+			${ANDROID_BUILD_DIR}/app/build/outputs/apk/debug/app-debug.apk
+			${CMAKE_BINARY_DIR}/fossilize.apk
+			DEPENDS build_apk
+		)
+	endif()
 endif()
