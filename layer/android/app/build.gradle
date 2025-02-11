@@ -1,0 +1,24 @@
+plugins {
+    alias(libs.plugins.android.application)
+}
+
+android {
+    namespace 'com.valve.fossilize'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.valve.fossilize"
+        minSdk 29
+        targetSdk 29
+        versionCode 1
+        versionName "1.0"
+        ndk {
+            //noinspection ChromeOsAbiSupport
+            abiFilters "arm64-v8a"
+        }
+    }
+
+    packagingOptions {
+        doNotStrip "**/*.so"
+    }
+}
