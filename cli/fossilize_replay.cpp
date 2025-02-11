@@ -4092,6 +4092,7 @@ int main(int argc, char *argv[])
 
 	bool log_memory = false;
 
+#ifndef NO_ROBUST_REPLAYER
 	// If a wrapper is specified, pass execution entirely to the wrapper.
 	const char *wrapper_path = getenv(FOSSILIZE_REPLAY_WRAPPER_ENV);
 	if (wrapper_path && *wrapper_path)
@@ -4099,6 +4100,7 @@ int main(int argc, char *argv[])
 		dispatch_to_replay_wrapper(wrapper_path, argv);
 		// If execution fails, just continue on normally.
 	}
+#endif
 
 	CLICallbacks cbs;
 	cbs.default_handler = [&](const char *arg) { databases.push_back(arg); };
