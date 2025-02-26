@@ -2996,6 +2996,11 @@ struct ThreadedReplayer : StateCreatorInterface
 
 			memory_index = (memory_index + 1) % NUM_PIPELINE_MEMORY_CONTEXTS;
 		}
+
+		// If the last work happens in memory context 0, we won't sync up memory context 1 properly.
+		// Ensure that happens properly.
+		work.push_back({ get_order_index(PARSE_ENQUEUE_OFFSET),
+		                 [this, memory_index]() { sync_worker_memory_context(memory_index); }});
 	}
 
 	void sync_threads() override
