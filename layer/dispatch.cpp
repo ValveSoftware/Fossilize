@@ -1010,7 +1010,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesNormal(Device *la
 
 	// If pipeline compile fails due to pipeline cache control we get a null handle for pipeline, so we need to
 	// treat it as a failure.
-	if (res != VK_SUCCESS || !shouldRecord)
+	if ((res != VK_SUCCESS && res != VK_OPERATION_DEFERRED_KHR && res != VK_OPERATION_NOT_DEFERRED_KHR) || !shouldRecord)
 		return res;
 
 	for (uint32_t i = 0; i < createInfoCount; i++)
@@ -1023,7 +1023,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesNormal(Device *la
 		}
 	}
 
-	return VK_SUCCESS;
+	return res;
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesParanoid(Device *layer,
@@ -1062,9 +1062,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesParanoid(Device *
 
 		// Have to create all pipelines here, in case the application makes use of basePipelineIndex.
 		// Write arguments in TLS in-case we crash here.
+		// Never defer operations when we're recording in paranoid mode,
+		// since we need to observe the compilation on this thread.
 		Instance::braceForRayTracingPipelineCrash(&layer->getRecorder(), &info);
-		// FIXME: Can we meaningfully deal with deferredOperation here?
-		auto res = layer->getTable()->CreateRayTracingPipelinesKHR(device, deferredOperation, pipelineCache, 1, &info,
+		auto res = layer->getTable()->CreateRayTracingPipelinesKHR(device, VK_NULL_HANDLE, pipelineCache, 1, &info,
 		                                                           pAllocator, &pPipelines[i]);
 		Instance::completedPipelineCompilation();
 
@@ -1076,7 +1077,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesParanoid(Device *
 			LOGW_LEVEL("Failed to record compute pipeline, usually caused by unsupported pNext.\n");
 		}
 
-		if (res == VK_PIPELINE_COMPILE_REQUIRED_EXT)
+		if (res == VK_PIPELINE_COMPILE_REQUIRED)
 			final_res = res;
 
 		if (res < 0)
@@ -1091,6 +1092,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateRayTracingPipelinesParanoid(Device *
 			break;
 		}
 	}
+
+	if (final_res == VK_SUCCESS && deferredOperation)
+		final_res = VK_OPERATION_NOT_DEFERRED_KHR;
 
 	return final_res;
 }
