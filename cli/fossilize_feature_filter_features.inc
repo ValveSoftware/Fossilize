@@ -121,3 +121,4 @@ FE(DEVICE_GENERATED_COMMANDS, device_generated_commands, EXT);
 FE(SHADER_OBJECT, shader_object, EXT);
 FE(PRIMITIVES_GENERATED_QUERY, primitives_generated_query, EXT);
 FE(IMAGE_2D_VIEW_OF_3D, image_2d_view_of_3d, EXT);
+FE(OPACITY_MICROMAP, opacity_micromap, EXT);
