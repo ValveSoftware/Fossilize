@@ -91,13 +91,9 @@ static bool filter_extension(const char *ext, bool want_amd_shader_info,
 		}
 	}
 
-	if (strcmp(ext, VK_AMD_NEGATIVE_VIEWPORT_HEIGHT_EXTENSION_NAME) == 0 ||
-	    strcmp(ext, VK_NV_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME) == 0)
+	if (strcmp(ext, VK_AMD_NEGATIVE_VIEWPORT_HEIGHT_EXTENSION_NAME) == 0)
 	{
 		// AMD_negative_viewport_height: Obsolete, illegal to enable along maintenance1.
-		// NV_fragment_shader: Various enum conflicts,
-		// not considered important enough to work around a vendor extension for this.
-		// Don't want to enable both NV and KHR extensions together.
 		return false;
 	}
 	else if (strcmp(ext, VK_NV_RAY_TRACING_EXTENSION_NAME) == 0)
