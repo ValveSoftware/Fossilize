@@ -876,7 +876,7 @@ static void print_help()
 static string uint64_string(uint64_t value)
 {
 	char str[17]; // 16 digits + null
-	sprintf(str, "%016" PRIx64, value);
+	snprintf(str, sizeof(str), "%016" PRIx64, value);
 	return string(str);
 }
 

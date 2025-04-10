@@ -55,8 +55,8 @@ int main(int argc, char *argv[])
   // Append a bunch of text files to the test archive
   for (i = (N - 1); i >= 0; --i)
   {
-    sprintf(archive_filename, "%u.txt", i);
-    sprintf(data, "%u %s %u", (N - 1) - i, s_pTest_str, i);
+    snprintf(archive_filename, sizeof(archive_filename), "%u.txt", i);
+    snprintf(data, sizeof(data), "%u %s %u", (N - 1) - i, s_pTest_str, i);
 
     // Add a new file to the archive. Note this is an IN-PLACE operation, so if it fails your archive is probably hosed (its central directory may not be complete) but it should be recoverable using zip -F or -FF. So use caution with this guy.
     // A more robust way to add a file to an archive would be to read it into memory, perform the operation, then write a new archive out to a temp file and then delete/rename the files.
@@ -127,8 +127,8 @@ int main(int argc, char *argv[])
 
     for (i = 0; i < N; i++)
     {
-      sprintf(archive_filename, "%u.txt", i);
-      sprintf(data, "%u %s %u", (N - 1) - i, s_pTest_str, i);
+      snprintf(archive_filename, sizeof(archive_filename), "%u.txt", i);
+      snprintf(data, sizeof(data), "%u %s %u", (N - 1) - i, s_pTest_str, i);
 
       // Try to extract all the files to the heap.
       p = mz_zip_reader_extract_file_to_heap(&zip_archive, archive_filename, &uncomp_size, 0);

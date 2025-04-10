@@ -594,7 +594,7 @@ struct DumbDirectoryDatabase : DatabaseInterface
 			return false;
 
 		char filename[25]; // 2 digits + "." + 16 digits + ".json" + null
-		sprintf(filename, "%02x.%016" PRIx64 ".json", static_cast<unsigned>(tag), hash);
+		snprintf(filename, sizeof(filename), "%02x.%016" PRIx64 ".json", static_cast<unsigned>(tag), hash);
 		auto path = Path::join(base_directory, filename);
 
 		FILE *file = fopen(path.c_str(), "rb");
@@ -646,7 +646,7 @@ struct DumbDirectoryDatabase : DatabaseInterface
 			return true;
 
 		char filename[25]; // 2 digits + "." + 16 digits + ".json" + null
-		sprintf(filename, "%02x.%016" PRIx64 ".json", static_cast<unsigned>(tag), hash);
+		snprintf(filename, sizeof(filename), "%02x.%016" PRIx64 ".json", static_cast<unsigned>(tag), hash);
 		auto path = Path::join(base_directory, filename);
 
 		FILE *file = fopen(path.c_str(), "wb");
@@ -862,8 +862,8 @@ struct ZipDatabase : DatabaseInterface
 			return true;
 
 		char str[FOSSILIZE_BLOB_HASH_LENGTH + 1]; // 40 digits + null
-		sprintf(str, "%0*x", FOSSILIZE_BLOB_HASH_LENGTH - 16, tag);
-		sprintf(str + FOSSILIZE_BLOB_HASH_LENGTH - 16, "%016" PRIx64, hash);
+		snprintf(str, FOSSILIZE_BLOB_HASH_LENGTH + 1, "%0*x", FOSSILIZE_BLOB_HASH_LENGTH - 16, tag);
+		snprintf(str + FOSSILIZE_BLOB_HASH_LENGTH - 16, 17, "%016" PRIx64, hash);
 
 		unsigned mz_flags;
 		if ((flags & PAYLOAD_WRITE_COMPRESS_BIT) != 0)
@@ -1353,8 +1353,8 @@ struct StreamArchive : DatabaseInterface
 			return true;
 
 		char str[FOSSILIZE_BLOB_HASH_LENGTH + 1]; // 40 digits + null
-		sprintf(str, "%0*x", FOSSILIZE_BLOB_HASH_LENGTH - 16, tag);
-		sprintf(str + FOSSILIZE_BLOB_HASH_LENGTH - 16, "%016" PRIx64, hash);
+		snprintf(str, FOSSILIZE_BLOB_HASH_LENGTH + 1, "%0*x", FOSSILIZE_BLOB_HASH_LENGTH - 16, tag);
+		snprintf(str + FOSSILIZE_BLOB_HASH_LENGTH - 16, 17, "%016" PRIx64, hash);
 
 		if (fwrite(str, 1, FOSSILIZE_BLOB_HASH_LENGTH, file) != FOSSILIZE_BLOB_HASH_LENGTH)
 			return false;

@@ -164,7 +164,7 @@ void ProcessProgress::parse(const char *cmd)
 			if (Global::control_block && graphics_progress > 0 && graphics_pipeline != 0)
 			{
 				char buffer[ControlBlockMessageSize];
-				sprintf(buffer, "GRAPHICS %d %" PRIx64 "\n", graphics_progress - 1, graphics_pipeline);
+				snprintf(buffer, ControlBlockMessageSize, "GRAPHICS %d %" PRIx64 "\n", graphics_progress - 1, graphics_pipeline);
 
 				if (WaitForSingleObject(Global::shared_mutex, INFINITE) == WAIT_OBJECT_0)
 				{
@@ -185,7 +185,7 @@ void ProcessProgress::parse(const char *cmd)
 			if (Global::control_block && raytracing_progress > 0 && raytracing_pipeline != 0)
 			{
 				char buffer[ControlBlockMessageSize];
-				sprintf(buffer, "RAYTRACE %d %" PRIx64 "\n", raytracing_progress - 1, raytracing_pipeline);
+				snprintf(buffer, ControlBlockMessageSize, "RAYTRACE %d %" PRIx64 "\n", raytracing_progress - 1, raytracing_pipeline);
 
 				if (WaitForSingleObject(Global::shared_mutex, INFINITE) == WAIT_OBJECT_0)
 				{
@@ -206,7 +206,7 @@ void ProcessProgress::parse(const char *cmd)
 			if (Global::control_block && compute_progress > 0 && compute_pipeline)
 			{
 				char buffer[ControlBlockMessageSize];
-				sprintf(buffer, "COMPUTE %d %" PRIx64 "\n", compute_progress - 1, compute_pipeline);
+				snprintf(buffer, ControlBlockMessageSize, "COMPUTE %d %" PRIx64 "\n", compute_progress - 1, compute_pipeline);
 
 				if (WaitForSingleObject(Global::shared_mutex, INFINITE) == WAIT_OBJECT_0)
 				{
@@ -351,7 +351,7 @@ static void send_faulty_modules_and_close(HANDLE file)
 	for (auto &m : Global::faulty_spirv_modules)
 	{
 		char buffer[18];
-		sprintf(buffer, "%" PRIx64 "\n", m);
+		snprintf(buffer, sizeof(buffer), "%" PRIx64 "\n", m);
 		write_all(file, buffer);
 	}
 
@@ -368,7 +368,7 @@ static bool CreateCustomPipe(HANDLE *read_pipe, HANDLE *write_pipe, LPSECURITY_A
 	// This is so that we can safely read one message at a time with ReadFile rather than rely on fgets to delimit each message for us.
 	static unsigned pipe_serial;
 	char pipe_name_buffer[MAX_PATH];
-	sprintf(pipe_name_buffer, "\\\\.\\Pipe\\Fossilize.%08lx.%08x", GetCurrentProcessId(), pipe_serial++);
+	snprintf(pipe_name_buffer, sizeof(pipe_name_buffer), "\\\\.\\Pipe\\Fossilize.%08lx.%08x", GetCurrentProcessId(), pipe_serial++);
 	*read_pipe = CreateNamedPipeA(pipe_name_buffer, PIPE_ACCESS_INBOUND | (overlapped_read ? FILE_FLAG_OVERLAPPED : 0),
 	                              PIPE_TYPE_MESSAGE | PIPE_WAIT | PIPE_READMODE_MESSAGE, 1, 4096, 4096, 10000, attrs);
 
@@ -1045,19 +1045,19 @@ static void validation_error_cb(ThreadedReplayer *replayer)
 
 	if (per_thread.current_graphics_pipeline)
 	{
-		sprintf(buffer, "GRAPHICS_VERR %" PRIx64 "\n", per_thread.current_graphics_pipeline);
+		snprintf(buffer, sizeof(buffer), "GRAPHICS_VERR %" PRIx64 "\n", per_thread.current_graphics_pipeline);
 		write_all(crash_handle, buffer);
 	}
 
 	if (per_thread.current_compute_pipeline)
 	{
-		sprintf(buffer, "COMPUTE_VERR %" PRIx64 "\n", per_thread.current_compute_pipeline);
+		snprintf(buffer, sizeof(buffer), "COMPUTE_VERR %" PRIx64 "\n", per_thread.current_compute_pipeline);
 		write_all(crash_handle, buffer);
 	}
 
 	if (per_thread.current_raytracing_pipeline)
 	{
-		sprintf(buffer, "RAYTRACE_VERR %" PRIx64 "\n", per_thread.current_raytracing_pipeline);
+		snprintf(buffer, sizeof(buffer), "RAYTRACE_VERR %" PRIx64 "\n", per_thread.current_raytracing_pipeline);
 		write_all(crash_handle, buffer);
 	}
 }
@@ -1067,7 +1067,7 @@ static void report_module_uuid(const char (&path)[2 * VK_UUID_SIZE + 1])
 	if (crash_handle)
 	{
 		char buffer[64];
-		sprintf(buffer, "MODULE_UUID %s\n", path);
+		snprintf(buffer, sizeof(buffer), "MODULE_UUID %s\n", path);
 		if (!write_all(crash_handle, buffer))
 			ExitProcess(2);
 	}
@@ -1081,7 +1081,7 @@ static void crash_handler(ThreadedReplayer &replayer, ThreadedReplayer::PerThrea
 	// This allows a new process to ignore these modules.
 	for (unsigned i = 0; i < per_thread.num_failed_module_hashes; i++)
 	{
-		sprintf(buffer, "MODULE %" PRIx64 "\n", per_thread.failed_module_hashes[i]);
+		snprintf(buffer, sizeof(buffer), "MODULE %" PRIx64 "\n", per_thread.failed_module_hashes[i]);
 		if (!write_all(crash_handle, buffer))
 			ExitProcess(2);
 	}
@@ -1094,17 +1094,17 @@ static void crash_handler(ThreadedReplayer &replayer, ThreadedReplayer::PerThrea
 	    per_thread.current_raytracing_pipeline)
 	{
 		// Report where we stopped, so we can continue.
-		sprintf(buffer, "GRAPHICS %d %" PRIx64 "\n", per_thread.current_graphics_index,
+		snprintf(buffer, sizeof(buffer), "GRAPHICS %d %" PRIx64 "\n", per_thread.current_graphics_index,
 		        per_thread.current_graphics_pipeline);
 		if (!write_all(crash_handle, buffer))
 			ExitProcess(2);
 
-		sprintf(buffer, "COMPUTE %d %" PRIx64 "\n", per_thread.current_compute_index,
+		snprintf(buffer, sizeof(buffer), "COMPUTE %d %" PRIx64 "\n", per_thread.current_compute_index,
 		        per_thread.current_compute_pipeline);
 		if (!write_all(crash_handle, buffer))
 			ExitProcess(2);
 
-		sprintf(buffer, "RAYTRACE %d %" PRIx64 "\n", per_thread.current_raytracing_index,
+		snprintf(buffer, sizeof(buffer), "RAYTRACE %d %" PRIx64 "\n", per_thread.current_raytracing_index,
 		        per_thread.current_raytracing_pipeline);
 		if (!write_all(crash_handle, buffer))
 			ExitProcess(2);
@@ -1325,7 +1325,7 @@ static int run_slave_process(const VulkanDevice::Options &opts,
 		if (WaitForSingleObject(Global::shared_mutex, INFINITE) == WAIT_OBJECT_0)
 		{
 			char msg[ControlBlockMessageSize] = {};
-			sprintf(msg, "SLAVE_FINISHED\n");
+			snprintf(msg, ControlBlockMessageSize, "SLAVE_FINISHED\n");
 			shared_control_block_write(Global::control_block, msg, sizeof(msg));
 			ReleaseMutex(Global::shared_mutex);
 		}

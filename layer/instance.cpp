@@ -382,7 +382,7 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDevicePropert
 		needsBucket = false;
 
 	char hashString[17];
-	sprintf(hashString, "%016" PRIx64, hash);
+	snprintf(hashString, sizeof(hashString), "%016" PRIx64, hash);
 
 	// Try to normalize the path layouts for last use.
 	// Without buckets:
@@ -420,7 +420,7 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDevicePropert
 	{
 		char bucketPath[17];
 		Hash bucketHash = infoFilter->get_bucket_hash(props, appInfo, device_pnext);
-		sprintf(bucketPath, "%016" PRIx64, bucketHash);
+		snprintf(bucketPath, sizeof(bucketPath), "%016" PRIx64, bucketHash);
 
 		// For convenience. Makes filenames similar in top-level directory and bucket directories.
 		auto basename = Path::basename(serializationPath);
@@ -465,7 +465,7 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDevicePropert
 		{
 			char uuidString[2 * VK_UUID_SIZE + 1];
 			for (unsigned i = 0; i < VK_UUID_SIZE; i++)
-				sprintf(uuidString + 2 * i, "%02x", identifierProps->shaderModuleIdentifierAlgorithmUUID[i]);
+				snprintf(uuidString + 2 * i, 2 * VK_UUID_SIZE + 1 - 2 * i, "%02x", identifierProps->shaderModuleIdentifierAlgorithmUUID[i]);
 
 			std::string identifierDatabasePath = identifierPath;
 			identifierDatabasePath += '.';
