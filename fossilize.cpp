@@ -111,7 +111,7 @@ template <typename Allocator>
 static Value uint64_string(uint64_t value, Allocator &alloc)
 {
 	char str[17]; // 16 digits + null
-	sprintf(str, "%016" PRIx64, value);
+	snprintf(str, sizeof(str), "%016" PRIx64, value);
 	return Value(str, alloc);
 }
 

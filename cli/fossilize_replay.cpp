@@ -1692,7 +1692,7 @@ struct ThreadedReplayer : StateCreatorInterface
 				auto &props = device->get_module_identifier_properties();
 				char uuid_string[2 * VK_UUID_SIZE + 1];
 				for (unsigned i = 0; i < VK_UUID_SIZE; i++)
-					sprintf(uuid_string + 2 * i, "%02x", props.shaderModuleIdentifierAlgorithmUUID[i]);
+					snprintf(uuid_string + 2 * i, 2 * VK_UUID_SIZE + 1 - 2 * i, "%02x", props.shaderModuleIdentifierAlgorithmUUID[i]);
 
 				report_module_uuid(uuid_string);
 

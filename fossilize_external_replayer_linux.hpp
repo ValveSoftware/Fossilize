@@ -593,7 +593,7 @@ bool ExternalReplayer::Impl::get_raytracing_failed_validation(size_t *count, Has
 void ExternalReplayer::Impl::start_replayer_process(const ExternalReplayer::Options &options, int ctl_fd)
 {
 	char fd_name[16], control_fd_name[16];
-	sprintf(fd_name, "%d", fd);
+	snprintf(fd_name, sizeof(fd_name), "%d", fd);
 	char num_thread_holder[16];
 
 	std::string self_path;
@@ -627,7 +627,7 @@ void ExternalReplayer::Impl::start_replayer_process(const ExternalReplayer::Opti
 	if (ctl_fd >= 0)
 	{
 		argv.push_back("--control-fd");
-		sprintf(control_fd_name, "%d", ctl_fd);
+		snprintf(control_fd_name, sizeof(control_fd_name), "%d", ctl_fd);
 		argv.push_back(control_fd_name);
 	}
 
@@ -637,7 +637,7 @@ void ExternalReplayer::Impl::start_replayer_process(const ExternalReplayer::Opti
 	if (options.num_threads)
 	{
 		argv.push_back("--num-threads");
-		sprintf(num_thread_holder, "%u", options.num_threads);
+		snprintf(num_thread_holder, sizeof(num_thread_holder), "%u", options.num_threads);
 		argv.push_back(num_thread_holder);
 	}
 
@@ -671,7 +671,7 @@ void ExternalReplayer::Impl::start_replayer_process(const ExternalReplayer::Opti
 		argv.push_back("--on-disk-replay-whitelist");
 		argv.push_back(options.on_disk_replay_whitelist);
 
-		sprintf(whitelist_hex, "%x", options.on_disk_replay_whitelist_mask);
+		snprintf(whitelist_hex, sizeof(whitelist_hex), "%x", options.on_disk_replay_whitelist_mask);
 		argv.push_back("--on-disk-replay-whitelist-mask");
 		argv.push_back(whitelist_hex);
 	}
@@ -701,7 +701,7 @@ void ExternalReplayer::Impl::start_replayer_process(const ExternalReplayer::Opti
 
 	argv.push_back("--device-index");
 	char index_name[16];
-	sprintf(index_name, "%u", options.device_index);
+	snprintf(index_name, sizeof(index_name), "%u", options.device_index);
 	argv.push_back(index_name);
 
 	char graphics_range_start[16], graphics_range_end[16];
@@ -711,20 +711,20 @@ void ExternalReplayer::Impl::start_replayer_process(const ExternalReplayer::Opti
 	if (options.use_pipeline_range)
 	{
 		argv.push_back("--graphics-pipeline-range");
-		sprintf(graphics_range_start, "%u", options.start_graphics_index);
-		sprintf(graphics_range_end, "%u", options.end_graphics_index);
+		snprintf(graphics_range_start, sizeof(graphics_range_start), "%u", options.start_graphics_index);
+		snprintf(graphics_range_end, sizeof(graphics_range_end), "%u", options.end_graphics_index);
 		argv.push_back(graphics_range_start);
 		argv.push_back(graphics_range_end);
 
 		argv.push_back("--compute-pipeline-range");
-		sprintf(compute_range_start, "%u", options.start_compute_index);
-		sprintf(compute_range_end, "%u", options.end_compute_index);
+		snprintf(compute_range_start, sizeof(compute_range_start), "%u", options.start_compute_index);
+		snprintf(compute_range_end, sizeof(compute_range_end), "%u", options.end_compute_index);
 		argv.push_back(compute_range_start);
 		argv.push_back(compute_range_end);
 
 		argv.push_back("--raytracing-pipeline-range");
-		sprintf(raytracing_range_start, "%u", options.start_raytracing_index);
-		sprintf(raytracing_range_end, "%u", options.end_raytracing_index);
+		snprintf(raytracing_range_start, sizeof(raytracing_range_start), "%u", options.start_raytracing_index);
+		snprintf(raytracing_range_end, sizeof(raytracing_range_end), "%u", options.end_raytracing_index);
 		argv.push_back(raytracing_range_start);
 		argv.push_back(raytracing_range_end);
 	}
@@ -739,7 +739,7 @@ void ExternalReplayer::Impl::start_replayer_process(const ExternalReplayer::Opti
 	if (options.timeout_seconds)
 	{
 		argv.push_back("--timeout-seconds");
-		sprintf(timeout, "%u", options.timeout_seconds);
+		snprintf(timeout, sizeof(timeout), "%u", options.timeout_seconds);
 		argv.push_back(timeout);
 	}
 
@@ -748,7 +748,7 @@ void ExternalReplayer::Impl::start_replayer_process(const ExternalReplayer::Opti
 	for (unsigned i = 0; i < options.num_implicit_whitelist_indices; i++)
 	{
 		argv.push_back("--implicit-whitelist");
-		sprintf(implicit_indices[i].data(), "%u", options.implicit_whitelist_indices[i]);
+		snprintf(implicit_indices[i].data(), implicit_indices[i].size(), "%u", options.implicit_whitelist_indices[i]);
 		argv.push_back(implicit_indices[i].data());
 	}
 
@@ -884,7 +884,7 @@ static bool create_low_priority_autogroup()
 bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 {
 	char shm_name[256];
-	sprintf(shm_name, "/fossilize-external-%d-%d", getpid(), shm_index.fetch_add(1, std::memory_order_relaxed));
+	snprintf(shm_name, sizeof(shm_name), "/fossilize-external-%d-%d", getpid(), shm_index.fetch_add(1, std::memory_order_relaxed));
 	fd = shm_open(shm_name, O_RDWR | O_CREAT | O_EXCL, 0600);
 	if (fd < 0)
 	{

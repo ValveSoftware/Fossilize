@@ -202,7 +202,7 @@ void ProcessProgress::parse(const char *cmd)
 			if (Global::control_block && graphics_progress > 0 && graphics_pipeline != 0)
 			{
 				char buffer[ControlBlockMessageSize];
-				sprintf(buffer, "GRAPHICS %d %" PRIx64 "\n", graphics_progress - 1, graphics_pipeline);
+				snprintf(buffer, ControlBlockMessageSize, "GRAPHICS %d %" PRIx64 "\n", graphics_progress - 1, graphics_pipeline);
 				futex_wrapper_lock(&Global::control_block->futex_lock);
 				shared_control_block_write(Global::control_block, buffer, sizeof(buffer));
 				futex_wrapper_unlock(&Global::control_block->futex_lock);
@@ -220,7 +220,7 @@ void ProcessProgress::parse(const char *cmd)
 			if (Global::control_block && raytracing_progress > 0 && raytracing_pipeline != 0)
 			{
 				char buffer[ControlBlockMessageSize];
-				sprintf(buffer, "RAYTRACE %d %" PRIx64 "\n", raytracing_progress - 1, raytracing_pipeline);
+				snprintf(buffer, ControlBlockMessageSize, "RAYTRACE %d %" PRIx64 "\n", raytracing_progress - 1, raytracing_pipeline);
 				futex_wrapper_lock(&Global::control_block->futex_lock);
 				shared_control_block_write(Global::control_block, buffer, sizeof(buffer));
 				futex_wrapper_unlock(&Global::control_block->futex_lock);
@@ -238,7 +238,7 @@ void ProcessProgress::parse(const char *cmd)
 			if (Global::control_block && compute_progress > 0 && compute_pipeline)
 			{
 				char buffer[ControlBlockMessageSize];
-				sprintf(buffer, "COMPUTE %d %" PRIx64 "\n", compute_progress - 1, compute_pipeline);
+				snprintf(buffer, ControlBlockMessageSize, "COMPUTE %d %" PRIx64 "\n", compute_progress - 1, compute_pipeline);
 				futex_wrapper_lock(&Global::control_block->futex_lock);
 				shared_control_block_write(Global::control_block, buffer, sizeof(buffer));
 				futex_wrapper_unlock(&Global::control_block->futex_lock);
@@ -417,7 +417,7 @@ static void send_faulty_modules_and_close(int fd)
 	for (auto &m : Global::faulty_spirv_modules)
 	{
 		char buffer[18];
-		sprintf(buffer, "%" PRIx64 "\n", m);
+		snprintf(buffer, sizeof(buffer), "%" PRIx64 "\n", m);
 		write_all(fd, buffer);
 	}
 
@@ -1426,19 +1426,19 @@ static void validation_error_cb(ThreadedReplayer *replayer)
 
 	if (per_thread.current_graphics_pipeline)
 	{
-		sprintf(buffer, "GRAPHICS_VERR %" PRIx64 "\n", per_thread.current_graphics_pipeline);
+		snprintf(buffer, sizeof(buffer), "GRAPHICS_VERR %" PRIx64 "\n", per_thread.current_graphics_pipeline);
 		write_all(crash_fd, buffer);
 	}
 
 	if (per_thread.current_compute_pipeline)
 	{
-		sprintf(buffer, "COMPUTE_VERR %" PRIx64 "\n", per_thread.current_compute_pipeline);
+		snprintf(buffer, sizeof(buffer), "COMPUTE_VERR %" PRIx64 "\n", per_thread.current_compute_pipeline);
 		write_all(crash_fd, buffer);
 	}
 
 	if (per_thread.current_raytracing_pipeline)
 	{
-		sprintf(buffer, "RAYTRACE_VERR %" PRIx64 "\n", per_thread.current_raytracing_pipeline);
+		snprintf(buffer, sizeof(buffer), "RAYTRACE_VERR %" PRIx64 "\n", per_thread.current_raytracing_pipeline);
 		write_all(crash_fd, buffer);
 	}
 }
@@ -1448,7 +1448,7 @@ static void report_module_uuid(const char (&path)[2 * VK_UUID_SIZE + 1])
 	if (crash_fd >= 0)
 	{
 		char buffer[64];
-		sprintf(buffer, "MODULE_UUID %s\n", path);
+		snprintf(buffer, sizeof(buffer), "MODULE_UUID %s\n", path);
 		if (!write_all(crash_fd, buffer))
 			_exit(2);
 	}
@@ -1462,7 +1462,7 @@ static void crash_handler(ThreadedReplayer &replayer, ThreadedReplayer::PerThrea
 	// This allows a new process to ignore these modules.
 	for (unsigned i = 0; i < per_thread.num_failed_module_hashes; i++)
 	{
-		sprintf(buffer, "MODULE %" PRIx64 "\n", per_thread.failed_module_hashes[i]);
+		snprintf(buffer, sizeof(buffer), "MODULE %" PRIx64 "\n", per_thread.failed_module_hashes[i]);
 		if (!write_all(crash_fd, buffer))
 			_exit(2);
 	}
@@ -1475,18 +1475,18 @@ static void crash_handler(ThreadedReplayer &replayer, ThreadedReplayer::PerThrea
 	    per_thread.current_raytracing_pipeline)
 	{
 		// Report where we stopped, so we can continue.
-		sprintf(buffer, "GRAPHICS %d %" PRIx64 "\n", per_thread.current_graphics_index,
-		        per_thread.current_graphics_pipeline);
+		snprintf(buffer, sizeof(buffer), "GRAPHICS %d %" PRIx64 "\n", per_thread.current_graphics_index,
+		         per_thread.current_graphics_pipeline);
 		if (!write_all(crash_fd, buffer))
 			_exit(2);
 
-		sprintf(buffer, "COMPUTE %d %" PRIx64 "\n", per_thread.current_compute_index,
-		        per_thread.current_compute_pipeline);
+		snprintf(buffer, sizeof(buffer), "COMPUTE %d %" PRIx64 "\n", per_thread.current_compute_index,
+		         per_thread.current_compute_pipeline);
 		if (!write_all(crash_fd, buffer))
 			_exit(2);
 
-		sprintf(buffer, "RAYTRACE %d %" PRIx64 "\n", per_thread.current_raytracing_index,
-		        per_thread.current_raytracing_pipeline);
+		snprintf(buffer, sizeof(buffer), "RAYTRACE %d %" PRIx64 "\n", per_thread.current_raytracing_index,
+		         per_thread.current_raytracing_pipeline);
 		if (!write_all(crash_fd, buffer))
 			_exit(2);
 	}
@@ -1707,7 +1707,7 @@ static int run_slave_process(const VulkanDevice::Options &opts,
 	{
 		futex_wrapper_lock(&Global::control_block->futex_lock);
 		char msg[ControlBlockMessageSize] = {};
-		sprintf(msg, "SLAVE_FINISHED\n");
+		snprintf(msg, ControlBlockMessageSize, "SLAVE_FINISHED\n");
 		shared_control_block_write(Global::control_block, msg, sizeof(msg));
 		futex_wrapper_unlock(&Global::control_block->futex_lock);
 	}
@@ -1719,7 +1719,7 @@ static int run_slave_process(const VulkanDevice::Options &opts,
 static void log_process_memory()
 {
 	char path[1024];
-	sprintf(path, "/proc/%d/status", getpid());
+	snprintf(path, sizeof(path), "/proc/%d/status", getpid());
 	FILE *file = fopen(path, "r");
 	if (!file)
 	{
