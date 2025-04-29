@@ -2841,8 +2841,12 @@ struct ThreadedReplayer : StateCreatorInterface
 
 						                for (auto dependency : dependencies)
 						                {
-							                // Handle nested libraries.
-							                enqueue_parent_pipelines(parents.at(dependency), pipelines, parents, *parsed_parents);
+							                // Handle nested libraries. It's possible that we can't find the
+											// reference to the parent in the archive,
+											// in which case we cannot compile any of the children.
+											auto itr = parents.find(dependency);
+											if (itr != parents.end())
+												enqueue_parent_pipelines(itr->second, pipelines, parents, *parsed_parents);
 						                }
 
 						                if (parsed_parents->empty())
