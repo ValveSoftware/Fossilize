@@ -311,9 +311,10 @@ string get_executable_path()
 		snprintf(link_path, sizeof(link_path), "/proc/self/%s", ext);
 		ssize_t ret = readlink(link_path, target, sizeof(target) - 1);
 		if (ret >= 0)
+		{
 			target[ret] = '\0';
-
-		return string(target);
+			return string(target);
+		}
 	}
 
 	return "";
