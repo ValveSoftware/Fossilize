@@ -60,11 +60,6 @@ static inline bool operator==(const VkShaderModuleIdentifierEXT &a, const VkShad
 	       memcmp(a.identifier, b.identifier, a.identifierSize) == 0;
 }
 
-static inline bool operator!=(const VkShaderModuleIdentifierEXT &a, const VkShaderModuleIdentifierEXT &b)
-{
-	return !(a == b);
-}
-
 namespace std
 {
 template <> struct hash<VkShaderModuleIdentifierEXT>
