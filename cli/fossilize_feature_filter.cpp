@@ -4573,6 +4573,12 @@ bool FeatureFilter::supports_scalar_block_layout() const
 	return impl->null_device || impl->features.vk12.scalarBlockLayout;
 }
 
+bool FeatureFilter::supports_maintenance4() const
+{
+	return impl->null_device || impl->features.maintenance4.maintenance4 ||
+	       impl->api_version >= VK_MAKE_VERSION(1, 3, 0);
+}
+
 void FeatureFilter::set_device_query_interface(DeviceQueryInterface *iface)
 {
 	impl->query = iface;
