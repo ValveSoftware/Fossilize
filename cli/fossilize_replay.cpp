@@ -335,6 +335,248 @@ struct PipelineFeedback
 	}
 };
 
+class PipelineResolver
+{
+public:
+	~PipelineResolver();
+	const VkGraphicsPipelineCreateInfo *resolve_graphics_pipeline(VulkanDevice *device, const VkGraphicsPipelineCreateInfo *info);
+	const VkComputePipelineCreateInfo *resolve_compute_pipeline(VulkanDevice *device, const VkComputePipelineCreateInfo *info);
+	const VkRayTracingPipelineCreateInfoKHR *resolve_ray_tracing_pipeline(VulkanDevice *device, const VkRayTracingPipelineCreateInfoKHR *info);
+
+	void flush(VulkanDevice *device);
+
+private:
+	ScratchAllocator alloc;
+
+	VkResult resolve_pipeline_layout(VulkanDevice *device, VkPipelineLayout *pipeline_layout);
+	VkResult resolve_descriptor_set_layout(VulkanDevice *device, VkDescriptorSetLayout *set_layout);
+	VkResult resolve_sampler(VulkanDevice *device, VkSampler *sampler);
+	VkResult resolve_render_pass(VulkanDevice *device, VkRenderPass *render_pass);
+
+	std::vector<VkSampler> samplers;
+	std::vector<VkDescriptorSetLayout> set_layouts;
+	std::vector<VkPipelineLayout> pipeline_layouts;
+	std::vector<VkRenderPass> render_passes;
+};
+
+PipelineResolver::~PipelineResolver()
+{
+	if (!samplers.empty() ||
+	    !set_layouts.empty() ||
+	    !pipeline_layouts.empty() ||
+	    !render_passes.empty())
+	{
+		LOGE("Leaking objects from PipelineResolver!\n");
+	}
+}
+
+void PipelineResolver::flush(VulkanDevice *device)
+{
+	for (auto &samp : samplers)
+		vkDestroySampler(device->get_device(), samp, nullptr);
+	for (auto &layout : set_layouts)
+		vkDestroyDescriptorSetLayout(device->get_device(), layout, nullptr);
+	for (auto &layout : pipeline_layouts)
+		vkDestroyPipelineLayout(device->get_device(), layout, nullptr);
+	for (auto &pass : render_passes)
+		vkDestroyRenderPass(device->get_device(), pass, nullptr);
+
+	samplers.clear();
+	set_layouts.clear();
+	pipeline_layouts.clear();
+	render_passes.clear();
+	alloc.reset();
+}
+
+VkResult PipelineResolver::resolve_sampler(VulkanDevice *device, VkSampler *sampler)
+{
+	auto *info = reinterpret_cast<VkSamplerCreateInfo *>(*sampler);
+	if (info->sType != VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO)
+		return VK_ERROR_UNKNOWN;
+
+	VkSampler samp = VK_NULL_HANDLE;
+	auto vr = vkCreateSampler(device->get_device(), info, nullptr, &samp);
+
+	if (vr == VK_SUCCESS)
+	{
+		samplers.push_back(samp);
+		*sampler = samp;
+	}
+
+	return vr;
+}
+
+VkResult PipelineResolver::resolve_render_pass(VulkanDevice *device, VkRenderPass *render_pass)
+{
+	auto *info = reinterpret_cast<VkBaseInStructure *>(*render_pass);
+	VkRenderPass rp = VK_NULL_HANDLE;
+	VkResult vr = VK_ERROR_UNKNOWN;
+
+	if (info->sType == VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO)
+		vr = vkCreateRenderPass(device->get_device(), reinterpret_cast<VkRenderPassCreateInfo *>(info), nullptr, &rp);
+	else if (info->sType == VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2)
+		vr = vkCreateRenderPass2KHR(device->get_device(), reinterpret_cast<VkRenderPassCreateInfo2 *>(info), nullptr, &rp);
+
+	if (vr == VK_SUCCESS)
+	{
+		render_passes.push_back(rp);
+		*render_pass = rp;
+	}
+
+	return vr;
+}
+
+VkResult PipelineResolver::resolve_descriptor_set_layout(VulkanDevice *device, VkDescriptorSetLayout *set_layout)
+{
+	auto info = *reinterpret_cast<VkDescriptorSetLayoutCreateInfo *>(*set_layout);
+	if (info.sType != VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO)
+		return VK_ERROR_UNKNOWN;
+
+	bool needs_immutable_samplers = false;
+
+	for (uint32_t i = 0; i < info.bindingCount; i++)
+	{
+		auto &binding = info.pBindings[i];
+		if ((binding.descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ||
+		     binding.descriptorType == VK_DESCRIPTOR_TYPE_SAMPLER) &&
+		    binding.pImmutableSamplers && info.bindingCount != 0)
+		{
+			needs_immutable_samplers = true;
+			break;
+		}
+	}
+
+	if (needs_immutable_samplers)
+	{
+		auto *bindings = alloc.allocate_n<VkDescriptorSetLayoutBinding>(info.bindingCount);
+		memcpy(bindings, info.pBindings, info.bindingCount * sizeof(*bindings));
+
+		for (uint32_t i = 0; i < info.bindingCount; i++)
+		{
+			auto &binding = bindings[i];
+			if ((binding.descriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER ||
+			     binding.descriptorType == VK_DESCRIPTOR_TYPE_SAMPLER) &&
+			    binding.pImmutableSamplers && binding.descriptorCount != 0)
+			{
+				auto *new_samplers = alloc.allocate_n<VkSampler>(binding.descriptorCount);
+				memcpy(new_samplers, binding.pImmutableSamplers, binding.descriptorCount * sizeof(*new_samplers));
+
+				for (uint32_t j = 0; j < binding.descriptorCount; j++)
+				{
+					if (new_samplers[j] != VK_NULL_HANDLE)
+					{
+						auto vr = resolve_sampler(device, &new_samplers[j]);
+						if (vr != VK_SUCCESS)
+							return vr;
+					}
+				}
+
+				binding.pImmutableSamplers = new_samplers;
+			}
+		}
+
+		info.pBindings = bindings;
+	}
+
+	VkDescriptorSetLayout layout = VK_NULL_HANDLE;
+	auto vr = vkCreateDescriptorSetLayout(device->get_device(), &info, nullptr, &layout);
+
+	if (vr == VK_SUCCESS)
+	{
+		set_layouts.push_back(layout);
+		*set_layout = layout;
+	}
+
+	return vr;
+}
+
+VkResult PipelineResolver::resolve_pipeline_layout(VulkanDevice *device, VkPipelineLayout *pipeline_layout)
+{
+	auto info = *reinterpret_cast<VkPipelineLayoutCreateInfo *>(*pipeline_layout);
+	if (info.sType != VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO)
+		return VK_ERROR_UNKNOWN;
+
+	if (info.setLayoutCount != 0)
+	{
+		auto *layouts = alloc.allocate_n<VkDescriptorSetLayout>(info.setLayoutCount);
+		memcpy(layouts, info.pSetLayouts, info.setLayoutCount * sizeof(*layouts));
+
+		for (uint32_t i = 0; i < info.setLayoutCount; i++)
+		{
+			if (layouts[i] != VK_NULL_HANDLE)
+			{
+				auto vr = resolve_descriptor_set_layout(device, &layouts[i]);
+				if (vr != VK_SUCCESS)
+					return vr;
+			}
+		}
+		info.pSetLayouts = layouts;
+	}
+
+	VkPipelineLayout layout = VK_NULL_HANDLE;
+	auto vr = vkCreatePipelineLayout(device->get_device(), &info, nullptr, &layout);
+
+	if (vr == VK_SUCCESS)
+	{
+		pipeline_layouts.push_back(layout);
+		*pipeline_layout = layout;
+	}
+
+	return vr;
+}
+
+const VkGraphicsPipelineCreateInfo *
+PipelineResolver::resolve_graphics_pipeline(VulkanDevice *device, const VkGraphicsPipelineCreateInfo *create_info)
+{
+	if (create_info->sType != VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO)
+		return nullptr;
+
+	auto *info = alloc.allocate<VkGraphicsPipelineCreateInfo>();
+	*info = *create_info;
+
+	if (info->renderPass)
+		if (resolve_render_pass(device, &info->renderPass) != VK_SUCCESS)
+			return nullptr;
+
+	if (info->layout)
+		if (resolve_pipeline_layout(device, &info->layout) != VK_SUCCESS)
+			return nullptr;
+
+	return info;
+}
+
+const VkComputePipelineCreateInfo *
+PipelineResolver::resolve_compute_pipeline(VulkanDevice *device, const VkComputePipelineCreateInfo *create_info)
+{
+	if (create_info->sType != VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO)
+		return nullptr;
+
+	auto *info = alloc.allocate<VkComputePipelineCreateInfo>();
+	*info = *create_info;
+
+	if (info->layout)
+		if (resolve_pipeline_layout(device, &info->layout) != VK_SUCCESS)
+			return nullptr;
+
+	return info;
+}
+
+const VkRayTracingPipelineCreateInfoKHR *
+PipelineResolver::resolve_ray_tracing_pipeline(VulkanDevice *device, const VkRayTracingPipelineCreateInfoKHR *create_info)
+{
+	if (create_info->sType != VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR)
+		return nullptr;
+
+	auto *info = alloc.allocate<VkRayTracingPipelineCreateInfoKHR>();
+	*info = *create_info;
+
+	if (info->layout)
+		if (resolve_pipeline_layout(device, &info->layout) != VK_SUCCESS)
+			return nullptr;
+
+	return info;
+}
+
 struct ThreadedReplayer : StateCreatorInterface
 {
 	struct Options
@@ -952,8 +1194,15 @@ struct ThreadedReplayer : StateCreatorInterface
 		}
 	}
 
-	bool run_creation_work_item_setup_graphics(const PipelineWorkItem &work_item)
+	bool run_creation_work_item_setup_graphics(PipelineResolver &resolver, PipelineWorkItem &work_item)
 	{
+		if (device->get_feature_filter().supports_maintenance4() && work_item.create_info.graphics_create_info)
+		{
+			// If we crash during resolve, it should count as a dirty crash. Don't try to recover.
+			work_item.create_info.graphics_create_info = resolver.resolve_graphics_pipeline(
+					device.get(), work_item.create_info.graphics_create_info);
+		}
+
 		auto &per_thread = get_per_thread_data();
 		per_thread.current_graphics_index = work_item.index + 1;
 		per_thread.current_graphics_pipeline = work_item.hash;
@@ -984,8 +1233,15 @@ struct ThreadedReplayer : StateCreatorInterface
 		return true;
 	}
 
-	bool run_creation_work_item_setup_compute(const PipelineWorkItem &work_item)
+	bool run_creation_work_item_setup_compute(PipelineResolver &resolver, PipelineWorkItem &work_item)
 	{
+		if (device->get_feature_filter().supports_maintenance4() && work_item.create_info.compute_create_info)
+		{
+			// If we crash during resolve, it should count as a dirty crash. Don't try to recover.
+			work_item.create_info.compute_create_info = resolver.resolve_compute_pipeline(
+					device.get(), work_item.create_info.compute_create_info);
+		}
+
 		auto &per_thread = get_per_thread_data();
 		per_thread.current_compute_index = work_item.index + 1;
 		per_thread.current_compute_pipeline = work_item.hash;
@@ -1014,8 +1270,15 @@ struct ThreadedReplayer : StateCreatorInterface
 		return true;
 	}
 
-	bool run_creation_work_item_setup_raytracing(const PipelineWorkItem &work_item)
+	bool run_creation_work_item_setup_raytracing(PipelineResolver &resolver, PipelineWorkItem &work_item)
 	{
+		if (device->get_feature_filter().supports_maintenance4() && work_item.create_info.raytracing_create_info)
+		{
+			// If we crash during resolve, it should count as a dirty crash. Don't try to recover.
+			work_item.create_info.raytracing_create_info = resolver.resolve_ray_tracing_pipeline(
+					device.get(), work_item.create_info.raytracing_create_info);
+		}
+
 		auto &per_thread = get_per_thread_data();
 		per_thread.current_raytracing_index = work_item.index + 1;
 		per_thread.current_raytracing_pipeline = work_item.hash;
@@ -1058,13 +1321,12 @@ struct ThreadedReplayer : StateCreatorInterface
 		return true;
 	}
 
-	bool run_creation_work_item_setup(const PipelineWorkItem &work_item)
+	bool run_creation_work_item_setup(PipelineResolver &resolver, PipelineWorkItem &work_item)
 	{
 		auto &per_thread = get_per_thread_data();
 		per_thread.current_graphics_pipeline = 0;
 		per_thread.current_compute_pipeline = 0;
 		per_thread.current_raytracing_pipeline = 0;
-		per_thread.triggered_validation_error = false;
 		bool ret = true;
 
 		// Don't bother replaying blacklisted objects.
@@ -1079,15 +1341,15 @@ struct ThreadedReplayer : StateCreatorInterface
 			switch (work_item.tag)
 			{
 			case RESOURCE_GRAPHICS_PIPELINE:
-				ret = run_creation_work_item_setup_graphics(work_item);
+				ret = run_creation_work_item_setup_graphics(resolver, work_item);
 				break;
 
 			case RESOURCE_COMPUTE_PIPELINE:
-				ret = run_creation_work_item_setup_compute(work_item);
+				ret = run_creation_work_item_setup_compute(resolver, work_item);
 				break;
 
 			case RESOURCE_RAYTRACING_PIPELINE:
-				ret = run_creation_work_item_setup_raytracing(work_item);
+				ret = run_creation_work_item_setup_raytracing(resolver, work_item);
 				break;
 
 			default:
@@ -1095,6 +1357,9 @@ struct ThreadedReplayer : StateCreatorInterface
 				break;
 			}
 		}
+
+		// If we trigger validation errors while resolving objects, ignore that.
+		per_thread.triggered_validation_error = false;
 
 		if (!ret)
 		{
@@ -1332,9 +1597,9 @@ struct ThreadedReplayer : StateCreatorInterface
 			run_creation_work_item_raytracing_iteration(work_item, cache, i == 0);
 	}
 
-	void run_creation_work_item(const PipelineWorkItem &work_item)
+	void run_creation_work_item(PipelineResolver &resolver, PipelineWorkItem work_item)
 	{
-		if (!run_creation_work_item_setup(work_item))
+		if (!run_creation_work_item_setup(resolver, work_item))
 			return;
 
 		bool valid_type = true;
@@ -1376,6 +1641,9 @@ struct ThreadedReplayer : StateCreatorInterface
 		per_thread.current_compute_pipeline = 0;
 		per_thread.current_graphics_pipeline = 0;
 		per_thread.current_raytracing_pipeline = 0;
+
+		// Destroy any objects we created during resolve.
+		resolver.flush(device.get());
 	}
 
 	void worker_thread(unsigned thread_index)
@@ -1397,6 +1665,8 @@ struct ThreadedReplayer : StateCreatorInterface
 			r.set_resolve_shader_module_handles(false);
 			r.copy_handle_references(*global_replayer);
 		}
+
+		PipelineResolver pipeline_resolver;
 
 		get_per_thread_data().per_thread_replayers = per_thread_replayer;
 		// Let main thread know that the per thread replayers have been initialized correctly.
@@ -1432,7 +1702,7 @@ struct ThreadedReplayer : StateCreatorInterface
 			if (work_item.parse_only)
 				run_parse_work_item(per_thread_replayer[work_item.memory_context_index], json_buffer, work_item);
 			else
-				run_creation_work_item(work_item);
+				run_creation_work_item(pipeline_resolver, work_item);
 
 			idle_start_time = chrono::steady_clock::now();
 			{
@@ -1851,13 +2121,26 @@ struct ThreadedReplayer : StateCreatorInterface
 			return false;
 		}
 
-		if (device->create_sampler_with_ycbcr_remap(create_info, sampler) != VK_SUCCESS)
+		if (device->get_feature_filter().supports_maintenance4())
 		{
-			LOGE("Creating sampler %016" PRIx64 " Failed!\n", index);
-			return false;
+			// With maintenance4, pipelines cannot refer to pipeline layouts anymore after creation,
+			// so we can safely create and destroy pipeline layouts lazily.
+			if (device->resolve_sampler_with_ycbcr_remap(const_cast<VkSamplerCreateInfo *>(create_info)) != VK_SUCCESS)
+				return false;
+
+			*sampler = reinterpret_cast<VkSampler>(const_cast<VkSamplerCreateInfo *>(create_info));
+		}
+		else
+		{
+			if (device->create_sampler_with_ycbcr_remap(create_info, sampler) != VK_SUCCESS)
+			{
+				LOGE("Creating sampler %016" PRIx64 " Failed!\n", index);
+				return false;
+			}
+
+			samplers[index] = *sampler;
 		}
 
-		samplers[index] = *sampler;
 		return true;
 	}
 
@@ -1876,13 +2159,23 @@ struct ThreadedReplayer : StateCreatorInterface
 			return false;
 		}
 
-		// Playback in-order.
-		if (vkCreateDescriptorSetLayout(device->get_device(), create_info, nullptr, layout) != VK_SUCCESS)
+		if (device->get_feature_filter().supports_maintenance4())
 		{
-			LOGE("Creating descriptor set layout %016" PRIx64 " Failed!\n", index);
-			return false;
+			// With maintenance4, pipelines cannot refer to pipeline layouts anymore after creation,
+			// so we can safely create and destroy pipeline layouts lazily.
+			*layout = reinterpret_cast<VkDescriptorSetLayout>(const_cast<VkDescriptorSetLayoutCreateInfo *>(create_info));
 		}
-		layouts[index] = *layout;
+		else
+		{
+			// Playback in-order.
+			if (vkCreateDescriptorSetLayout(device->get_device(), create_info, nullptr, layout) != VK_SUCCESS)
+			{
+				LOGE("Creating descriptor set layout %016" PRIx64 " Failed!\n", index);
+				return false;
+			}
+			layouts[index] = *layout;
+		}
+
 		return true;
 	}
 
@@ -1897,13 +2190,23 @@ struct ThreadedReplayer : StateCreatorInterface
 			return false;
 		}
 
-		// Playback in-order.
-		if (vkCreatePipelineLayout(device->get_device(), create_info, nullptr, layout) != VK_SUCCESS)
+		if (device->get_feature_filter().supports_maintenance4())
 		{
-			LOGE("Creating pipeline layout %0" PRIX64 " Failed!\n", index);
-			return false;
+			// With maintenance4, pipelines cannot refer to pipeline layouts anymore after creation,
+			// so we can safely create and destroy pipeline layouts lazily.
+			*layout = reinterpret_cast<VkPipelineLayout>(const_cast<VkPipelineLayoutCreateInfo *>(create_info));
 		}
-		pipeline_layouts[index] = *layout;
+		else
+		{
+			// Playback in-order.
+			if (vkCreatePipelineLayout(device->get_device(), create_info, nullptr, layout) != VK_SUCCESS)
+			{
+				LOGE("Creating pipeline layout %0" PRIX64 " Failed!\n", index);
+				return false;
+			}
+			pipeline_layouts[index] = *layout;
+		}
+
 		return true;
 	}
 
@@ -1918,13 +2221,24 @@ struct ThreadedReplayer : StateCreatorInterface
 			return false;
 		}
 
-		// Playback in-order.
-		if (vkCreateRenderPass(device->get_device(), create_info, nullptr, render_pass) != VK_SUCCESS)
+		if (device->get_feature_filter().supports_maintenance4())
 		{
-			LOGE("Creating render pass %0" PRIX64 " Failed!\n", index);
-			return false;
+			// With maintenance4, pipelines cannot refer to pipeline layouts anymore after creation,
+			// so we can safely create and destroy pipeline layouts lazily.
+			// Renderpass rewrite and layouts are done together. Keep complexity low by doing it like this.
+			*render_pass = reinterpret_cast<VkRenderPass>(const_cast<VkRenderPassCreateInfo *>(create_info));
 		}
-		render_passes[index] = *render_pass;
+		else
+		{
+			// Playback in-order.
+			if (vkCreateRenderPass(device->get_device(), create_info, nullptr, render_pass) != VK_SUCCESS)
+			{
+				LOGE("Creating render pass %0" PRIX64 " Failed!\n", index);
+				return false;
+			}
+			render_passes[index] = *render_pass;
+		}
+
 		return true;
 	}
 
@@ -1939,13 +2253,24 @@ struct ThreadedReplayer : StateCreatorInterface
 			return false;
 		}
 
-		// Playback in-order.
-		if (vkCreateRenderPass2KHR(device->get_device(), create_info, nullptr, render_pass) != VK_SUCCESS)
+		if (device->get_feature_filter().supports_maintenance4())
 		{
-			LOGE("Creating render pass %0" PRIX64 " Failed!\n", index);
-			return false;
+			// With maintenance4, pipelines cannot refer to pipeline layouts anymore after creation,
+			// so we can safely create and destroy pipeline layouts lazily.
+			// Renderpass rewrite and layouts are done together. Keep complexity low by doing it like this.
+			*render_pass = reinterpret_cast<VkRenderPass>(const_cast<VkRenderPassCreateInfo2 *>(create_info));
 		}
-		render_passes[index] = *render_pass;
+		else
+		{
+			// Playback in-order.
+			if (vkCreateRenderPass2KHR(device->get_device(), create_info, nullptr, render_pass) != VK_SUCCESS)
+			{
+				LOGE("Creating render pass %0" PRIX64 " Failed!\n", index);
+				return false;
+			}
+			render_passes[index] = *render_pass;
+		}
+
 		return true;
 	}
 
@@ -3940,8 +4265,10 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 		}
 	}
 
-	// Done parsing static objects.
-	state_replayer.get_allocator().reset();
+	// Done parsing static objects, so we could reclaim some memory,
+	// but keep the allocated memory around so we can create objects on-demand with maintenance4 path.
+	if (!replayer.device->get_feature_filter().supports_maintenance4())
+		state_replayer.get_allocator().reset();
 
 	vector<EnqueuedWork> graphics_workload;
 	vector<EnqueuedWork> compute_workload;
@@ -4000,11 +4327,7 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 	replayer.raytracing_pipelines_cleared += replayer.raytracing_pipelines.size();
 
 	unsigned long total_size =
-		replayer.samplers.size() +
-		replayer.layouts.size() +
-		replayer.pipeline_layouts.size() +
 		replayer.shader_modules.get_current_object_count() +
-		replayer.render_passes.size() +
 		replayer.compute_pipelines_cleared +
 		replayer.graphics_pipelines_cleared +
 		replayer.raytracing_pipelines_cleared;
@@ -4051,10 +4374,6 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 	     (replayer.total_peak_memory.load() + state_replayer.get_allocator().get_peak_memory_consumption()) * 1e-6);
 
 	LOGI("Replayed %lu objects in %ld ms:\n", total_size, elapsed_ms);
-	LOGI("  samplers:              %7lu\n", (unsigned long)replayer.samplers.size());
-	LOGI("  descriptor set layouts:%7lu\n", (unsigned long)replayer.layouts.size());
-	LOGI("  pipeline layouts:      %7lu\n", (unsigned long)replayer.pipeline_layouts.size());
-	LOGI("  render passes:         %7lu\n", (unsigned long)replayer.render_passes.size());
 	LOGI("  compute pipelines:     %7lu\n", (unsigned long)replayer.compute_pipelines_cleared);
 	LOGI("  graphics pipelines:    %7lu\n", (unsigned long)replayer.graphics_pipelines_cleared);
 	LOGI("  raytracing pipelines:  %7lu\n", (unsigned long)replayer.raytracing_pipelines_cleared);
