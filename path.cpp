@@ -144,7 +144,7 @@ string canonicalize_path(const string &path)
 				result.pop_back();
 		}
 		else
-			result.push_back(move(i));
+			result.push_back(std::move(i));
 	}
 
 	string res;

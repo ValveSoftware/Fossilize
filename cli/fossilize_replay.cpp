@@ -4237,7 +4237,7 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 				return EXIT_FAILURE;
 			}
 
-			move(begin(*hashes) + start_index, begin(*hashes) + end_index, begin(*hashes));
+			std::move(begin(*hashes) + start_index, begin(*hashes) + end_index, begin(*hashes));
 			hashes->erase(begin(*hashes) + (end_index - start_index), end(*hashes));
 
 			if (replayer.replayer_cache_db)

@@ -1006,7 +1006,7 @@ int main(int argc, char *argv[])
 	});
 	cbs.error_handler = [] { print_help(); };
 
-	CLIParser parser(move(cbs), argc - 1, argv + 1);
+	CLIParser parser(std::move(cbs), argc - 1, argv + 1);
 	if (!parser.parse())
 		return EXIT_FAILURE;
 	if (parser.is_ended_state())
