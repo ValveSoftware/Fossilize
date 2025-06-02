@@ -235,6 +235,7 @@ public:
 	void unregister_shader_module_info(VkShaderModule module);
 
 	bool supports_scalar_block_layout() const;
+	bool supports_maintenance4() const;
 
 private:
 	struct Impl;

@@ -745,7 +745,7 @@ get_physical_device_properties(VkPhysicalDevice, VkPhysicalDeviceProperties *pro
 	props->apiVersion = VK_API_VERSION_1_1;
 }
 
-VkResult VulkanDevice::create_sampler_with_ycbcr_remap(const VkSamplerCreateInfo *create_info, VkSampler *sampler)
+VkResult VulkanDevice::resolve_sampler_with_ycbcr_remap(VkSamplerCreateInfo *create_info)
 {
 	VkSamplerYcbcrConversion conv = VK_NULL_HANDLE;
 	VkResult vr;
@@ -775,9 +775,16 @@ VkResult VulkanDevice::create_sampler_with_ycbcr_remap(const VkSamplerCreateInfo
 		next = static_cast<const VkBaseInStructure *>(next->pNext);
 	}
 
+	return VK_SUCCESS;
+}
+
+VkResult VulkanDevice::create_sampler_with_ycbcr_remap(const VkSamplerCreateInfo *create_info, VkSampler *sampler)
+{
+	auto vr = resolve_sampler_with_ycbcr_remap(const_cast<VkSamplerCreateInfo *>(create_info));
+	if (vr != VK_SUCCESS)
+		return vr;
 	if ((vr = vkCreateSampler(device, create_info, nullptr, sampler)) != VK_SUCCESS)
 		return vr;
-
 	return VK_SUCCESS;
 }
 
