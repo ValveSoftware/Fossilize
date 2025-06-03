@@ -1,0 +1,34 @@
+{
+	"asset": "FossilizeApplicationInfoFilter",
+	"version": 1,
+	"engineFilters": {
+		"DXVK": {
+			"minimumEngineVersion": 4222979,
+			"bucketVariantDependencies" : [
+				"EngineName",
+				"EngineVersionMajor"
+			],
+			"recordImmutableSamplers" : false
+		},
+		"vkd3d": {
+			"minimumEngineVersion": 8392704,
+			"blacklistedEnvironments" : {
+				"VKD3D_CONFIG" : { "contains" : "qa_checks" },
+				"VKD3D_SHADER_OVERRIDE" : { "nonnull" : true },
+				"VKD3D_DISABLE_EXTENSIONS" : { "nonnull" : true }
+			},
+			"bucketVariantDependencies" : [
+				"BindlessUBO",
+				"VendorID",
+				"MutableDescriptorType",
+				"BufferDeviceAddress",
+				"EngineName",
+				"EngineVersionMajor",
+				"EngineVersionMinor"
+			],
+			"bucketVariantFeatureDependencies" : [ 
+				"DescriptorBuffer" 
+			]
+		}
+	}
+}
