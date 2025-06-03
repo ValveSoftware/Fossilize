@@ -2867,6 +2867,7 @@ bool FeatureFilter::Impl::validate_module_capabilities(const uint32_t *data, siz
 			{
 				LOGE("SPIR-V extension %s is not supported on this device, ignoring shader module.\n",
 				     name.c_str());
+				return false;
 			}
 		}
 		else if (op == spv::OpFunction)
