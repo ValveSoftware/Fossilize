@@ -74,7 +74,9 @@ R"delim(
 				"ApplicationName",
 				"FragmentShadingRate",
 				"DynamicRendering"
-			]
+			],
+			"applicationVersionBucketDeltas" : [ 10000, 20000 ],
+			"engineVersionBucketDeltas" : [ 30000, 40000 ]
 		},
 		"variance" : {
 			"bucketVariantDependencies" : [ "VendorID" ]
@@ -523,6 +525,39 @@ R"delim(
 			return EXIT_FAILURE;
 		appinfo.pEngineName = "test6";
 		if (!filter.should_record_immutable_samplers(&appinfo))
+			return EXIT_FAILURE;
+	}
+
+	{
+		appinfo.pApplicationName = "dummy";
+		appinfo.pEngineName = "test1";
+		appinfo.applicationVersion = 9999;
+		appinfo.engineVersion = 29999;
+		auto hash0 = filter.get_bucket_hash(nullptr, &appinfo, nullptr);
+		appinfo.applicationVersion = 10000;
+		auto hash1 = filter.get_bucket_hash(nullptr, &appinfo, nullptr);
+		appinfo.applicationVersion = 19999;
+		auto hash2 = filter.get_bucket_hash(nullptr, &appinfo, nullptr);
+		appinfo.applicationVersion = 20000;
+		auto hash3 = filter.get_bucket_hash(nullptr, &appinfo, nullptr);
+
+		if (hash0 == hash1 || hash1 != hash2 || hash2 == hash3)
+			return EXIT_FAILURE;
+
+		appinfo.applicationVersion = 9999;
+		appinfo.engineVersion = 29999;
+		hash0 = filter.get_bucket_hash(nullptr, &appinfo, nullptr);
+
+		appinfo.engineVersion = 30000;
+		hash1 = filter.get_bucket_hash(nullptr, &appinfo, nullptr);
+
+		appinfo.engineVersion = 39999;
+		hash2 = filter.get_bucket_hash(nullptr, &appinfo, nullptr);
+
+		appinfo.engineVersion = 40000;
+		hash3 = filter.get_bucket_hash(nullptr, &appinfo, nullptr);
+
+		if (hash0 == hash1 || hash1 != hash2 || hash2 == hash3)
 			return EXIT_FAILURE;
 	}
 
