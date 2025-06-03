@@ -113,6 +113,13 @@ struct AppInfo
 	// For future uses of the feature filter, feature hashing is ideally placed in the feature variant list.
 	std::vector<VariantDependency> variant_dependencies;
 	std::vector<VariantDependency> variant_dependencies_feature;
+
+	// If the application or engine version is greater-than or equal-to a value,
+	// modify the bucket hash.
+	// This is used when we want to encode special scenarios where we want to give a new bucket
+	// to a specific version of an engine instead of bucketizing on every major/minor/patch version.
+	std::vector<uint32_t> application_version_deltas;
+	std::vector<uint32_t> engine_version_deltas;
 };
 
 struct ApplicationInfoFilter::Impl
@@ -451,6 +458,12 @@ Hash ApplicationInfoFilter::Impl::get_bucket_hash(const VkPhysicalDeviceProperti
 				hash_variant(h, dep, props, info, device_pnext, false);
 			for (auto &dep : itr->second.variant_dependencies_feature)
 				hash_variant(h, dep, props, info, device_pnext, true);
+			for (auto &dep : itr->second.application_version_deltas)
+				if (info->applicationVersion >= dep)
+					h.u32(dep ^ 0xabba);
+			for (auto &dep : itr->second.engine_version_deltas)
+				if (info->engineVersion >= dep)
+					h.u32(dep ^ 0xcafe);
 		}
 	}
 
@@ -736,6 +749,27 @@ static bool parse_bucket_variant_dependencies(const Value &deps, std::vector<Var
 	return true;
 }
 
+static bool parse_version_variant_dependencies(const Value &values, std::vector<uint32_t> &versions)
+{
+	if (!values.IsArray())
+	{
+		LOGE("*VersionBucketDeltas must be an array.\n");
+		return false;
+	}
+
+	versions.clear();
+
+	for (auto itr = values.Begin(); itr != values.End(); ++itr)
+	{
+		auto &elem = *itr;
+		if (!elem.GetUint())
+			return false;
+		versions.push_back(elem.GetUint());
+	}
+
+	return true;
+}
+
 static bool add_application_filters(std::unordered_map<std::string, AppInfo> &output, const Value *filters)
 {
 	if (!filters->IsObject())
@@ -767,6 +801,12 @@ static bool add_application_filters(std::unordered_map<std::string, AppInfo> &ou
 				return false;
 		if (value.HasMember("bucketVariantFeatureDependencies"))
 			if (!parse_bucket_variant_dependencies(value["bucketVariantFeatureDependencies"], info.variant_dependencies_feature))
+				return false;
+		if (value.HasMember("applicationVersionBucketDeltas"))
+			if (!parse_version_variant_dependencies(value["applicationVersionBucketDeltas"], info.application_version_deltas))
+				return false;
+		if (value.HasMember("engineVersionBucketDeltas"))
+			if (!parse_version_variant_dependencies(value["engineVersionBucketDeltas"], info.engine_version_deltas))
 				return false;
 		output[itr->name.GetString()] = std::move(info);
 	}
