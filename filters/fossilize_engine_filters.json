@@ -8,6 +8,7 @@
 				"EngineName",
 				"EngineVersionMajor"
 			],
+			"engineVersionBucketDeltas" : [ 8417280 ],
 			"recordImmutableSamplers" : false
 		},
 		"vkd3d": {
