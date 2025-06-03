@@ -66,7 +66,7 @@ FE(SHADER_ATOMIC_FLOAT_2, shader_atomic_float2, EXT);
 FE(PROVOKING_VERTEX, provoking_vertex, EXT);
 FE(CUSTOM_BORDER_COLOR, custom_border_color, EXT);
 FE_ALIAS(COMPUTE_SHADER_DERIVATIVES, compute_shader_derivatives, KHR, NV);
-FE(FRAGMENT_SHADER_BARYCENTRIC, barycentric, KHR);
+FE_ALIAS(FRAGMENT_SHADER_BARYCENTRIC, barycentric, KHR, NV);
 FE(SHADER_IMAGE_FOOTPRINT, image_footprint_nv, NV);
 FE(SHADING_RATE_IMAGE, shading_rate_nv, NV);
 FE(COOPERATIVE_MATRIX, cooperative_matrix_nv, NV);
