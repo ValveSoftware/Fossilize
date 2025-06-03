@@ -9,7 +9,10 @@
 				"EngineVersionMajor"
 			],
 			"engineVersionBucketDeltas" : [ 8417280 ],
-			"recordImmutableSamplers" : false
+			"recordImmutableSamplers" : false,
+			"bucketVariantFeatureDependencies" : [ 
+				"DescriptorBuffer" 
+			]
 		},
 		"vkd3d": {
 			"minimumEngineVersion": 8392704,
