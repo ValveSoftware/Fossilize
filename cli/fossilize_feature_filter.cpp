@@ -721,7 +721,7 @@ void FeatureFilter::Impl::init_features(const void *pNext)
 			FEATURE(descriptor_indexing, vk12, descriptorBindingVariableDescriptorCount);
 			FEATURE(descriptor_indexing, vk12, runtimeDescriptorArray);
 			FEATURE(vk12, vk12, samplerFilterMinmax);
-			FEATURE(vk12, vk12, scalarBlockLayout);
+			FEATURE(scalar_block_layout, vk12, scalarBlockLayout);
 			//imagelessFramebuffer;
 			//uniformBufferStandardLayout;
 			FEATURE(subgroup_extended_types, vk12, shaderSubgroupExtendedTypes);
@@ -944,11 +944,7 @@ bool FeatureFilter::Impl::init(uint32_t api_version_, const char **device_exts, 
                                const VkPhysicalDeviceProperties2 *properties)
 {
 	for (unsigned i = 0; i < count; i++)
-	{
 		enabled_extensions.insert(device_exts[i]);
-		if (strcmp(device_exts[i], VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME) == 0)
-			features.vk12.scalarBlockLayout = VK_TRUE;
-	}
 
 	api_version = api_version_;
 	props2 = *properties;
@@ -4570,7 +4566,7 @@ bool FeatureFilter::raytracing_pipeline_is_supported(const VkRayTracingPipelineC
 
 bool FeatureFilter::supports_scalar_block_layout() const
 {
-	return impl->null_device || impl->features.vk12.scalarBlockLayout;
+	return impl->null_device || impl->features.scalar_block_layout.scalarBlockLayout;
 }
 
 bool FeatureFilter::supports_maintenance4() const

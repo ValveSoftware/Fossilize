@@ -132,13 +132,13 @@ struct VulkanFeatures
 	VkPhysicalDeviceShaderObjectFeaturesEXT shader_object;
 	VkPhysicalDevicePrimitivesGeneratedQueryFeaturesEXT primitives_generated_query;
 	VkPhysicalDeviceImage2DViewOf3DFeaturesEXT image_2d_view_of_3d;
+	VkPhysicalDeviceScalarBlockLayoutFeaturesEXT scalar_block_layout;
 
 	struct
 	{
 		VkBool32 shaderOutputViewportIndex;
 		VkBool32 shaderOutputLayer;
 		VkBool32 samplerFilterMinmax;
-		VkBool32 scalarBlockLayout;
 		VkBool32 descriptorIndexing;
 	} vk12;
 
