@@ -2314,6 +2314,15 @@ static void record_graphics_pipelines(StateRecorder &recorder)
 	input_attachment_info.pStencilInputAttachmentIndex = color_locs + 2;
 	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100021), pipe, nullptr, 0))
 		abort();
+
+	VkPipelineFragmentDensityMapLayeredCreateInfoVALVE density_layered = { VK_STRUCTURE_TYPE_PIPELINE_FRAGMENT_DENSITY_MAP_LAYERED_CREATE_INFO_VALVE };
+	density_layered.maxFragmentDensityMapLayers = 1;
+	pipe.pNext = &density_layered;
+	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100022), pipe, nullptr, 0))
+		abort();
+	density_layered.maxFragmentDensityMapLayers = 2;
+	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(100023), pipe, nullptr, 0))
+		abort();
 }
 
 static void record_raytracing_pipelines(StateRecorder &recorder)
@@ -2402,6 +2411,16 @@ static void record_raytracing_pipelines(StateRecorder &recorder)
 		abort();
 
 	if (!recorder.record_raytracing_pipeline(fake_handle<VkPipeline>(44), pipe, nullptr, 0))
+		abort();
+
+	VkRayTracingPipelineClusterAccelerationStructureCreateInfoNV cluster =
+			{ VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CLUSTER_ACCELERATION_STRUCTURE_CREATE_INFO_NV };
+	cluster.allowClusterAccelerationStructure = VK_FALSE;
+	pipe.pNext = &cluster;
+	if (!recorder.record_raytracing_pipeline(fake_handle<VkPipeline>(45), pipe, nullptr, 0))
+		abort();
+	cluster.allowClusterAccelerationStructure = VK_TRUE;
+	if (!recorder.record_raytracing_pipeline(fake_handle<VkPipeline>(46), pipe, nullptr, 0))
 		abort();
 }
 

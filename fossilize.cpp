@@ -382,6 +382,8 @@ struct StateReplayer::Impl
 	bool parse_depth_clamp_control(const Value &state, VkPipelineViewportDepthClampControlCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_rendering_attachment_location_info(const Value &state, VkRenderingAttachmentLocationInfoKHR **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_rendering_input_attachment_index_info(const Value &state, VkRenderingInputAttachmentIndexInfoKHR **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_pipeline_fragment_density_map_layered_info(const Value &state, VkPipelineFragmentDensityMapLayeredCreateInfoVALVE **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_ray_tracing_pipeline_cluster_acceleration_structure_info(const Value &state, VkRayTracingPipelineClusterAccelerationStructureCreateInfoNV **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_uints(const Value &attachments, const uint32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	bool parse_sints(const Value &attachments, const int32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	const char *duplicate_string(const char *str, size_t len);
@@ -872,6 +874,18 @@ static void hash_pnext_struct(const StateRecorder *, Hasher &h,
 		h.u32(*info.pStencilInputAttachmentIndex);
 	else
 		h.u32(0xffff); // Use an arbitrary invalid attachment value.
+}
+
+static void hash_pnext_struct(const StateRecorder *, Hasher &h,
+                              const VkPipelineFragmentDensityMapLayeredCreateInfoVALVE &info)
+{
+	h.u32(info.maxFragmentDensityMapLayers);
+}
+
+static void hash_pnext_struct(const StateRecorder *, Hasher &h,
+                              const VkRayTracingPipelineClusterAccelerationStructureCreateInfoNV &info)
+{
+	h.u32(info.allowClusterAccelerationStructure);
 }
 
 static bool hash_pnext_chain_pdf2(const StateRecorder *recorder, Hasher &h, const void *pNext)
@@ -1702,6 +1716,14 @@ static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const voi
 
 		case VK_STRUCTURE_TYPE_RENDERING_INPUT_ATTACHMENT_INDEX_INFO_KHR:
 			hash_pnext_struct(recorder, h, *static_cast<const VkRenderingInputAttachmentIndexInfoKHR *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_FRAGMENT_DENSITY_MAP_LAYERED_CREATE_INFO_VALVE:
+			hash_pnext_struct(recorder, h, *static_cast<const VkPipelineFragmentDensityMapLayeredCreateInfoVALVE *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CLUSTER_ACCELERATION_STRUCTURE_CREATE_INFO_NV:
+			hash_pnext_struct(recorder, h, *static_cast<const VkRayTracingPipelineClusterAccelerationStructureCreateInfoNV *>(pNext));
 			break;
 
 		default:
@@ -4911,6 +4933,24 @@ bool StateReplayer::Impl::parse_rendering_input_attachment_index_info(const Valu
 	return true;
 }
 
+bool StateReplayer::Impl::parse_pipeline_fragment_density_map_layered_info(
+		const Value &state, VkPipelineFragmentDensityMapLayeredCreateInfoVALVE **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkPipelineFragmentDensityMapLayeredCreateInfoVALVE>();
+	info->maxFragmentDensityMapLayers = state["maxFragmentDensityMapLayers"].GetUint();
+	*out_info = info;
+	return true;
+}
+
+bool StateReplayer::Impl::parse_ray_tracing_pipeline_cluster_acceleration_structure_info(
+		const Value &state, VkRayTracingPipelineClusterAccelerationStructureCreateInfoNV **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkRayTracingPipelineClusterAccelerationStructureCreateInfoNV>();
+	info->allowClusterAccelerationStructure = state["allowClusterAccelerationStructure"].GetUint();
+	*out_info = info;
+	return true;
+}
+
 bool StateReplayer::Impl::parse_mutable_descriptor_type(const Value &state,
                                                         VkMutableDescriptorTypeCreateInfoEXT **out_info)
 {
@@ -5350,6 +5390,24 @@ bool StateReplayer::Impl::parse_pnext_chain(
 		{
 			VkRenderingInputAttachmentIndexInfoKHR *info = nullptr;
 			if (!parse_rendering_input_attachment_index_info(next, &info))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_FRAGMENT_DENSITY_MAP_LAYERED_CREATE_INFO_VALVE:
+		{
+			VkPipelineFragmentDensityMapLayeredCreateInfoVALVE *info = nullptr;
+			if (!parse_pipeline_fragment_density_map_layered_info(next, &info))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CLUSTER_ACCELERATION_STRUCTURE_CREATE_INFO_NV:
+		{
+			VkRayTracingPipelineClusterAccelerationStructureCreateInfoNV *info = nullptr;
+			if (!parse_ray_tracing_pipeline_cluster_acceleration_structure_info(next, &info))
 				return false;
 			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
 			break;
@@ -6386,6 +6444,20 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 		{
 			auto *ci = static_cast<const VkRenderingInputAttachmentIndexInfoKHR *>(pNext);
 			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PIPELINE_FRAGMENT_DENSITY_MAP_LAYERED_CREATE_INFO_VALVE:
+		{
+			auto *ci = static_cast<const VkPipelineFragmentDensityMapLayeredCreateInfoVALVE *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CLUSTER_ACCELERATION_STRUCTURE_CREATE_INFO_NV:
+		{
+			auto *ci = static_cast<const VkRayTracingPipelineClusterAccelerationStructureCreateInfoNV *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
 			break;
 		}
 
@@ -9616,6 +9688,26 @@ static bool json_value(const VkRenderingInputAttachmentIndexInfoKHR &create_info
 }
 
 template <typename Allocator>
+static bool json_value(const VkPipelineFragmentDensityMapLayeredCreateInfoVALVE &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("maxFragmentDensityMapLayers", create_info.maxFragmentDensityMapLayers, alloc);
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
+static bool json_value(const VkRayTracingPipelineClusterAccelerationStructureCreateInfoNV &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("allowClusterAccelerationStructure", create_info.allowClusterAccelerationStructure, alloc);
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
 static bool json_value(const VkSubpassDescriptionDepthStencilResolve &create_info, Allocator &alloc, Value *out_value);
 template <typename Allocator>
 static bool json_value(const VkFragmentShadingRateAttachmentInfoKHR &create_info, Allocator &alloc, Value *out_value);
@@ -9837,6 +9929,16 @@ static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *o
 
 		case VK_STRUCTURE_TYPE_RENDERING_INPUT_ATTACHMENT_INDEX_INFO_KHR:
 			if (!json_value(*static_cast<const VkRenderingInputAttachmentIndexInfoKHR *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_PIPELINE_FRAGMENT_DENSITY_MAP_LAYERED_CREATE_INFO_VALVE:
+			if (!json_value(*static_cast<const VkPipelineFragmentDensityMapLayeredCreateInfoVALVE *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CLUSTER_ACCELERATION_STRUCTURE_CREATE_INFO_NV:
+			if (!json_value(*static_cast<const VkRayTracingPipelineClusterAccelerationStructureCreateInfoNV *>(pNext), alloc, &next))
 				return false;
 			break;
 

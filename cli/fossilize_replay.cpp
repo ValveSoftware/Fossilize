@@ -2313,12 +2313,26 @@ struct ThreadedReplayer : StateCreatorInterface
 
 			spvtools::SpirvTools context(env);
 			spvtools::ValidatorOptions validation_opts;
+			bool expected_failure = false;
+			bool unexpected_failure = false;
+
 			validation_opts.SetScalarBlockLayout(device->get_feature_filter().supports_scalar_block_layout());
-			context.SetMessageConsumer([](spv_message_level_t, const char *, const spv_position_t &, const char *message) {
-				LOGE("spirv-val: %s\n", message);
+			context.SetMessageConsumer([&](spv_message_level_t, const char *, const spv_position_t &, const char *message) {
+				if (strstr(message, "08721") || strstr(message, "08722"))
+				{
+					// Workaround validation error which will go away soon.
+					LOGW("SPIRV-Tools message expected failure: %s\n", message);
+					expected_failure = true;
+				}
+				else
+				{
+					LOGE("SPIRV-Tools message: %s\n", message);
+					unexpected_failure = true;
+				}
 			});
 
-			bool ret = context.Validate(create_info->pCode, create_info->codeSize / 4, validation_opts);
+			bool ret = context.Validate(create_info->pCode, create_info->codeSize / 4, validation_opts) ||
+			           (expected_failure && !unexpected_failure);
 
 			auto end_time = chrono::steady_clock::now();
 			auto duration_ns = chrono::duration_cast<chrono::nanoseconds>(end_time - start_time).count();

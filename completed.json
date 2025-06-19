@@ -91,7 +91,15 @@
 		"VK_KHR_pipeline_binary",
 		"VK_EXT_depth_clamp_control",
 		"VK_EXT_device_generated_commands",
-		"VK_KHR_dynamic_rendering_local_read"
+		"VK_KHR_dynamic_rendering_local_read",
+		"VK_EXT_zero_initialize_device_memory",
+		"VK_ARM_pipeline_opacity_micromap",
+		"VK_NV_cooperative_vector",
+		"VK_NV_ray_tracing_linear_swept_spheres",
+		"VK_NV_partitioned_acceleration_structure",
+		"VK_ARM_tensors",
+		"VK_NV_cluster_acceleration_structure",
+		"VK_VALVE_fragment_density_map_layered"
 	],
 	"fully-ignored" : [
 		"VK_AMD_mixed_attachment_samples",
@@ -118,7 +126,11 @@
 		"VK_QCOM_image_processing2",
 		"VK_QCOM_filter_cubic_weights",
 		"VK_QCOM_filter_cubic_clamp",
-		"VK_NV_device_generated_commands"
+		"VK_NV_device_generated_commands",
+		"VK_KHR_video_encode_quantization_map",
+		"VK_KHR_maintenance9",
+		"VK_QCOM_tile_shading",
+		"VK_QCOM_tile_memory_heap"
 	],
 	"cherry-pick": [
 		"VK_DYNAMIC_STATE_VIEWPORT_W_SCALING_NV",
@@ -307,6 +319,26 @@
 		"FloatControls2",
 		"QuadControlKHR",
 		"RawAccessChainsNV",
-		"ReplicatedCompositesEXT"
+		"ReplicatedCompositesEXT",
+		"BFloat16TypeKHR",
+		"BFloat16DotProductKHR",
+		"BFloat16CooperativeMatrixKHR",
+		"TensorAddressingNV",
+		"CooperativeMatrixReductionsNV",
+		"CooperativeMatrixConversionsNV",
+		"CooperativeMatrixPerElementOperationsNV",
+		"CooperativeMatrixTensorAddressingNV",
+		"CooperativeMatrixBlockLoadsNV",
+		"RayTracingSpheresGeometryNV",
+		"RayTracingLinearSweptSpheresGeometryNV",
+		"RayTracingClusterAccelerationStructureNV",
+		"CooperativeVectorNV",
+		"CooperativeVectorTrainingNV",
+		"TileShadingQCOM",
+		"Float8EXT",
+		"Float8CooperativeMatrixEXT",
+		"TensorsARM",
+		"StorageTensorArrayDynamicIndexingARM",
+		"StorageTensorArrayNonUniformIndexingARM"
 	]
 }

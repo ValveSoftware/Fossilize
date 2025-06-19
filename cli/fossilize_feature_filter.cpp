@@ -32,6 +32,9 @@
 #include <vector>
 #include <mutex>
 
+// There is a mismatch in pluralization between extension name and feature structure name which screws up our macros.
+#define VK_ARM_TENSOR_EXTENSION_NAME VK_ARM_TENSORS_EXTENSION_NAME
+
 namespace Fossilize
 {
 void *build_pnext_chain(VulkanFeatures &features, uint32_t api_version,
@@ -1597,6 +1600,23 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 			break;
 		}
 
+		case VK_STRUCTURE_TYPE_PIPELINE_FRAGMENT_DENSITY_MAP_LAYERED_CREATE_INFO_VALVE:
+		{
+			auto *info = static_cast<const VkPipelineFragmentDensityMapLayeredCreateInfoVALVE *>(pNext);
+			if (features.fragment_density_map_layered_valve.fragmentDensityMapLayered == VK_FALSE)
+				return false;
+			if (info->maxFragmentDensityMapLayers > props.fragment_density_map_layered_valve.maxFragmentDensityMapLayers)
+				return false;
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CLUSTER_ACCELERATION_STRUCTURE_CREATE_INFO_NV:
+		{
+			if (features.cluster_acceleration_structure_nv.clusterAccelerationStructure == VK_FALSE)
+				return false;
+			break;
+		}
+
 		default:
 			LOGE("Unrecognized pNext sType: %u. Treating as unsupported.\n", unsigned(base->sType));
 			return false;
@@ -1912,6 +1932,20 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 			count = nullptr;
 			break;
 
+		case VK_DESCRIPTOR_TYPE_PARTITIONED_ACCELERATION_STRUCTURE_NV:
+			if (features.partitioned_acceleration_structure_nv.partitionedAccelerationStructure == VK_FALSE)
+				return false;
+			// *shrug*
+			count = nullptr;
+			break;
+
+		case VK_DESCRIPTOR_TYPE_TENSOR_ARM:
+			if (features.tensor_arm.tensors == VK_FALSE)
+				return false;
+			// *shrug*
+			count = nullptr;
+			break;
+
 		default:
 			return false;
 		}
@@ -2102,7 +2136,7 @@ bool FeatureFilter::Impl::validate_spirv_extension(const std::string &ext) const
 		{ "SPV_KHR_workgroup_memory_explicit_layout", "VK_KHR_workgroup_memory_explicit_layout", 0 },
 		{ "SPV_EXT_shader_atomic_float_add", "VK_EXT_shader_atomic_float", 0 },
 		{ "SPV_KHR_fragment_shader_barycentric", "VK_KHR_fragment_shader_barycentric", 0 },
-		{ "SPV_KHR_subgroup_uniform_control_flow", "VK_KHR_shader_subgroup_uniform_control_flow", VK_API_VERSION_1_3 },
+		{ "SPV_KHR_subgroup_uniform_control_flow", "VK_KHR_shader_subgroup_uniform_control_flow", 0 },
 		{ "SPV_EXT_shader_atomic_float_min_max", "VK_EXT_shader_atomic_float2", 0 },
 		{ "SPV_EXT_shader_atomic_float16_add", "VK_EXT_shader_atomic_float2", 0 },
 		{ "SPV_NV_shader_atomic_fp16_vector", "VK_NV_shader_atomic_float16_vector", 0 },
@@ -2123,14 +2157,23 @@ bool FeatureFilter::Impl::validate_spirv_extension(const std::string &ext) const
 		{ "SPV_HUAWEI_subpass_shading", "VK_HUAWEI_subpass_shading", 0 },
 		{ "SPV_NV_ray_tracing_motion_blur", "VK_NV_ray_tracing_motion_blur", 0 },
 		{ "SPV_KHR_maximal_reconvergence", "VK_KHR_shader_maximal_reconvergence", 0 },
-		{ "SPV_KHR_subgroup_rotate", "VK_KHR_shader_subgroup_rotate", 0 },
-		{ "SPV_KHR_expect_assume", "VK_KHR_shader_expect_assume", 0 },
-		{ "SPV_KHR_float_controls2", "VK_KHR_shader_float_controls2", 0 },
+		{ "SPV_KHR_subgroup_rotate", "VK_KHR_shader_subgroup_rotate", VK_API_VERSION_1_4 },
+		{ "SPV_KHR_expect_assume", "VK_KHR_shader_expect_assume", VK_API_VERSION_1_4 },
+		{ "SPV_KHR_float_controls2", "VK_KHR_shader_float_controls2", VK_API_VERSION_1_4 },
 		{ "SPV_KHR_quad_control", "VK_KHR_shader_quad_control", 0 },
+		{ "SPV_KHR_bfloat16", "VK_KHR_shader_bfloat16", 0 },
 		{ "SPV_NV_raw_access_chains", "VK_NV_raw_access_chains", 0 },
 		{ "SPV_KHR_compute_shader_derivatives", "VK_KHR_compute_shader_derivatives", 0 },
 		{ "SPV_EXT_replicated_composites", "VK_EXT_shader_replicated_composites", 0 },
 		{ "SPV_KHR_relaxed_extended_instruction", "VK_KHR_shader_relaxed_extended_instruction", 0 },
+		{ "SPV_NV_cooperative_matrix2", "VK_NV_cooperative_matrix2", 0 },
+		{ "SPV_NV_tensor_addressing", "VK_NV_cooperative_matrix2", 0 },
+		{ "SPV_NV_linear_swept_spheres", "VK_NV_ray_tracing_linear_swept_spheres", 0 },
+		{ "SPV_NV_cluster_acceleration_structure", "VK_NV_cluster_acceleration_structure", 0 },
+		{ "SPV_NV_cooperative_vector", "VK_NV_cooperative_vector", 0 },
+		{ "SPV_QCOM_tile_shading", "VK_QCOM_tile_shading", 0 },
+		{ "SPV_ARM_tensors", "VK_ARM_tensors", 0 },
+		{ "SPV_EXT_float8", "VK_EXT_shader_float8", 0 },
 	};
 
 	for (auto &mapping : ext_mapping)
@@ -2488,6 +2531,46 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 		return features.raw_access_chains_nv.shaderRawAccessChains == VK_TRUE;
 	case spv::CapabilityReplicatedCompositesEXT:
 		return features.shader_replicated_composites.shaderReplicatedComposites == VK_TRUE;
+	case spv::CapabilityBFloat16TypeKHR:
+		return features.bfloat16.shaderBFloat16Type == VK_TRUE;
+	case spv::CapabilityBFloat16DotProductKHR:
+		return features.bfloat16.shaderBFloat16DotProduct == VK_TRUE;
+	case spv::CapabilityBFloat16CooperativeMatrixKHR:
+		return features.bfloat16.shaderBFloat16CooperativeMatrix == VK_TRUE;
+	case spv::CapabilityTensorAddressingNV:
+		return features.cooperative_matrix2_nv.cooperativeMatrixTensorAddressing == VK_TRUE;
+	case spv::CapabilityCooperativeMatrixReductionsNV:
+		return features.cooperative_matrix2_nv.cooperativeMatrixReductions == VK_TRUE;
+	case spv::CapabilityCooperativeMatrixConversionsNV:
+		return features.cooperative_matrix2_nv.cooperativeMatrixConversions == VK_TRUE;
+	case spv::CapabilityCooperativeMatrixPerElementOperationsNV:
+		return features.cooperative_matrix2_nv.cooperativeMatrixPerElementOperations == VK_TRUE;
+	case spv::CapabilityCooperativeMatrixTensorAddressingNV:
+		return features.cooperative_matrix2_nv.cooperativeMatrixTensorAddressing == VK_TRUE;
+	case spv::CapabilityCooperativeMatrixBlockLoadsNV:
+		return features.cooperative_matrix2_nv.cooperativeMatrixBlockLoads == VK_TRUE;
+	case spv::CapabilityRayTracingSpheresGeometryNV:
+		return features.ray_tracing_linear_swept_spheres_nv.spheres == VK_TRUE;
+	case spv::CapabilityRayTracingLinearSweptSpheresGeometryNV:
+		return features.ray_tracing_linear_swept_spheres_nv.linearSweptSpheres == VK_TRUE;
+	case spv::CapabilityRayTracingClusterAccelerationStructureNV:
+		return features.cluster_acceleration_structure_nv.clusterAccelerationStructure == VK_TRUE;
+	case spv::CapabilityCooperativeVectorNV:
+		return features.cooperative_vector_nv.cooperativeVector == VK_TRUE;
+	case spv::CapabilityCooperativeVectorTrainingNV:
+		return features.cooperative_vector_nv.cooperativeVectorTraining == VK_TRUE;
+	case spv::CapabilityTileShadingQCOM:
+		return features.tile_shading_qcom.tileShading == VK_TRUE;
+	case spv::CapabilityFloat8EXT:
+		return features.shader_float8.shaderFloat8 == VK_TRUE;
+	case spv::CapabilityFloat8CooperativeMatrixEXT:
+		return features.shader_float8.shaderFloat8CooperativeMatrix == VK_TRUE;
+	case spv::CapabilityTensorsARM:
+		return features.tensor_arm.shaderTensorAccess == VK_TRUE;
+	case spv::CapabilityStorageTensorArrayDynamicIndexingARM:
+		return features.tensor_arm.shaderStorageTensorArrayDynamicIndexing == VK_TRUE;
+	case spv::CapabilityStorageTensorArrayNonUniformIndexingARM:
+		return features.tensor_arm.shaderStorageTensorArrayNonUniformIndexing == VK_TRUE;
 
 	default:
 		LOGE("Unrecognized SPIR-V capability %u, treating as unsupported.\n", unsigned(cap));
@@ -2900,12 +2983,18 @@ bool FeatureFilter::Impl::shader_module_is_supported(const VkShaderModuleCreateI
 bool FeatureFilter::Impl::render_pass_is_supported(const VkRenderPassCreateInfo *info) const
 {
 	// Only allow flags we recognize and validate.
-	constexpr VkRenderPassCreateFlags supported_flags = VK_RENDER_PASS_CREATE_TRANSFORM_BIT_QCOM;
+	constexpr VkRenderPassCreateFlags supported_flags =
+			VK_RENDER_PASS_CREATE_TRANSFORM_BIT_QCOM |
+			VK_RENDER_PASS_CREATE_PER_LAYER_FRAGMENT_DENSITY_BIT_VALVE;
 	if ((info->flags & ~supported_flags) != 0)
 		return false;
 
 	if ((info->flags & VK_RENDER_PASS_CREATE_TRANSFORM_BIT_QCOM) != 0 &&
 	    enabled_extensions.count(VK_QCOM_RENDER_PASS_TRANSFORM_EXTENSION_NAME) == 0)
+		return false;
+
+	if ((info->flags & VK_RENDER_PASS_CREATE_PER_LAYER_FRAGMENT_DENSITY_BIT_VALVE) != 0 &&
+	    enabled_extensions.count(VK_VALVE_FRAGMENT_DENSITY_MAP_LAYERED_EXTENSION_NAME) == 0)
 		return false;
 
 	if (null_device)
@@ -3214,6 +3303,7 @@ bool FeatureFilter::Impl::pipeline_stage_mask_is_supported(VkPipelineStageFlags2
 			VK_PIPELINE_STAGE_2_MICROMAP_BUILD_BIT_EXT |
 			VK_PIPELINE_STAGE_COMMAND_PREPROCESS_BIT_EXT |
 			VK_PIPELINE_STAGE_2_OPTICAL_FLOW_BIT_NV |
+			VK_PIPELINE_STAGE_2_CONVERT_COOPERATIVE_VECTOR_MATRIX_BIT_NV |
 			sync2_stages;
 
 	if (stages & ~supported_flags)
@@ -3269,6 +3359,10 @@ bool FeatureFilter::Impl::pipeline_stage_mask_is_supported(VkPipelineStageFlags2
 
 	if ((stages & VK_PIPELINE_STAGE_2_OPTICAL_FLOW_BIT_NV) != 0 &&
 	    features.optical_flow_nv.opticalFlow == VK_FALSE)
+		return false;
+
+	if ((stages & VK_PIPELINE_STAGE_2_CONVERT_COOPERATIVE_VECTOR_MATRIX_BIT_NV) != 0 &&
+	    features.cooperative_vector_nv.cooperativeVector == VK_FALSE)
 		return false;
 
 	return true;
@@ -3383,6 +3477,9 @@ bool FeatureFilter::Impl::image_layout_is_supported(VkImageLayout layout) const
 
 	case VK_IMAGE_LAYOUT_RENDERING_LOCAL_READ_KHR:
 		return features.dynamic_rendering_local_read.dynamicRenderingLocalRead == VK_TRUE;
+
+	case VK_IMAGE_LAYOUT_ZERO_INITIALIZED_EXT:
+		return features.zero_initialize_device_memory.zeroInitializeDeviceMemory == VK_TRUE;
 
 	default:
 		return false;
@@ -3738,12 +3835,19 @@ bool FeatureFilter::Impl::subgroup_size_control_is_supported(const VkPipelineSha
 bool FeatureFilter::Impl::render_pass2_is_supported(const VkRenderPassCreateInfo2 *info) const
 {
 	// Only allow flags we recognize and validate.
-	constexpr VkRenderPassCreateFlags supported_flags = VK_RENDER_PASS_CREATE_TRANSFORM_BIT_QCOM;
+	constexpr VkRenderPassCreateFlags supported_flags =
+			VK_RENDER_PASS_CREATE_TRANSFORM_BIT_QCOM |
+			VK_RENDER_PASS_CREATE_PER_LAYER_FRAGMENT_DENSITY_BIT_VALVE;
+
 	if ((info->flags & ~supported_flags) != 0)
 		return false;
 
 	if ((info->flags & VK_RENDER_PASS_CREATE_TRANSFORM_BIT_QCOM) != 0 &&
 	    enabled_extensions.count(VK_QCOM_RENDER_PASS_TRANSFORM_EXTENSION_NAME) == 0)
+		return false;
+
+	if ((info->flags & VK_RENDER_PASS_CREATE_PER_LAYER_FRAGMENT_DENSITY_BIT_VALVE) != 0 &&
+	    enabled_extensions.count(VK_VALVE_FRAGMENT_DENSITY_MAP_LAYERED_EXTENSION_NAME) == 0)
 		return false;
 
 	if (null_device)
@@ -3987,7 +4091,10 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 			VK_PIPELINE_CREATE_PROTECTED_ACCESS_ONLY_BIT_EXT |
 			VK_PIPELINE_CREATE_NO_PROTECTED_ACCESS_BIT_EXT |
 			VK_PIPELINE_CREATE_2_ENABLE_LEGACY_DITHERING_BIT_EXT |
-			VK_PIPELINE_CREATE_2_INDIRECT_BINDABLE_BIT_EXT;
+			VK_PIPELINE_CREATE_2_INDIRECT_BINDABLE_BIT_EXT |
+			VK_PIPELINE_CREATE_2_DISALLOW_OPACITY_MICROMAP_BIT_ARM |
+			VK_PIPELINE_CREATE_2_RAY_TRACING_ALLOW_SPHERES_AND_LINEAR_SWEPT_SPHERES_BIT_NV |
+			VK_PIPELINE_CREATE_2_PER_LAYER_FRAGMENT_DENSITY_BIT_VALVE;
 
 	auto flags = get_effective_flags(info);
 
@@ -4051,6 +4158,19 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 
 	if ((flags & VK_PIPELINE_CREATE_2_INDIRECT_BINDABLE_BIT_EXT) != 0 &&
 	    features.device_generated_commands.deviceGeneratedCommands == VK_FALSE)
+		return false;
+
+	if ((flags & VK_PIPELINE_CREATE_2_DISALLOW_OPACITY_MICROMAP_BIT_ARM) != 0 &&
+	    features.pipeline_opacity_micromap_arm.pipelineOpacityMicromap == VK_FALSE)
+		return false;
+
+	if ((flags & VK_PIPELINE_CREATE_2_RAY_TRACING_ALLOW_SPHERES_AND_LINEAR_SWEPT_SPHERES_BIT_NV) != 0 &&
+	    features.ray_tracing_linear_swept_spheres_nv.spheres == VK_FALSE &&
+	    features.ray_tracing_linear_swept_spheres_nv.linearSweptSpheres == VK_FALSE)
+		return false;
+
+	if ((flags & VK_PIPELINE_CREATE_2_PER_LAYER_FRAGMENT_DENSITY_BIT_VALVE) != 0 &&
+	    features.fragment_density_map_layered_valve.fragmentDensityMapLayered == VK_FALSE)
 		return false;
 
 	const VkDynamicState *dynamic_states = nullptr;
@@ -4358,7 +4478,9 @@ bool FeatureFilter::Impl::compute_pipeline_is_supported(const VkComputePipelineC
 			VK_PIPELINE_CREATE_INDIRECT_BINDABLE_BIT_NV |
 			VK_PIPELINE_CREATE_PROTECTED_ACCESS_ONLY_BIT_EXT |
 			VK_PIPELINE_CREATE_NO_PROTECTED_ACCESS_BIT_EXT |
-			VK_PIPELINE_CREATE_2_INDIRECT_BINDABLE_BIT_EXT;
+			VK_PIPELINE_CREATE_2_INDIRECT_BINDABLE_BIT_EXT |
+			VK_PIPELINE_CREATE_2_DISALLOW_OPACITY_MICROMAP_BIT_ARM |
+			VK_PIPELINE_CREATE_2_RAY_TRACING_ALLOW_SPHERES_AND_LINEAR_SWEPT_SPHERES_BIT_NV;
 
 	auto flags = get_effective_flags(info);
 
@@ -4391,6 +4513,15 @@ bool FeatureFilter::Impl::compute_pipeline_is_supported(const VkComputePipelineC
 	    features.device_generated_commands.deviceGeneratedCommands == VK_FALSE)
 		return false;
 
+	if ((flags & VK_PIPELINE_CREATE_2_DISALLOW_OPACITY_MICROMAP_BIT_ARM) != 0 &&
+	    features.pipeline_opacity_micromap_arm.pipelineOpacityMicromap == VK_FALSE)
+		return false;
+
+	if ((flags & VK_PIPELINE_CREATE_2_RAY_TRACING_ALLOW_SPHERES_AND_LINEAR_SWEPT_SPHERES_BIT_NV) != 0 &&
+	    features.ray_tracing_linear_swept_spheres_nv.spheres == VK_FALSE &&
+	    features.ray_tracing_linear_swept_spheres_nv.linearSweptSpheres == VK_FALSE)
+		return false;
+
 	if (!subgroup_size_control_is_supported(info->stage))
 		return false;
 
@@ -4420,7 +4551,9 @@ bool FeatureFilter::Impl::raytracing_pipeline_is_supported(const VkRayTracingPip
 			VK_PIPELINE_CREATE_RAY_TRACING_ALLOW_MOTION_BIT_NV |
 			VK_PIPELINE_CREATE_RAY_TRACING_OPACITY_MICROMAP_BIT_EXT |
 			VK_PIPELINE_CREATE_PROTECTED_ACCESS_ONLY_BIT_EXT |
-			VK_PIPELINE_CREATE_NO_PROTECTED_ACCESS_BIT_EXT;
+			VK_PIPELINE_CREATE_NO_PROTECTED_ACCESS_BIT_EXT |
+			VK_PIPELINE_CREATE_2_DISALLOW_OPACITY_MICROMAP_BIT_ARM |
+			VK_PIPELINE_CREATE_2_RAY_TRACING_ALLOW_SPHERES_AND_LINEAR_SWEPT_SPHERES_BIT_NV;
 
 	auto flags = get_effective_flags(info);
 
@@ -4458,6 +4591,15 @@ bool FeatureFilter::Impl::raytracing_pipeline_is_supported(const VkRayTracingPip
 	if ((flags & (VK_PIPELINE_CREATE_PROTECTED_ACCESS_ONLY_BIT_EXT |
 	              VK_PIPELINE_CREATE_NO_PROTECTED_ACCESS_BIT_EXT)) != 0 &&
 	    features.pipeline_protected_access.pipelineProtectedAccess == VK_FALSE)
+		return false;
+
+	if ((flags & VK_PIPELINE_CREATE_2_DISALLOW_OPACITY_MICROMAP_BIT_ARM) != 0 &&
+	    features.pipeline_opacity_micromap_arm.pipelineOpacityMicromap == VK_FALSE)
+		return false;
+
+	if ((flags & VK_PIPELINE_CREATE_2_RAY_TRACING_ALLOW_SPHERES_AND_LINEAR_SWEPT_SPHERES_BIT_NV) != 0 &&
+	    features.ray_tracing_linear_swept_spheres_nv.spheres == VK_FALSE &&
+	    features.ray_tracing_linear_swept_spheres_nv.linearSweptSpheres == VK_FALSE)
 		return false;
 
 	if (features.ray_tracing_pipeline.rayTracingPipeline == VK_FALSE)
