@@ -97,7 +97,9 @@
 		"VK_NV_cooperative_vector",
 		"VK_NV_ray_tracing_linear_swept_spheres",
 		"VK_NV_partitioned_acceleration_structure",
-		"VK_ARM_tensors"
+		"VK_ARM_tensors",
+		"VK_NV_cluster_acceleration_structure",
+		"VK_VALVE_fragment_density_map_layered"
 	],
 	"fully-ignored" : [
 		"VK_AMD_mixed_attachment_samples",
