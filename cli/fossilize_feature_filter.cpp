@@ -3266,6 +3266,7 @@ bool FeatureFilter::Impl::pipeline_stage_mask_is_supported(VkPipelineStageFlags2
 			VK_PIPELINE_STAGE_2_MICROMAP_BUILD_BIT_EXT |
 			VK_PIPELINE_STAGE_COMMAND_PREPROCESS_BIT_EXT |
 			VK_PIPELINE_STAGE_2_OPTICAL_FLOW_BIT_NV |
+			VK_PIPELINE_STAGE_2_CONVERT_COOPERATIVE_VECTOR_MATRIX_BIT_NV |
 			sync2_stages;
 
 	if (stages & ~supported_flags)
@@ -3321,6 +3322,10 @@ bool FeatureFilter::Impl::pipeline_stage_mask_is_supported(VkPipelineStageFlags2
 
 	if ((stages & VK_PIPELINE_STAGE_2_OPTICAL_FLOW_BIT_NV) != 0 &&
 	    features.optical_flow_nv.opticalFlow == VK_FALSE)
+		return false;
+
+	if ((stages & VK_PIPELINE_STAGE_2_CONVERT_COOPERATIVE_VECTOR_MATRIX_BIT_NV) != 0 &&
+	    features.cooperative_vector_nv.cooperativeVector == VK_FALSE)
 		return false;
 
 	return true;
@@ -3435,6 +3440,9 @@ bool FeatureFilter::Impl::image_layout_is_supported(VkImageLayout layout) const
 
 	case VK_IMAGE_LAYOUT_RENDERING_LOCAL_READ_KHR:
 		return features.dynamic_rendering_local_read.dynamicRenderingLocalRead == VK_TRUE;
+
+	case VK_IMAGE_LAYOUT_ZERO_INITIALIZED_EXT:
+		return features.zero_initialize_device_memory.zeroInitializeDeviceMemory == VK_TRUE;
 
 	default:
 		return false;
@@ -4039,7 +4047,9 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 			VK_PIPELINE_CREATE_PROTECTED_ACCESS_ONLY_BIT_EXT |
 			VK_PIPELINE_CREATE_NO_PROTECTED_ACCESS_BIT_EXT |
 			VK_PIPELINE_CREATE_2_ENABLE_LEGACY_DITHERING_BIT_EXT |
-			VK_PIPELINE_CREATE_2_INDIRECT_BINDABLE_BIT_EXT;
+			VK_PIPELINE_CREATE_2_INDIRECT_BINDABLE_BIT_EXT |
+			VK_PIPELINE_CREATE_2_DISALLOW_OPACITY_MICROMAP_BIT_ARM |
+			VK_PIPELINE_CREATE_2_RAY_TRACING_ALLOW_SPHERES_AND_LINEAR_SWEPT_SPHERES_BIT_NV;
 
 	auto flags = get_effective_flags(info);
 
@@ -4103,6 +4113,15 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 
 	if ((flags & VK_PIPELINE_CREATE_2_INDIRECT_BINDABLE_BIT_EXT) != 0 &&
 	    features.device_generated_commands.deviceGeneratedCommands == VK_FALSE)
+		return false;
+
+	if ((flags & VK_PIPELINE_CREATE_2_DISALLOW_OPACITY_MICROMAP_BIT_ARM) != 0 &&
+	    features.pipeline_opacity_micromap_arm.pipelineOpacityMicromap == VK_FALSE)
+		return false;
+
+	if ((flags & VK_PIPELINE_CREATE_2_RAY_TRACING_ALLOW_SPHERES_AND_LINEAR_SWEPT_SPHERES_BIT_NV) != 0 &&
+	    features.ray_tracing_linear_swept_spheres_nv.spheres == VK_FALSE &&
+	    features.ray_tracing_linear_swept_spheres_nv.linearSweptSpheres == VK_FALSE)
 		return false;
 
 	const VkDynamicState *dynamic_states = nullptr;
@@ -4410,7 +4429,9 @@ bool FeatureFilter::Impl::compute_pipeline_is_supported(const VkComputePipelineC
 			VK_PIPELINE_CREATE_INDIRECT_BINDABLE_BIT_NV |
 			VK_PIPELINE_CREATE_PROTECTED_ACCESS_ONLY_BIT_EXT |
 			VK_PIPELINE_CREATE_NO_PROTECTED_ACCESS_BIT_EXT |
-			VK_PIPELINE_CREATE_2_INDIRECT_BINDABLE_BIT_EXT;
+			VK_PIPELINE_CREATE_2_INDIRECT_BINDABLE_BIT_EXT |
+			VK_PIPELINE_CREATE_2_DISALLOW_OPACITY_MICROMAP_BIT_ARM |
+			VK_PIPELINE_CREATE_2_RAY_TRACING_ALLOW_SPHERES_AND_LINEAR_SWEPT_SPHERES_BIT_NV;
 
 	auto flags = get_effective_flags(info);
 
@@ -4443,6 +4464,15 @@ bool FeatureFilter::Impl::compute_pipeline_is_supported(const VkComputePipelineC
 	    features.device_generated_commands.deviceGeneratedCommands == VK_FALSE)
 		return false;
 
+	if ((flags & VK_PIPELINE_CREATE_2_DISALLOW_OPACITY_MICROMAP_BIT_ARM) != 0 &&
+	    features.pipeline_opacity_micromap_arm.pipelineOpacityMicromap == VK_FALSE)
+		return false;
+
+	if ((flags & VK_PIPELINE_CREATE_2_RAY_TRACING_ALLOW_SPHERES_AND_LINEAR_SWEPT_SPHERES_BIT_NV) != 0 &&
+	    features.ray_tracing_linear_swept_spheres_nv.spheres == VK_FALSE &&
+	    features.ray_tracing_linear_swept_spheres_nv.linearSweptSpheres == VK_FALSE)
+		return false;
+
 	if (!subgroup_size_control_is_supported(info->stage))
 		return false;
 
@@ -4472,7 +4502,9 @@ bool FeatureFilter::Impl::raytracing_pipeline_is_supported(const VkRayTracingPip
 			VK_PIPELINE_CREATE_RAY_TRACING_ALLOW_MOTION_BIT_NV |
 			VK_PIPELINE_CREATE_RAY_TRACING_OPACITY_MICROMAP_BIT_EXT |
 			VK_PIPELINE_CREATE_PROTECTED_ACCESS_ONLY_BIT_EXT |
-			VK_PIPELINE_CREATE_NO_PROTECTED_ACCESS_BIT_EXT;
+			VK_PIPELINE_CREATE_NO_PROTECTED_ACCESS_BIT_EXT |
+			VK_PIPELINE_CREATE_2_DISALLOW_OPACITY_MICROMAP_BIT_ARM |
+			VK_PIPELINE_CREATE_2_RAY_TRACING_ALLOW_SPHERES_AND_LINEAR_SWEPT_SPHERES_BIT_NV;
 
 	auto flags = get_effective_flags(info);
 
@@ -4510,6 +4542,15 @@ bool FeatureFilter::Impl::raytracing_pipeline_is_supported(const VkRayTracingPip
 	if ((flags & (VK_PIPELINE_CREATE_PROTECTED_ACCESS_ONLY_BIT_EXT |
 	              VK_PIPELINE_CREATE_NO_PROTECTED_ACCESS_BIT_EXT)) != 0 &&
 	    features.pipeline_protected_access.pipelineProtectedAccess == VK_FALSE)
+		return false;
+
+	if ((flags & VK_PIPELINE_CREATE_2_DISALLOW_OPACITY_MICROMAP_BIT_ARM) != 0 &&
+	    features.pipeline_opacity_micromap_arm.pipelineOpacityMicromap == VK_FALSE)
+		return false;
+
+	if ((flags & VK_PIPELINE_CREATE_2_RAY_TRACING_ALLOW_SPHERES_AND_LINEAR_SWEPT_SPHERES_BIT_NV) != 0 &&
+	    features.ray_tracing_linear_swept_spheres_nv.spheres == VK_FALSE &&
+	    features.ray_tracing_linear_swept_spheres_nv.linearSweptSpheres == VK_FALSE)
 		return false;
 
 	if (features.ray_tracing_pipeline.rayTracingPipeline == VK_FALSE)

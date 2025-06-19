@@ -131,3 +131,5 @@ FE(COOPERATIVE_VECTOR, cooperative_vector_nv, NV);
 FE(TILE_SHADING, tile_shading_qcom, QCOM);
 FE(SHADER_FLOAT8, shader_float8, EXT);
 FE(TENSOR, tensor_arm, ARM);
+FE(ZERO_INITIALIZE_DEVICE_MEMORY, zero_initialize_device_memory, EXT);
+FE(PIPELINE_OPACITY_MICROMAP, pipeline_opacity_micromap_arm, ARM);

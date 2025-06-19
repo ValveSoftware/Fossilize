@@ -141,6 +141,8 @@ struct VulkanFeatures
 	VkPhysicalDeviceTileShadingFeaturesQCOM tile_shading_qcom;
 	VkPhysicalDeviceShaderFloat8FeaturesEXT shader_float8;
 	VkPhysicalDeviceTensorFeaturesARM tensor_arm;
+	VkPhysicalDeviceZeroInitializeDeviceMemoryFeaturesEXT zero_initialize_device_memory;
+	VkPhysicalDevicePipelineOpacityMicromapFeaturesARM pipeline_opacity_micromap_arm;
 
 	struct
 	{
