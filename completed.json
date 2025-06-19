@@ -126,7 +126,9 @@
 		"VK_QCOM_filter_cubic_clamp",
 		"VK_NV_device_generated_commands",
 		"VK_KHR_video_encode_quantization_map",
-		"VK_KHR_maintenance9"
+		"VK_KHR_maintenance9",
+		"VK_QCOM_tile_shading",
+		"VK_QCOM_tile_memory_heap"
 	],
 	"cherry-pick": [
 		"VK_DYNAMIC_STATE_VIEWPORT_W_SCALING_NV",
