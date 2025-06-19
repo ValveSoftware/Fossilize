@@ -307,6 +307,26 @@
 		"FloatControls2",
 		"QuadControlKHR",
 		"RawAccessChainsNV",
-		"ReplicatedCompositesEXT"
+		"ReplicatedCompositesEXT",
+		"BFloat16TypeKHR",
+		"BFloat16DotProductKHR",
+		"BFloat16CooperativeMatrixKHR",
+		"TensorAddressingNV",
+		"CooperativeMatrixReductionsNV",
+		"CooperativeMatrixConversionsNV",
+		"CooperativeMatrixPerElementOperationsNV",
+		"CooperativeMatrixTensorAddressingNV",
+		"CooperativeMatrixBlockLoadsNV",
+		"RayTracingSpheresGeometryNV",
+		"RayTracingLinearSweptSpheresGeometryNV",
+		"RayTracingClusterAccelerationStructureNV",
+		"CooperativeVectorNV",
+		"CooperativeVectorTrainingNV",
+		"TileShadingQCOM",
+		"Float8EXT",
+		"Float8CooperativeMatrixEXT",
+		"TensorsARM",
+		"StorageTensorArrayDynamicIndexingARM",
+		"StorageTensorArrayNonUniformIndexingARM"
 	]
 }

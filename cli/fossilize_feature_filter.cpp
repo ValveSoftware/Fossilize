@@ -32,6 +32,9 @@
 #include <vector>
 #include <mutex>
 
+// There is a mismatch in pluralization between extension name and feature structure name which screws up our macros.
+#define VK_ARM_TENSOR_EXTENSION_NAME VK_ARM_TENSORS_EXTENSION_NAME
+
 namespace Fossilize
 {
 void *build_pnext_chain(VulkanFeatures &features, uint32_t api_version,
@@ -2497,6 +2500,46 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 		return features.raw_access_chains_nv.shaderRawAccessChains == VK_TRUE;
 	case spv::CapabilityReplicatedCompositesEXT:
 		return features.shader_replicated_composites.shaderReplicatedComposites == VK_TRUE;
+	case spv::CapabilityBFloat16TypeKHR:
+		return features.bfloat16.shaderBFloat16Type == VK_TRUE;
+	case spv::CapabilityBFloat16DotProductKHR:
+		return features.bfloat16.shaderBFloat16DotProduct == VK_TRUE;
+	case spv::CapabilityBFloat16CooperativeMatrixKHR:
+		return features.bfloat16.shaderBFloat16CooperativeMatrix == VK_TRUE;
+	case spv::CapabilityTensorAddressingNV:
+		return features.cooperative_matrix2_nv.cooperativeMatrixTensorAddressing == VK_TRUE;
+	case spv::CapabilityCooperativeMatrixReductionsNV:
+		return features.cooperative_matrix2_nv.cooperativeMatrixReductions == VK_TRUE;
+	case spv::CapabilityCooperativeMatrixConversionsNV:
+		return features.cooperative_matrix2_nv.cooperativeMatrixConversions == VK_TRUE;
+	case spv::CapabilityCooperativeMatrixPerElementOperationsNV:
+		return features.cooperative_matrix2_nv.cooperativeMatrixPerElementOperations == VK_TRUE;
+	case spv::CapabilityCooperativeMatrixTensorAddressingNV:
+		return features.cooperative_matrix2_nv.cooperativeMatrixTensorAddressing == VK_TRUE;
+	case spv::CapabilityCooperativeMatrixBlockLoadsNV:
+		return features.cooperative_matrix2_nv.cooperativeMatrixBlockLoads == VK_TRUE;
+	case spv::CapabilityRayTracingSpheresGeometryNV:
+		return features.ray_tracing_linear_swept_spheres_nv.spheres == VK_TRUE;
+	case spv::CapabilityRayTracingLinearSweptSpheresGeometryNV:
+		return features.ray_tracing_linear_swept_spheres_nv.linearSweptSpheres == VK_TRUE;
+	case spv::CapabilityRayTracingClusterAccelerationStructureNV:
+		return features.cluster_acceleration_structure_nv.clusterAccelerationStructure == VK_TRUE;
+	case spv::CapabilityCooperativeVectorNV:
+		return features.cooperative_vector_nv.cooperativeVector == VK_TRUE;
+	case spv::CapabilityCooperativeVectorTrainingNV:
+		return features.cooperative_vector_nv.cooperativeVectorTraining == VK_TRUE;
+	case spv::CapabilityTileShadingQCOM:
+		return features.tile_shading_qcom.tileShading == VK_TRUE;
+	case spv::CapabilityFloat8EXT:
+		return features.shader_float8.shaderFloat8 == VK_TRUE;
+	case spv::CapabilityFloat8CooperativeMatrixEXT:
+		return features.shader_float8.shaderFloat8CooperativeMatrix == VK_TRUE;
+	case spv::CapabilityTensorsARM:
+		return features.tensor_arm.shaderTensorAccess == VK_TRUE;
+	case spv::CapabilityStorageTensorArrayDynamicIndexingARM:
+		return features.tensor_arm.shaderStorageTensorArrayDynamicIndexing == VK_TRUE;
+	case spv::CapabilityStorageTensorArrayNonUniformIndexingARM:
+		return features.tensor_arm.shaderStorageTensorArrayNonUniformIndexing == VK_TRUE;
 
 	default:
 		LOGE("Unrecognized SPIR-V capability %u, treating as unsupported.\n", unsigned(cap));
