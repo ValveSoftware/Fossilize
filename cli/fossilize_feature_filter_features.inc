@@ -133,3 +133,4 @@ FE(SHADER_FLOAT8, shader_float8, EXT);
 FE(TENSOR, tensor_arm, ARM);
 FE(ZERO_INITIALIZE_DEVICE_MEMORY, zero_initialize_device_memory, EXT);
 FE(PIPELINE_OPACITY_MICROMAP, pipeline_opacity_micromap_arm, ARM);
+FE(PARTITIONED_ACCELERATION_STRUCTURE, partitioned_acceleration_structure_nv, NV);

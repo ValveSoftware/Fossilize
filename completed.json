@@ -95,7 +95,9 @@
 		"VK_EXT_zero_initialize_device_memory",
 		"VK_ARM_pipeline_opacity_micromap",
 		"VK_NV_cooperative_vector",
-		"VK_NV_ray_tracing_linear_swept_spheres"
+		"VK_NV_ray_tracing_linear_swept_spheres",
+		"VK_NV_partitioned_acceleration_structure",
+		"VK_ARM_tensors"
 	],
 	"fully-ignored" : [
 		"VK_AMD_mixed_attachment_samples",

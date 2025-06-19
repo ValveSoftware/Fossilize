@@ -1915,6 +1915,20 @@ bool FeatureFilter::Impl::descriptor_set_layout_is_supported(const VkDescriptorS
 			count = nullptr;
 			break;
 
+		case VK_DESCRIPTOR_TYPE_PARTITIONED_ACCELERATION_STRUCTURE_NV:
+			if (features.partitioned_acceleration_structure_nv.partitionedAccelerationStructure == VK_FALSE)
+				return false;
+			// *shrug*
+			count = nullptr;
+			break;
+
+		case VK_DESCRIPTOR_TYPE_TENSOR_ARM:
+			if (features.tensor_arm.tensors == VK_FALSE)
+				return false;
+			// *shrug*
+			count = nullptr;
+			break;
+
 		default:
 			return false;
 		}

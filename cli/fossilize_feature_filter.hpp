@@ -143,6 +143,7 @@ struct VulkanFeatures
 	VkPhysicalDeviceTensorFeaturesARM tensor_arm;
 	VkPhysicalDeviceZeroInitializeDeviceMemoryFeaturesEXT zero_initialize_device_memory;
 	VkPhysicalDevicePipelineOpacityMicromapFeaturesARM pipeline_opacity_micromap_arm;
+	VkPhysicalDevicePartitionedAccelerationStructureFeaturesNV partitioned_acceleration_structure_nv;
 
 	struct
 	{
