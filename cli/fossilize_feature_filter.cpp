@@ -1600,6 +1600,23 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 			break;
 		}
 
+		case VK_STRUCTURE_TYPE_PIPELINE_FRAGMENT_DENSITY_MAP_LAYERED_CREATE_INFO_VALVE:
+		{
+			auto *info = static_cast<const VkPipelineFragmentDensityMapLayeredCreateInfoVALVE *>(pNext);
+			if (features.fragment_density_map_layered_valve.fragmentDensityMapLayered == VK_FALSE)
+				return false;
+			if (info->maxFragmentDensityMapLayers > props.fragment_density_map_layered_valve.maxFragmentDensityMapLayers)
+				return false;
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CLUSTER_ACCELERATION_STRUCTURE_CREATE_INFO_NV:
+		{
+			if (features.cluster_acceleration_structure_nv.clusterAccelerationStructure == VK_FALSE)
+				return false;
+			break;
+		}
+
 		default:
 			LOGE("Unrecognized pNext sType: %u. Treating as unsupported.\n", unsigned(base->sType));
 			return false;
@@ -2966,12 +2983,18 @@ bool FeatureFilter::Impl::shader_module_is_supported(const VkShaderModuleCreateI
 bool FeatureFilter::Impl::render_pass_is_supported(const VkRenderPassCreateInfo *info) const
 {
 	// Only allow flags we recognize and validate.
-	constexpr VkRenderPassCreateFlags supported_flags = VK_RENDER_PASS_CREATE_TRANSFORM_BIT_QCOM;
+	constexpr VkRenderPassCreateFlags supported_flags =
+			VK_RENDER_PASS_CREATE_TRANSFORM_BIT_QCOM |
+			VK_RENDER_PASS_CREATE_PER_LAYER_FRAGMENT_DENSITY_BIT_VALVE;
 	if ((info->flags & ~supported_flags) != 0)
 		return false;
 
 	if ((info->flags & VK_RENDER_PASS_CREATE_TRANSFORM_BIT_QCOM) != 0 &&
 	    enabled_extensions.count(VK_QCOM_RENDER_PASS_TRANSFORM_EXTENSION_NAME) == 0)
+		return false;
+
+	if ((info->flags & VK_RENDER_PASS_CREATE_PER_LAYER_FRAGMENT_DENSITY_BIT_VALVE) != 0 &&
+	    enabled_extensions.count(VK_VALVE_FRAGMENT_DENSITY_MAP_LAYERED_EXTENSION_NAME) == 0)
 		return false;
 
 	if (null_device)
@@ -3812,12 +3835,19 @@ bool FeatureFilter::Impl::subgroup_size_control_is_supported(const VkPipelineSha
 bool FeatureFilter::Impl::render_pass2_is_supported(const VkRenderPassCreateInfo2 *info) const
 {
 	// Only allow flags we recognize and validate.
-	constexpr VkRenderPassCreateFlags supported_flags = VK_RENDER_PASS_CREATE_TRANSFORM_BIT_QCOM;
+	constexpr VkRenderPassCreateFlags supported_flags =
+			VK_RENDER_PASS_CREATE_TRANSFORM_BIT_QCOM |
+			VK_RENDER_PASS_CREATE_PER_LAYER_FRAGMENT_DENSITY_BIT_VALVE;
+
 	if ((info->flags & ~supported_flags) != 0)
 		return false;
 
 	if ((info->flags & VK_RENDER_PASS_CREATE_TRANSFORM_BIT_QCOM) != 0 &&
 	    enabled_extensions.count(VK_QCOM_RENDER_PASS_TRANSFORM_EXTENSION_NAME) == 0)
+		return false;
+
+	if ((info->flags & VK_RENDER_PASS_CREATE_PER_LAYER_FRAGMENT_DENSITY_BIT_VALVE) != 0 &&
+	    enabled_extensions.count(VK_VALVE_FRAGMENT_DENSITY_MAP_LAYERED_EXTENSION_NAME) == 0)
 		return false;
 
 	if (null_device)
@@ -4063,7 +4093,8 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 			VK_PIPELINE_CREATE_2_ENABLE_LEGACY_DITHERING_BIT_EXT |
 			VK_PIPELINE_CREATE_2_INDIRECT_BINDABLE_BIT_EXT |
 			VK_PIPELINE_CREATE_2_DISALLOW_OPACITY_MICROMAP_BIT_ARM |
-			VK_PIPELINE_CREATE_2_RAY_TRACING_ALLOW_SPHERES_AND_LINEAR_SWEPT_SPHERES_BIT_NV;
+			VK_PIPELINE_CREATE_2_RAY_TRACING_ALLOW_SPHERES_AND_LINEAR_SWEPT_SPHERES_BIT_NV |
+			VK_PIPELINE_CREATE_2_PER_LAYER_FRAGMENT_DENSITY_BIT_VALVE;
 
 	auto flags = get_effective_flags(info);
 
@@ -4136,6 +4167,10 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 	if ((flags & VK_PIPELINE_CREATE_2_RAY_TRACING_ALLOW_SPHERES_AND_LINEAR_SWEPT_SPHERES_BIT_NV) != 0 &&
 	    features.ray_tracing_linear_swept_spheres_nv.spheres == VK_FALSE &&
 	    features.ray_tracing_linear_swept_spheres_nv.linearSweptSpheres == VK_FALSE)
+		return false;
+
+	if ((flags & VK_PIPELINE_CREATE_2_PER_LAYER_FRAGMENT_DENSITY_BIT_VALVE) != 0 &&
+	    features.fragment_density_map_layered_valve.fragmentDensityMapLayered == VK_FALSE)
 		return false;
 
 	const VkDynamicState *dynamic_states = nullptr;

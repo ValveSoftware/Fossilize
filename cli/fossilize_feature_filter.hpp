@@ -144,6 +144,7 @@ struct VulkanFeatures
 	VkPhysicalDeviceZeroInitializeDeviceMemoryFeaturesEXT zero_initialize_device_memory;
 	VkPhysicalDevicePipelineOpacityMicromapFeaturesARM pipeline_opacity_micromap_arm;
 	VkPhysicalDevicePartitionedAccelerationStructureFeaturesNV partitioned_acceleration_structure_nv;
+	VkPhysicalDeviceFragmentDensityMapLayeredFeaturesVALVE fragment_density_map_layered_valve;
 
 	struct
 	{
@@ -193,6 +194,7 @@ struct VulkanProperties
 	VkPhysicalDeviceShaderModuleIdentifierPropertiesEXT shader_module_identifier;
 	VkPhysicalDeviceBlendOperationAdvancedPropertiesEXT blend_operation_advanced;
 	VkPhysicalDeviceMaintenance7PropertiesKHR maintenance7;
+	VkPhysicalDeviceFragmentDensityMapLayeredPropertiesVALVE fragment_density_map_layered_valve;
 
 	struct
 	{
