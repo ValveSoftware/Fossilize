@@ -535,7 +535,6 @@ static size_t getPnextStructSize(VkStructureType type)
 		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_PROCESSING_2_FEATURES_QCOM, sizeof(VkPhysicalDeviceImageProcessing2FeaturesQCOM) },
 		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_POOL_OVERALLOCATION_FEATURES_NV, sizeof(VkPhysicalDeviceDescriptorPoolOverallocationFeaturesNV) },
 		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PER_STAGE_DESCRIPTOR_SET_FEATURES_NV, sizeof(VkPhysicalDevicePerStageDescriptorSetFeaturesNV) },
-		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUDA_KERNEL_LAUNCH_FEATURES_NV, sizeof(VkPhysicalDeviceCudaKernelLaunchFeaturesNV) },
 		{ VK_STRUCTURE_TYPE_DEVICE_QUEUE_SHADER_CORE_CONTROL_CREATE_INFO_ARM, sizeof(VkDeviceQueueShaderCoreControlCreateInfoARM) },
 		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SCHEDULING_CONTROLS_FEATURES_ARM, sizeof(VkPhysicalDeviceSchedulingControlsFeaturesARM) },
 		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RELAXED_LINE_RASTERIZATION_FEATURES_IMG, sizeof(VkPhysicalDeviceRelaxedLineRasterizationFeaturesIMG) },
