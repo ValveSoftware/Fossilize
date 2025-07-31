@@ -623,6 +623,8 @@ struct ThreadedReplayer : StateCreatorInterface
 		void (*on_validation_error_callback)(ThreadedReplayer *) = nullptr;
 
 		unsigned timeout_seconds = 0;
+
+		bool fail_on_pipeline_compile_required = false;
 	};
 
 	struct DeferredGraphicsInfo
@@ -698,6 +700,10 @@ struct ThreadedReplayer : StateCreatorInterface
 		total_peak_memory.store(0);
 		pipeline_cache_hits.store(0);
 		pipeline_cache_misses.store(0);
+
+		graphics_pipeline_compile_required_count.store(0);
+		compute_pipeline_compile_required_count.store(0);
+		raytracing_pipeline_compile_required_count.store(0);
 
 		shader_module_total_compressed_size.store(0);
 		shader_module_total_size.store(0);
@@ -1470,8 +1476,9 @@ struct ThreadedReplayer : StateCreatorInterface
 		if ((disk_pipeline_cache || opts.pipeline_stats) && device->pipeline_feedback_enabled())
 			feedback.setup_pnext(work_item);
 
-		if (vkCreateGraphicsPipelines(device->get_device(), cache, 1, work_item.create_info.graphics_create_info,
-									  nullptr, work_item.output.pipeline) == VK_SUCCESS)
+		VkResult result = vkCreateGraphicsPipelines(device->get_device(), cache, 1, work_item.create_info.graphics_create_info,
+									  nullptr, work_item.output.pipeline);
+		if (result == VK_SUCCESS)
 		{
 			auto end_time = chrono::steady_clock::now();
 			auto duration_ns = chrono::duration_cast<chrono::nanoseconds>(end_time - start_time).count();
@@ -1489,6 +1496,11 @@ struct ThreadedReplayer : StateCreatorInterface
 			}
 
 			complete_work_item(work_item);
+		}
+		else if (result == VK_PIPELINE_COMPILE_REQUIRED)
+		{
+			LOGE("Recompile required for graphics pipeline hash 0x%016" PRIx64 ".\n", work_item.hash);
+			graphics_pipeline_compile_required_count.fetch_add(1, std::memory_order_relaxed);
 		}
 		else
 		{
@@ -1516,9 +1528,10 @@ struct ThreadedReplayer : StateCreatorInterface
 		if ((disk_pipeline_cache || opts.pipeline_stats) && device->pipeline_feedback_enabled())
 			feedback.setup_pnext(work_item);
 
-		if (vkCreateComputePipelines(device->get_device(), cache, 1,
+		VkResult result = vkCreateComputePipelines(device->get_device(), cache, 1,
 									 work_item.create_info.compute_create_info,
-									 nullptr, work_item.output.pipeline) == VK_SUCCESS)
+									 nullptr, work_item.output.pipeline);
+		if (result == VK_SUCCESS)
 		{
 			auto end_time = chrono::steady_clock::now();
 			auto duration_ns = chrono::duration_cast<chrono::nanoseconds>(end_time - start_time).count();
@@ -1536,6 +1549,11 @@ struct ThreadedReplayer : StateCreatorInterface
 			}
 
 			complete_work_item(work_item);
+		}
+		else if (result == VK_PIPELINE_COMPILE_REQUIRED)
+		{
+			LOGE("Recompile required for compute pipeline hash 0x%016" PRIx64 ".\n", work_item.hash);
+			compute_pipeline_compile_required_count.fetch_add(1, std::memory_order_relaxed);
 		}
 		else
 		{
@@ -1563,9 +1581,10 @@ struct ThreadedReplayer : StateCreatorInterface
 		if ((disk_pipeline_cache || opts.pipeline_stats) && device->pipeline_feedback_enabled())
 			feedback.setup_pnext(work_item);
 
-		if (vkCreateRayTracingPipelinesKHR(device->get_device(), VK_NULL_HANDLE, cache, 1,
+		VkResult result = vkCreateRayTracingPipelinesKHR(device->get_device(), VK_NULL_HANDLE, cache, 1,
 		                                   work_item.create_info.raytracing_create_info,
-		                                   nullptr, work_item.output.pipeline) == VK_SUCCESS)
+		                                   nullptr, work_item.output.pipeline);
+		if (result == VK_SUCCESS)
 		{
 			auto end_time = chrono::steady_clock::now();
 			auto duration_ns = chrono::duration_cast<chrono::nanoseconds>(end_time - start_time).count();
@@ -1583,6 +1602,11 @@ struct ThreadedReplayer : StateCreatorInterface
 			}
 
 			complete_work_item(work_item);
+		}
+		else if (result == VK_PIPELINE_COMPILE_REQUIRED)
+		{
+			LOGE("Recompile required for raytracing pipeline hash 0x%016" PRIx64 ".\n", work_item.hash);
+			raytracing_pipeline_compile_required_count.fetch_add(1, std::memory_order_relaxed);
 		}
 		else
 		{
@@ -2454,6 +2478,9 @@ struct ThreadedReplayer : StateCreatorInterface
 		if (opts.pipeline_stats)
 			info->flags |= VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR;
 
+		if (opts.fail_on_pipeline_compile_required)
+			info->flags |= VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT_EXT;
+
 		bool generates_library = (create_info->flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0;
 
 		auto &per_thread = get_per_thread_data();
@@ -2502,6 +2529,9 @@ struct ThreadedReplayer : StateCreatorInterface
 
 		if (opts.pipeline_stats)
 			info->flags |= VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR;
+
+		if (opts.fail_on_pipeline_compile_required)
+			info->flags |= VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT_EXT;
 
 		bool generates_library = (create_info->flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0;
 
@@ -2554,6 +2584,9 @@ struct ThreadedReplayer : StateCreatorInterface
 
 		if (opts.pipeline_stats)
 			info->flags |= VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR;
+
+		if (opts.fail_on_pipeline_compile_required)
+			info->flags |= VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT_EXT;
 
 		auto &per_thread = get_per_thread_data();
 		unsigned index = per_thread.current_parse_index;
@@ -3462,6 +3495,10 @@ struct ThreadedReplayer : StateCreatorInterface
 	std::atomic<std::uint32_t> pipeline_cache_hits;
 	std::atomic<std::uint32_t> pipeline_cache_misses;
 
+	std::atomic<std::uint32_t> graphics_pipeline_compile_required_count;
+	std::atomic<std::uint32_t> compute_pipeline_compile_required_count;
+	std::atomic<std::uint32_t> raytracing_pipeline_compile_required_count;
+
 	std::atomic<std::uint64_t> shader_module_total_size;
 	std::atomic<std::uint64_t> shader_module_total_compressed_size;
 
@@ -3549,6 +3586,7 @@ static void print_help()
 	     "\t[--timeout-seconds]\n"
 	     "\t[--implicit-whitelist <index>]\n"
 	     "\t[--replayer-cache <path>]\n"
+	     "\t[--fail-on-pipeline-compile-required]\n"
 	     EXTRA_OPTIONS
 	     "\t<Database>\n");
 }
@@ -4370,13 +4408,28 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 	     replayer.graphics_pipeline_count.load(),
 	     replayer.graphics_pipeline_ns.load() * 1e-9);
 
+	if (replayer.opts.fail_on_pipeline_compile_required)
+	{
+		LOGI("Graphics pipeline compile required count: %u\n", replayer.graphics_pipeline_compile_required_count.load());
+	}
+
 	LOGI("Playing back %u compute pipelines took %.3f s (accumulated time)\n",
 	     replayer.compute_pipeline_count.load(),
 	     replayer.compute_pipeline_ns.load() * 1e-9);
 
+	if (replayer.opts.fail_on_pipeline_compile_required)
+	{
+		LOGI("Compute pipeline compile required count: %u\n", replayer.compute_pipeline_compile_required_count.load());
+	}
+
 	LOGI("Playing back %u raytracing pipelines took %.3f s (accumulated time)\n",
 	     replayer.raytracing_pipeline_count.load(),
 	     replayer.raytracing_pipeline_ns.load() * 1e-9);
+
+	if (replayer.opts.fail_on_pipeline_compile_required)
+	{
+		LOGI("Raytracing pipeline compile required count: %u\n", replayer.raytracing_pipeline_compile_required_count.load());
+	}
 
 	LOGI("Threads were idling in total for %.3f s (accumulated time)\n",
 	     replayer.total_idle_ns.load() * 1e-9);
@@ -4535,6 +4588,7 @@ int main(int argc, char *argv[])
 	cbs.add("--replayer-cache", [&](CLIParser &parser) {
 		replayer_opts.replayer_cache_path = parser.next_string();
 	});
+	cbs.add("--fail-on-pipeline-compile-required", [&](CLIParser &) { replayer_opts.fail_on_pipeline_compile_required = true; });
 #ifndef _WIN32
 	cbs.add("--disable-signal-handler", [&](CLIParser &) { replayer_opts.disable_signal_handler = true; });
 	cbs.add("--disable-rate-limiter", [&](CLIParser &) { replayer_opts.disable_rate_limiter = true; });
