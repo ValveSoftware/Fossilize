@@ -1258,7 +1258,7 @@ struct ThreadedReplayer : StateCreatorInterface
 			return false;
 		}
 
-		if ((work_item.create_info.graphics_create_info->flags & VK_PIPELINE_CREATE_DERIVATIVE_BIT) != 0 &&
+		if ((get_pipeline_flags(work_item.create_info.graphics_create_info) & VK_PIPELINE_CREATE_DERIVATIVE_BIT) != 0 &&
 		    work_item.create_info.graphics_create_info->basePipelineHandle == VK_NULL_HANDLE)
 		{
 			// This pipeline failed for some reason, don't try to compile this one either.
@@ -1297,7 +1297,7 @@ struct ThreadedReplayer : StateCreatorInterface
 			return false;
 		}
 
-		if ((work_item.create_info.compute_create_info->flags & VK_PIPELINE_CREATE_DERIVATIVE_BIT) != 0 &&
+		if ((get_pipeline_flags(work_item.create_info.compute_create_info) & VK_PIPELINE_CREATE_DERIVATIVE_BIT) != 0 &&
 		    work_item.create_info.compute_create_info->basePipelineHandle == VK_NULL_HANDLE)
 		{
 			// This pipeline failed for some reason, don't try to compile this one either.
@@ -1334,7 +1334,7 @@ struct ThreadedReplayer : StateCreatorInterface
 			return false;
 		}
 
-		if ((work_item.create_info.raytracing_create_info->flags & VK_PIPELINE_CREATE_DERIVATIVE_BIT) != 0 &&
+		if ((get_pipeline_flags(work_item.create_info.raytracing_create_info) & VK_PIPELINE_CREATE_DERIVATIVE_BIT) != 0 &&
 		    work_item.create_info.raytracing_create_info->basePipelineHandle == VK_NULL_HANDLE)
 		{
 			// This pipeline failed for some reason, don't try to compile this one either.
@@ -1452,9 +1452,9 @@ struct ThreadedReplayer : StateCreatorInterface
 		switch (work_item.tag)
 		{
 		case RESOURCE_GRAPHICS_PIPELINE:
-			return (work_item.create_info.graphics_create_info->flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0;
+			return (get_pipeline_flags(work_item.create_info.graphics_create_info) & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0;
 		case RESOURCE_RAYTRACING_PIPELINE:
-			return (work_item.create_info.raytracing_create_info->flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0;
+			return (get_pipeline_flags(work_item.create_info.raytracing_create_info) & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0;
 		default:
 			return false;
 		}
@@ -2510,17 +2510,17 @@ struct ThreadedReplayer : StateCreatorInterface
 	{
 		// Ignore derived pipelines, no relevant drivers use them.
 		auto *info = const_cast<VkComputePipelineCreateInfo *>(create_info);
-		info->flags &= ~(VK_PIPELINE_CREATE_DERIVATIVE_BIT | VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT);
+		remove_pipeline_flag(create_info, VK_PIPELINE_CREATE_DERIVATIVE_BIT | VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT);
 		info->basePipelineHandle = VK_NULL_HANDLE;
 		info->basePipelineIndex = -1;
 
 		if (opts.pipeline_stats)
-			info->flags |= VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR;
+			add_pipeline_flag(create_info, VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR);
 
 		if (opts.fail_on_pipeline_compile_required)
-			info->flags |= VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT_EXT;
+			add_pipeline_flag(create_info, VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT);
 
-		bool generates_library = (create_info->flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0;
+		bool generates_library = (get_pipeline_flags(create_info) & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0;
 
 		auto &per_thread = get_per_thread_data();
 		unsigned index = per_thread.current_parse_index;
@@ -2562,17 +2562,17 @@ struct ThreadedReplayer : StateCreatorInterface
 	{
 		// Ignore derived pipelines, no relevant drivers use them.
 		auto *info = const_cast<VkGraphicsPipelineCreateInfo *>(create_info);
-		info->flags &= ~(VK_PIPELINE_CREATE_DERIVATIVE_BIT | VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT);
+		remove_pipeline_flag(create_info, VK_PIPELINE_CREATE_DERIVATIVE_BIT | VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT);
 		info->basePipelineHandle = VK_NULL_HANDLE;
 		info->basePipelineIndex = -1;
 
 		if (opts.pipeline_stats)
-			info->flags |= VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR;
+			add_pipeline_flag(create_info, VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR);
 
 		if (opts.fail_on_pipeline_compile_required)
-			info->flags |= VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT_EXT;
+			add_pipeline_flag(create_info, VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT);
 
-		bool generates_library = (create_info->flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0;
+		bool generates_library = (get_pipeline_flags(create_info) & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0;
 
 		auto &per_thread = get_per_thread_data();
 		unsigned index = per_thread.current_parse_index;
@@ -2615,17 +2615,17 @@ struct ThreadedReplayer : StateCreatorInterface
 	{
 		// Ignore derived pipelines, no relevant drivers use them.
 		auto *info = const_cast<VkRayTracingPipelineCreateInfoKHR *>(create_info);
-		info->flags &= ~(VK_PIPELINE_CREATE_DERIVATIVE_BIT | VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT);
+		remove_pipeline_flag(create_info, VK_PIPELINE_CREATE_DERIVATIVE_BIT | VK_PIPELINE_CREATE_ALLOW_DERIVATIVES_BIT);
 		info->basePipelineHandle = VK_NULL_HANDLE;
 		info->basePipelineIndex = -1;
 
-		bool generates_library = (create_info->flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0;
+		bool generates_library = (get_pipeline_flags(create_info) & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0;
 
 		if (opts.pipeline_stats)
-			info->flags |= VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR;
+			add_pipeline_flag(create_info, VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR);
 
 		if (opts.fail_on_pipeline_compile_required)
-			info->flags |= VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT_EXT;
+			add_pipeline_flag(create_info, VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT);
 
 		auto &per_thread = get_per_thread_data();
 		unsigned index = per_thread.current_parse_index;
