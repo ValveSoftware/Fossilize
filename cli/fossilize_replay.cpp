@@ -163,6 +163,45 @@ void spurious_deadlock()
 }
 #endif
 
+template <typename CreateInfo>
+static void remove_pipeline_flag(const CreateInfo *info, VkPipelineCreateFlags flags)
+{
+	auto *flags2 = const_cast<VkPipelineCreateFlags2CreateInfo *>(
+			find_pnext<VkPipelineCreateFlags2CreateInfo>(
+					VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO, info->pNext));
+
+	if (flags2)
+		flags2->flags &= ~VkPipelineCreateFlags2(flags);
+	else
+		const_cast<CreateInfo *>(info)->flags &= ~flags;
+}
+
+template <typename CreateInfo>
+static void add_pipeline_flag(const CreateInfo *info, VkPipelineCreateFlags flags)
+{
+	auto *flags2 = const_cast<VkPipelineCreateFlags2CreateInfo *>(
+			find_pnext<VkPipelineCreateFlags2CreateInfo>(
+					VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO, info->pNext));
+
+	if (flags2)
+		flags2->flags |= flags;
+	else
+		const_cast<CreateInfo *>(info)->flags |= flags;
+}
+
+template <typename CreateInfo>
+static VkPipelineCreateFlags2 get_pipeline_flags(const CreateInfo *info)
+{
+	auto *flags2 = const_cast<VkPipelineCreateFlags2CreateInfo *>(
+			find_pnext<VkPipelineCreateFlags2CreateInfo>(
+					VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO, info->pNext));
+
+	if (flags2)
+		return flags2->flags;
+	else
+		return info->flags;
+}
+
 // Unstable, but deterministic.
 template <typename BidirectionalItr, typename UnaryPredicate>
 static BidirectionalItr unstable_remove_if(BidirectionalItr first, BidirectionalItr last, UnaryPredicate &&p)
