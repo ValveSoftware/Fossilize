@@ -664,7 +664,7 @@ struct ThreadedReplayer : StateCreatorInterface
 		unsigned timeout_seconds = 0;
 
 		bool fail_on_pipeline_compile_required = false;
-		bool skip_uncached_pipelines = false;
+		bool skip_pipelines_on_compile_required = false;
 	};
 
 	struct DeferredGraphicsInfo
@@ -1525,7 +1525,7 @@ struct ThreadedReplayer : StateCreatorInterface
 			graphics_pipeline_compile_required_count.fetch_add(1, std::memory_order_relaxed);
 			LOGE("Recompile required for graphics pipeline hash 0x%016" PRIx64 ".\n", work_item.hash);
 
-			if (!opts.skip_uncached_pipelines)
+			if (!opts.skip_pipelines_on_compile_required)
 			{
 				remove_pipeline_flag(work_item.create_info.graphics_create_info,
 				                     VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT);
@@ -1589,7 +1589,7 @@ struct ThreadedReplayer : StateCreatorInterface
 			compute_pipeline_compile_required_count.fetch_add(1, std::memory_order_relaxed);
 			LOGE("Recompile required for compute pipeline hash 0x%016" PRIx64 ".\n", work_item.hash);
 
-			if (!opts.skip_uncached_pipelines)
+			if (!opts.skip_pipelines_on_compile_required)
 			{
 				remove_pipeline_flag(work_item.create_info.compute_create_info,
 				                     VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT);
@@ -1653,7 +1653,7 @@ struct ThreadedReplayer : StateCreatorInterface
 			raytracing_pipeline_compile_required_count.fetch_add(1, std::memory_order_relaxed);
 			LOGE("Recompile required for raytracing pipeline hash 0x%016" PRIx64 ".\n", work_item.hash);
 
-			if (!opts.skip_uncached_pipelines)
+			if (!opts.skip_pipelines_on_compile_required)
 			{
 				remove_pipeline_flag(work_item.create_info.raytracing_create_info,
 				                     VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT);
@@ -2552,7 +2552,7 @@ struct ThreadedReplayer : StateCreatorInterface
 		if (opts.pipeline_stats)
 			add_pipeline_flag(create_info, VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR);
 
-		if (opts.fail_on_pipeline_compile_required)
+		if (opts.fail_on_pipeline_compile_required && device->pipeline_cache_control_enabled())
 			add_pipeline_flag(create_info, VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT);
 
 		bool generates_library = (get_pipeline_flags(create_info) & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0;
@@ -2604,7 +2604,7 @@ struct ThreadedReplayer : StateCreatorInterface
 		if (opts.pipeline_stats)
 			add_pipeline_flag(create_info, VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR);
 
-		if (opts.fail_on_pipeline_compile_required)
+		if (opts.fail_on_pipeline_compile_required && device->pipeline_cache_control_enabled())
 			add_pipeline_flag(create_info, VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT);
 
 		bool generates_library = (get_pipeline_flags(create_info) & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0;
@@ -2659,7 +2659,7 @@ struct ThreadedReplayer : StateCreatorInterface
 		if (opts.pipeline_stats)
 			add_pipeline_flag(create_info, VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR);
 
-		if (opts.fail_on_pipeline_compile_required)
+		if (opts.fail_on_pipeline_compile_required && device->pipeline_cache_control_enabled())
 			add_pipeline_flag(create_info, VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT);
 
 		auto &per_thread = get_per_thread_data();
@@ -3661,7 +3661,7 @@ static void print_help()
 	     "\t[--implicit-whitelist <index>]\n"
 	     "\t[--replayer-cache <path>]\n"
 	     "\t[--fail-on-pipeline-compile-required]\n"
-	     "\t[--skip-uncached-pipelines]\n"
+	     "\t[--skip-pipelines-on-compile-required]\n"
 	     EXTRA_OPTIONS
 	     "\t<Database>\n");
 }
@@ -4658,7 +4658,7 @@ int main(int argc, char *argv[])
 		replayer_opts.replayer_cache_path = parser.next_string();
 	});
 	cbs.add("--fail-on-pipeline-compile-required", [&](CLIParser &) { replayer_opts.fail_on_pipeline_compile_required = true; });
-	cbs.add("--skip-uncached-pipelines", [&](CLIParser &) { replayer_opts.skip_uncached_pipelines = true; });
+	cbs.add("--skip-pipelines-on-compile-required", [&](CLIParser &) { replayer_opts.skip_pipelines_on_compile_required = true; });
 #ifndef _WIN32
 	cbs.add("--disable-signal-handler", [&](CLIParser &) { replayer_opts.disable_signal_handler = true; });
 	cbs.add("--disable-rate-limiter", [&](CLIParser &) { replayer_opts.disable_rate_limiter = true; });
