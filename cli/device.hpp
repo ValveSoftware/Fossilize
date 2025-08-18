@@ -71,6 +71,11 @@ public:
 		return supports_pipeline_feedback;
 	}
 
+	bool pipeline_cache_control_enabled() const
+	{
+		return supports_pipeline_cache_control;
+	}
+
 	bool module_identifiers_enabled() const
 	{
 		return supports_module_identifiers;
@@ -124,6 +129,7 @@ private:
 	void (*validation_callback)(void *) = nullptr;
 	void *validation_callback_userdata = nullptr;
 	bool supports_pipeline_feedback = false;
+	bool supports_pipeline_cache_control = false;
 	bool supports_module_identifiers = false;
 
 	void init_null_device();

@@ -483,6 +483,10 @@ bool VulkanDevice::init_device(const Options &opts)
 		return strcmp(ext, VK_EXT_PIPELINE_CREATION_FEEDBACK_EXTENSION_NAME) == 0;
 	}) != end(active_device_extensions);
 
+	supports_pipeline_cache_control = find_if(begin(active_device_extensions), end(active_device_extensions), [](const char *ext) {
+		return strcmp(ext, VK_EXT_PIPELINE_CREATION_CACHE_CONTROL_EXTENSION_NAME) == 0;
+	}) != end(active_device_extensions);
+
 	amd_shader_info = find_if(begin(active_device_extensions), end(active_device_extensions), [](const char *ext) {
 		return strcmp(ext, VK_AMD_SHADER_INFO_EXTENSION_NAME) == 0;
 	}) != end(active_device_extensions);

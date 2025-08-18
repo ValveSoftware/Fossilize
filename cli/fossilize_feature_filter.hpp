@@ -145,6 +145,7 @@ struct VulkanFeatures
 	VkPhysicalDevicePipelineOpacityMicromapFeaturesARM pipeline_opacity_micromap_arm;
 	VkPhysicalDevicePartitionedAccelerationStructureFeaturesNV partitioned_acceleration_structure_nv;
 	VkPhysicalDeviceFragmentDensityMapLayeredFeaturesVALVE fragment_density_map_layered_valve;
+	VkPhysicalDevicePipelineCreationCacheControlFeatures pipeline_creation_cache_control;
 
 	struct
 	{
