@@ -45,6 +45,7 @@ static void print_help()
 	     "\t[--frag shader.spv]\n"
 	     "\t[--comp shader.spv]\n"
 	     "\t[--multiview views]\n"
+	     "\t[--robustness]\n"
 	     "\t[--output out.foz]\n"
 	     "\t[--spec <ID> <f32/u32/i32> <value>\n"
 	     "\t[--multi-spec <index> <count>\n");
@@ -831,6 +832,7 @@ int main(int argc, char *argv[])
 	std::string output_path;
 	SpecConstant spec_constants;
 	uint32_t view_count = 0;
+	bool robustness = false;
 
 	cbs.add("--vert", [&](CLIParser &parser) { spv_paths[STAGE_VERT] = parser.next_string(); });
 	cbs.add("--tesc", [&](CLIParser &parser) { spv_paths[STAGE_TESC] = parser.next_string(); });
@@ -878,6 +880,7 @@ int main(int argc, char *argv[])
 	cbs.add("--multiview", [&](CLIParser &parser) {
 		view_count = parser.next_uint();
 	});
+	cbs.add("--robustness", [&](CLIParser &) { robustness = true; });
 
 	CLIParser parser(std::move(cbs), argc - 1, argv + 1);
 	if (!parser.parse())
@@ -919,9 +922,24 @@ int main(int argc, char *argv[])
 		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
 	VkPhysicalDeviceMeshShaderFeaturesEXT mesh_features =
 		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT };
+	VkPhysicalDeviceRobustness2FeaturesEXT robustness2 =
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT };
 	mesh_features.taskShader = VK_TRUE;
 	mesh_features.meshShader = VK_TRUE;
+	mesh_features.pNext = features2.pNext;
 	features2.pNext = &mesh_features;
+
+	if (robustness)
+	{
+		robustness2.robustBufferAccess2 = VK_TRUE;
+		robustness2.robustImageAccess2 = VK_TRUE;
+		robustness2.nullDescriptor = VK_TRUE;
+		features2.features.robustBufferAccess = VK_TRUE;
+
+		robustness2.pNext = features2.pNext;
+		features2.pNext = &robustness2;
+	}
+
 	if (!recorder.record_physical_device_features(&features2))
 		return EXIT_FAILURE;
 
