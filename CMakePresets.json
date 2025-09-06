@@ -1,0 +1,419 @@
+{
+    "version": 10,
+    "cmakeMinimumRequired": {
+        "major": 4,
+        "minor": 0,
+        "patch": 0
+    },
+    "configurePresets": [
+        {
+            "name": "linux-default",
+            "hidden": true,
+            "description": "Sets Ninja generator, compilers, build and install directory, debug build type",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/out/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}"
+            }
+        },
+        {
+            "name": "windows-default",
+            "hidden": true,
+            "description": "Sets Ninja generator, compilers, x64 architecture, build and install directory, debug build type",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/out/build/${presetName}",
+            "architecture": {
+                "value": "x64",
+                "strategy": "external"
+            },
+            "cacheVariables": {
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}"
+            }
+        },
+        {
+            "name": "linux-debug",
+            "displayName": "Linux debug",
+            "inherits": "linux-default",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "debug"
+            }
+        },
+        {
+            "name": "linux-release",
+            "displayName": "Linux release",
+            "inherits": "linux-default",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "release"
+            }
+        },
+        {
+            "name": "linux-library-only-debug",
+            "inherits": "linux-debug",
+            "displayName": "Linux library/Layer only debug",
+            "description": "Library only without CLI tools and SPIRV",
+            "cacheVariables": {
+                "FOSSILIZE_CLI": "OFF",
+                "FOSSILIZE_TESTS": "OFF"
+            }
+        },
+        {
+            "name": "linux-library-only-release",
+            "inherits": "linux-release",
+            "displayName": "Linux library/Layer only release",
+            "description": "Library only without CLI tools and SPIRV",
+            "cacheVariables": {
+                "FOSSILIZE_CLI": "OFF",
+                "FOSSILIZE_TESTS": "OFF"
+            }
+        },
+        {
+            "name": "windows-debug",
+            "displayName": "Windows x64 debug",
+            "inherits": "windows-default",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "debug"
+            }
+        },
+        {
+            "name": "windows-release",
+            "displayName": "Windows x64 release",
+            "inherits": "windows-default",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "release"
+            }
+        },
+        {
+            "name": "windows-library-only-debug",
+            "inherits": "windows-debug",
+            "displayName": "Windows library/Layer only debug",
+            "description": "Library only without CLI tools and SPIRV",
+            "cacheVariables": {
+                "FOSSILIZE_CLI": "OFF",
+                "FOSSILIZE_TESTS": "OFF"
+            }
+        },
+        {
+            "name": "windows-library-only-release",
+            "inherits": "windows-release",
+            "displayName": "Windows library/Layer only release",
+            "description": "Library only without CLI tools and SPIRV",
+            "cacheVariables": {
+                "FOSSILIZE_CLI": "OFF",
+                "FOSSILIZE_TESTS": "OFF"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "linux-debug",
+            "configurePreset": "linux-debug"
+        },
+        {
+            "name": "linux-release",
+            "configurePreset": "linux-release"
+        },
+        {
+            "name": "linux-library-only-debug",
+            "configurePreset": "linux-library-only-debug"
+        },
+        {
+            "name": "linux-library-only-release",
+            "configurePreset": "linux-library-only-release"
+        },
+        {
+            "name": "windows-debug",
+            "configurePreset": "windows-debug"
+        },
+        {
+            "name": "windows-release",
+            "configurePreset": "windows-release"
+        },
+        {
+            "name": "windows-library-only-debug",
+            "configurePreset": "windows-library-only-debug"
+        },
+        {
+            "name": "windows-library-only-release",
+            "configurePreset": "windows-library-only-release"
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "linux-debug",
+            "configurePreset": "linux-debug",
+            "output": {"outputOnFailure": true},
+            "execution": {"noTestsAction": "error", "stopOnFailure": true}
+        },
+        {
+            "name": "linux-release",
+            "configurePreset": "linux-release",
+            "output": {"outputOnFailure": true},
+            "execution": {"noTestsAction": "error", "stopOnFailure": true}
+        },
+        {
+            "name": "linux-library-only-debug",
+            "configurePreset": "linux-library-only-debug",
+            "output": {"outputOnFailure": true},
+            "execution": {"noTestsAction": "error", "stopOnFailure": true}
+        },
+        {
+            "name": "linux-library-only-release",
+            "configurePreset": "linux-library-only-release",
+            "output": {"outputOnFailure": true},
+            "execution": {"noTestsAction": "error", "stopOnFailure": true}
+        },
+        {
+            "name": "windows-debug",
+            "configurePreset": "windows-debug",
+            "output": {"outputOnFailure": true},
+            "execution": {"noTestsAction": "error", "stopOnFailure": true}
+        },
+        {
+            "name": "windows-release",
+            "configurePreset": "windows-release",
+            "output": {"outputOnFailure": true},
+            "execution": {"noTestsAction": "error", "stopOnFailure": true}
+        },
+        {
+            "name": "windows-library-only-debug",
+            "configurePreset": "windows-library-only-debug",
+            "output": {"outputOnFailure": true},
+            "execution": {"noTestsAction": "error", "stopOnFailure": true}
+        },
+        {
+            "name": "windows-library-only-release",
+            "configurePreset": "windows-library-only-release",
+            "output": {"outputOnFailure": true},
+            "execution": {"noTestsAction": "error", "stopOnFailure": true}
+        }
+    ],
+    "packagePresets": [
+        {
+            "name": "linux-debug",
+            "configurePreset": "linux-debug",
+            "generators": [
+                "TGZ"
+            ]
+        },
+        {
+            "name": "linux-release",
+            "configurePreset": "linux-release",
+            "generators": [
+                "TGZ"
+            ]
+        },
+        {
+            "name": "linux-library-only-debug",
+            "configurePreset": "linux-library-only-debug",
+            "generators": [
+                "TGZ"
+            ]
+        },
+        {
+            "name": "linux-library-only-release",
+            "configurePreset": "linux-library-only-release",
+            "generators": [
+                "TGZ"
+            ]
+        },
+        {
+            "name": "windows-debug",
+            "configurePreset": "windows-debug",
+            "generators": [
+                "ZIP"
+            ]
+        },
+        {
+            "name": "windows-release",
+            "configurePreset": "windows-release",
+            "generators": [
+                "ZIP"
+            ]
+        },
+        {
+            "name": "windows-library-only-debug",
+            "configurePreset": "windows-library-only-debug",
+            "generators": [
+                "ZIP"
+            ]
+        },
+        {
+            "name": "windows-library-only-release",
+            "configurePreset": "windows-library-only-release",
+            "generators": [
+                "ZIP"
+            ]
+        }
+    ],
+    "workflowPresets": [
+        {
+            "name": "linux-debug",
+            "steps": [
+                {
+                    "type": "configure",
+                    "name": "linux-debug"
+                },
+                {
+                    "type": "build",
+                    "name": "linux-debug"
+                },
+                {
+                    "type": "test",
+                    "name": "linux-debug"
+                },
+                {
+                    "type": "package",
+                    "name": "linux-debug"
+                }
+            ]
+        },
+        {
+            "name": "linux-release",
+            "steps": [
+                {
+                    "type": "configure",
+                    "name": "linux-release"
+                },
+                {
+                    "type": "build",
+                    "name": "linux-release"
+                },
+                {
+                    "type": "test",
+                    "name": "linux-release"
+                },
+                {
+                    "type": "package",
+                    "name": "linux-release"
+                }
+            ]
+        },
+        {
+            "name": "linux-library-only-debug",
+            "steps": [
+                {
+                    "type": "configure",
+                    "name": "linux-library-only-debug"
+                },
+                {
+                    "type": "build",
+                    "name": "linux-library-only-debug"
+                },
+                {
+                    "type": "test",
+                    "name": "linux-library-only-debug"
+                },
+                {
+                    "type": "package",
+                    "name": "linux-library-only-debug"
+                }
+            ]
+        },
+        {
+            "name": "linux-library-only-release",
+            "steps": [
+                {
+                    "type": "configure",
+                    "name": "linux-library-only-release"
+                },
+                {
+                    "type": "build",
+                    "name": "linux-library-only-release"
+                },
+                {
+                    "type": "test",
+                    "name": "linux-library-only-release"
+                },
+                {
+                    "type": "package",
+                    "name": "linux-library-only-release"
+                }
+            ]
+        },
+        {
+            "name": "windows-debug",
+            "steps": [
+                {
+                    "type": "configure",
+                    "name": "windows-debug"
+                },
+                {
+                    "type": "build",
+                    "name": "windows-debug"
+                },
+                {
+                    "type": "test",
+                    "name": "windows-debug"
+                },
+                {
+                    "type": "package",
+                    "name": "windows-debug"
+                }
+            ]
+        },
+        {
+            "name": "windows-release",
+            "steps": [
+                {
+                    "type": "configure",
+                    "name": "windows-release"
+                },
+                {
+                    "type": "build",
+                    "name": "windows-release"
+                },
+                {
+                    "type": "test",
+                    "name": "windows-release"
+                },
+                {
+                    "type": "package",
+                    "name": "windows-release"
+                }
+            ]
+        },
+        {
+            "name": "windows-library-only-debug",
+            "steps": [
+                {
+                    "type": "configure",
+                    "name": "windows-library-only-debug"
+                },
+                {
+                    "type": "build",
+                    "name": "windows-library-only-debug"
+                },
+                {
+                    "type": "test",
+                    "name": "windows-library-only-debug"
+                },
+                {
+                    "type": "package",
+                    "name": "windows-library-only-debug"
+                }
+            ]
+        },
+        {
+            "name": "windows-library-only-release",
+            "steps": [
+                {
+                    "type": "configure",
+                    "name": "windows-library-only-release"
+                },
+                {
+                    "type": "build",
+                    "name": "windows-library-only-release"
+                },
+                {
+                    "type": "test",
+                    "name": "windows-library-only-release"
+                },
+                {
+                    "type": "package",
+                    "name": "windows-library-only-release"
+                }
+            ]
+        }
+    ]
+}
+

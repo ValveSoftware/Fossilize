@@ -1,7 +1,10 @@
 cmake_minimum_required(VERSION 3.5)
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_C_STANDARD 99)
-project(Fossilize LANGUAGES CXX C)
+project(Fossilize
+        VERSION 1.0.0
+        LANGUAGES CXX C
+)
 
 option(FOSSILIZE_MSVC_ANALYZE "Enable /analyze" OFF)
 option(FOSSILIZE_ENABLE_EXCEPTIONS "Compile Fossilize with exception support." OFF)
@@ -140,3 +143,5 @@ if (FOSSILIZE_TESTS)
     add_subdirectory(test)
 endif()
 
+
+include(CPack)
