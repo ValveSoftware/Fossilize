@@ -30,6 +30,11 @@
 #include "fossilize_external_replayer.hpp"
 #include <inttypes.h>
 
+static void set_affinity(int)
+{
+    //TODO WIN32 API
+}
+
 static bool write_all(HANDLE file, const char *str)
 {
 	size_t len = strlen(str);

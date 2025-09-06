@@ -39,6 +39,29 @@
 #include "path.hpp"
 #include "platform/futex_wrapper_linux.hpp"
 #include <inttypes.h>
+#include <pthread.h>
+
+static void set_affinity(int cpu_index)
+{
+    cpu_set_t cpuset;
+    CPU_SET(cpu_index, &cpuset);
+    auto thread = pthread_self();
+
+    auto s = pthread_setaffinity_np(thread, sizeof(cpuset), &cpuset);
+    if (s != 0)
+        LOGE("pthread_setaffinity_np error:%d for thread:%d", s, cpu_index);
+
+    /* Check the affinity mask has been applied to the thread. */
+
+    s = pthread_getaffinity_np(thread, sizeof(cpuset), &cpuset);
+    if (s != 0)
+        LOGE("pthread_getaffinity_np error:%d for thread:%d", s, cpu_index);
+
+    if (CPU_ISSET(cpu_index, &cpuset))
+        LOGI("CPU %u pinned\n", cpu_index);
+    else
+        LOGI("CPU %u not pinned\n", cpu_index);
+}
 
 static bool write_all(int fd, const char *str)
 {

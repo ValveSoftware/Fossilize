@@ -260,11 +260,13 @@ static void report_module_uuid(const char (&path)[2 * VK_UUID_SIZE + 1]);
 static void timeout_handler();
 static void begin_heartbeat();
 static void heartbeat();
+static void set_affinity(int cpu_index);
 #else
 #define report_module_uuid(x) ((void)(x))
 #define timeout_handler() ((void)0)
 #define begin_heartbeat() ((void)0)
 #define heartbeat() ((void)0)
+#define set_affinity(cpu_index) ((void)(cpu_index))
 #endif
 
 struct PipelineWorkItem
@@ -1744,8 +1746,11 @@ struct ThreadedReplayer : StateCreatorInterface
 		resolver.flush(device.get());
 	}
 
+    // thread_index starts at 1
 	void worker_thread(unsigned thread_index)
 	{
+        set_affinity(thread_index - 1);
+
 		Global::worker_thread_index = thread_index;
 
 		if (opts.on_thread_callback)
