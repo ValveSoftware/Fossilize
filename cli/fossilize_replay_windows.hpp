@@ -29,11 +29,59 @@
 #include <signal.h>
 #include "fossilize_external_replayer.hpp"
 #include <inttypes.h>
+#include <system_error>
+#include <thread>
 
-static void set_affinity(int)
+namespace Windows
 {
-    //TODO WIN32 API
+	static constexpr auto RETURN_FAILURE = 0;
+	static constexpr auto RETURN_MORE_THREAD_THAN_CPU = 1;
 }
+
+static int set_affinity(int cpu_index)
+{
+	auto hThread = GetCurrentThread();
+
+	GROUP_AFFINITY group_affinity{};
+	auto result = GetThreadGroupAffinity(hThread, &group_affinity);
+
+	if (result == Windows::RETURN_FAILURE)
+	{
+		const auto error = GetLastError();
+		LOGE("GetThreadGroupAffinity failed %s", std::system_category().message(error).c_str());
+		return error;
+	}
+
+	const auto thread_count = std::thread::hardware_concurrency();
+
+	if (cpu_index >= thread_count)
+	{
+		return Windows::RETURN_MORE_THREAD_THAN_CPU;
+	}
+
+	std::cerr << "thread count: " << thread_count << std::endl;
+	std::cerr << "original mask:";
+	for (auto index = 0U; index < thread_count; ++index)
+	{
+		if ((group_affinity.Mask >> index) & 1)
+		{
+			std::cerr << ' ' << index;
+		}
+	}
+	std::cerr << std::endl << "new mask: " << cpu_index << std::endl;
+
+	result = SetThreadAffinityMask(hThread, 1 << cpu_index);
+
+	if (result == Windows::RETURN_FAILURE)
+	{
+		const auto error = GetLastError();
+		LOGE("SetThreadAffinityMask failed %s", std::system_category().message(error).c_str());
+		return error;
+	}
+
+	return 0;
+}
+
 
 static bool write_all(HANDLE file, const char *str)
 {
