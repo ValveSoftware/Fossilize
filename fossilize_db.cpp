@@ -1755,15 +1755,15 @@ struct DumbFileDatabase : StreamArchive
 				uint64_t value = strtoull(value_str, nullptr, 16);
 				Entry entry = {};
 				entry.header = header;
-				entry.offset = offset + 1;
+				entry.offset = offset + 1; // + newline symbol
 				if (test_resource_filter(static_cast<ResourceTag>(tag), value))
 					seen_blobs[tag].emplace(value, entry);
 			}
 
-			if (fseek(file, header.uncompressed_size + 2, SEEK_CUR) < 0)
+			if (fseek(file, header.uncompressed_size + 2, SEEK_CUR) < 0) // + two newline symbols
 				return false;
 
-			offset += header.uncompressed_size + 2;
+			offset += header.uncompressed_size + 2; // + two newline symbols
 		}
 
 		if (mode == DatabaseMode::Append && offset != len)
