@@ -55,7 +55,7 @@ static void print_help()
 	LOGI("Usage: fossilize-list\n"
 	     "\t<database path>\n"
 	     "\t[--tag index]\n"
-	     "\t[--size]\n")
+	     "\t[--size]\n"
 		 "\t[--connectivity]\n");
 }
 
