@@ -31,13 +31,11 @@
 using namespace Fossilize;
 using namespace std;
 
-#define PRINT_SAVED_BUFFER_INNER(SavedBufferName, VkObjectName, Tag)\
+#define PRINT_SAVED_BUFFER(SavedBufferName, VkObjectName, Tag)\
 for (auto It = list_replayer.SavedBufferName.begin(); It != list_replayer.SavedBufferName.end(); ++It)\
 {\
 	printf(VkObjectName "(%d):%016" PRIx64 ", ", Tag, *It);\
 }\
-
-#define PRINT_SAVED_BUFFER(SavedBufferName, VkObjectName, Tag) PRINT_SAVED_BUFFER_INNER(SavedBufferName, VkObjectName, Tag)
 
 static const ResourceTag playback_order[] = {
 	RESOURCE_SAMPLER,
