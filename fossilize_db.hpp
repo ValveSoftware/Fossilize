@@ -67,9 +67,6 @@ enum PayloadReadFlagBits
 	// *NOTE*: Only tested with the Fossilize database format.
 	PAYLOAD_READ_CONCURRENT_BIT = 1 << 1,
 
-	// Reading (read_entry) with the separator in mind
-	PAYLOAD_READ_WITH_SEPARATOR_BIT = 1 << 2,
-
 	PAYLOAD_READ_MAX_ENUM = 0x7fffffff
 };
 using PayloadWriteFlags = uint32_t;
