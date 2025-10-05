@@ -46,6 +46,9 @@ enum PayloadWriteFlagBits
 	// Compute checksum of payload for more robustness.
 	PAYLOAD_WRITE_COMPUTE_CHECKSUM_BIT = 1 << 3,
 
+	// Normal file writing using fwrite() without additional information
+	PAYLOAD_WRITE_WITHOUT_HASH_HEADER_BIT = 1 << 4,
+
 	PAYLOAD_WRITE_MAX_ENUM = 0x7fffffff
 };
 
@@ -64,6 +67,9 @@ enum PayloadReadFlagBits
 	// *NOTE*: Only tested with the Fossilize database format.
 	PAYLOAD_READ_CONCURRENT_BIT = 1 << 1,
 
+	// Reading (read_entry) with the separator in mind
+	PAYLOAD_READ_WITH_SEPARATOR_BIT = 1 << 2,
+
 	PAYLOAD_READ_MAX_ENUM = 0x7fffffff
 };
 using PayloadWriteFlags = uint32_t;
@@ -80,6 +86,9 @@ enum class DatabaseMode
 	// For other backends, this is an alias for OverWrite
 	ExclusiveOverWrite
 };
+
+const size_t db_merge_separator_size = 3;
+const uint8_t db_merge_separator[db_merge_separator_size + 1] = "FOZ";
 
 struct ExportedMetadataHeader;
 
@@ -254,6 +263,9 @@ bool merge_concurrent_databases(const char *append_database_path,
 bool merge_concurrent_databases_last_use(const char *append_database_path,
                                          const char * const *source_paths, size_t num_source_paths,
                                          bool skip_missing_inputs = false);
+
+// Unmerge database (which was created after the fossilize-merge-db operation) by the db_merge_separator keyword.
+bool unmerge_concurrent_databases(const char* append_database_path, char* output_databases_name);
 
 // For set_bucket_path() behavior on a concurrent database:
 // Must be called before prepare().

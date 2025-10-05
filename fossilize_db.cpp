@@ -1028,6 +1028,18 @@ struct StreamArchive : DatabaseInterface
 			fflush(file);
 	}
 
+	static bool is_separator(FILE* file, size_t start_offset)
+	{
+		uint8_t separator[db_merge_separator_size];
+		if (fread(separator, 1, db_merge_separator_size, file) != db_merge_separator_size)
+			return false;
+		
+		if (fseek(file, start_offset, SEEK_SET) < 0)
+			return false;
+
+		return equal(begin(separator), end(separator), begin(db_merge_separator));
+	}
+
 	bool prepare() override
 	{
 		if (!impl->imported_metadata.empty() && mode != DatabaseMode::ReadOnly)
@@ -1183,6 +1195,13 @@ struct StreamArchive : DatabaseInterface
 						return false;
 
 					offset += header.payload_size;
+
+					if (offset + db_merge_separator_size < len && is_separator(file, offset))
+					{
+						offset += db_merge_separator_size;
+						if (fseek(file, db_merge_separator_size, SEEK_CUR) < 0)
+							return false;
+					}
 				}
 
 				if (mode == DatabaseMode::Append && offset != len)
@@ -1347,6 +1366,14 @@ struct StreamArchive : DatabaseInterface
 	{
 		if (!alive || mode == DatabaseMode::ReadOnly)
 			return false;
+
+		if ((flags & PAYLOAD_WRITE_WITHOUT_HASH_HEADER_BIT) != 0)
+		{
+			if (fwrite(blob, 1, size, file) != size)
+				return false;
+
+			return true;
+		}
 
 		auto itr = seen_blobs[tag].find(hash);
 		if (itr != end(seen_blobs[tag]))
@@ -2352,7 +2379,124 @@ bool merge_concurrent_databases(const char *append_archive, const char * const *
 					return false;
 			}
 		}
+
+		if (source < num_source_paths - 1)
+		if (!append_db->write_entry(RESOURCE_COUNT, 0, db_merge_separator, db_merge_separator_size, PAYLOAD_WRITE_WITHOUT_HASH_HEADER_BIT))
+			return false;
 	}
+
+	return true;
+}
+
+bool unmerge_concurrent_databases(const char* append_archive, char* output_databases_name)
+{
+	FILE* file = fopen(append_archive, "rb");
+	if (!file)
+		return false;
+
+	if (fseek(file, 0, SEEK_END) < 0)
+	{
+		fclose(file);
+		return false;
+	}
+
+	size_t len = size_t(ftell(file));
+	rewind(file);
+	size_t offset = sizeof(stream_reference_magic_and_version);
+	if (fseek(file, offset, SEEK_SET) < 0)
+	{
+		fclose(file);
+		return false;
+	}
+
+	int db_counter = 0;
+	string output_db_path = output_databases_name + to_string(db_counter) + ".foz";
+	auto output_db = std::unique_ptr<DatabaseInterface>(create_stream_archive_database(output_db_path.c_str(), DatabaseMode::OverWrite));
+	if (!output_db->prepare())
+	{
+		fclose(file);
+		return false;
+	}
+
+	while (offset < len)
+	{
+		if (shutdown_requested.load(std::memory_order_relaxed))
+		{
+			fclose(file);
+			return false;
+		}
+
+		StreamArchive::PayloadHeaderRaw* header_raw = nullptr;
+		char bytes_to_read[FOSSILIZE_BLOB_HASH_LENGTH + sizeof(StreamArchive::PayloadHeaderRaw)];
+		PayloadHeader header = {};
+
+		// Corrupt entry. Our process might have been killed before we could write all data.
+		if (offset + sizeof(bytes_to_read) > len)
+		{
+			LOGW_LEVEL("Detected sliced file. Dropping entries from here.\n");
+			break;
+		}
+
+		// NAME + HEADER in one read
+		if (fread(bytes_to_read, 1, sizeof(bytes_to_read), file) != sizeof(bytes_to_read))
+			return false;
+		offset += sizeof(bytes_to_read);
+		header_raw = (StreamArchive::PayloadHeaderRaw*)&bytes_to_read[FOSSILIZE_BLOB_HASH_LENGTH];
+		StreamArchive::convert_from_le(header, *header_raw);
+
+		// Corrupt entry. Our process might have been killed before we could write all data.
+		if (offset + header.payload_size > len)
+		{
+			LOGW_LEVEL("Detected sliced file. Dropping entries from here.\n");
+			break;
+		}
+
+		char tag_str[16 + 1] = {};
+		char value_str[16 + 1] = {};
+		memcpy(tag_str, bytes_to_read + FOSSILIZE_BLOB_HASH_LENGTH - 32, 16);
+		memcpy(value_str, bytes_to_read + FOSSILIZE_BLOB_HASH_LENGTH - 16, 16);
+
+		auto tag = unsigned(strtoul(tag_str, nullptr, 16));
+		if (tag < RESOURCE_COUNT)
+		{
+			uint64_t value = strtoull(value_str, nullptr, 16);
+			vector<uint8_t> buffer(header.payload_size);
+			if (fread(buffer.data(), 1, header.payload_size, file) != header.payload_size)
+			{
+				fclose(file);
+				return false;
+			}
+
+			if (!output_db->write_entry((ResourceTag)tag, value, buffer.data(), buffer.size(), PAYLOAD_WRITE_RAW_FOSSILIZE_DB_BIT))
+			{
+				fclose(file);
+				return false;
+			}
+		}
+
+		offset += header.payload_size;
+
+		if (offset + db_merge_separator_size < len && StreamArchive::is_separator(file, offset))
+		{
+			offset += db_merge_separator_size;
+			if (fseek(file, db_merge_separator_size, SEEK_CUR) < 0)
+			{
+				fclose(file);
+				return false;
+			}
+			
+			output_db_path = output_databases_name + to_string(++db_counter) + ".foz";
+			output_db.release();
+			output_db = std::unique_ptr<DatabaseInterface>(create_stream_archive_database(output_db_path.c_str(), DatabaseMode::OverWrite));
+			if (!output_db->prepare())
+			{
+				fclose(file);
+				return false;
+			}
+		}
+	}
+
+	fclose(file);
 
 	return true;
 }
