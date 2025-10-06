@@ -1028,84 +1028,6 @@ struct StreamArchive : DatabaseInterface
 			fflush(file);
 	}
 
-	virtual bool seen_blobs_fill(size_t len)
-	{
-		uint8_t magic[MagicSize];
-		if (fread(magic, 1, MagicSize, file) != MagicSize)
-			return false;
-
-		if (memcmp(magic, stream_reference_magic_and_version, MagicSize - 1))
-			return false;
-		int version = magic[MagicSize - 1];
-		if (version > FOSSILIZE_FORMAT_VERSION || version < FOSSILIZE_FORMAT_MIN_COMPAT_VERSION)
-			return false;
-
-		size_t offset = MagicSize;
-		size_t begin_append_offset = len;
-
-		while (offset < len)
-		{
-			if (shutdown_requested.load(std::memory_order_relaxed))
-				return false;
-
-			begin_append_offset = offset;
-
-			PayloadHeaderRaw* header_raw = nullptr;
-			char bytes_to_read[FOSSILIZE_BLOB_HASH_LENGTH + sizeof(PayloadHeaderRaw)];
-			PayloadHeader header = {};
-
-			// Corrupt entry. Our process might have been killed before we could write all data.
-			if (offset + sizeof(bytes_to_read) > len)
-			{
-				LOGW_LEVEL("Detected sliced file. Dropping entries from here.\n");
-				break;
-			}
-
-			// NAME + HEADER in one read
-			if (fread(bytes_to_read, 1, sizeof(bytes_to_read), file) != sizeof(bytes_to_read))
-				return false;
-			offset += sizeof(bytes_to_read);
-			header_raw = (PayloadHeaderRaw*)&bytes_to_read[FOSSILIZE_BLOB_HASH_LENGTH];
-			convert_from_le(header, *header_raw);
-
-			// Corrupt entry. Our process might have been killed before we could write all data.
-			if (offset + header.payload_size > len)
-			{
-				LOGW_LEVEL("Detected sliced file. Dropping entries from here.\n");
-				break;
-			}
-
-			char tag_str[16 + 1] = {};
-			char value_str[16 + 1] = {};
-			memcpy(tag_str, bytes_to_read + FOSSILIZE_BLOB_HASH_LENGTH - 32, 16);
-			memcpy(value_str, bytes_to_read + FOSSILIZE_BLOB_HASH_LENGTH - 16, 16);
-
-			auto tag = unsigned(strtoul(tag_str, nullptr, 16));
-			if (tag < RESOURCE_COUNT)
-			{
-				uint64_t value = strtoull(value_str, nullptr, 16);
-				Entry entry = {};
-				entry.header = header;
-				entry.offset = offset;
-				if (test_resource_filter(static_cast<ResourceTag>(tag), value))
-					seen_blobs[tag].emplace(value, entry);
-			}
-
-			if (fseek(file, header.payload_size, SEEK_CUR) < 0)
-				return false;
-
-			offset += header.payload_size;
-		}
-
-		if (mode == DatabaseMode::Append && offset != len)
-		{
-			if (fseek(file, begin_append_offset, SEEK_SET) < 0)
-				return false;
-		}
-		
-		return true;
-	}
-
 	bool prepare() override
 	{
 		if (!impl->imported_metadata.empty() && mode != DatabaseMode::ReadOnly)
@@ -1684,20 +1606,9 @@ struct StreamArchive : DatabaseInterface
 	size_t zlib_buffer_size = 0;
 	bool alive = false;
 	std::mutex read_lock;
-};
 
-DatabaseInterface* create_stream_archive_database(const char* path, DatabaseMode mode)
-{
-	auto* db = new StreamArchive(path, mode);
-	return db;
-}
-
-struct DumbFileDatabase : StreamArchive
-{
-	DumbFileDatabase(const string& path_, DatabaseMode mode_) : StreamArchive(path_, mode_)
-	{ }
-
-	bool seen_blobs_fill(size_t len) override
+protected:
+	virtual bool seen_blobs_fill(size_t len)
 	{
 		uint8_t magic[MagicSize];
 		if (fread(magic, 1, MagicSize, file) != MagicSize)
@@ -1738,7 +1649,7 @@ struct DumbFileDatabase : StreamArchive
 			convert_from_le(header, *header_raw);
 
 			// Corrupt entry. Our process might have been killed before we could write all data.
-			if (offset + header.uncompressed_size > len)
+			if (offset + header.payload_size > len)
 			{
 				LOGW_LEVEL("Detected sliced file. Dropping entries from here.\n");
 				break;
@@ -1755,15 +1666,15 @@ struct DumbFileDatabase : StreamArchive
 				uint64_t value = strtoull(value_str, nullptr, 16);
 				Entry entry = {};
 				entry.header = header;
-				entry.offset = offset + 1; // + newline symbol
+				entry.offset = offset;
 				if (test_resource_filter(static_cast<ResourceTag>(tag), value))
 					seen_blobs[tag].emplace(value, entry);
 			}
 
-			if (fseek(file, header.uncompressed_size + 2, SEEK_CUR) < 0) // + two newline symbols
+			if (fseek(file, header.payload_size, SEEK_CUR) < 0)
 				return false;
 
-			offset += header.uncompressed_size + 2; // + two newline symbols
+			offset += header.payload_size;
 		}
 
 		if (mode == DatabaseMode::Append && offset != len)
@@ -1774,6 +1685,18 @@ struct DumbFileDatabase : StreamArchive
 
 		return true;
 	}
+};
+
+DatabaseInterface *create_stream_archive_database(const char* path, DatabaseMode mode)
+{
+	auto* db = new StreamArchive(path, mode);
+	return db;
+}
+
+struct DumbFileDatabase : StreamArchive
+{
+	DumbFileDatabase(const string& path_, DatabaseMode mode_) : StreamArchive(path_, mode_)
+	{ }
 
 	bool read_entry(ResourceTag tag, Hash hash, size_t* blob_size, void* blob, PayloadReadFlags flags) override
 	{
@@ -1841,9 +1764,90 @@ struct DumbFileDatabase : StreamArchive
 		seen_blobs[tag].emplace(hash, Entry{});
 		return true;
 	}
+
+protected:
+	// payload_size has been replaced with uncompressed_size.
+	// Also, in some places where uncompressed_size was used, newline characters were taken into account.
+	bool seen_blobs_fill(size_t len) override
+	{
+		uint8_t magic[MagicSize];
+		if (fread(magic, 1, MagicSize, file) != MagicSize)
+			return false;
+
+		if (memcmp(magic, stream_reference_magic_and_version, MagicSize - 1))
+			return false;
+		int version = magic[MagicSize - 1];
+		if (version > FOSSILIZE_FORMAT_VERSION || version < FOSSILIZE_FORMAT_MIN_COMPAT_VERSION)
+			return false;
+
+		size_t offset = MagicSize;
+		size_t begin_append_offset = len;
+
+		while (offset < len)
+		{
+			if (shutdown_requested.load(std::memory_order_relaxed))
+				return false;
+
+			begin_append_offset = offset;
+
+			PayloadHeaderRaw* header_raw = nullptr;
+			char bytes_to_read[FOSSILIZE_BLOB_HASH_LENGTH + sizeof(PayloadHeaderRaw)];
+			PayloadHeader header = {};
+
+			// Corrupt entry. Our process might have been killed before we could write all data.
+			if (offset + sizeof(bytes_to_read) > len)
+			{
+				LOGW_LEVEL("Detected sliced file. Dropping entries from here.\n");
+				break;
+			}
+
+			// NAME + HEADER in one read
+			if (fread(bytes_to_read, 1, sizeof(bytes_to_read), file) != sizeof(bytes_to_read))
+				return false;
+			offset += sizeof(bytes_to_read);
+			header_raw = (PayloadHeaderRaw*)&bytes_to_read[FOSSILIZE_BLOB_HASH_LENGTH];
+			convert_from_le(header, *header_raw);
+
+			// Corrupt entry. Our process might have been killed before we could write all data.
+			if (offset + header.uncompressed_size > len)
+			{
+				LOGW_LEVEL("Detected sliced file. Dropping entries from here.\n");
+				break;
+			}
+
+			char tag_str[16 + 1] = {};
+			char value_str[16 + 1] = {};
+			memcpy(tag_str, bytes_to_read + FOSSILIZE_BLOB_HASH_LENGTH - 32, 16);
+			memcpy(value_str, bytes_to_read + FOSSILIZE_BLOB_HASH_LENGTH - 16, 16);
+
+			auto tag = unsigned(strtoul(tag_str, nullptr, 16));
+			if (tag < RESOURCE_COUNT)
+			{
+				uint64_t value = strtoull(value_str, nullptr, 16);
+				Entry entry = {};
+				entry.header = header;
+				entry.offset = offset + 1; // + newline symbol
+				if (test_resource_filter(static_cast<ResourceTag>(tag), value))
+					seen_blobs[tag].emplace(value, entry);
+			}
+			
+			if (fseek(file, header.uncompressed_size + 2, SEEK_CUR) < 0) // + two newline symbols
+				return false;
+
+			offset += header.uncompressed_size + 2; // + two newline symbols
+		}
+
+		if (mode == DatabaseMode::Append && offset != len)
+		{
+			if (fseek(file, begin_append_offset, SEEK_SET) < 0)
+				return false;
+		}
+
+		return true;
+	}
 };
 
-DatabaseInterface* create_dumb_file_database(const char* path, DatabaseMode mode)
+DatabaseInterface *create_dumb_file_database(const char* path, DatabaseMode mode)
 {
 	auto* db = new DumbFileDatabase(path, mode);
 	return db;
@@ -1856,7 +1860,7 @@ DatabaseInterface *create_database(const char *path, DatabaseMode mode)
 		return create_stream_archive_database(path, mode);
 	else if (ext == "zip")
 		return create_zip_archive_database(path, mode);
-	else if (!ext.empty())
+	else if (ext == "txt")
 		return create_dumb_file_database(path, mode);
 	else
 		return create_dumb_folder_database(path, mode);
