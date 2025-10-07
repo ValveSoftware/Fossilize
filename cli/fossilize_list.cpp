@@ -27,16 +27,9 @@
 #include <memory>
 #include <vector>
 #include <unordered_set>
-#include <map>
 
 using namespace Fossilize;
 using namespace std;
-
-#define PRINT_SAVED_BUFFER(SavedBufferName, VkObjectName, Tag)\
-for (auto It = SavedBufferName.begin(); It != SavedBufferName.end(); ++It)\
-{\
-	printf(VkObjectName "(%d):%016" PRIx64 ", ", Tag, *It);\
-}\
 
 static const ResourceTag playback_order[] = {
 	RESOURCE_SAMPLER,
@@ -47,6 +40,17 @@ static const ResourceTag playback_order[] = {
 	RESOURCE_GRAPHICS_PIPELINE,
 	RESOURCE_COMPUTE_PIPELINE,
 	RESOURCE_RAYTRACING_PIPELINE
+};
+
+static const size_t tag_names_size = 7;
+static const const char* tag_names[tag_names_size] = {
+	"sampler",
+	"descriptorSet",
+	"pipelineLayout",
+	"shaderModule",
+	"renderPass",
+	"graphicsPipeline",
+	"raytracingPipeline"
 };
 
 static void print_help()
@@ -81,18 +85,10 @@ static inline const T* find_pnext(VkStructureType type, const void* pNext)
 
 struct ListReplayer : StateCreatorInterface
 {
-	struct SavedHashes
-	{
-		unordered_set<Hash> saved_samplers;
-		unordered_set<Hash> saved_descriptor_sets;
-		unordered_set<Hash> saved_pipeline_layouts;
-		unordered_set<Hash> saved_shader_modules;
-		unordered_set<Hash> saved_render_passes;
-		unordered_set<Hash> saved_graphics_pipelines;
-		unordered_set<Hash> saved_raytracing_pipelines;
-	};
+	using saved_hashes_type = vector<pair<ResourceTag, Hash>>;
 
-	map<Hash, SavedHashes> saved_hashes_map;
+	saved_hashes_type saved_hashes;
+	unordered_map<Hash, saved_hashes_type> saved_hashes_map;
 	ResourceTag selected_tag;
 
 	bool enqueue_create_sampler(Hash hash, const VkSamplerCreateInfo* create_info, VkSampler* sampler) override
@@ -106,9 +102,9 @@ struct ListReplayer : StateCreatorInterface
 		*layout = fake_handle<VkDescriptorSetLayout>(hash);
 		if (selected_tag != RESOURCE_DESCRIPTOR_SET_LAYOUT)
 			return true;
-
-		auto saved_hash_iter = saved_hashes_map.insert({ hash, SavedHashes() }).first;
-
+		
+		auto saved_hash_iter = saved_hashes_map.insert({ hash, saved_hashes_type() }).first;
+		
 		for (uint32_t binding = 0; binding < create_info->bindingCount; binding++)
 		{
 			auto& bind = create_info->pBindings[binding];
@@ -116,7 +112,7 @@ struct ListReplayer : StateCreatorInterface
 			{
 				for (uint32_t i = 0; i < bind.descriptorCount; i++)
 					if (bind.pImmutableSamplers[i] != VK_NULL_HANDLE)
-						saved_hash_iter->second.saved_samplers.insert((Hash)bind.pImmutableSamplers[i]);
+						saved_hash_iter->second.push_back({ RESOURCE_SAMPLER, (Hash)bind.pImmutableSamplers[i] });
 			}
 		}
 
@@ -128,11 +124,11 @@ struct ListReplayer : StateCreatorInterface
 		*layout = fake_handle<VkPipelineLayout>(hash);
 		if (selected_tag != RESOURCE_PIPELINE_LAYOUT)
 			return true;
-
-		auto saved_hash_iter = saved_hashes_map.insert({ hash, SavedHashes() }).first;
-
+		
+		auto saved_hash_iter = saved_hashes_map.insert({ hash, saved_hashes_type() }).first;
+		
 		for (uint32_t layout = 0; layout < create_info->setLayoutCount; layout++)
-			saved_hash_iter->second.saved_descriptor_sets.insert((Hash)create_info->pSetLayouts[layout]);
+			saved_hash_iter->second.push_back({ RESOURCE_DESCRIPTOR_SET_LAYOUT, (Hash)create_info->pSetLayouts[layout] });
 
 		return true;
 	}
@@ -160,11 +156,11 @@ struct ListReplayer : StateCreatorInterface
 		*pipeline = fake_handle<VkPipeline>(hash);
 		if (selected_tag != RESOURCE_COMPUTE_PIPELINE)
 			return true;
+		
+		auto saved_hash_iter = saved_hashes_map.insert({ hash, saved_hashes_type() }).first;
 
-		auto saved_hash_iter = saved_hashes_map.insert({ hash, SavedHashes() }).first;
-
-		saved_hash_iter->second.saved_pipeline_layouts.insert((Hash)create_info->layout);
-		saved_hash_iter->second.saved_shader_modules.insert((Hash)create_info->stage.module);
+		saved_hash_iter->second.push_back({ RESOURCE_PIPELINE_LAYOUT, (Hash)create_info->layout });
+		saved_hash_iter->second.push_back({ RESOURCE_SHADER_MODULE, (Hash)create_info->stage.module });
 
 		return true;
 	}
@@ -175,15 +171,15 @@ struct ListReplayer : StateCreatorInterface
 		if (selected_tag != RESOURCE_GRAPHICS_PIPELINE)
 			return true;
 
-		auto saved_hash_iter = saved_hashes_map.insert({ hash, SavedHashes() }).first;
+		auto saved_hash_iter = saved_hashes_map.insert({ hash, saved_hashes_type() }).first;
 
 		for (uint32_t i = 0; i < create_info->stageCount; i++)
 		{
-			saved_hash_iter->second.saved_shader_modules.insert((Hash)create_info->pStages[i].module);
+			saved_hash_iter->second.push_back({ RESOURCE_SHADER_MODULE, (Hash)create_info->pStages[i].module });
 		}
 
-		saved_hash_iter->second.saved_pipeline_layouts.insert((Hash)create_info->layout);
-		saved_hash_iter->second.saved_render_passes.insert((Hash)create_info->renderPass);
+		saved_hash_iter->second.push_back({ RESOURCE_PIPELINE_LAYOUT, (Hash)create_info->layout });
+		saved_hash_iter->second.push_back({ RESOURCE_RENDER_PASS, (Hash)create_info->renderPass });
 
 		auto* library_info =
 			find_pnext<VkPipelineLibraryCreateInfoKHR>(VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR,
@@ -193,7 +189,7 @@ struct ListReplayer : StateCreatorInterface
 		{
 			for (uint32_t i = 0; i < library_info->libraryCount; i++)
 			{
-				saved_hash_iter->second.saved_graphics_pipelines.insert((Hash)library_info->pLibraries[i]);
+				saved_hash_iter->second.push_back({ RESOURCE_GRAPHICS_PIPELINE, (Hash)library_info->pLibraries[i] });
 			}
 		}
 
@@ -206,19 +202,19 @@ struct ListReplayer : StateCreatorInterface
 		if (selected_tag != RESOURCE_RAYTRACING_PIPELINE)
 			return true;
 
-		auto saved_hash_iter = saved_hashes_map.insert({ hash, SavedHashes() }).first;
+		auto saved_hash_iter = saved_hashes_map.insert({ hash, saved_hashes_type() }).first;
 
-		saved_hash_iter->second.saved_pipeline_layouts.insert((Hash)create_info->layout);
+		saved_hash_iter->second.push_back({ RESOURCE_PIPELINE_LAYOUT, (Hash)create_info->layout });
 		for (uint32_t stage = 0; stage < create_info->stageCount; stage++)
 		{
-			saved_hash_iter->second.saved_shader_modules.insert((Hash)create_info->pStages[stage].module);
+			saved_hash_iter->second.push_back({ RESOURCE_SHADER_MODULE, (Hash)create_info->pStages[stage].module });
 		}
 
 		if (create_info->pLibraryInfo)
 		{
 			for (uint32_t i = 0; i < create_info->pLibraryInfo->libraryCount; i++)
 			{
-				saved_hash_iter->second.saved_raytracing_pipelines.insert((Hash)create_info->pLibraryInfo->pLibraries[i]);
+				saved_hash_iter->second.push_back({ RESOURCE_RAYTRACING_PIPELINE, (Hash)create_info->pLibraryInfo->pLibraries[i] });
 			}
 		}
 
@@ -268,7 +264,7 @@ bool parse_tag(ResourceTag tag, StateReplayer& replayer, ListReplayer& list_repl
 
 bool replayer_create_info_fill(ResourceTag selected_tag, StateReplayer& replayer, ListReplayer& list_replayer, const std::unique_ptr<DatabaseInterface>& input_db)
 {
-	// fill Vulcan object data in replayer
+	// fill Vulkan object data in replayer
 	for (auto tag : playback_order)
 	{
 		if (tag == selected_tag)
@@ -290,13 +286,11 @@ void print_connectivity(Hash hash, const ListReplayer& list_replayer)
 	auto saved_hashes_map = list_replayer.saved_hashes_map.find(hash);
 	if (saved_hashes_map != list_replayer.saved_hashes_map.end())
 	{
-		PRINT_SAVED_BUFFER(saved_hashes_map->second.saved_samplers, "sampler", RESOURCE_SAMPLER);
-		PRINT_SAVED_BUFFER(saved_hashes_map->second.saved_descriptor_sets, "descriptorSet", RESOURCE_DESCRIPTOR_SET_LAYOUT);
-		PRINT_SAVED_BUFFER(saved_hashes_map->second.saved_pipeline_layouts, "pipelineLayout", RESOURCE_PIPELINE_LAYOUT);
-		PRINT_SAVED_BUFFER(saved_hashes_map->second.saved_shader_modules, "shaderModule", RESOURCE_SHADER_MODULE);
-		PRINT_SAVED_BUFFER(saved_hashes_map->second.saved_render_passes, "renderPass", RESOURCE_RENDER_PASS);
-		PRINT_SAVED_BUFFER(saved_hashes_map->second.saved_graphics_pipelines, "graphicsPipeline", RESOURCE_GRAPHICS_PIPELINE);
-		PRINT_SAVED_BUFFER(saved_hashes_map->second.saved_raytracing_pipelines, "raytracingPipeline", RESOURCE_RAYTRACING_PIPELINE);
+		for (auto par : saved_hashes_map->second)
+		{
+			printf(tag_names[par.first - 1 >= tag_names_size ? tag_names_size - 1 : par.first - 1]);
+			printf("(%d):%016" PRIx64 ", ", par.first, par.second);
+		}
 	}
 }
 
