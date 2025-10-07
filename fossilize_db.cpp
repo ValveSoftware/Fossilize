@@ -1154,7 +1154,7 @@ struct StreamArchive : DatabaseInterface
 						return false;
 					offset += sizeof(bytes_to_read);
 					header_raw = (PayloadHeaderRaw*)&bytes_to_read[FOSSILIZE_BLOB_HASH_LENGTH];
-					convert_from_le(header, *header_raw);
+					header = get_converted_header(header_raw);
 
 					// Corrupt entry. Our process might have been killed before we could write all data.
 					if (offset + header.payload_size > len)
