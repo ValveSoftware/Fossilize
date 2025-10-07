@@ -93,6 +93,7 @@ struct ListReplayer : StateCreatorInterface
 	};
 
 	map<Hash, SavedHashes> saved_hashes_map;
+	ResourceTag selected_tag;
 
 	bool enqueue_create_sampler(Hash hash, const VkSamplerCreateInfo* create_info, VkSampler* sampler) override
 	{
@@ -103,6 +104,8 @@ struct ListReplayer : StateCreatorInterface
 	bool enqueue_create_descriptor_set_layout(Hash hash, const VkDescriptorSetLayoutCreateInfo* create_info, VkDescriptorSetLayout* layout) override
 	{
 		*layout = fake_handle<VkDescriptorSetLayout>(hash);
+		if (selected_tag != RESOURCE_DESCRIPTOR_SET_LAYOUT)
+			return true;
 
 		auto saved_hash_iter = saved_hashes_map.insert({ hash, SavedHashes() }).first;
 
@@ -123,6 +126,8 @@ struct ListReplayer : StateCreatorInterface
 	bool enqueue_create_pipeline_layout(Hash hash, const VkPipelineLayoutCreateInfo* create_info, VkPipelineLayout* layout) override
 	{
 		*layout = fake_handle<VkPipelineLayout>(hash);
+		if (selected_tag != RESOURCE_PIPELINE_LAYOUT)
+			return true;
 
 		auto saved_hash_iter = saved_hashes_map.insert({ hash, SavedHashes() }).first;
 
@@ -153,6 +158,8 @@ struct ListReplayer : StateCreatorInterface
 	bool enqueue_create_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo* create_info, VkPipeline* pipeline) override
 	{
 		*pipeline = fake_handle<VkPipeline>(hash);
+		if (selected_tag != RESOURCE_COMPUTE_PIPELINE)
+			return true;
 
 		auto saved_hash_iter = saved_hashes_map.insert({ hash, SavedHashes() }).first;
 
@@ -165,6 +172,8 @@ struct ListReplayer : StateCreatorInterface
 	bool enqueue_create_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo* create_info, VkPipeline* pipeline) override
 	{
 		*pipeline = fake_handle<VkPipeline>(hash);
+		if (selected_tag != RESOURCE_GRAPHICS_PIPELINE)
+			return true;
 
 		auto saved_hash_iter = saved_hashes_map.insert({ hash, SavedHashes() }).first;
 
@@ -194,6 +203,8 @@ struct ListReplayer : StateCreatorInterface
 	bool enqueue_create_raytracing_pipeline(Hash hash, const VkRayTracingPipelineCreateInfoKHR* create_info, VkPipeline* pipeline) override
 	{
 		*pipeline = fake_handle<VkPipeline>(hash);
+		if (selected_tag != RESOURCE_RAYTRACING_PIPELINE)
+			return true;
 
 		auto saved_hash_iter = saved_hashes_map.insert({ hash, SavedHashes() }).first;
 
@@ -257,6 +268,7 @@ bool parse_tag(ResourceTag tag, StateReplayer& replayer, ListReplayer& list_repl
 
 bool replayer_create_info_fill(ResourceTag selected_tag, StateReplayer& replayer, ListReplayer& list_replayer, const std::unique_ptr<DatabaseInterface>& input_db)
 {
+	// fill Vulcan object data in replayer
 	for (auto tag : playback_order)
 	{
 		if (tag == selected_tag)
@@ -266,6 +278,7 @@ bool replayer_create_info_fill(ResourceTag selected_tag, StateReplayer& replayer
 			return false;
 	}
 
+	// fill connectivity data
 	if (!parse_tag(selected_tag, replayer, list_replayer, input_db))
 		return false;
 
@@ -344,6 +357,8 @@ int main(int argc, char **argv)
 
 	StateReplayer replayer;
 	ListReplayer list_replayer;
+	list_replayer.selected_tag = tag;
+	if (log_connectivity)
 	if (!replayer_create_info_fill(tag, replayer, list_replayer, input_db))
 	{
 		LOGE("Failed to fill create infos for list_replayer.\n");
