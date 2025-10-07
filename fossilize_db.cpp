@@ -1779,7 +1779,7 @@ struct DumbFileDatabase : StreamArchive
 	}
 
 protected:
-	virtual PayloadHeader get_converted_header(PayloadHeaderRaw header_raw)
+	PayloadHeader get_converted_header(PayloadHeaderRaw header_raw) override
 	{
 		PayloadHeader header;
 		convert_from_le(header, header_raw);
@@ -1787,7 +1787,7 @@ protected:
 		return header;
 	}
 
-	virtual bool move_offset_through_header_size(PayloadHeader header, size_t& offset)
+	bool move_offset_through_header_size(PayloadHeader header, size_t& offset) override
 	{
 		if (fseek(file, header.uncompressed_size + 2, SEEK_CUR) < 0) // + two newline symbols
 			return false;
@@ -1797,7 +1797,7 @@ protected:
 		return true;
 	}
 
-	virtual Entry fill_entry(PayloadHeader header, size_t offset)
+	Entry fill_entry(PayloadHeader header, size_t offset) override
 	{
 		Entry entry = {};
 		entry.header = header;
