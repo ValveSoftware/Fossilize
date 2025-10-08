@@ -1138,7 +1138,7 @@ struct StreamArchive : DatabaseInterface
 
 					begin_append_offset = offset;
 
-					PayloadHeaderRaw* header_raw = nullptr;
+					PayloadHeaderRaw *header_raw = nullptr;
 					char bytes_to_read[FOSSILIZE_BLOB_HASH_LENGTH + sizeof(PayloadHeaderRaw)];
 					PayloadHeader header = {};
 
