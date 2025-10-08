@@ -26,7 +26,7 @@
 #include "layer/utils.hpp"
 #include <memory>
 #include <vector>
-#include <unordered_map>
+#include <unordered_set>
 
 using namespace Fossilize;
 using namespace std;
@@ -69,13 +69,13 @@ static inline T fake_handle(uint64_t v)
 }
 
 template <typename T>
-static inline const T* find_pnext(VkStructureType type, const void* pNext)
+static inline const T *find_pnext(VkStructureType type, const void *pNext)
 {
 	while (pNext != nullptr)
 	{
-		auto* sin = static_cast<const VkBaseInStructure*>(pNext);
+		auto *sin = static_cast<const VkBaseInStructure *>(pNext);
 		if (sin->sType == type)
-			return static_cast<const T*>(pNext);
+			return static_cast<const T *>(pNext);
 
 		pNext = sin->pNext;
 	}
@@ -91,143 +91,126 @@ struct ListReplayer : StateCreatorInterface
 	unordered_map<Hash, saved_hashes_type> saved_hashes_map;
 	ResourceTag selected_tag;
 
-	bool enqueue_create_sampler(Hash hash, const VkSamplerCreateInfo* create_info, VkSampler* sampler) override
+	bool enqueue_create_sampler(Hash hash, const VkSamplerCreateInfo *create_info, VkSampler *sampler) override
 	{
 		*sampler = fake_handle<VkSampler>(hash);
 		return true;
 	}
 
-	bool enqueue_create_descriptor_set_layout(Hash hash, const VkDescriptorSetLayoutCreateInfo* create_info, VkDescriptorSetLayout* layout) override
+	bool enqueue_create_descriptor_set_layout(Hash hash, const VkDescriptorSetLayoutCreateInfo *create_info, VkDescriptorSetLayout *layout) override
 	{
 		*layout = fake_handle<VkDescriptorSetLayout>(hash);
 		if (selected_tag != RESOURCE_DESCRIPTOR_SET_LAYOUT)
 			return true;
 		
-		saved_hashes_map.insert({ hash, saved_hashes_type() });
-		auto &dependencies = saved_hashes_map[hash];
+		auto saved_hash_iter = saved_hashes_map.insert({ hash, saved_hashes_type() }).first;
 		
 		for (uint32_t binding = 0; binding < create_info->bindingCount; binding++)
 		{
-			auto& bind = create_info->pBindings[binding];
+			auto &bind = create_info->pBindings[binding];
 			if (bind.pImmutableSamplers && bind.descriptorCount != 0)
 			{
 				for (uint32_t i = 0; i < bind.descriptorCount; i++)
 					if (bind.pImmutableSamplers[i] != VK_NULL_HANDLE)
-						dependencies.push_back({ RESOURCE_SAMPLER, (Hash)bind.pImmutableSamplers[i] });
+						saved_hash_iter->second.push_back({ RESOURCE_SAMPLER, (Hash)bind.pImmutableSamplers[i] });
 			}
 		}
 
 		return true;
 	}
 
-	bool enqueue_create_pipeline_layout(Hash hash, const VkPipelineLayoutCreateInfo* create_info, VkPipelineLayout* layout) override
+	bool enqueue_create_pipeline_layout(Hash hash, const VkPipelineLayoutCreateInfo *create_info, VkPipelineLayout *layout) override
 	{
 		*layout = fake_handle<VkPipelineLayout>(hash);
 		if (selected_tag != RESOURCE_PIPELINE_LAYOUT)
 			return true;
 		
-		saved_hashes_map.insert({ hash, saved_hashes_type() });
-		auto &dependencies = saved_hashes_map[hash];
+		auto saved_hash_iter = saved_hashes_map.insert({ hash, saved_hashes_type() }).first;
 		
 		for (uint32_t layout = 0; layout < create_info->setLayoutCount; layout++)
-			dependencies.push_back({ RESOURCE_DESCRIPTOR_SET_LAYOUT, (Hash)create_info->pSetLayouts[layout] });
+			saved_hash_iter->second.push_back({ RESOURCE_DESCRIPTOR_SET_LAYOUT, (Hash)create_info->pSetLayouts[layout] });
 
 		return true;
 	}
 
-	bool enqueue_create_shader_module(Hash hash, const VkShaderModuleCreateInfo* create_info, VkShaderModule* module) override
+	bool enqueue_create_shader_module(Hash hash, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module) override
 	{
 		*module = fake_handle<VkShaderModule>(hash);
 		return true;
 	}
 
-	bool enqueue_create_render_pass(Hash hash, const VkRenderPassCreateInfo* create_info, VkRenderPass* render_pass) override
+	bool enqueue_create_render_pass(Hash hash, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass) override
 	{
 		*render_pass = fake_handle<VkRenderPass>(hash);
 		return true;
 	}
 
-	bool enqueue_create_render_pass2(Hash hash, const VkRenderPassCreateInfo2* create_info, VkRenderPass* render_pass) override
+	bool enqueue_create_render_pass2(Hash hash, const VkRenderPassCreateInfo2 *create_info, VkRenderPass *render_pass) override
 	{
 		*render_pass = fake_handle<VkRenderPass>(hash);
 		return true;
 	}
 
-	bool enqueue_create_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo* create_info, VkPipeline* pipeline) override
+	bool enqueue_create_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
 		*pipeline = fake_handle<VkPipeline>(hash);
 		if (selected_tag != RESOURCE_COMPUTE_PIPELINE)
 			return true;
 		
-		saved_hashes_map.insert({ hash, saved_hashes_type() });
-		auto &dependencies = saved_hashes_map[hash];
+		auto saved_hash_iter = saved_hashes_map.insert({ hash, saved_hashes_type() }).first;
 
-		dependencies.push_back({ RESOURCE_PIPELINE_LAYOUT, (Hash)create_info->layout });
-		dependencies.push_back({ RESOURCE_SHADER_MODULE, (Hash)create_info->stage.module });
+		saved_hash_iter->second.push_back({ RESOURCE_PIPELINE_LAYOUT, (Hash)create_info->layout });
+		saved_hash_iter->second.push_back({ RESOURCE_SHADER_MODULE, (Hash)create_info->stage.module });
 
 		return true;
 	}
 
-	bool enqueue_create_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo* create_info, VkPipeline* pipeline) override
+	bool enqueue_create_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
 		*pipeline = fake_handle<VkPipeline>(hash);
 		if (selected_tag != RESOURCE_GRAPHICS_PIPELINE)
 			return true;
 
-		saved_hashes_map.insert({ hash, saved_hashes_type() });
-		auto &dependencies = saved_hashes_map[hash];
+		auto saved_hash_iter = saved_hashes_map.insert({ hash, saved_hashes_type() }).first;
 
 		for (uint32_t i = 0; i < create_info->stageCount; i++)
-		{
-			dependencies.push_back({ RESOURCE_SHADER_MODULE, (Hash)create_info->pStages[i].module });
-		}
+			saved_hash_iter->second.push_back({ RESOURCE_SHADER_MODULE, (Hash)create_info->pStages[i].module });
 
-		dependencies.push_back({ RESOURCE_PIPELINE_LAYOUT, (Hash)create_info->layout });
-		dependencies.push_back({ RESOURCE_RENDER_PASS, (Hash)create_info->renderPass });
+		saved_hash_iter->second.push_back({ RESOURCE_PIPELINE_LAYOUT, (Hash)create_info->layout });
+		saved_hash_iter->second.push_back({ RESOURCE_RENDER_PASS, (Hash)create_info->renderPass });
 
 		auto* library_info =
 			find_pnext<VkPipelineLibraryCreateInfoKHR>(VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR,
 				create_info->pNext);
 
 		if (library_info)
-		{
 			for (uint32_t i = 0; i < library_info->libraryCount; i++)
-			{
-				dependencies.push_back({ RESOURCE_GRAPHICS_PIPELINE, (Hash)library_info->pLibraries[i] });
-			}
-		}
+				saved_hash_iter->second.push_back({ RESOURCE_GRAPHICS_PIPELINE, (Hash)library_info->pLibraries[i] });
 
 		return true;
 	}
 
-	bool enqueue_create_raytracing_pipeline(Hash hash, const VkRayTracingPipelineCreateInfoKHR* create_info, VkPipeline* pipeline) override
+	bool enqueue_create_raytracing_pipeline(Hash hash, const VkRayTracingPipelineCreateInfoKHR *create_info, VkPipeline *pipeline) override
 	{
 		*pipeline = fake_handle<VkPipeline>(hash);
 		if (selected_tag != RESOURCE_RAYTRACING_PIPELINE)
 			return true;
 
-		saved_hashes_map.insert({ hash, saved_hashes_type() });
-		auto &dependencies = saved_hashes_map[hash];
+		auto saved_hash_iter = saved_hashes_map.insert({ hash, saved_hashes_type() }).first;
 
-		dependencies.push_back({ RESOURCE_PIPELINE_LAYOUT, (Hash)create_info->layout });
+		saved_hash_iter->second.push_back({ RESOURCE_PIPELINE_LAYOUT, (Hash)create_info->layout });
 		for (uint32_t stage = 0; stage < create_info->stageCount; stage++)
-		{
-			dependencies.push_back({ RESOURCE_SHADER_MODULE, (Hash)create_info->pStages[stage].module });
-		}
+			saved_hash_iter->second.push_back({ RESOURCE_SHADER_MODULE, (Hash)create_info->pStages[stage].module });
 
 		if (create_info->pLibraryInfo)
-		{
 			for (uint32_t i = 0; i < create_info->pLibraryInfo->libraryCount; i++)
-			{
-				dependencies.push_back({ RESOURCE_RAYTRACING_PIPELINE, (Hash)create_info->pLibraryInfo->pLibraries[i] });
-			}
-		}
+				saved_hash_iter->second.push_back({ RESOURCE_RAYTRACING_PIPELINE, (Hash)create_info->pLibraryInfo->pLibraries[i] });
 
 		return true;
 	}
 };
 
-bool parse_tag(ResourceTag tag, StateReplayer& replayer, ListReplayer& list_replayer, const std::unique_ptr<DatabaseInterface>& input_db)
+bool parse_tag(ResourceTag tag, StateReplayer &replayer, ListReplayer &list_replayer, const DatabaseInterface *input_db)
 {
 	vector<uint8_t> state_db;
 	size_t hash_count = 0;
@@ -267,7 +250,7 @@ bool parse_tag(ResourceTag tag, StateReplayer& replayer, ListReplayer& list_repl
 	return true;
 }
 
-bool replayer_create_info_fill(ResourceTag selected_tag, StateReplayer& replayer, ListReplayer& list_replayer, const std::unique_ptr<DatabaseInterface>& input_db)
+bool replayer_create_info_fill(ResourceTag selected_tag, StateReplayer &replayer, ListReplayer &list_replayer, const DatabaseInterface *input_db)
 {
 	// fill Vulkan object data in replayer
 	for (auto tag : playback_order)
@@ -286,7 +269,7 @@ bool replayer_create_info_fill(ResourceTag selected_tag, StateReplayer& replayer
 	return true;
 }
 
-void print_connectivity(Hash hash, const ListReplayer& list_replayer)
+void print_connectivity(Hash hash, const ListReplayer &list_replayer)
 {
 	auto saved_hashes_map = list_replayer.saved_hashes_map.find(hash);
 	if (saved_hashes_map != list_replayer.saved_hashes_map.end())
@@ -357,8 +340,7 @@ int main(int argc, char **argv)
 	StateReplayer replayer;
 	ListReplayer list_replayer;
 	list_replayer.selected_tag = tag;
-	if (log_connectivity)
-	if (!replayer_create_info_fill(tag, replayer, list_replayer, input_db))
+	if (log_connectivity && !replayer_create_info_fill(tag, replayer, list_replayer, input_db.get()))
 	{
 		LOGE("Failed to fill create infos for list_replayer.\n");
 		return EXIT_FAILURE;
@@ -366,10 +348,25 @@ int main(int argc, char **argv)
 
 	uint64_t compressed_total_size = 0;
 	uint64_t uncompressed_total_size = 0;
+	vector<uint8_t> state_db;
 	for (auto hash : hashes)
 	{
 		if (log_connectivity)
 		{
+			size_t state_db_size;
+			if (!input_db->read_entry(tag, hash, &state_db_size, nullptr, 0))
+			{
+				LOGE("Failed to query blob size.\n");
+				return EXIT_FAILURE;
+			}
+
+			state_db.resize(state_db_size);
+			if (!input_db->read_entry(tag, hash, &state_db_size, state_db.data(), 0))
+			{
+				LOGE("Failed to load blob from cache.\n");
+				return EXIT_FAILURE;
+			}
+
 			printf("%016" PRIx64 " : ", hash);
 			print_connectivity(hash, list_replayer);
 			printf(";\n");
