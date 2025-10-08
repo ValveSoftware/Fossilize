@@ -262,7 +262,7 @@ bool parse_tag(ResourceTag tag, StateReplayer &replayer, ListReplayer &list_repl
 	return true;
 }
 
-bool replayer_create_info_fill(ResourceTag selected_tag, StateReplayer& replayer, ListReplayer& list_replayer, const std::unique_ptr<DatabaseInterface>& input_db)
+bool replayer_create_info_fill(ResourceTag selected_tag, StateReplayer &replayer, ListReplayer &list_replayer, const DatabaseInterface *input_db)
 {
 	// fill Vulkan object data in replayer
 	for (auto tag : playback_order)
