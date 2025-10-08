@@ -210,7 +210,7 @@ protected:
 	Impl *impl;
 };
 
-DatabaseInterface* create_dumb_file_database(const char* path, DatabaseMode mode);
+DatabaseInterface* create_dumb_file_database(const char *path, DatabaseMode mode);
 DatabaseInterface *create_dumb_folder_database(const char *directory_path, DatabaseMode mode);
 DatabaseInterface *create_zip_archive_database(const char *path, DatabaseMode mode);
 DatabaseInterface *create_stream_archive_database(const char *path, DatabaseMode mode);
