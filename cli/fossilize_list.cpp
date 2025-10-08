@@ -75,7 +75,7 @@ static inline const T* find_pnext(VkStructureType type, const void* pNext)
 	{
 		auto *sin = static_cast<const VkBaseInStructure *>(pNext);
 		if (sin->sType == type)
-			return static_cast<const T*>(pNext);
+			return static_cast<const T *>(pNext);
 
 		pNext = sin->pNext;
 	}
