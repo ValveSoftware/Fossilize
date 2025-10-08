@@ -1806,7 +1806,7 @@ protected:
 	}
 };
 
-DatabaseInterface *create_dumb_file_database(const char* path, DatabaseMode mode)
+DatabaseInterface *create_dumb_file_database(const char *path, DatabaseMode mode)
 {
 	auto *db = new DumbFileDatabase(path, mode);
 	return db;
