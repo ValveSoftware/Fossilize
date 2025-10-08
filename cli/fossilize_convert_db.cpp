@@ -49,6 +49,7 @@ int main(int argc, char *argv[])
 		return EXIT_FAILURE;
 	}
 
+	output_db->set_overwrite_db_clear(true);
 	if (!output_db || !output_db->prepare())
 	{
 		LOGE("Failed to open database for writing: %s\n", argv[2]);

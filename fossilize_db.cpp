@@ -138,6 +138,7 @@ struct DatabaseInterface::Impl
 	std::vector<const ExportedMetadataHeader *> imported_metadata;
 	const uint8_t *mapped_metadata = nullptr;
 	size_t mapped_metadata_size = 0;
+	bool overwrite_db_clear = false;
 
 	bool parse_imported_metadata(const void *data, size_t size);
 };
@@ -146,6 +147,16 @@ DatabaseInterface::DatabaseInterface(DatabaseMode mode)
 {
 	impl = new Impl;
 	impl->mode = mode;
+}
+
+void DatabaseInterface::set_overwrite_db_clear(bool value)
+{
+	impl->overwrite_db_clear = value;
+}
+
+bool DatabaseInterface::get_overwrite_db_clear() const
+{
+	return impl->overwrite_db_clear;
 }
 
 bool DatabaseInterface::has_sub_databases()
@@ -542,7 +553,12 @@ struct DumbDirectoryDatabase : DatabaseInterface
 	bool prepare() override
 	{
 		if (mode == DatabaseMode::OverWrite)
+		{
+			if (impl->overwrite_db_clear && !overwrite_db_clear())
+				return false;
+
 			return true;
+		}
 
 		DIR *dp = opendir(base_directory.c_str());
 		if (!dp)
@@ -701,6 +717,31 @@ struct DumbDirectoryDatabase : DatabaseInterface
 	string base_directory;
 	DatabaseMode mode;
 	unordered_set<Hash> seen_blobs[RESOURCE_COUNT];
+
+protected:
+	bool overwrite_db_clear()
+	{
+		DIR *dp = opendir(base_directory.c_str());
+		if (!dp)
+			return false;
+
+		dirent *next_file;
+		char filepath[256];
+
+		while ((next_file = readdir(dp)) != NULL)
+		{
+			if (strcmp(next_file->d_name, ".") == 0 || strcmp(next_file->d_name, "..") == 0)
+				continue;
+
+			sprintf(filepath, "%s/%s", base_directory.c_str(), next_file->d_name);
+			
+			if (remove(filepath) != 0)
+				return false;
+		}
+
+		closedir(dp);
+		return true;
+	}
 };
 
 DatabaseInterface *create_dumb_folder_database(const char *directory_path, DatabaseMode mode)
