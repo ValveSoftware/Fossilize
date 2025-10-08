@@ -281,7 +281,7 @@ bool replayer_create_info_fill(ResourceTag selected_tag, StateReplayer& replayer
 	return true;
 }
 
-void print_connectivity(Hash hash, const ListReplayer& list_replayer)
+void print_connectivity(Hash hash, const ListReplayer &list_replayer)
 {
 	auto saved_hashes_map = list_replayer.saved_hashes_map.find(hash);
 	if (saved_hashes_map != list_replayer.saved_hashes_map.end())
