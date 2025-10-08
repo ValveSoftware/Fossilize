@@ -151,7 +151,7 @@ struct ListReplayer : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo* create_info, VkPipeline* pipeline) override
+	bool enqueue_create_compute_pipeline(Hash hash, const VkComputePipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
 		*pipeline = fake_handle<VkPipeline>(hash);
 		if (selected_tag != RESOURCE_COMPUTE_PIPELINE)
