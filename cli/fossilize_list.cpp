@@ -133,7 +133,7 @@ struct ListReplayer : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_shader_module(Hash hash, const VkShaderModuleCreateInfo* create_info, VkShaderModule* module) override
+	bool enqueue_create_shader_module(Hash hash, const VkShaderModuleCreateInfo *create_info, VkShaderModule *module) override
 	{
 		*module = fake_handle<VkShaderModule>(hash);
 		return true;
