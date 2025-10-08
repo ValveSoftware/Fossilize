@@ -211,12 +211,8 @@ struct ListReplayer : StateCreatorInterface
 		}
 
 		if (create_info->pLibraryInfo)
-		{
 			for (uint32_t i = 0; i < create_info->pLibraryInfo->libraryCount; i++)
-			{
 				saved_hash_iter->second.push_back({ RESOURCE_RAYTRACING_PIPELINE, (Hash)create_info->pLibraryInfo->pLibraries[i] });
-			}
-		}
 
 		return true;
 	}
