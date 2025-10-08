@@ -42,14 +42,15 @@ static const ResourceTag playback_order[] = {
 	RESOURCE_RAYTRACING_PIPELINE
 };
 
-static const size_t tag_names_size = 7;
-static const const char* tag_names[tag_names_size] = {
+static const const char* tag_names[] = {
+	"applicationInfo",
 	"sampler",
 	"descriptorSet",
 	"pipelineLayout",
 	"shaderModule",
 	"renderPass",
 	"graphicsPipeline",
+	"applicationBlobLink",
 	"raytracingPipeline"
 };
 
@@ -215,7 +216,7 @@ struct ListReplayer : StateCreatorInterface
 	}
 };
 
-bool parse_tag(ResourceTag tag, StateReplayer &replayer, ListReplayer &list_replayer, const DatabaseInterface *input_db)
+bool parse_tag(ResourceTag tag, StateReplayer &replayer, ListReplayer &list_replayer, DatabaseInterface *input_db)
 {
 	vector<uint8_t> state_db;
 	size_t hash_count = 0;
@@ -248,14 +249,14 @@ bool parse_tag(ResourceTag tag, StateReplayer &replayer, ListReplayer &list_repl
 			return false;
 		}
 
-		if (!replayer.parse(list_replayer, input_db.get(), state_db.data(), state_db.size()))
+		if (!replayer.parse(list_replayer, input_db, state_db.data(), state_db.size()))
 			LOGE("Failed to parse blob (tag: %d, hash: 0x%" PRIx64 ").\n", tag, hash);
 	}
 
 	return true;
 }
 
-bool replayer_create_info_fill(ResourceTag selected_tag, StateReplayer &replayer, ListReplayer &list_replayer, const DatabaseInterface *input_db)
+bool replayer_create_info_fill(ResourceTag selected_tag, StateReplayer &replayer, ListReplayer &list_replayer, DatabaseInterface *input_db)
 {
 	// fill Vulkan object data in replayer
 	for (auto tag : playback_order)
@@ -281,7 +282,7 @@ void print_connectivity(Hash hash, const ListReplayer &list_replayer)
 	{
 		for (auto par : saved_hashes_map->second)
 		{
-			printf(tag_names[par.first - 1 >= tag_names_size ? tag_names_size - 1 : par.first - 1]);
+			printf(tag_names[par.first]);
 			printf("(%d):%016" PRIx64 ", ", par.first, par.second);
 		}
 	}
