@@ -91,7 +91,7 @@ struct ListReplayer : StateCreatorInterface
 	unordered_map<Hash, saved_hashes_type> saved_hashes_map;
 	ResourceTag selected_tag;
 
-	bool enqueue_create_sampler(Hash hash, const VkSamplerCreateInfo* create_info, VkSampler* sampler) override
+	bool enqueue_create_sampler(Hash hash, const VkSamplerCreateInfo *create_info, VkSampler *sampler) override
 	{
 		*sampler = fake_handle<VkSampler>(hash);
 		return true;
@@ -139,7 +139,7 @@ struct ListReplayer : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_render_pass(Hash hash, const VkRenderPassCreateInfo* create_info, VkRenderPass* render_pass) override
+	bool enqueue_create_render_pass(Hash hash, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass) override
 	{
 		*render_pass = fake_handle<VkRenderPass>(hash);
 		return true;
@@ -340,8 +340,7 @@ int main(int argc, char **argv)
 	StateReplayer replayer;
 	ListReplayer list_replayer;
 	list_replayer.selected_tag = tag;
-	if (log_connectivity)
-	if (!replayer_create_info_fill(tag, replayer, list_replayer, input_db))
+	if (log_connectivity && !replayer_create_info_fill(tag, replayer, list_replayer, input_db.get()))
 	{
 		LOGE("Failed to fill create infos for list_replayer.\n");
 		return EXIT_FAILURE;
