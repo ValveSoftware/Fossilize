@@ -97,7 +97,7 @@ struct ListReplayer : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_descriptor_set_layout(Hash hash, const VkDescriptorSetLayoutCreateInfo* create_info, VkDescriptorSetLayout* layout) override
+	bool enqueue_create_descriptor_set_layout(Hash hash, const VkDescriptorSetLayoutCreateInfo *create_info, VkDescriptorSetLayout *layout) override
 	{
 		*layout = fake_handle<VkDescriptorSetLayout>(hash);
 		if (selected_tag != RESOURCE_DESCRIPTOR_SET_LAYOUT)
