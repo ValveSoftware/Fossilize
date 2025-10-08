@@ -1700,7 +1700,7 @@ protected:
 	}
 };
 
-DatabaseInterface *create_stream_archive_database(const char* path, DatabaseMode mode)
+DatabaseInterface *create_stream_archive_database(const char *path, DatabaseMode mode)
 {
 	auto* db = new StreamArchive(path, mode);
 	return db;
