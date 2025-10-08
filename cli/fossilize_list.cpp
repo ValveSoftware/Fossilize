@@ -206,9 +206,7 @@ struct ListReplayer : StateCreatorInterface
 
 		saved_hash_iter->second.push_back({ RESOURCE_PIPELINE_LAYOUT, (Hash)create_info->layout });
 		for (uint32_t stage = 0; stage < create_info->stageCount; stage++)
-		{
 			saved_hash_iter->second.push_back({ RESOURCE_SHADER_MODULE, (Hash)create_info->pStages[stage].module });
-		}
 
 		if (create_info->pLibraryInfo)
 			for (uint32_t i = 0; i < create_info->pLibraryInfo->libraryCount; i++)
