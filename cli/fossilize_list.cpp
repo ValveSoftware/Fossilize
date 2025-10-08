@@ -107,7 +107,7 @@ struct ListReplayer : StateCreatorInterface
 		
 		for (uint32_t binding = 0; binding < create_info->bindingCount; binding++)
 		{
-			auto& bind = create_info->pBindings[binding];
+			auto &bind = create_info->pBindings[binding];
 			if (bind.pImmutableSamplers && bind.descriptorCount != 0)
 			{
 				for (uint32_t i = 0; i < bind.descriptorCount; i++)
