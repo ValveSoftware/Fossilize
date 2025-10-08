@@ -104,7 +104,6 @@ struct ListReplayer : StateCreatorInterface
 		if (selected_tag != RESOURCE_DESCRIPTOR_SET_LAYOUT)
 			return true;
 		
-		saved_hashes_map.insert({ hash, saved_hashes_type() });
 		auto &dependencies = saved_hashes_map[hash];
 		
 		for (uint32_t binding = 0; binding < create_info->bindingCount; binding++)
@@ -127,7 +126,6 @@ struct ListReplayer : StateCreatorInterface
 		if (selected_tag != RESOURCE_PIPELINE_LAYOUT)
 			return true;
 		
-		saved_hashes_map.insert({ hash, saved_hashes_type() });
 		auto &dependencies = saved_hashes_map[hash];
 		
 		for (uint32_t layout = 0; layout < create_info->setLayoutCount; layout++)
@@ -160,7 +158,6 @@ struct ListReplayer : StateCreatorInterface
 		if (selected_tag != RESOURCE_COMPUTE_PIPELINE)
 			return true;
 		
-		saved_hashes_map.insert({ hash, saved_hashes_type() });
 		auto &dependencies = saved_hashes_map[hash];
 
 		dependencies.push_back({ RESOURCE_PIPELINE_LAYOUT, (Hash)create_info->layout });
@@ -175,7 +172,6 @@ struct ListReplayer : StateCreatorInterface
 		if (selected_tag != RESOURCE_GRAPHICS_PIPELINE)
 			return true;
 
-		saved_hashes_map.insert({ hash, saved_hashes_type() });
 		auto &dependencies = saved_hashes_map[hash];
 
 		for (uint32_t i = 0; i < create_info->stageCount; i++)
@@ -201,7 +197,6 @@ struct ListReplayer : StateCreatorInterface
 		if (selected_tag != RESOURCE_RAYTRACING_PIPELINE)
 			return true;
 
-		saved_hashes_map.insert({ hash, saved_hashes_type() });
 		auto &dependencies = saved_hashes_map[hash];
 
 		dependencies.push_back({ RESOURCE_PIPELINE_LAYOUT, (Hash)create_info->layout });
