@@ -174,9 +174,7 @@ struct ListReplayer : StateCreatorInterface
 		auto saved_hash_iter = saved_hashes_map.insert({ hash, saved_hashes_type() }).first;
 
 		for (uint32_t i = 0; i < create_info->stageCount; i++)
-		{
 			saved_hash_iter->second.push_back({ RESOURCE_SHADER_MODULE, (Hash)create_info->pStages[i].module });
-		}
 
 		saved_hash_iter->second.push_back({ RESOURCE_PIPELINE_LAYOUT, (Hash)create_info->layout });
 		saved_hash_iter->second.push_back({ RESOURCE_RENDER_PASS, (Hash)create_info->renderPass });
