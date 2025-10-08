@@ -30,25 +30,6 @@
 using namespace Fossilize;
 using namespace std;
 
-#define PRINT_SAVED_BUFFER_INNER(SavedBufferName, VkObjectName, Tag)\
-for (auto It = list_replayer.SavedBufferName.begin(); It != list_replayer.SavedBufferName.end(); ++It)\
-{\
-	printf(VkObjectName "(%d):%016" PRIx64 ", ", Tag, *It);\
-}\
-
-#define PRINT_SAVED_BUFFER(SavedBufferName, VkObjectName, Tag) PRINT_SAVED_BUFFER_INNER(SavedBufferName, VkObjectName, Tag)
-
-static const ResourceTag playback_order[] = {
-	RESOURCE_SAMPLER,
-	RESOURCE_DESCRIPTOR_SET_LAYOUT,
-	RESOURCE_PIPELINE_LAYOUT,
-	RESOURCE_SHADER_MODULE,
-	RESOURCE_RENDER_PASS,
-	RESOURCE_GRAPHICS_PIPELINE,
-	RESOURCE_COMPUTE_PIPELINE,
-	RESOURCE_RAYTRACING_PIPELINE
-};
-
 static void print_help()
 {
 	LOGI("Usage: fossilize-list\n"
@@ -119,7 +100,7 @@ int main(int argc, char **argv)
 			size_t compressed_blob_size = 0;
 			size_t uncompressed_blob_size = 0;
 			if (!input_db->read_entry(tag, hash, &compressed_blob_size, nullptr, PAYLOAD_READ_RAW_FOSSILIZE_DB_BIT) ||
-				!input_db->read_entry(tag, hash, &uncompressed_blob_size, nullptr, 0))
+			    !input_db->read_entry(tag, hash, &uncompressed_blob_size, nullptr, 0))
 			{
 				LOGE("Failed to query blob size.\n");
 				return EXIT_FAILURE;
