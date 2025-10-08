@@ -1787,7 +1787,7 @@ protected:
 		return header;
 	}
 
-	bool move_offset_through_header_size(PayloadHeader header, size_t& offset) override
+	bool move_offset_through_header_size(PayloadHeader header, size_t &offset) override
 	{
 		if (fseek(file, header.uncompressed_size + 2, SEEK_CUR) < 0) // + two newline symbols
 			return false;
