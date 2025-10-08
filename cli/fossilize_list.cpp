@@ -69,7 +69,7 @@ static inline T fake_handle(uint64_t v)
 }
 
 template <typename T>
-static inline const T* find_pnext(VkStructureType type, const void* pNext)
+static inline const T *find_pnext(VkStructureType type, const void *pNext)
 {
 	while (pNext != nullptr)
 	{
