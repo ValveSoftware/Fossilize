@@ -26,7 +26,7 @@
 #include "layer/utils.hpp"
 #include <memory>
 #include <vector>
-#include <unordered_set>
+#include <unordered_map>
 
 using namespace Fossilize;
 using namespace std;
@@ -103,7 +103,8 @@ struct ListReplayer : StateCreatorInterface
 		if (selected_tag != RESOURCE_DESCRIPTOR_SET_LAYOUT)
 			return true;
 		
-		auto saved_hash_iter = saved_hashes_map.insert({ hash, saved_hashes_type() }).first;
+		saved_hashes_map.insert({ hash, saved_hashes_type() });
+		auto &dependencies = saved_hashes_map[hash];
 		
 		for (uint32_t binding = 0; binding < create_info->bindingCount; binding++)
 		{
@@ -112,7 +113,7 @@ struct ListReplayer : StateCreatorInterface
 			{
 				for (uint32_t i = 0; i < bind.descriptorCount; i++)
 					if (bind.pImmutableSamplers[i] != VK_NULL_HANDLE)
-						saved_hash_iter->second.push_back({ RESOURCE_SAMPLER, (Hash)bind.pImmutableSamplers[i] });
+						dependencies.push_back({ RESOURCE_SAMPLER, (Hash)bind.pImmutableSamplers[i] });
 			}
 		}
 
@@ -125,10 +126,11 @@ struct ListReplayer : StateCreatorInterface
 		if (selected_tag != RESOURCE_PIPELINE_LAYOUT)
 			return true;
 		
-		auto saved_hash_iter = saved_hashes_map.insert({ hash, saved_hashes_type() }).first;
+		saved_hashes_map.insert({ hash, saved_hashes_type() });
+		auto &dependencies = saved_hashes_map[hash];
 		
 		for (uint32_t layout = 0; layout < create_info->setLayoutCount; layout++)
-			saved_hash_iter->second.push_back({ RESOURCE_DESCRIPTOR_SET_LAYOUT, (Hash)create_info->pSetLayouts[layout] });
+			dependencies.push_back({ RESOURCE_DESCRIPTOR_SET_LAYOUT, (Hash)create_info->pSetLayouts[layout] });
 
 		return true;
 	}
@@ -157,10 +159,11 @@ struct ListReplayer : StateCreatorInterface
 		if (selected_tag != RESOURCE_COMPUTE_PIPELINE)
 			return true;
 		
-		auto saved_hash_iter = saved_hashes_map.insert({ hash, saved_hashes_type() }).first;
+		saved_hashes_map.insert({ hash, saved_hashes_type() });
+		auto &dependencies = saved_hashes_map[hash];
 
-		saved_hash_iter->second.push_back({ RESOURCE_PIPELINE_LAYOUT, (Hash)create_info->layout });
-		saved_hash_iter->second.push_back({ RESOURCE_SHADER_MODULE, (Hash)create_info->stage.module });
+		dependencies.push_back({ RESOURCE_PIPELINE_LAYOUT, (Hash)create_info->layout });
+		dependencies.push_back({ RESOURCE_SHADER_MODULE, (Hash)create_info->stage.module });
 
 		return true;
 	}
@@ -171,15 +174,16 @@ struct ListReplayer : StateCreatorInterface
 		if (selected_tag != RESOURCE_GRAPHICS_PIPELINE)
 			return true;
 
-		auto saved_hash_iter = saved_hashes_map.insert({ hash, saved_hashes_type() }).first;
+		saved_hashes_map.insert({ hash, saved_hashes_type() });
+		auto &dependencies = saved_hashes_map[hash];
 
 		for (uint32_t i = 0; i < create_info->stageCount; i++)
 		{
-			saved_hash_iter->second.push_back({ RESOURCE_SHADER_MODULE, (Hash)create_info->pStages[i].module });
+			dependencies.push_back({ RESOURCE_SHADER_MODULE, (Hash)create_info->pStages[i].module });
 		}
 
-		saved_hash_iter->second.push_back({ RESOURCE_PIPELINE_LAYOUT, (Hash)create_info->layout });
-		saved_hash_iter->second.push_back({ RESOURCE_RENDER_PASS, (Hash)create_info->renderPass });
+		dependencies.push_back({ RESOURCE_PIPELINE_LAYOUT, (Hash)create_info->layout });
+		dependencies.push_back({ RESOURCE_RENDER_PASS, (Hash)create_info->renderPass });
 
 		auto* library_info =
 			find_pnext<VkPipelineLibraryCreateInfoKHR>(VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR,
@@ -189,7 +193,7 @@ struct ListReplayer : StateCreatorInterface
 		{
 			for (uint32_t i = 0; i < library_info->libraryCount; i++)
 			{
-				saved_hash_iter->second.push_back({ RESOURCE_GRAPHICS_PIPELINE, (Hash)library_info->pLibraries[i] });
+				dependencies.push_back({ RESOURCE_GRAPHICS_PIPELINE, (Hash)library_info->pLibraries[i] });
 			}
 		}
 
@@ -202,19 +206,20 @@ struct ListReplayer : StateCreatorInterface
 		if (selected_tag != RESOURCE_RAYTRACING_PIPELINE)
 			return true;
 
-		auto saved_hash_iter = saved_hashes_map.insert({ hash, saved_hashes_type() }).first;
+		saved_hashes_map.insert({ hash, saved_hashes_type() });
+		auto &dependencies = saved_hashes_map[hash];
 
-		saved_hash_iter->second.push_back({ RESOURCE_PIPELINE_LAYOUT, (Hash)create_info->layout });
+		dependencies.push_back({ RESOURCE_PIPELINE_LAYOUT, (Hash)create_info->layout });
 		for (uint32_t stage = 0; stage < create_info->stageCount; stage++)
 		{
-			saved_hash_iter->second.push_back({ RESOURCE_SHADER_MODULE, (Hash)create_info->pStages[stage].module });
+			dependencies.push_back({ RESOURCE_SHADER_MODULE, (Hash)create_info->pStages[stage].module });
 		}
 
 		if (create_info->pLibraryInfo)
 		{
 			for (uint32_t i = 0; i < create_info->pLibraryInfo->libraryCount; i++)
 			{
-				saved_hash_iter->second.push_back({ RESOURCE_RAYTRACING_PIPELINE, (Hash)create_info->pLibraryInfo->pLibraries[i] });
+				dependencies.push_back({ RESOURCE_RAYTRACING_PIPELINE, (Hash)create_info->pLibraryInfo->pLibraries[i] });
 			}
 		}
 
@@ -361,25 +366,10 @@ int main(int argc, char **argv)
 
 	uint64_t compressed_total_size = 0;
 	uint64_t uncompressed_total_size = 0;
-	vector<uint8_t> state_db;
 	for (auto hash : hashes)
 	{
 		if (log_connectivity)
 		{
-			size_t state_db_size;
-			if (!input_db->read_entry(tag, hash, &state_db_size, nullptr, 0))
-			{
-				LOGE("Failed to query blob size.\n");
-				return EXIT_FAILURE;
-			}
-
-			state_db.resize(state_db_size);
-			if (!input_db->read_entry(tag, hash, &state_db_size, state_db.data(), 0))
-			{
-				LOGE("Failed to load blob from cache.\n");
-				return EXIT_FAILURE;
-			}
-
 			printf("%016" PRIx64 " : ", hash);
 			print_connectivity(hash, list_replayer);
 			printf(";\n");
