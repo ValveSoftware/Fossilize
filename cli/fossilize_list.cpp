@@ -145,7 +145,7 @@ struct ListReplayer : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_render_pass2(Hash hash, const VkRenderPassCreateInfo2* create_info, VkRenderPass* render_pass) override
+	bool enqueue_create_render_pass2(Hash hash, const VkRenderPassCreateInfo2 *create_info, VkRenderPass *render_pass) override
 	{
 		*render_pass = fake_handle<VkRenderPass>(hash);
 		return true;
