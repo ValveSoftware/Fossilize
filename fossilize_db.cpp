@@ -1711,7 +1711,7 @@ struct DumbFileDatabase : StreamArchive
 	DumbFileDatabase(const string& path_, DatabaseMode mode_) : StreamArchive(path_, mode_)
 	{ }
 
-	bool read_entry(ResourceTag tag, Hash hash, size_t* blob_size, void* blob, PayloadReadFlags flags) override
+	bool read_entry(ResourceTag tag, Hash hash, size_t *blob_size, void *blob, PayloadReadFlags flags) override
 	{
 		if (!alive || mode != DatabaseMode::ReadOnly)
 			return false;
