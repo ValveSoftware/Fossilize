@@ -1154,7 +1154,7 @@ struct StreamArchive : DatabaseInterface
 						return false;
 					offset += sizeof(bytes_to_read);
 					header_raw = (PayloadHeaderRaw*)&bytes_to_read[FOSSILIZE_BLOB_HASH_LENGTH];
-					convert_from_le(header, *header_raw);
+					header = get_converted_header(*header_raw);
 
 					// Corrupt entry. Our process might have been killed before we could write all data.
 					if (offset + header.payload_size > len)
@@ -1172,17 +1172,13 @@ struct StreamArchive : DatabaseInterface
 					if (tag < RESOURCE_COUNT)
 					{
 						uint64_t value = strtoull(value_str, nullptr, 16);
-						Entry entry = {};
-						entry.header = header;
-						entry.offset = offset;
+						Entry entry = fill_entry(header, offset);
 						if (test_resource_filter(static_cast<ResourceTag>(tag), value))
 							seen_blobs[tag].emplace(value, entry);
 					}
 
-					if (fseek(file, header.payload_size, SEEK_CUR) < 0)
+					if (!move_offset_through_header_size(header, offset))
 						return false;
-
-					offset += header.payload_size;
 				}
 
 				if (mode == DatabaseMode::Append && offset != len)
@@ -1676,11 +1672,143 @@ struct StreamArchive : DatabaseInterface
 	size_t zlib_buffer_size = 0;
 	bool alive = false;
 	std::mutex read_lock;
+
+protected:
+	virtual PayloadHeader get_converted_header(PayloadHeaderRaw header_raw)
+	{
+		PayloadHeader header;
+		convert_from_le(header, header_raw);
+		return header;
+	}
+
+	virtual bool move_offset_through_header_size(PayloadHeader header, size_t &offset)
+	{
+		if (fseek(file, header.payload_size, SEEK_CUR) < 0)
+			return false;
+
+		offset += header.payload_size;
+
+		return true;
+	}
+
+	virtual Entry fill_entry(PayloadHeader header, size_t offset)
+	{
+		Entry entry = {};
+		entry.header = header;
+		entry.offset = offset;
+		return entry;
+	}
 };
 
 DatabaseInterface *create_stream_archive_database(const char *path, DatabaseMode mode)
 {
 	auto *db = new StreamArchive(path, mode);
+	return db;
+}
+
+struct DumbFileDatabase : StreamArchive
+{
+	DumbFileDatabase(const string& path_, DatabaseMode mode_) : StreamArchive(path_, mode_)
+	{}
+
+	bool read_entry(ResourceTag tag, Hash hash, size_t *blob_size, void *blob, PayloadReadFlags flags) override
+	{
+		if (!alive || mode != DatabaseMode::ReadOnly)
+			return false;
+
+		Entry entry;
+		if (!find_entry(tag, hash, entry))
+			return false;
+
+		if (!blob_size)
+			return false;
+
+		uint32_t out_size = entry.header.uncompressed_size;
+
+		if (blob && *blob_size < out_size)
+			return false;
+		*blob_size = out_size;
+
+		if (blob)
+		{
+			// Include the header.
+			ConditionalLockGuard holder(read_lock, (flags & PAYLOAD_READ_CONCURRENT_BIT) != 0);
+			if (fseek(file, entry.offset, SEEK_SET) < 0)
+				return false;
+
+			if (fread(blob, 1, out_size, file) != out_size)
+				return false;
+		}
+
+		return true;
+	}
+
+	bool write_entry(ResourceTag tag, Hash hash, const void *blob, size_t size, PayloadWriteFlags flags) override
+	{
+		if (!alive || mode == DatabaseMode::ReadOnly)
+			return false;
+
+		auto itr = seen_blobs[tag].find(hash);
+		if (itr != end(seen_blobs[tag]))
+			return true;
+
+		char str[FOSSILIZE_BLOB_HASH_LENGTH + 1]; // 40 digits + null
+		sprintf(str, "%0*x", FOSSILIZE_BLOB_HASH_LENGTH - 16, tag);
+		sprintf(str + FOSSILIZE_BLOB_HASH_LENGTH - 16, "%016" PRIx64, hash);
+
+		if (fwrite(str, 1, FOSSILIZE_BLOB_HASH_LENGTH, file) != FOSSILIZE_BLOB_HASH_LENGTH)
+			return false;
+
+		uint32_t crc = 0;
+		if ((flags & PAYLOAD_WRITE_COMPUTE_CHECKSUM_BIT) != 0)
+			crc = uint32_t(mz_crc32(MZ_CRC32_INIT, static_cast<const unsigned char*>(blob), size));
+
+		PayloadHeader header = { uint32_t(size), FOSSILIZE_COMPRESSION_NONE, crc, uint32_t(size) };
+		PayloadHeaderRaw raw = {};
+		convert_to_le(raw, header);
+
+		if (fwrite(&raw, 1, sizeof(raw), file) != sizeof(raw) || putc('\n', file) == EOF)
+			return false;
+
+		if (fwrite(blob, 1, size, file) != size || putc('\n', file) == EOF)
+			return false;
+
+		// The entry is irrelevant, we're not going to read from this archive any time soon.
+		seen_blobs[tag].emplace(hash, Entry{});
+		return true;
+	}
+
+protected:
+	PayloadHeader get_converted_header(PayloadHeaderRaw header_raw) override
+	{
+		PayloadHeader header;
+		convert_from_le(header, header_raw);
+		header.payload_size = header.uncompressed_size;
+		return header;
+	}
+
+	bool move_offset_through_header_size(PayloadHeader header, size_t &offset) override
+	{
+		if (fseek(file, header.uncompressed_size + 2, SEEK_CUR) < 0) // + two newline symbols
+			return false;
+
+		offset += header.uncompressed_size + 2; // + two newline symbols
+
+		return true;
+	}
+
+	Entry fill_entry(PayloadHeader header, size_t offset) override
+	{
+		Entry entry = {};
+		entry.header = header;
+		entry.offset = offset + 1; // + newline symbol
+		return entry;
+	}
+};
+
+DatabaseInterface *create_dumb_file_database(const char *path, DatabaseMode mode)
+{
+	auto *db = new DumbFileDatabase(path, mode);
 	return db;
 }
 
@@ -1691,6 +1819,8 @@ DatabaseInterface *create_database(const char *path, DatabaseMode mode)
 		return create_stream_archive_database(path, mode);
 	else if (ext == "zip")
 		return create_zip_archive_database(path, mode);
+	else if (ext == "txt")
+		return create_dumb_file_database(path, mode);
 	else
 		return create_dumb_folder_database(path, mode);
 }

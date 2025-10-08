@@ -37,19 +37,23 @@ git submodule update --init
 otherwise, you can set `FOSSILIZE_RAPIDJSON_INCLUDE_PATH` if building this library as part of your project.
 It is also possible to use `FOSSILIZE_VULKAN_INCLUDE_PATH` to override Vulkan header include paths.
 
-Normally, the CLI tools will be built. These require SPIRV-Tools and SPIRV-Cross submodules to be initialized, however, if you're only building Fossilize as a library/layer, you can use CMake options `-DFOSSILIZE_CLI=OFF` and `-DFOSSILIZE_TESTS=OFF` to disable all those requirements for submodules (assuming you have custom include path for rapidjson).
+Normally, the CLI tools will be built. These require SPIRV-Tools and SPIRV-Cross submodules to be initialized, however, if you're only building Fossilize as a library/layer, you can use one of the preset "*library-only*" to disable all those requirements for submodules (assuming you have custom include path for rapidjson).
+
 Standalone build:
 ```shell
-mkdir build
-cd build
-cmake ..
-cmake --build .
+# pick the preset of your platform to replace <preset-name>
+# run either 1. or 2.
+cmake --list-presets=all .
+# 1. to run the full workflow
+cmake --workflow --preset <preset-name>
+# 2. to only build
+cmake --build --preset <preset-name>
 ```
 
 Link as part of other project:
 ```cmake
 add_subdirectory(fossilize EXCLUDE_FROM_ALL)
-target_link_library(your-target fossilize)
+target_link_library(your-target {PRIVATE or PUBLIC} fossilize)
 ```
 
 For Android, you can use the `android_build.sh` script. It builds the layer for armeabi-v7a and arm64-v8a.
