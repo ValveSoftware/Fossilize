@@ -1709,7 +1709,7 @@ DatabaseInterface *create_stream_archive_database(const char *path, DatabaseMode
 struct DumbFileDatabase : StreamArchive
 {
 	DumbFileDatabase(const string& path_, DatabaseMode mode_) : StreamArchive(path_, mode_)
-	{ }
+	{}
 
 	bool read_entry(ResourceTag tag, Hash hash, size_t *blob_size, void *blob, PayloadReadFlags flags) override
 	{
