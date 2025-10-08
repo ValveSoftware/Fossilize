@@ -222,7 +222,7 @@ struct ListReplayer : StateCreatorInterface
 	}
 };
 
-bool parse_tag(ResourceTag tag, StateReplayer& replayer, ListReplayer& list_replayer, const std::unique_ptr<DatabaseInterface>& input_db)
+bool parse_tag(ResourceTag tag, StateReplayer &replayer, ListReplayer &list_replayer, const DatabaseInterface *input_db)
 {
 	vector<uint8_t> state_db;
 	size_t hash_count = 0;
