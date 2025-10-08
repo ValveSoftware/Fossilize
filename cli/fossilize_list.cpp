@@ -119,7 +119,7 @@ struct ListReplayer : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_pipeline_layout(Hash hash, const VkPipelineLayoutCreateInfo* create_info, VkPipelineLayout* layout) override
+	bool enqueue_create_pipeline_layout(Hash hash, const VkPipelineLayoutCreateInfo *create_info, VkPipelineLayout *layout) override
 	{
 		*layout = fake_handle<VkPipelineLayout>(hash);
 		if (selected_tag != RESOURCE_PIPELINE_LAYOUT)
