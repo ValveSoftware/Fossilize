@@ -1681,7 +1681,7 @@ protected:
 		return header;
 	}
 
-	virtual bool move_offset_through_header_size(PayloadHeader header, size_t& offset)
+	virtual bool move_offset_through_header_size(PayloadHeader header, size_t &offset)
 	{
 		if (fseek(file, header.payload_size, SEEK_CUR) < 0)
 			return false;
