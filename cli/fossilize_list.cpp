@@ -186,12 +186,8 @@ struct ListReplayer : StateCreatorInterface
 				create_info->pNext);
 
 		if (library_info)
-		{
 			for (uint32_t i = 0; i < library_info->libraryCount; i++)
-			{
 				saved_hash_iter->second.push_back({ RESOURCE_GRAPHICS_PIPELINE, (Hash)library_info->pLibraries[i] });
-			}
-		}
 
 		return true;
 	}
