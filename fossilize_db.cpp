@@ -1743,7 +1743,7 @@ struct DumbFileDatabase : StreamArchive
 		return true;
 	}
 
-	bool write_entry(ResourceTag tag, Hash hash, const void* blob, size_t size, PayloadWriteFlags flags) override
+	bool write_entry(ResourceTag tag, Hash hash, const void *blob, size_t size, PayloadWriteFlags flags) override
 	{
 		if (!alive || mode == DatabaseMode::ReadOnly)
 			return false;
