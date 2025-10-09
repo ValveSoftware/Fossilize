@@ -354,7 +354,6 @@ int main(int argc, char **argv)
 		{
 			printf("%016" PRIx64 " : ", hash);
 			print_connectivity(hash, list_replayer);
-			printf(";\n");
 		}
 
 		if (log_size)
