@@ -92,7 +92,7 @@ struct ListReplayer : StateCreatorInterface
 	unordered_map<Hash, saved_hashes_type> saved_hashes_map;
 	ResourceTag selected_tag;
 
-	bool enqueue_create_sampler(Hash hash, const VkSamplerCreateInfo *create_info, VkSampler *sampler) override
+	bool enqueue_create_sampler(Hash hash, const VkSamplerCreateInfo *, VkSampler *sampler) override
 	{
 		*sampler = fake_handle<VkSampler>(hash);
 		return true;
@@ -128,8 +128,8 @@ struct ListReplayer : StateCreatorInterface
 		
 		auto &dependencies = saved_hashes_map[hash];
 		
-		for (uint32_t layout = 0; layout < create_info->setLayoutCount; layout++)
-			dependencies.push_back({ RESOURCE_DESCRIPTOR_SET_LAYOUT, (Hash)create_info->pSetLayouts[layout] });
+		for (uint32_t i = 0; i < create_info->setLayoutCount; i++)
+			dependencies.push_back({ RESOURCE_DESCRIPTOR_SET_LAYOUT, (Hash)create_info->pSetLayouts[i] });
 
 		return true;
 	}
@@ -140,13 +140,13 @@ struct ListReplayer : StateCreatorInterface
 		return true;
 	}
 
-	bool enqueue_create_render_pass(Hash hash, const VkRenderPassCreateInfo *create_info, VkRenderPass *render_pass) override
+	bool enqueue_create_render_pass(Hash hash, const VkRenderPassCreateInfo *, VkRenderPass *render_pass) override
 	{
 		*render_pass = fake_handle<VkRenderPass>(hash);
 		return true;
 	}
 
-	bool enqueue_create_render_pass2(Hash hash, const VkRenderPassCreateInfo2 *create_info, VkRenderPass *render_pass) override
+	bool enqueue_create_render_pass2(Hash hash, const VkRenderPassCreateInfo2 *, VkRenderPass *render_pass) override
 	{
 		*render_pass = fake_handle<VkRenderPass>(hash);
 		return true;
