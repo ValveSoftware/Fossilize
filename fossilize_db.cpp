@@ -25,6 +25,7 @@
 #include <windows.h>
 #include <io.h>
 #include <fcntl.h>
+#include <direct.h>
 #else
 #include <unistd.h>
 #include <sys/mman.h>
@@ -542,7 +543,18 @@ struct DumbDirectoryDatabase : DatabaseInterface
 	bool prepare() override
 	{
 		if (mode == DatabaseMode::OverWrite)
+		{
+			DIR* dp = opendir(base_directory.c_str());
+			if (!dp)
+			{
+				if (mkdir(base_directory.c_str()) != 0)
+					return false;
+			}
+			else
+				closedir(dp);
+
 			return true;
+		}
 
 		DIR *dp = opendir(base_directory.c_str());
 		if (!dp)
