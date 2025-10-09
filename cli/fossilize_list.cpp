@@ -274,12 +274,9 @@ void print_connectivity(Hash hash, const ListReplayer &list_replayer)
 {
 	auto saved_hashes_map = list_replayer.saved_hashes_map.find(hash);
 	if (saved_hashes_map != list_replayer.saved_hashes_map.end())
-	{
 		for (auto par : saved_hashes_map->second)
-		{
 			printf("%s(%d):%016" PRIx64 ", ", tag_names[par.first], par.first, par.second);
-		}
-	}
+	printf("\n");
 }
 
 int main(int argc, char **argv)
