@@ -42,7 +42,7 @@ static const ResourceTag playback_order[] = {
 	RESOURCE_RAYTRACING_PIPELINE
 };
 
-static const const char* tag_names[] = {
+static const char *tag_names[] = {
 	"applicationInfo",
 	"sampler",
 	"descriptorSet",
