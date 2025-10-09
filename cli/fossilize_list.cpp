@@ -180,7 +180,7 @@ struct ListReplayer : StateCreatorInterface
 		dependencies.push_back({ RESOURCE_PIPELINE_LAYOUT, (Hash)create_info->layout });
 		dependencies.push_back({ RESOURCE_RENDER_PASS, (Hash)create_info->renderPass });
 
-		auto* library_info =
+		auto *library_info =
 			find_pnext<VkPipelineLibraryCreateInfoKHR>(VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR,
 				create_info->pNext);
 
@@ -277,8 +277,7 @@ void print_connectivity(Hash hash, const ListReplayer &list_replayer)
 	{
 		for (auto par : saved_hashes_map->second)
 		{
-			printf(tag_names[par.first]);
-			printf("(%d):%016" PRIx64 ", ", par.first, par.second);
+			printf("%s(%d):%016" PRIx64 ", ", tag_names[par.first], par.first, par.second);
 		}
 	}
 }
