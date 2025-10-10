@@ -726,14 +726,14 @@ protected:
 			return false;
 
 		dirent *next_file;
-		char filepath[256];
+		char filepath[PATH_MAX];
 
 		while ((next_file = readdir(dp)) != NULL)
 		{
-			if (strcmp(next_file->d_name, ".") == 0 || strcmp(next_file->d_name, "..") == 0)
+			if (strcmp(next_file->d_name, ".") == 0 || strcmp(next_file->d_name, "..") == 0 || strcmp(Path::ext(next_file->d_name).c_str(), "json"))
 				continue;
 
-			sprintf(filepath, "%s/%s", base_directory.c_str(), next_file->d_name);
+			snprintf(filepath, base_directory.size() + string(next_file->d_name).size() + 2, "%s/%s", base_directory.c_str(), next_file->d_name);
 			
 			if (remove(filepath) != 0)
 				return false;
