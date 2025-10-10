@@ -25,7 +25,6 @@
 #include <windows.h>
 #include <io.h>
 #include <fcntl.h>
-#include <direct.h>
 #else
 #include <unistd.h>
 #include <sys/mman.h>
