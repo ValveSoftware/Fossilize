@@ -544,14 +544,8 @@ struct DumbDirectoryDatabase : DatabaseInterface
 	{
 		if (mode == DatabaseMode::OverWrite)
 		{
-			DIR *dp = opendir(base_directory.c_str());
-			if (!dp)
-			{
-				if (mkdir(base_directory.c_str()) != 0)
-					return false;
-			}
-			else
-				closedir(dp);
+			if (!Path::mkdir(base_directory))
+				return false;
 
 			return true;
 		}
