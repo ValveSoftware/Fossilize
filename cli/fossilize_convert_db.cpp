@@ -28,39 +28,39 @@
 #include <cstdlib>
 
 using namespace Fossilize;
-using namespace std;
 
 static void print_help()
 {
-	LOGI("Usage: fossilize-convert-db\n"
-		"\t[--input-db path]\n"
-		"\t[--output-db path]\n"
+	LOGI("Usage: fossilize-convert-db input-db output-db\n"
 		"\t[--output-db-clear (only relevant for DumbDirectoryDatabase)]\n");
 }
 
 int main(int argc, char *argv[])
 {
-	CLICallbacks cbs;
-	string input_db_path;
-	string output_db_path;
 	bool overwrite_db_clear = false;
-	cbs.add("--help", [](CLIParser& parser) { print_help(); parser.end(); });
-	cbs.add("--input-db", [&](CLIParser& parser) { input_db_path = parser.next_string(); });
-	cbs.add("--output-db", [&](CLIParser& parser) { output_db_path = parser.next_string(); });
-	cbs.add("--output-db-clear", [&](CLIParser&) { overwrite_db_clear = true; });
-	cbs.error_handler = [] { print_help(); };
-
-	CLIParser parser(std::move(cbs), argc - 1, argv + 1);
-	if (!parser.parse())
+	if (argc != 3)
+	{
+		print_help();
 		return EXIT_FAILURE;
-	if (parser.is_ended_state())
-		return EXIT_SUCCESS;
+	}
+	else if (argc > 3)
+	{
+		CLICallbacks cbs;
+		cbs.add("--output-db-clear", [&](CLIParser&) { overwrite_db_clear = true; });
+		cbs.error_handler = [] { print_help(); };
 
-	auto input_db = std::unique_ptr<DatabaseInterface>(create_database(input_db_path.c_str(), DatabaseMode::ReadOnly));
-	auto output_db = std::unique_ptr<DatabaseInterface>(create_database(output_db_path.c_str(), DatabaseMode::OverWrite));
+		CLIParser parser(std::move(cbs), argc - 3, argv + 3);
+		if (!parser.parse())
+			return EXIT_FAILURE;
+		if (parser.is_ended_state())
+			return EXIT_SUCCESS;
+	}
+	
+	auto input_db = std::unique_ptr<DatabaseInterface>(create_database(argv[1], DatabaseMode::ReadOnly));
+	auto output_db = std::unique_ptr<DatabaseInterface>(create_database(argv[2], DatabaseMode::OverWrite));
 	if (!input_db || !input_db->prepare())
 	{
-		LOGE("Failed to load database: %s\n", input_db_path.c_str());
+		LOGE("Failed to load database: %s\n", argv[1]);
 		return EXIT_FAILURE;
 	}
 
@@ -69,7 +69,7 @@ int main(int argc, char *argv[])
 
 	if (!output_db || !output_db->prepare())
 	{
-		LOGE("Failed to open database for writing: %s\n", output_db_path.c_str());
+		LOGE("Failed to open database for writing: %s\n", argv[2]);
 		return EXIT_FAILURE;
 	}
 
