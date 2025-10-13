@@ -542,7 +542,7 @@ struct DumbDirectoryDatabase : DatabaseInterface
 	bool prepare() override
 	{
 		if (mode == DatabaseMode::OverWrite)
-			return Path::mkdir(base_directory))
+			return Path::mkdir(base_directory));
 
 		DIR *dp = opendir(base_directory.c_str());
 		if (!dp)
