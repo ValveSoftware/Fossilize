@@ -38,12 +38,7 @@ static void print_help()
 int main(int argc, char *argv[])
 {
 	bool overwrite_db_clear = false;
-	if (argc != 3)
-	{
-		print_help();
-		return EXIT_FAILURE;
-	}
-	else if (argc > 3)
+	if (argc > 3)
 	{
 		CLICallbacks cbs;
 		cbs.add("--output-db-clear", [&](CLIParser&) { overwrite_db_clear = true; });
@@ -54,6 +49,11 @@ int main(int argc, char *argv[])
 			return EXIT_FAILURE;
 		if (parser.is_ended_state())
 			return EXIT_SUCCESS;
+	}
+	else if (argc != 3)
+	{
+		print_help();
+		return EXIT_FAILURE;
 	}
 	
 	auto input_db = std::unique_ptr<DatabaseInterface>(create_database(argv[1], DatabaseMode::ReadOnly));

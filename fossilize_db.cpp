@@ -550,6 +550,27 @@ struct DumbDirectoryDatabase : DatabaseInterface
 	{
 	}
 
+	bool overwrite_db_clear()
+	{
+		DIR* dp = opendir(base_directory.c_str());
+		if (!dp)
+			return false;
+
+		dirent* next_file;
+
+		while ((next_file = readdir(dp)) != NULL)
+		{
+			if (strcmp(Path::ext(next_file->d_name).c_str(), "json"))
+				continue;
+
+			if (remove(Path::join(base_directory, next_file->d_name).c_str()) != 0)
+				return false;
+		}
+
+		closedir(dp);
+		return true;
+	}
+
 	bool prepare() override
 	{
 		if (mode == DatabaseMode::OverWrite)
@@ -717,28 +738,6 @@ struct DumbDirectoryDatabase : DatabaseInterface
 	string base_directory;
 	DatabaseMode mode;
 	unordered_set<Hash> seen_blobs[RESOURCE_COUNT];
-
-protected:
-	bool overwrite_db_clear()
-	{
-		DIR* dp = opendir(base_directory.c_str());
-		if (!dp)
-			return false;
-
-		dirent* next_file;
-
-		while ((next_file = readdir(dp)) != NULL)
-		{
-			if (strcmp(Path::ext(next_file->d_name).c_str(), "json"))
-				continue;
-
-			if (remove(Path::join(base_directory, next_file->d_name).c_str()) != 0)
-				return false;
-		}
-
-		closedir(dp);
-		return true;
-	}
 };
 
 DatabaseInterface *create_dumb_folder_database(const char *directory_path, DatabaseMode mode)
