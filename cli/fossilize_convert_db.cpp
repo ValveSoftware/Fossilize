@@ -55,7 +55,6 @@ int main(int argc, char *argv[])
 		print_help();
 		return EXIT_FAILURE;
 	}
-	
 	auto input_db = std::unique_ptr<DatabaseInterface>(create_database(argv[1], DatabaseMode::ReadOnly));
 	auto output_db = std::unique_ptr<DatabaseInterface>(create_database(argv[2], DatabaseMode::OverWrite));
 	if (!input_db || !input_db->prepare())

@@ -558,9 +558,9 @@ struct DumbDirectoryDatabase : DatabaseInterface
 
 		dirent *next_file;
 
-		while ((next_file = readdir(dp)) != NULL)
+		while ((next_file = readdir(dp)) != nullptr)
 		{
-			if (strcmp(Path::ext(next_file->d_name).c_str(), "json"))
+			if (strcmp(Path::ext(next_file->d_name).c_str(), "json") != 0)
 				continue;
 
 			if (remove(Path::join(base_directory, next_file->d_name).c_str()) != 0)
