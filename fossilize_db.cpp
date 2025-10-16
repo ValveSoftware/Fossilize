@@ -721,11 +721,11 @@ struct DumbDirectoryDatabase : DatabaseInterface
 protected:
 	bool overwrite_db_clear()
 	{
-		DIR* dp = opendir(base_directory.c_str());
+		DIR *dp = opendir(base_directory.c_str());
 		if (!dp)
 			return false;
 
-		dirent* next_file;
+		dirent *next_file;
 
 		while ((next_file = readdir(dp)) != NULL)
 		{
