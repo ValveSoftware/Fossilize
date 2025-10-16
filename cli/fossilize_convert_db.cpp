@@ -24,23 +24,37 @@
 #include <memory>
 #include <vector>
 #include "layer/utils.hpp"
+#include "cli_parser.hpp"
 #include <cstdlib>
 
 using namespace Fossilize;
 
 static void print_help()
 {
-	LOGI("Usage: fossilize-convert-db input-db output-db\n");
+	LOGI("Usage: fossilize-convert-db input-db output-db\n"
+		"\t[--output-db-clear (only relevant for DumbDirectoryDatabase)]\n");
 }
 
 int main(int argc, char *argv[])
 {
-	if (argc != 3)
+	bool overwrite_db_clear = false;
+	if (argc > 3)
+	{
+		CLICallbacks cbs;
+		cbs.add("--output-db-clear", [&](CLIParser&) { overwrite_db_clear = true; });
+		cbs.error_handler = [] { print_help(); };
+
+		CLIParser parser(std::move(cbs), argc - 3, argv + 3);
+		if (!parser.parse())
+			return EXIT_FAILURE;
+		if (parser.is_ended_state())
+			return EXIT_SUCCESS;
+	}
+	else if (argc != 3)
 	{
 		print_help();
 		return EXIT_FAILURE;
 	}
-
 	auto input_db = std::unique_ptr<DatabaseInterface>(create_database(argv[1], DatabaseMode::ReadOnly));
 	auto output_db = std::unique_ptr<DatabaseInterface>(create_database(argv[2], DatabaseMode::OverWrite));
 	if (!input_db || !input_db->prepare())
@@ -48,6 +62,9 @@ int main(int argc, char *argv[])
 		LOGE("Failed to load database: %s\n", argv[1]);
 		return EXIT_FAILURE;
 	}
+
+	if (overwrite_db_clear)
+		output_db->set_overwrite_db_clear(true);
 
 	if (!output_db || !output_db->prepare())
 	{

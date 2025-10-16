@@ -138,6 +138,7 @@ struct DatabaseInterface::Impl
 	std::vector<const ExportedMetadataHeader *> imported_metadata;
 	const uint8_t *mapped_metadata = nullptr;
 	size_t mapped_metadata_size = 0;
+	bool overwrite_db_clear = false;
 
 	bool parse_imported_metadata(const void *data, size_t size);
 };
@@ -146,6 +147,16 @@ DatabaseInterface::DatabaseInterface(DatabaseMode mode)
 {
 	impl = new Impl;
 	impl->mode = mode;
+}
+
+void DatabaseInterface::set_overwrite_db_clear(bool value)
+{
+	impl->overwrite_db_clear = value;
+}
+
+bool DatabaseInterface::get_overwrite_db_clear() const
+{
+	return impl->overwrite_db_clear;
 }
 
 bool DatabaseInterface::has_sub_databases()
@@ -539,10 +550,36 @@ struct DumbDirectoryDatabase : DatabaseInterface
 	{
 	}
 
+	bool overwrite_db_clear()
+	{
+		DIR *dp = opendir(base_directory.c_str());
+		if (!dp)
+			return false;
+
+		dirent *next_file;
+
+		while ((next_file = readdir(dp)) != nullptr)
+		{
+			if (strcmp(Path::ext(next_file->d_name).c_str(), "json") != 0)
+				continue;
+
+			if (remove(Path::join(base_directory, next_file->d_name).c_str()) != 0)
+				return false;
+		}
+
+		closedir(dp);
+		return true;
+	}
+
 	bool prepare() override
 	{
 		if (mode == DatabaseMode::OverWrite)
-			return Path::mkdir(base_directory);
+		{
+			if (!Path::mkdir(base_directory) || (impl->overwrite_db_clear && !overwrite_db_clear()))
+				return false;
+
+			return true;
+		}
 
 		DIR *dp = opendir(base_directory.c_str());
 		if (!dp)

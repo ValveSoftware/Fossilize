@@ -202,6 +202,11 @@ public:
 	// arises to stop loading the database.
 	static void request_shutdown();
 
+	// Deletes all objects in the database that were previously in it (only relevant for DumbDirectoryDatabase).
+	// The actual deletion occurs in the prepare() function if DatabaseMode == OverWrite.
+	void set_overwrite_db_clear(bool value);
+	bool get_overwrite_db_clear() const;
+
 protected:
 	bool test_resource_filter(ResourceTag tag, Hash hash) const;
 	bool add_to_implicit_whitelist(DatabaseInterface &iface);
