@@ -442,8 +442,8 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 
 	char shm_name[256];
 	char shm_mutex_name[256];
-	sprintf(shm_name, "fossilize-external-%lu-%d", GetCurrentProcessId(), shm_index.fetch_add(1, std::memory_order_relaxed));
-	sprintf(shm_mutex_name, "fossilize-external-%lu-%d", GetCurrentProcessId(), shm_index.fetch_add(1, std::memory_order_relaxed));
+	snprintf(shm_name, sizeof(shm_name), "fossilize-external-%lu-%d", GetCurrentProcessId(), shm_index.fetch_add(1, std::memory_order_relaxed));
+	snprintf(shm_mutex_name, sizeof(shm_mutex_name), "fossilize-external-%lu-%d", GetCurrentProcessId(), shm_index.fetch_add(1, std::memory_order_relaxed));
 	mapping_handle = CreateFileMappingA(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, (DWORD)shm_block_size, shm_name);
 
 	if (!mapping_handle)
@@ -563,7 +563,7 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 
 		cmdline += " --on-disk-replay-whitelist-mask ";
 		char whitelist_hex[9];
-		sprintf(whitelist_hex, "%x", options.on_disk_replay_whitelist_mask);
+		snprintf(whitelist_hex, sizeof(whitelist_hex), "%x", options.on_disk_replay_whitelist_mask);
 		cmdline += whitelist_hex;
 	}
 
