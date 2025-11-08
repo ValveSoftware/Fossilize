@@ -286,6 +286,9 @@ static bool add_bindings(spvc_compiler compiler,
 	if (!append_descriptors(bindings, binding_flags, compiler, resources,
 	                        SPVC_RESOURCE_TYPE_SUBPASS_INPUT, VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT))
 		return false;
+	if (!append_descriptors(bindings, binding_flags, compiler, resources,
+	                        SPVC_RESOURCE_TYPE_ACCELERATION_STRUCTURE, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR))
+		return false;
 
 	if (spvc_resources_get_resource_list_for_type(resources, SPVC_RESOURCE_TYPE_PUSH_CONSTANT, &list, &count) != SPVC_SUCCESS)
 		return false;
