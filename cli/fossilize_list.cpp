@@ -50,6 +50,7 @@ static const char *tag_names[] = {
 	"shaderModule",
 	"renderPass",
 	"graphicsPipeline",
+	"computePipeline",
 	"applicationBlobLink",
 	"raytracingPipeline"
 };
