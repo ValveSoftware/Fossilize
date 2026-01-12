@@ -131,7 +131,8 @@ struct DatabaseInterface::Impl
 	DatabaseMode mode;
 	uint32_t whitelist_tag_mask = (1u << RESOURCE_SHADER_MODULE) |
 	                              (1u << RESOURCE_GRAPHICS_PIPELINE) |
-	                              (1u << RESOURCE_COMPUTE_PIPELINE);
+	                              (1u << RESOURCE_COMPUTE_PIPELINE) |
+	                              (1u << RESOURCE_RAYTRACING_PIPELINE);
 
 	const ExportedMetadataHeader *imported_concurrent_metadata = nullptr;
 
