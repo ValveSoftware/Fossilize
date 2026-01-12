@@ -197,6 +197,13 @@ bool DatabaseInterface::load_whitelist_database(const char *path)
 		return false;
 	}
 
+	/* Ignore shader modules if whitelist doesn't contain any. */
+	size_t hash_count;
+	if (get_hash_list_for_resource_tag(RESOURCE_SHADER_MODULE, &hash_count, nullptr)) {
+		if (hash_count == 0)
+			set_whitelist_tag_mask(impl->whitelist_tag_mask & ~(1u << RESOURCE_SHADER_MODULE));
+	}
+
 	return true;
 }
 
