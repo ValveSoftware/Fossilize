@@ -252,6 +252,8 @@ public:
 	bool record_ycbcr_conversion(VkSamplerYcbcrConversion conv,
 	                             const VkSamplerYcbcrConversionCreateInfo &create_info) FOSSILIZE_WARN_UNUSED;
 
+	bool record_pipeline_use(VkPipeline pipeline, VkPipelineBindPoint bind_point) FOSSILIZE_WARN_UNUSED;
+
 	// Used by hashing functions in Hashing namespace. Should be considered an implementation detail.
 	bool get_hash_for_descriptor_set_layout(VkDescriptorSetLayout layout, Hash *hash) const FOSSILIZE_WARN_UNUSED;
 	bool get_hash_for_pipeline_layout(VkPipelineLayout layout, Hash *hash) const FOSSILIZE_WARN_UNUSED;
@@ -283,6 +285,7 @@ public:
 	// For this to work, a shader module create info needs to include a ShaderModuleIdentifierCreateInfoEXT struct,
 	// alongside the normal VkShaderModule.
 	void set_module_identifier_database_interface(DatabaseInterface *iface);
+	void set_pipeline_use_database_interface(DatabaseInterface *iface);
 	void set_on_use_database_interface(DatabaseInterface *iface);
 
 	// If database is non-null, serialize cannot be called later, as the implementation will not retain

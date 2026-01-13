@@ -1418,6 +1418,22 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineBinariesKHR(
 	return res;
 }
 
+static VKAPI_ATTR void VKAPI_CALL CmdBindPipeline(
+		VkCommandBuffer                             commandBuffer,
+		VkPipelineBindPoint                         pipelineBindPoint,
+		VkPipeline                                  pipeline)
+{
+	Device *layer = nullptr;
+	void *key = getDispatchKey(commandBuffer);
+	lock_guard<mutex> holder{ globalLock };
+	layer = getLayerData(key, deviceData);
+	layer->getTable()->CmdBindPipeline(commandBuffer, pipelineBindPoint, pipeline);
+
+	if (!layer->getRecorder().record_pipeline_use(pipeline, pipelineBindPoint))
+		LOGW_LEVEL("Recording pipeline use failed.\n");
+}
+
+
 static PFN_vkVoidFunction interceptDeviceCommand(Instance *instance, const char *pName)
 {
 	static const struct
@@ -1425,6 +1441,7 @@ static PFN_vkVoidFunction interceptDeviceCommand(Instance *instance, const char 
 		const char *name;
 		PFN_vkVoidFunction proc;
 		bool is_sampler;
+		bool is_bind;
 	} coreDeviceCommands[] = {
 		{ "vkGetDeviceProcAddr", reinterpret_cast<PFN_vkVoidFunction>(VK_LAYER_fossilize_GetDeviceProcAddr) },
 		{ "vkDestroyDevice", reinterpret_cast<PFN_vkVoidFunction>(DestroyDevice) },
@@ -1442,11 +1459,15 @@ static PFN_vkVoidFunction interceptDeviceCommand(Instance *instance, const char 
 		{ "vkCreateSamplerYcbcrConversionKHR", reinterpret_cast<PFN_vkVoidFunction>(CreateSamplerYcbcrConversionKHR), true },
 		{ "vkCreateRayTracingPipelinesKHR", reinterpret_cast<PFN_vkVoidFunction>(CreateRayTracingPipelinesKHR) },
 		{ "vkCreatePipelineBinariesKHR", reinterpret_cast<PFN_vkVoidFunction>(CreatePipelineBinariesKHR) },
+		{ "vkCmdBindPipeline", reinterpret_cast<PFN_vkVoidFunction>(CmdBindPipeline), false, true },
 	};
 
 	for (auto &cmd : coreDeviceCommands)
 	{
 		if (cmd.is_sampler && !instance->recordsImmutableSamplers())
+			continue;
+
+		if (cmd.is_bind && !instance->recordsPipelineUses())
 			continue;
 
 		if (strcmp(cmd.name, pName) == 0)
