@@ -2174,6 +2174,7 @@ bool FeatureFilter::Impl::validate_spirv_extension(const std::string &ext) const
 		{ "SPV_QCOM_tile_shading", "VK_QCOM_tile_shading", 0 },
 		{ "SPV_ARM_tensors", "VK_ARM_tensors", 0 },
 		{ "SPV_EXT_float8", "VK_EXT_shader_float8", 0 },
+		{ "SPV_KHR_untyped_pointers", "VK_KHR_shader_untyped_pointers", 0 },
 	};
 
 	for (auto &mapping : ext_mapping)
@@ -2571,6 +2572,8 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 		return features.tensor_arm.shaderStorageTensorArrayDynamicIndexing == VK_TRUE;
 	case spv::CapabilityStorageTensorArrayNonUniformIndexingARM:
 		return features.tensor_arm.shaderStorageTensorArrayNonUniformIndexing == VK_TRUE;
+	case spv::CapabilityUntypedPointersKHR:
+		return features.shader_untyped_pointers.shaderUntypedPointers == VK_TRUE;
 
 	default:
 		LOGE("Unrecognized SPIR-V capability %u, treating as unsupported.\n", unsigned(cap));

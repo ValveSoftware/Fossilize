@@ -98,6 +98,7 @@
 		"VK_NV_ray_tracing_linear_swept_spheres",
 		"VK_NV_partitioned_acceleration_structure",
 		"VK_ARM_tensors",
+		"VK_KHR_shader_untyped_pointers",
 		"VK_NV_cluster_acceleration_structure",
 		"VK_VALVE_fragment_density_map_layered"
 	],
@@ -338,6 +339,7 @@
 		"Float8EXT",
 		"Float8CooperativeMatrixEXT",
 		"TensorsARM",
+		"UntypedPointersKHR",
 		"StorageTensorArrayDynamicIndexingARM",
 		"StorageTensorArrayNonUniformIndexingARM"
 	]
