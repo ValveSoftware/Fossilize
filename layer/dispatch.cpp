@@ -584,6 +584,7 @@ static size_t getPnextStructSize(VkStructureType type)
 		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TENSOR_FEATURES_ARM, sizeof(VkPhysicalDeviceTensorFeaturesARM) },
 		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_TENSOR_FEATURES_ARM, sizeof(VkPhysicalDeviceDescriptorBufferTensorFeaturesARM) },
 		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT8_FEATURES_EXT, sizeof(VkPhysicalDeviceShaderFloat8FeaturesEXT) },
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_UNTYPED_POINTERS_FEATURES_KHR, sizeof(VkPhysicalDeviceShaderUntypedPointersFeaturesKHR) },
 	};
 
 	for (auto &siz : sizes)
