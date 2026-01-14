@@ -1425,14 +1425,12 @@ static VKAPI_ATTR void VKAPI_CALL CmdBindPipeline(
 {
 	Device *layer = nullptr;
 	void *key = getDispatchKey(commandBuffer);
-	lock_guard<mutex> holder{ globalLock };
 	layer = getLayerData(key, deviceData);
 	layer->getTable()->CmdBindPipeline(commandBuffer, pipelineBindPoint, pipeline);
 
 	if (!layer->getRecorder().record_pipeline_use(pipeline, pipelineBindPoint))
 		LOGW_LEVEL("Recording pipeline use failed.\n");
 }
-
 
 static PFN_vkVoidFunction interceptDeviceCommand(Instance *instance, const char *pName)
 {

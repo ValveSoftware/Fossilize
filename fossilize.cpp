@@ -6983,20 +6983,18 @@ bool StateRecorder::record_pipeline_use(VkPipeline pipeline, VkPipelineBindPoint
 	{
 		std::lock_guard<std::mutex> lock(impl->record_lock);
 
-		enum VkStructureType type;
-		switch (bind_point) {
-			case VK_PIPELINE_BIND_POINT_GRAPHICS: {
+		VkStructureType type;
+		switch (bind_point)
+		{
+			case VK_PIPELINE_BIND_POINT_GRAPHICS:
 				type = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
 				break;
-			}
-			case VK_PIPELINE_BIND_POINT_COMPUTE: {
+			case VK_PIPELINE_BIND_POINT_COMPUTE:
 				type = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
 				break;
-			}
-			case VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR: {
+			case VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR:
 				type = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR;
 				break;
-			}
 			default:
 				return false;
 		}
@@ -8787,6 +8785,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 							register_pipeline_use(tag, hash);
 					continue;
 				}
+
 				if (!Hashing::compute_hash_raytracing_pipeline(*recorder, *create_info, &hash))
 				{
 					if (vk_object)
@@ -8854,6 +8853,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 							register_pipeline_use(tag, hash);
 					continue;
 				}
+
 				if (!Hashing::compute_hash_graphics_pipeline(*recorder, *create_info, &hash))
 				{
 					if (vk_object)
@@ -8920,6 +8920,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 							register_pipeline_use(tag, hash);
 					continue;
 				}
+
 				if (!Hashing::compute_hash_compute_pipeline(*recorder, *create_info, &hash))
 				{
 					if (vk_object)

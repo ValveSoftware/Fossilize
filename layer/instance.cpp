@@ -486,8 +486,8 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDevicePropert
 	if (const char *pipelineUsePath = getenv(FOSSILIZE_PIPELINE_USE_DUMP_PATH_ENV))
 	{
 		entry.pipeline_use_interface.reset(create_concurrent_database(pipelineUsePath,
-					                           DatabaseMode::AppendWithReadOnlyAccess,
-					                           nullptr, 0));
+		                                                              DatabaseMode::AppendWithReadOnlyAccess,
+		                                                              nullptr, 0));
 		shouldRecordPipelineUses = true;
 	}
 
