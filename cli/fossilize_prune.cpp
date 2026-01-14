@@ -382,9 +382,12 @@ struct PruneReplayer : StateCreatorInterface
 
 		// Need to defer this since we need to access pipeline libraries.
 		if (allow_pipeline)
-			graphics_pipelines[hash] = create_info;
-		else if ((create_info->flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0)
-			library_graphics_pipelines[hash] = create_info;
+		{
+			if ((create_info->flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0)
+				library_graphics_pipelines[hash] = create_info;
+			else
+				graphics_pipelines[hash] = create_info;
+		}
 
 		return true;
 	}
