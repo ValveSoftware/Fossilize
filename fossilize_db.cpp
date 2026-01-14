@@ -265,6 +265,11 @@ bool DatabaseInterface::add_to_implicit_whitelist(DatabaseInterface &iface)
 	return true;
 }
 
+void DatabaseInterface::add_to_implicit_whitelist(ResourceTag tag, Hash hash)
+{
+	impl->implicit_whitelisted[tag].insert(hash);
+}
+
 DatabaseInterface::~DatabaseInterface()
 {
 #ifdef _WIN32
