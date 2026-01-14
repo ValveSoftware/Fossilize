@@ -107,6 +107,8 @@ void Instance::init(VkInstance instance_, const VkApplicationInfo *pApp, VkLayer
 			pAppInfo->pEngineName = pEngineName;
 		}
 	}
+
+	shouldRecordImmutableSamplers = !infoFilter || infoFilter->should_record_immutable_samplers(pApp);
 }
 
 // Make this global to the process so we can share pipeline recording across VkInstances as well in-case an application is using external memory sharing techniques, (VR?).
@@ -339,6 +341,10 @@ Instance::Instance()
 #endif
 
 	enablePrecompileQA = queryPrecompileQA();
+
+	// Ensure this is set early so that instance get proc address can work as intended.
+	if (getenv(FOSSILIZE_PIPELINE_USE_DUMP_PATH_ENV))
+		shouldRecordPipelineUses = true;
 }
 
 StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDeviceProperties2 *props,
@@ -380,7 +386,6 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDevicePropert
 	const char *lastUseTag = getenv(FOSSILIZE_LAST_USE_TAG_ENV);
 
 	bool needsBucket = infoFilter && infoFilter->needs_buckets(appInfo);
-	shouldRecordImmutableSamplers = !infoFilter || infoFilter->should_record_immutable_samplers(appInfo);
 
 	// Don't write a bucket if we're going to filter out the application.
 	if (needsBucket && appInfo && infoFilter && !infoFilter->test_application_info(appInfo))
@@ -483,12 +488,14 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDevicePropert
 		}
 	}
 
-	if (const char *pipelineUsePath = getenv(FOSSILIZE_PIPELINE_USE_DUMP_PATH_ENV))
+	if (shouldRecordPipelineUses)
 	{
-		entry.pipeline_use_interface.reset(create_concurrent_database(pipelineUsePath,
-		                                                              DatabaseMode::AppendWithReadOnlyAccess,
-		                                                              nullptr, 0));
-		shouldRecordPipelineUses = true;
+		if (const char *pipelineUsePath = getenv(FOSSILIZE_PIPELINE_USE_DUMP_PATH_ENV))
+		{
+			entry.pipeline_use_interface.reset(create_concurrent_database(pipelineUsePath,
+																		  DatabaseMode::AppendWithReadOnlyAccess,
+																		  nullptr, 0));
+		}
 	}
 
 	entry.recorder.reset(new StateRecorder);

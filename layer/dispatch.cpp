@@ -1236,7 +1236,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateSampler(VkDevice device, const VkSam
 	auto *layer = get_device_layer(device);
 	auto res = layer->getTable()->CreateSampler(device, pCreateInfo, pCallbacks, pSampler);
 
-	if (res == VK_SUCCESS)
+	// Safety against this being called through instance get proc address.
+	// We conservatively allow that case to hook this entry point.
+	if (res == VK_SUCCESS && layer->getInstance()->recordsImmutableSamplers())
 	{
 		if (!layer->getRecorder().record_sampler(*pSampler, *pCreateInfo))
 			LOGW_LEVEL("Failed to record sampler, usually caused by unsupported pNext.\n");
@@ -1428,8 +1430,10 @@ static VKAPI_ATTR void VKAPI_CALL CmdBindPipeline(
 	layer = getLayerData(key, deviceData);
 	layer->getTable()->CmdBindPipeline(commandBuffer, pipelineBindPoint, pipeline);
 
-	if (!layer->getRecorder().record_pipeline_use(pipeline, pipelineBindPoint))
-		LOGW_LEVEL("Recording pipeline use failed.\n");
+	// Safety if we conservatively hook the entry point for whatever reason.
+	if (layer->getInstance()->recordsPipelineUses())
+		if (!layer->getRecorder().record_pipeline_use(pipeline, pipelineBindPoint))
+			LOGW_LEVEL("Recording pipeline use failed.\n");
 }
 
 static PFN_vkVoidFunction interceptDeviceCommand(Instance *instance, const char *pName)
