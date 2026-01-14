@@ -413,6 +413,7 @@ struct StateRecorder::Impl
 	ScratchAllocator ycbcr_temp_allocator;
 	DatabaseInterface *database_iface = nullptr;
 	DatabaseInterface *module_identifier_database_iface = nullptr;
+	DatabaseInterface *pipeline_use_database_iface = nullptr;
 	DatabaseInterface *on_use_database_iface = nullptr;
 	ApplicationInfoFilter *application_info_filter = nullptr;
 	bool should_record_identifier_only = false;
@@ -564,6 +565,7 @@ struct StateRecorder::Impl
 	bool remap_shader_module_handle(VkPipelineShaderStageCreateInfo &info) FOSSILIZE_WARN_UNUSED;
 	void register_module_identifier(VkShaderModule module, const VkPipelineShaderStageModuleIdentifierCreateInfoEXT &ident);
 	void register_on_use(ResourceTag tag, Hash hash) const;
+	void register_pipeline_use(ResourceTag tag, Hash hash) const;
 
 	bool get_subpass_meta_for_render_pass_hash(Hash render_pass_hash,
 	                                           uint32_t subpass,
@@ -6976,6 +6978,33 @@ bool StateRecorder::record_shader_module(VkShaderModule module, const VkShaderMo
 	return true;
 }
 
+bool StateRecorder::record_pipeline_use(VkPipeline pipeline, VkPipelineBindPoint bind_point)
+{
+	{
+		std::lock_guard<std::mutex> lock(impl->record_lock);
+
+		VkStructureType type;
+		switch (bind_point)
+		{
+			case VK_PIPELINE_BIND_POINT_GRAPHICS:
+				type = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+				break;
+			case VK_PIPELINE_BIND_POINT_COMPUTE:
+				type = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+				break;
+			case VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR:
+				type = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR;
+				break;
+			default:
+				return false;
+		}
+		impl->push_work_locked({type, api_object_cast<uint64_t>(pipeline), nullptr, 0});
+	}
+	impl->pump_synchronized_recording(this);
+
+	return true;
+}
+
 void StateRecorder::Impl::record_end()
 {
 	// Signal end of recording with empty work item
@@ -8007,6 +8036,15 @@ void StateRecorder::Impl::register_on_use(ResourceTag tag, Hash hash) const
 	}
 }
 
+void StateRecorder::Impl::register_pipeline_use(ResourceTag tag, Hash hash) const
+{
+	if (record_data.write_database_entries && pipeline_use_database_iface &&
+	    !pipeline_use_database_iface->has_entry(tag, hash))
+	{
+		pipeline_use_database_iface->write_entry(tag, hash, NULL, 0, 0);
+	}
+}
+
 void StateRecorder::Impl::register_module_identifier(
 		VkShaderModule module, const VkPipelineShaderStageModuleIdentifierCreateInfoEXT &ident)
 {
@@ -8373,6 +8411,12 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 			on_use_database_iface = nullptr;
 		}
 
+		if (pipeline_use_database_iface && !pipeline_use_database_iface->prepare())
+		{
+			LOGE_LEVEL("Failed to prepare pipeline-use database_iface database, will not dump those.\n");
+			pipeline_use_database_iface = nullptr;
+		}
+
 		if (database_iface && record_data.write_database_entries)
 		{
 			Hasher h;
@@ -8734,7 +8778,15 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 
 			if (hash == 0)
 			{
-				if (!create_info || !Hashing::compute_hash_raytracing_pipeline(*recorder, *create_info, &hash))
+				if (!create_info)
+				{
+					if (vk_object)
+						if (recorder->get_hash_for_raytracing_pipeline_handle(vk_object, &hash))
+							register_pipeline_use(tag, hash);
+					continue;
+				}
+
+				if (!Hashing::compute_hash_raytracing_pipeline(*recorder, *create_info, &hash))
 				{
 					if (vk_object)
 						raytracing_pipeline_to_hash.erase(vk_object);
@@ -8794,7 +8846,15 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 
 			if (hash == 0)
 			{
-				if (!create_info || !Hashing::compute_hash_graphics_pipeline(*recorder, *create_info, &hash))
+				if (!create_info)
+				{
+					if (vk_object)
+						if (recorder->get_hash_for_graphics_pipeline_handle(vk_object, &hash))
+							register_pipeline_use(tag, hash);
+					continue;
+				}
+
+				if (!Hashing::compute_hash_graphics_pipeline(*recorder, *create_info, &hash))
 				{
 					if (vk_object)
 						graphics_pipeline_to_hash.erase(vk_object);
@@ -8853,7 +8913,15 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 
 			if (hash == 0)
 			{
-				if (!create_info || !Hashing::compute_hash_compute_pipeline(*recorder, *create_info, &hash))
+				if (!create_info)
+				{
+					if (vk_object)
+						if (recorder->get_hash_for_compute_pipeline_handle(vk_object, &hash))
+							register_pipeline_use(tag, hash);
+					continue;
+				}
+
+				if (!Hashing::compute_hash_compute_pipeline(*recorder, *create_info, &hash))
 				{
 					if (vk_object)
 						compute_pipeline_to_hash.erase(vk_object);
@@ -8918,6 +8986,8 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 			module_identifier_database_iface->flush();
 		if (on_use_database_iface)
 			on_use_database_iface->flush();
+		if (pipeline_use_database_iface)
+			pipeline_use_database_iface->flush();
 
 		// We no longer need a reference to this.
 		// This should allow us to call init_recording_thread again if we want,
@@ -8925,6 +8995,7 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 		database_iface = nullptr;
 		module_identifier_database_iface = nullptr;
 		on_use_database_iface = nullptr;
+		pipeline_use_database_iface = nullptr;
 	}
 	else if (database_iface)
 	{
@@ -8933,6 +9004,8 @@ void StateRecorder::Impl::record_task(StateRecorder *recorder, bool looping)
 			module_identifier_database_iface->flush();
 		if (on_use_database_iface)
 			on_use_database_iface->flush();
+		if (pipeline_use_database_iface)
+			pipeline_use_database_iface->flush();
 	}
 }
 
@@ -11503,6 +11576,11 @@ void StateRecorder::free_serialized(uint8_t *serialized)
 void StateRecorder::set_module_identifier_database_interface(DatabaseInterface *iface)
 {
 	impl->module_identifier_database_iface = iface;
+}
+
+void StateRecorder::set_pipeline_use_database_interface(DatabaseInterface *iface)
+{
+	impl->pipeline_use_database_iface = iface;
 }
 
 void StateRecorder::set_on_use_database_interface(DatabaseInterface *iface)

@@ -4591,7 +4591,9 @@ int main(int argc, char *argv[])
 		if (strcmp(tag, "module") == 0)
 			whitelist_mask = 1u << RESOURCE_SHADER_MODULE;
 		else if (strcmp(tag, "pipeline") == 0)
-			whitelist_mask = (1u << RESOURCE_GRAPHICS_PIPELINE) | (1u << RESOURCE_COMPUTE_PIPELINE);
+			whitelist_mask = (1u << RESOURCE_GRAPHICS_PIPELINE) |
+			                 (1u << RESOURCE_COMPUTE_PIPELINE) |
+			                 (1u << RESOURCE_RAYTRACING_PIPELINE);
 		else
 		{
 			whitelist_mask = strtoull(tag, nullptr, 16);

@@ -67,6 +67,7 @@ struct VkLayerDispatchTable
 	PFN_vkGetShaderModuleIdentifierEXT GetShaderModuleIdentifierEXT;
 	PFN_vkGetShaderModuleCreateInfoIdentifierEXT GetShaderModuleCreateInfoIdentifierEXT;
 	PFN_vkCreatePipelineBinariesKHR CreatePipelineBinariesKHR;
+	PFN_vkCmdBindPipeline CmdBindPipeline;
 };
 
 using InstanceTable = std::unordered_map<void *, std::unique_ptr<VkLayerInstanceDispatchTable>>;

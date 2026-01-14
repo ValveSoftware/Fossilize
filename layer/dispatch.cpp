@@ -1237,7 +1237,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateSampler(VkDevice device, const VkSam
 	auto *layer = get_device_layer(device);
 	auto res = layer->getTable()->CreateSampler(device, pCreateInfo, pCallbacks, pSampler);
 
-	if (res == VK_SUCCESS)
+	// Safety against this being called through instance get proc address.
+	// We conservatively allow that case to hook this entry point.
+	if (res == VK_SUCCESS && layer->getInstance()->recordsImmutableSamplers())
 	{
 		if (!layer->getRecorder().record_sampler(*pSampler, *pCreateInfo))
 			LOGW_LEVEL("Failed to record sampler, usually caused by unsupported pNext.\n");
@@ -1419,6 +1421,22 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreatePipelineBinariesKHR(
 	return res;
 }
 
+static VKAPI_ATTR void VKAPI_CALL CmdBindPipeline(
+		VkCommandBuffer                             commandBuffer,
+		VkPipelineBindPoint                         pipelineBindPoint,
+		VkPipeline                                  pipeline)
+{
+	Device *layer = nullptr;
+	void *key = getDispatchKey(commandBuffer);
+	layer = getLayerData(key, deviceData);
+	layer->getTable()->CmdBindPipeline(commandBuffer, pipelineBindPoint, pipeline);
+
+	// Safety if we conservatively hook the entry point for whatever reason.
+	if (layer->getInstance()->recordsPipelineUses())
+		if (!layer->getRecorder().record_pipeline_use(pipeline, pipelineBindPoint))
+			LOGW_LEVEL("Recording pipeline use failed.\n");
+}
+
 static PFN_vkVoidFunction interceptDeviceCommand(Instance *instance, const char *pName)
 {
 	static const struct
@@ -1426,6 +1444,7 @@ static PFN_vkVoidFunction interceptDeviceCommand(Instance *instance, const char 
 		const char *name;
 		PFN_vkVoidFunction proc;
 		bool is_sampler;
+		bool is_bind;
 	} coreDeviceCommands[] = {
 		{ "vkGetDeviceProcAddr", reinterpret_cast<PFN_vkVoidFunction>(VK_LAYER_fossilize_GetDeviceProcAddr) },
 		{ "vkDestroyDevice", reinterpret_cast<PFN_vkVoidFunction>(DestroyDevice) },
@@ -1443,11 +1462,15 @@ static PFN_vkVoidFunction interceptDeviceCommand(Instance *instance, const char 
 		{ "vkCreateSamplerYcbcrConversionKHR", reinterpret_cast<PFN_vkVoidFunction>(CreateSamplerYcbcrConversionKHR), true },
 		{ "vkCreateRayTracingPipelinesKHR", reinterpret_cast<PFN_vkVoidFunction>(CreateRayTracingPipelinesKHR) },
 		{ "vkCreatePipelineBinariesKHR", reinterpret_cast<PFN_vkVoidFunction>(CreatePipelineBinariesKHR) },
+		{ "vkCmdBindPipeline", reinterpret_cast<PFN_vkVoidFunction>(CmdBindPipeline), false, true },
 	};
 
 	for (auto &cmd : coreDeviceCommands)
 	{
 		if (cmd.is_sampler && !instance->recordsImmutableSamplers())
+			continue;
+
+		if (cmd.is_bind && !instance->recordsPipelineUses())
 			continue;
 
 		if (strcmp(cmd.name, pName) == 0)

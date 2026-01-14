@@ -107,6 +107,8 @@ void Instance::init(VkInstance instance_, const VkApplicationInfo *pApp, VkLayer
 			pAppInfo->pEngineName = pEngineName;
 		}
 	}
+
+	shouldRecordImmutableSamplers = !infoFilter || infoFilter->should_record_immutable_samplers(pApp);
 }
 
 // Make this global to the process so we can share pipeline recording across VkInstances as well in-case an application is using external memory sharing techniques, (VR?).
@@ -118,6 +120,7 @@ struct Recorder
 	std::unique_ptr<DatabaseInterface> interface;
 	std::unique_ptr<DatabaseInterface> module_identifier_interface;
 	std::unique_ptr<DatabaseInterface> last_use_interface;
+	std::unique_ptr<DatabaseInterface> pipeline_use_interface;
 	std::unique_ptr<StateRecorder> recorder;
 };
 static std::unordered_map<Hash, Recorder> globalRecorders;
@@ -163,6 +166,10 @@ static std::string getSystemProperty(const char *key)
 
 #ifndef FOSSILIZE_IDENTIFIER_DUMP_PATH_ENV
 #define FOSSILIZE_IDENTIFIER_DUMP_PATH_ENV "FOSSILIZE_IDENTIFIER_DUMP_PATH"
+#endif
+
+#ifndef FOSSILIZE_PIPELINE_USE_DUMP_PATH_ENV
+#define FOSSILIZE_PIPELINE_USE_DUMP_PATH_ENV "FOSSILIZE_PIPELINE_USE_DUMP_PATH"
 #endif
 
 #ifndef FOSSILIZE_LAST_USE_TAG_ENV
@@ -334,6 +341,10 @@ Instance::Instance()
 #endif
 
 	enablePrecompileQA = queryPrecompileQA();
+
+	// Ensure this is set early so that instance get proc address can work as intended.
+	if (getenv(FOSSILIZE_PIPELINE_USE_DUMP_PATH_ENV))
+		shouldRecordPipelineUses = true;
 }
 
 StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDeviceProperties2 *props,
@@ -375,7 +386,6 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDevicePropert
 	const char *lastUseTag = getenv(FOSSILIZE_LAST_USE_TAG_ENV);
 
 	bool needsBucket = infoFilter && infoFilter->needs_buckets(appInfo);
-	shouldRecordImmutableSamplers = !infoFilter || infoFilter->should_record_immutable_samplers(appInfo);
 
 	// Don't write a bucket if we're going to filter out the application.
 	if (needsBucket && appInfo && infoFilter && !infoFilter->test_application_info(appInfo))
@@ -478,6 +488,16 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDevicePropert
 		}
 	}
 
+	if (shouldRecordPipelineUses)
+	{
+		if (const char *pipelineUsePath = getenv(FOSSILIZE_PIPELINE_USE_DUMP_PATH_ENV))
+		{
+			entry.pipeline_use_interface.reset(create_concurrent_database(pipelineUsePath,
+																		  DatabaseMode::AppendWithReadOnlyAccess,
+																		  nullptr, 0));
+		}
+	}
+
 	entry.recorder.reset(new StateRecorder);
 	auto *recorder = entry.recorder.get();
 	recorder->set_database_enable_compression(true);
@@ -496,6 +516,7 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDevicePropert
 			LOGE_LEVEL("Failed to record physical device features.\n");
 
 	recorder->set_module_identifier_database_interface(entry.module_identifier_interface.get());
+	recorder->set_pipeline_use_database_interface(entry.pipeline_use_interface.get());
 	recorder->set_on_use_database_interface(entry.last_use_interface.get());
 
 	if (synchronized)

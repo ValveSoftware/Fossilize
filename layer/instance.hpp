@@ -76,6 +76,11 @@ public:
 		return shouldRecordImmutableSamplers;
 	}
 
+	bool recordsPipelineUses() const
+	{
+		return shouldRecordPipelineUses;
+	}
+
 	bool enablesPrecompileQA() const
 	{
 		return enablePrecompileQA;
@@ -97,5 +102,6 @@ private:
 	bool synchronized = false;
 	bool enablePrecompileQA = false;
 	bool shouldRecordImmutableSamplers = true;
+	bool shouldRecordPipelineUses = false;
 };
 }

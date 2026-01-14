@@ -131,7 +131,8 @@ struct DatabaseInterface::Impl
 	DatabaseMode mode;
 	uint32_t whitelist_tag_mask = (1u << RESOURCE_SHADER_MODULE) |
 	                              (1u << RESOURCE_GRAPHICS_PIPELINE) |
-	                              (1u << RESOURCE_COMPUTE_PIPELINE);
+	                              (1u << RESOURCE_COMPUTE_PIPELINE) |
+	                              (1u << RESOURCE_RAYTRACING_PIPELINE);
 
 	const ExportedMetadataHeader *imported_concurrent_metadata = nullptr;
 
@@ -195,6 +196,12 @@ bool DatabaseInterface::load_whitelist_database(const char *path)
 		impl->whitelist.reset();
 		return false;
 	}
+
+	// Ignore shader modules if whitelist doesn't contain any.
+	size_t hash_count;
+	if (get_hash_list_for_resource_tag(RESOURCE_SHADER_MODULE, &hash_count, nullptr))
+		if (hash_count == 0)
+			set_whitelist_tag_mask(impl->whitelist_tag_mask & ~(1u << RESOURCE_SHADER_MODULE));
 
 	return true;
 }
