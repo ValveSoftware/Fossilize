@@ -380,14 +380,15 @@ struct PruneReplayer : StateCreatorInterface
 				allow_pipeline = false;
 		}
 
-		// Need to defer this since we need to access pipeline libraries.
+		// A pipeline library may be a dependency of another pipeline which we have to pull in late.
+		// Store for later.
+		if ((create_info->flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0)
+			library_graphics_pipelines[hash] = create_info;
+
+		// With whitelist, we don't know yet if a pipeline will be allowed or not.
+		// We might be explicitly pulling in a library to be included, even if the linked pipeline does not exist.
 		if (allow_pipeline)
-		{
-			if ((create_info->flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0)
-				library_graphics_pipelines[hash] = create_info;
-			else
-				graphics_pipelines[hash] = create_info;
-		}
+			graphics_pipelines[hash] = create_info;
 
 		return true;
 	}
@@ -541,11 +542,15 @@ struct PruneReplayer : StateCreatorInterface
 				allow_pipeline = false;
 		}
 
-		// Need to defer this since we need to access pipeline libraries.
+		// A pipeline library may be a dependency of another pipeline which we have to pull in late.
+		// Store for later.
+		if ((create_info->flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0)
+			library_raytracing_pipelines[hash] = create_info;
+
+		// With whitelist, we don't know yet if a pipeline will be allowed or not.
+		// We might be explicitly pulling in a library to be included, even if the linked pipeline does not exist.
 		if (allow_pipeline)
 			raytracing_pipelines[hash] = create_info;
-		else if ((create_info->flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0)
-			library_raytracing_pipelines[hash] = create_info;
 
 		return true;
 	}
