@@ -207,6 +207,8 @@ public:
 	void set_overwrite_db_clear(bool value);
 	bool get_overwrite_db_clear() const;
 
+	void add_to_implicit_whitelist(ResourceTag tag, Hash hash);
+
 protected:
 	bool test_resource_filter(ResourceTag tag, Hash hash) const;
 	bool add_to_implicit_whitelist(DatabaseInterface &iface);
