@@ -52,7 +52,8 @@ static void print_help()
 	     "\t[--skip-application-info-links]\n"
 	     "\t[--whitelist whitelist.foz]\n"
 	     "\t[--blacklist blacklist.foz]\n"
-	     "\t[--invert-module-pruning]\n");
+	     "\t[--invert-module-pruning]\n"
+	     "\t[--max-size] (limit the size of the output-db, NOT including application info links)\n");
 }
 
 template <typename T>
@@ -84,6 +85,13 @@ static VkPipelineCreateFlagBits2KHR get_effective_pipeline_flags(const T *info)
 		return flags_info->flags;
 	else
 		return info->flags;
+}
+
+static size_t get_compressed_size(DatabaseInterface &iface, ResourceTag tag, Hash hash)
+{
+	size_t size = 0;
+	iface.read_entry(tag, hash, &size, nullptr, PAYLOAD_READ_RAW_FOSSILIZE_DB_BIT);
+	return size;
 }
 
 struct PruneReplayer : StateCreatorInterface
@@ -170,22 +178,36 @@ struct PruneReplayer : StateCreatorInterface
 		return true;
 	}
 
-	void access_sampler(Hash hash)
+	size_t access_sampler(DatabaseInterface &iface, Hash hash, bool insert)
 	{
-		accessed_samplers.insert(hash);
+		if (accessed_samplers.count(hash))
+			return 0;
+
+		if (insert)
+		{
+			accessed_samplers.insert(hash);
+			return 0;
+		}
+
+		return get_compressed_size(iface, RESOURCE_SAMPLER, hash);
 	}
 
-	void access_descriptor_set(Hash hash)
+	size_t access_descriptor_set(DatabaseInterface &iface, Hash hash, bool insert)
 	{
 		if (!hash)
-			return;
+			return 0;
 		if (accessed_descriptor_sets.count(hash))
-			return;
-		accessed_descriptor_sets.insert(hash);
+			return 0;
 
 		auto *create_info = descriptor_sets[hash];
 		if (!create_info)
-			return;
+			return 0;
+
+		size_t size = 0;
+		if (insert)
+			accessed_descriptor_sets.insert(hash);
+		else
+			size = get_compressed_size(iface, RESOURCE_DESCRIPTOR_SET_LAYOUT, hash);
 
 		for (uint32_t binding = 0; binding < create_info->bindingCount; binding++)
 		{
@@ -194,25 +216,62 @@ struct PruneReplayer : StateCreatorInterface
 			{
 				for (uint32_t i = 0; i < bind.descriptorCount; i++)
 					if (bind.pImmutableSamplers[i] != VK_NULL_HANDLE)
-						access_sampler((Hash)bind.pImmutableSamplers[i]);
+						size += access_sampler(iface, (Hash)bind.pImmutableSamplers[i], insert);
 			}
 		}
+
+		return size;
 	}
 
-	void access_pipeline_layout(Hash hash)
+	size_t access_pipeline_layout(DatabaseInterface &iface, Hash hash, bool insert)
 	{
 		if (!hash)
-			return;
+			return 0;
 		if (accessed_pipeline_layouts.count(hash))
-			return;
-		accessed_pipeline_layouts.insert(hash);
+			return 0;
 
 		auto *create_info = pipeline_layouts[hash];
 		if (!create_info)
-			return;
+			return 0;
+
+		size_t size = 0;
+		if (insert)
+			accessed_pipeline_layouts.insert(hash);
+		else
+			size = get_compressed_size(iface, RESOURCE_PIPELINE_LAYOUT, hash);
 
 		for (uint32_t layout = 0; layout < create_info->setLayoutCount; layout++)
-			access_descriptor_set((Hash)create_info->pSetLayouts[layout]);
+			size += access_descriptor_set(iface, (Hash)create_info->pSetLayouts[layout], insert);
+
+		return size;
+	}
+
+	size_t access_render_pass(DatabaseInterface &iface, Hash hash, bool insert)
+	{
+		if (accessed_render_passes.count(hash))
+			return 0;
+
+		if (insert)
+		{
+			accessed_render_passes.insert(hash);
+			return 0;
+		}
+
+		return get_compressed_size(iface, RESOURCE_RENDER_PASS, hash);
+	}
+
+	size_t access_shader_module(DatabaseInterface &iface, Hash hash, bool insert)
+	{
+		if (accessed_shader_modules.count(hash))
+			return 0;
+
+		if (insert)
+		{
+			accessed_shader_modules.insert(hash);
+			return 0;
+		}
+
+		return get_compressed_size(iface, RESOURCE_SHADER_MODULE, hash);
 	}
 
 	bool enqueue_create_descriptor_set_layout(Hash hash, const VkDescriptorSetLayoutCreateInfo *create_info, VkDescriptorSetLayout *layout) override
@@ -424,21 +483,27 @@ struct PruneReplayer : StateCreatorInterface
 		return true;
 	}
 
-	void access_graphics_pipeline(DatabaseInterface &iface, Hash hash, const VkGraphicsPipelineCreateInfo *create_info)
+	size_t access_graphics_pipeline(DatabaseInterface &iface, Hash hash, bool insert,
+	                                const VkGraphicsPipelineCreateInfo *create_info)
 	{
 		if (accessed_graphics_pipelines.count(hash))
-			return;
+			return 0;
 
 		if (!iface.has_entry(RESOURCE_GRAPHICS_PIPELINE, hash))
-			return;
+			return 0;
 
-		accessed_graphics_pipelines.insert(hash);
-		access_pipeline_layout((Hash) create_info->layout);
+		size_t size = 0;
+		if (insert)
+			accessed_graphics_pipelines.insert(hash);
+		else
+			size = get_compressed_size(iface, RESOURCE_GRAPHICS_PIPELINE, hash);
+
+		size += access_pipeline_layout(iface, (Hash) create_info->layout, insert);
 
 		if (create_info->renderPass != VK_NULL_HANDLE)
-			accessed_render_passes.insert((Hash) create_info->renderPass);
+			size += access_render_pass(iface, (Hash) create_info->renderPass, insert);
 		for (uint32_t stage = 0; stage < create_info->stageCount; stage++)
-			accessed_shader_modules.insert((Hash) create_info->pStages[stage].module);
+			size += access_shader_module(iface, (Hash) create_info->pStages[stage].module, insert);
 
 		auto *library_info =
 				find_pnext<VkPipelineLibraryCreateInfoKHR>(VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR,
@@ -453,25 +518,33 @@ struct PruneReplayer : StateCreatorInterface
 				if (lib_itr != library_graphics_pipelines.end())
 				{
 					iface.add_to_implicit_whitelist(RESOURCE_GRAPHICS_PIPELINE, lib_itr->first);
-					access_graphics_pipeline(iface, lib_itr->first, lib_itr->second);
+					size += access_graphics_pipeline(iface, lib_itr->first, insert, lib_itr->second);
 				}
 			}
 		}
+
+		return size;
 	}
 
-	void access_raytracing_pipeline(DatabaseInterface &iface, Hash hash, const VkRayTracingPipelineCreateInfoKHR *create_info)
+	size_t access_raytracing_pipeline(DatabaseInterface &iface, Hash hash, bool insert,
+	                                  const VkRayTracingPipelineCreateInfoKHR *create_info)
 	{
 		if (accessed_raytracing_pipelines.count(hash))
-			return;
+			return 0;
 
 		if (!iface.has_entry(RESOURCE_RAYTRACING_PIPELINE, hash))
-			return;
+			return 0;
 
-		accessed_raytracing_pipelines.insert(hash);
-		access_pipeline_layout((Hash) create_info->layout);
+		size_t size = 0;
+		if (insert)
+			accessed_raytracing_pipelines.insert(hash);
+		else
+			get_compressed_size(iface, RESOURCE_RAYTRACING_PIPELINE, hash);
+
+		size += access_pipeline_layout(iface, (Hash) create_info->layout, insert);
 
 		for (uint32_t stage = 0; stage < create_info->stageCount; stage++)
-			accessed_shader_modules.insert((Hash) create_info->pStages[stage].module);
+			size += access_shader_module(iface, (Hash) create_info->pStages[stage].module, insert);
 
 		if (create_info->pLibraryInfo)
 		{
@@ -482,38 +555,83 @@ struct PruneReplayer : StateCreatorInterface
 				if (lib_itr != library_raytracing_pipelines.end())
 				{
 					iface.add_to_implicit_whitelist(RESOURCE_RAYTRACING_PIPELINE, lib_itr->first);
-					access_raytracing_pipeline(iface, lib_itr->first, lib_itr->second);
+					size += access_raytracing_pipeline(iface, lib_itr->first, insert, lib_itr->second);
 				}
 			}
 		}
+
+		return size;
 	}
 
-	void access_compute_pipeline(DatabaseInterface &iface, Hash hash, const VkComputePipelineCreateInfo *create_info)
+	size_t access_compute_pipeline(DatabaseInterface &iface, Hash hash, bool insert,
+	                               const VkComputePipelineCreateInfo *create_info)
 	{
-		if (iface.has_entry(RESOURCE_COMPUTE_PIPELINE, hash))
-		{
-			access_pipeline_layout((Hash) create_info->layout);
-			accessed_shader_modules.insert((Hash) create_info->stage.module);
+		if (accessed_compute_pipelines.count(hash))
+			return 0;
+
+		if (!iface.has_entry(RESOURCE_COMPUTE_PIPELINE, hash))
+			return 0;
+
+		size_t size = 0;
+		if (insert)
 			accessed_compute_pipelines.insert(hash);
+		else
+			size = get_compressed_size(iface, RESOURCE_COMPUTE_PIPELINE, hash);
+
+		size += access_pipeline_layout(iface, (Hash) create_info->layout, insert);
+		size += access_shader_module(iface, (Hash) create_info->stage.module, insert);
+		return size;
+	}
+
+	void access_pipelines(DatabaseInterface &iface, size_t max_size)
+	{
+		if (max_size)
+		{
+			size_t rt_size = 0;
+			size_t max_rt_size = max_size * 0.5;
+			for (auto &pipe : raytracing_pipelines)
+			{
+				size_t size = access_raytracing_pipeline(iface, pipe.first, false, pipe.second);
+				if (rt_size + size > max_rt_size)
+					continue;
+
+				access_raytracing_pipeline(iface, pipe.first, true, pipe.second);
+				rt_size += size;
+			}
+
+			size_t cs_size = 0;
+			size_t max_cs_size = (max_size - rt_size) * 0.6;
+			for (auto &pipe : compute_pipelines)
+			{
+				size_t size = access_compute_pipeline(iface, pipe.first, false, pipe.second);
+				if (cs_size + size > max_cs_size)
+					continue;
+
+				access_compute_pipeline(iface, pipe.first, true, pipe.second);
+				cs_size += size;
+			}
+
+			size_t gfx_size = 0;
+			size_t max_gfx_size = max_size - rt_size - cs_size;
+			for (auto &pipe : graphics_pipelines)
+			{
+				size_t size = access_graphics_pipeline(iface, pipe.first, false, pipe.second);
+				if (gfx_size + size > max_gfx_size)
+					continue;
+
+				access_graphics_pipeline(iface, pipe.first, true, pipe.second);
+				gfx_size += size;
+			}
 		}
-	}
-
-	void access_graphics_pipelines(DatabaseInterface &iface)
-	{
-		for (auto &pipe : graphics_pipelines)
-			access_graphics_pipeline(iface, pipe.first, pipe.second);
-	}
-
-	void access_raytracing_pipelines(DatabaseInterface &iface)
-	{
-		for (auto &pipe : raytracing_pipelines)
-			access_raytracing_pipeline(iface, pipe.first, pipe.second);
-	}
-
-	void access_compute_pipelines(DatabaseInterface &iface)
-	{
-		for (auto &pipe : compute_pipelines)
-			access_compute_pipeline(iface, pipe.first, pipe.second);
+		else
+		{
+			for (auto &pipe : raytracing_pipelines)
+				access_raytracing_pipeline(iface, pipe.first, true, pipe.second);
+			for (auto &pipe : compute_pipelines)
+				access_compute_pipeline(iface, pipe.first, true, pipe.second);
+			for (auto &pipe : graphics_pipelines)
+				access_graphics_pipeline(iface, pipe.first, true, pipe.second);
+		}
 	}
 
 	bool enqueue_create_raytracing_pipeline(Hash hash, const VkRayTracingPipelineCreateInfoKHR *create_info, VkPipeline *pipeline) override
@@ -601,8 +719,8 @@ static bool copy_accessed_types(DatabaseInterface &input_db,
 	per_tag_written[tag] = accessed.size();
 	for (auto hash : accessed)
 	{
-		size_t compressed_size = 0;
-		if (!input_db.read_entry(tag, hash, &compressed_size, nullptr, PAYLOAD_READ_RAW_FOSSILIZE_DB_BIT))
+		size_t compressed_size = get_compressed_size(input_db, tag, hash);
+		if (compressed_size == 0)
 		{
 			if (tag == RESOURCE_SHADER_MODULE)
 			{
@@ -635,6 +753,7 @@ int main(int argc, char *argv[])
 	bool should_filter_application_hash = false;
 	bool skip_application_info_links = false;
 	bool invert_module_pruning = false;
+	size_t max_size = 0;
 
 	unordered_set<Hash> filter_graphics;
 	unordered_set<Hash> filter_compute;
@@ -692,6 +811,9 @@ int main(int argc, char *argv[])
 	});
 	cbs.add("--blacklist", [&](CLIParser &parser) {
 		blacklist = parser.next_string();
+	});
+	cbs.add("--max-size", [&](CLIParser &parser) {
+		max_size = parser.next_size();
 	});
 	cbs.error_handler = [] { print_help(); };
 
@@ -873,7 +995,11 @@ int main(int argc, char *argv[])
 					size_t compressed_size = 0;
 					if (!input_db->read_entry(tag, hash, &compressed_size, nullptr, PAYLOAD_READ_RAW_FOSSILIZE_DB_BIT))
 						return EXIT_FAILURE;
+
 					state_json.resize(compressed_size);
+					if (max_size > compressed_size)
+						max_size -= compressed_size;
+
 					if (!input_db->read_entry(tag, hash, &compressed_size, state_json.data(),
 					                          PAYLOAD_READ_RAW_FOSSILIZE_DB_BIT))
 						return EXIT_FAILURE;
@@ -893,9 +1019,7 @@ int main(int argc, char *argv[])
 		return EXIT_FAILURE;
 	}
 
-	prune_replayer.access_compute_pipelines(*input_db);
-	prune_replayer.access_graphics_pipelines(*input_db);
-	prune_replayer.access_raytracing_pipelines(*input_db);
+	prune_replayer.access_pipelines(*input_db, max_size);
 
 	if (invert_module_pruning)
 	{
