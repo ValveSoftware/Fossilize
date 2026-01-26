@@ -153,6 +153,8 @@ struct VulkanFeatures
 	VkPhysicalDeviceShaderFmaFeaturesKHR shader_fma;
 	VkPhysicalDevicePushConstantBankFeaturesNV push_constant_bank_nv;
 	VkPhysicalDeviceShaderSubgroupPartitionedFeaturesEXT shader_subgroup_partitioned;
+	VkPhysicalDeviceMaintenance10FeaturesKHR maintenance10;
+	VkPhysicalDeviceCustomResolveFeaturesEXT custom_resolve;
 
 	struct
 	{
@@ -204,6 +206,7 @@ struct VulkanProperties
 	VkPhysicalDeviceMaintenance7PropertiesKHR maintenance7;
 	VkPhysicalDeviceFragmentDensityMapLayeredPropertiesVALVE fragment_density_map_layered_valve;
 	VkPhysicalDeviceDescriptorHeapPropertiesEXT descriptor_heap;
+	VkPhysicalDeviceMaintenance10PropertiesKHR maintenance10;
 
 	struct
 	{

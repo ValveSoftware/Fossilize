@@ -100,7 +100,10 @@
 		"VK_ARM_tensors",
 		"VK_KHR_shader_untyped_pointers",
 		"VK_NV_cluster_acceleration_structure",
-		"VK_VALVE_fragment_density_map_layered"
+		"VK_VALVE_fragment_density_map_layered",
+		"VK_KHR_maintenance10",
+		"VK_EXT_custom_resolve",
+		"VK_EXT_shader_64bit_indexing"
 	],
 	"fully-ignored" : [
 		"VK_AMD_mixed_attachment_samples",
@@ -132,7 +135,11 @@
 		"VK_KHR_maintenance9",
 		"VK_QCOM_tile_shading",
 		"VK_QCOM_tile_memory_heap",
-		"VK_ARM_data_graph"
+		"VK_ARM_data_graph",
+		"VK_OHOS_external_memory",
+		"VK_KHR_maintenance8",
+		"VK_EXT_memory_decompression",
+		"VK_KHR_copy_memory_indirect"
 	],
 	"cherry-pick": [
 		"VK_DYNAMIC_STATE_VIEWPORT_W_SCALING_NV",

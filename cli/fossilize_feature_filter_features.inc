@@ -143,3 +143,5 @@ FE(SHADER_64_BIT_INDEXING, shader_64_bit_indexing, EXT);
 FE(SHADER_FMA, shader_fma, KHR);
 FE(PUSH_CONSTANT_BANK, push_constant_bank_nv, NV);
 FE(SHADER_SUBGROUP_PARTITIONED, shader_subgroup_partitioned, EXT);
+FE(MAINTENANCE_10, maintenance10, KHR);
+FE(CUSTOM_RESOLVE, custom_resolve, EXT);

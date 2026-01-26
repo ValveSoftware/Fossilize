@@ -594,6 +594,7 @@ struct FeatureFilter::Impl
 	bool shader_stage_mask_is_supported(VkShaderStageFlags stages) const;
 	bool aspect_mask_is_supported(VkImageAspectFlags aspect) const;
 	bool format_is_supported(VkFormat, VkFormatFeatureFlags format_features) const;
+	bool attachment_description_flags_are_supported(VkAttachmentDescriptionFlags flags) const;
 
 	bool stage_limits_are_supported(const VkPipelineShaderStageCreateInfo &info) const;
 
@@ -3535,9 +3536,35 @@ bool FeatureFilter::Impl::attachment_reference2_is_supported(const VkAttachmentR
 	return true;
 }
 
+bool FeatureFilter::Impl::attachment_description_flags_are_supported(VkAttachmentDescriptionFlags flags) const
+{
+	constexpr VkAttachmentDescriptionFlags recognized_flags =
+			VK_ATTACHMENT_DESCRIPTION_RESOLVE_ENABLE_TRANSFER_FUNCTION_BIT_KHR |
+			VK_ATTACHMENT_DESCRIPTION_RESOLVE_SKIP_TRANSFER_FUNCTION_BIT_KHR |
+			VK_ATTACHMENT_DESCRIPTION_MAY_ALIAS_BIT;
+
+	if (flags & ~recognized_flags)
+		return false;
+
+	if ((flags & (
+		     VK_ATTACHMENT_DESCRIPTION_RESOLVE_ENABLE_TRANSFER_FUNCTION_BIT_KHR |
+		     VK_ATTACHMENT_DESCRIPTION_RESOLVE_SKIP_TRANSFER_FUNCTION_BIT_KHR)) != 0)
+	{
+		if (!features.maintenance10.maintenance10)
+			return false;
+		if (!props.maintenance10.resolveSrgbFormatSupportsTransferFunctionControl)
+			return false;
+	}
+
+	return true;
+}
+
 bool FeatureFilter::Impl::attachment_description_is_supported(const VkAttachmentDescription &desc,
                                                               VkFormatFeatureFlags format_features) const
 {
+
+	if (!attachment_description_flags_are_supported(desc.flags))
+		return false;
 	if (!image_layout_is_supported(desc.initialLayout))
 		return false;
 	if (!image_layout_is_supported(desc.finalLayout))
@@ -3559,6 +3586,8 @@ bool FeatureFilter::Impl::attachment_description_is_supported(const VkAttachment
 bool FeatureFilter::Impl::attachment_description2_is_supported(const VkAttachmentDescription2 &desc,
                                                                VkFormatFeatureFlags format_features) const
 {
+	if (!attachment_description_flags_are_supported(desc.flags))
+		return false;
 	if (!pnext_chain_is_supported(desc.pNext))
 		return false;
 	if (!image_layout_is_supported(desc.initialLayout))
@@ -3584,9 +3613,9 @@ bool FeatureFilter::Impl::subpass_description_flags_is_supported(VkSubpassDescri
 	constexpr VkSubpassDescriptionFlags supported_flags =
 			VK_SUBPASS_DESCRIPTION_PER_VIEW_ATTRIBUTES_BIT_NVX |
 			VK_SUBPASS_DESCRIPTION_PER_VIEW_POSITION_X_ONLY_BIT_NVX |
-			VK_SUBPASS_DESCRIPTION_FRAGMENT_REGION_BIT_QCOM |
-			VK_SUBPASS_DESCRIPTION_SHADER_RESOLVE_BIT_QCOM |
-			VK_SUBPASS_DESCRIPTION_ENABLE_LEGACY_DITHERING_BIT_EXT;
+			VK_SUBPASS_DESCRIPTION_ENABLE_LEGACY_DITHERING_BIT_EXT |
+			VK_SUBPASS_DESCRIPTION_CUSTOM_RESOLVE_BIT_EXT |
+			VK_SUBPASS_DESCRIPTION_FRAGMENT_REGION_BIT_EXT;
 
 	if (flags & ~supported_flags)
 		return false;
@@ -3596,10 +3625,15 @@ bool FeatureFilter::Impl::subpass_description_flags_is_supported(VkSubpassDescri
 	    enabled_extensions.count(VK_NVX_MULTIVIEW_PER_VIEW_ATTRIBUTES_EXTENSION_NAME) == 0)
 		return false;
 
-	if ((flags & (VK_SUBPASS_DESCRIPTION_FRAGMENT_REGION_BIT_QCOM |
-	              VK_SUBPASS_DESCRIPTION_SHADER_RESOLVE_BIT_QCOM)) != 0 &&
-	    enabled_extensions.count(VK_QCOM_RENDER_PASS_SHADER_RESOLVE_EXTENSION_NAME) == 0)
-		return false;
+	if ((flags & (VK_SUBPASS_DESCRIPTION_FRAGMENT_REGION_BIT_EXT |
+	              VK_SUBPASS_DESCRIPTION_CUSTOM_RESOLVE_BIT_EXT)) != 0)
+	{
+		if (enabled_extensions.count(VK_QCOM_RENDER_PASS_SHADER_RESOLVE_EXTENSION_NAME) == 0 &&
+		    features.custom_resolve.customResolve == VK_FALSE)
+		{
+			return false;
+		}
+	}
 
 	if ((flags & VK_SUBPASS_DESCRIPTION_ENABLE_LEGACY_DITHERING_BIT_EXT) != 0 &&
 	    features.legacy_dithering.legacyDithering == VK_FALSE)
@@ -4124,7 +4158,8 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 			VK_PIPELINE_CREATE_2_DISALLOW_OPACITY_MICROMAP_BIT_ARM |
 			VK_PIPELINE_CREATE_2_RAY_TRACING_ALLOW_SPHERES_AND_LINEAR_SWEPT_SPHERES_BIT_NV |
 			VK_PIPELINE_CREATE_2_PER_LAYER_FRAGMENT_DENSITY_BIT_VALVE |
-			VK_PIPELINE_CREATE_2_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT;
+			VK_PIPELINE_CREATE_2_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT |
+			VK_PIPELINE_CREATE_2_64_BIT_INDEXING_BIT_EXT;
 
 	auto flags = get_effective_flags(info);
 
@@ -4201,6 +4236,10 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 
 	if ((flags & VK_PIPELINE_CREATE_2_PER_LAYER_FRAGMENT_DENSITY_BIT_VALVE) != 0 &&
 	    features.fragment_density_map_layered_valve.fragmentDensityMapLayered == VK_FALSE)
+		return false;
+
+	if ((flags & VK_PIPELINE_CREATE_2_64_BIT_INDEXING_BIT_EXT) != 0 &&
+		features.shader_64_bit_indexing.shader64BitIndexing == VK_FALSE)
 		return false;
 
 	const VkDynamicState *dynamic_states = nullptr;
@@ -4511,7 +4550,8 @@ bool FeatureFilter::Impl::compute_pipeline_is_supported(const VkComputePipelineC
 			VK_PIPELINE_CREATE_2_INDIRECT_BINDABLE_BIT_EXT |
 			VK_PIPELINE_CREATE_2_DISALLOW_OPACITY_MICROMAP_BIT_ARM |
 			VK_PIPELINE_CREATE_2_RAY_TRACING_ALLOW_SPHERES_AND_LINEAR_SWEPT_SPHERES_BIT_NV |
-			VK_PIPELINE_CREATE_2_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT;
+			VK_PIPELINE_CREATE_2_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT |
+			VK_PIPELINE_CREATE_2_64_BIT_INDEXING_BIT_EXT;
 
 	auto flags = get_effective_flags(info);
 
@@ -4553,6 +4593,10 @@ bool FeatureFilter::Impl::compute_pipeline_is_supported(const VkComputePipelineC
 	    features.ray_tracing_linear_swept_spheres_nv.linearSweptSpheres == VK_FALSE)
 		return false;
 
+	if ((flags & VK_PIPELINE_CREATE_2_64_BIT_INDEXING_BIT_EXT) != 0 &&
+	    features.shader_64_bit_indexing.shader64BitIndexing == VK_FALSE)
+		return false;
+
 	if (!subgroup_size_control_is_supported(info->stage))
 		return false;
 
@@ -4585,7 +4629,8 @@ bool FeatureFilter::Impl::raytracing_pipeline_is_supported(const VkRayTracingPip
 			VK_PIPELINE_CREATE_NO_PROTECTED_ACCESS_BIT_EXT |
 			VK_PIPELINE_CREATE_2_DISALLOW_OPACITY_MICROMAP_BIT_ARM |
 			VK_PIPELINE_CREATE_2_RAY_TRACING_ALLOW_SPHERES_AND_LINEAR_SWEPT_SPHERES_BIT_NV |
-			VK_PIPELINE_CREATE_2_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT;
+			VK_PIPELINE_CREATE_2_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT |
+			VK_PIPELINE_CREATE_2_64_BIT_INDEXING_BIT_EXT;
 
 	auto flags = get_effective_flags(info);
 
@@ -4632,6 +4677,10 @@ bool FeatureFilter::Impl::raytracing_pipeline_is_supported(const VkRayTracingPip
 	if ((flags & VK_PIPELINE_CREATE_2_RAY_TRACING_ALLOW_SPHERES_AND_LINEAR_SWEPT_SPHERES_BIT_NV) != 0 &&
 	    features.ray_tracing_linear_swept_spheres_nv.spheres == VK_FALSE &&
 	    features.ray_tracing_linear_swept_spheres_nv.linearSweptSpheres == VK_FALSE)
+		return false;
+
+	if ((flags & VK_PIPELINE_CREATE_2_64_BIT_INDEXING_BIT_EXT) != 0 &&
+		features.shader_64_bit_indexing.shader64BitIndexing == VK_FALSE)
 		return false;
 
 	if (features.ray_tracing_pipeline.rayTracingPipeline == VK_FALSE)
