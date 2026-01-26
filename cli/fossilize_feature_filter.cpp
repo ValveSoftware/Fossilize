@@ -34,6 +34,7 @@
 
 // There is a mismatch in pluralization between extension name and feature structure name which screws up our macros.
 #define VK_ARM_TENSOR_EXTENSION_NAME VK_ARM_TENSORS_EXTENSION_NAME
+#define VK_EXT_SHADER_64_BIT_INDEXING_EXTENSION_NAME VK_EXT_SHADER_64BIT_INDEXING_EXTENSION_NAME
 
 namespace Fossilize
 {
@@ -2368,8 +2369,9 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 		return (props.subgroup.supportedOperations & VK_SUBGROUP_FEATURE_CLUSTERED_BIT) != 0;
 	case spv::CapabilityGroupNonUniformQuad:
 		return (props.subgroup.supportedOperations & VK_SUBGROUP_FEATURE_QUAD_BIT) != 0;
-	case spv::CapabilityGroupNonUniformPartitionedNV:
-		return (props.subgroup.supportedOperations & VK_SUBGROUP_FEATURE_PARTITIONED_BIT_NV) != 0;
+	case spv::CapabilityGroupNonUniformPartitionedEXT:
+		return (props.subgroup.supportedOperations & VK_SUBGROUP_FEATURE_PARTITIONED_BIT_NV) != 0 ||
+		       features.shader_subgroup_partitioned.shaderSubgroupPartitioned == VK_TRUE;
 	case spv::CapabilitySampleMaskPostDepthCoverage:
 		return enabled_extensions.count(VK_EXT_POST_DEPTH_COVERAGE_EXTENSION_NAME) != 0;
 	case spv::CapabilityShaderNonUniform:
@@ -2584,6 +2586,20 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 		return features.tensor_arm.shaderStorageTensorArrayNonUniformIndexing == VK_TRUE;
 	case spv::CapabilityUntypedPointersKHR:
 		return features.shader_untyped_pointers.shaderUntypedPointers == VK_TRUE;
+	case spv::CapabilityDescriptorHeapEXT:
+		return features.descriptor_heap.descriptorHeap == VK_TRUE;
+	case spv::CapabilityLongVectorEXT:
+		return features.long_vector.longVector == VK_TRUE;
+	case spv::CapabilityShader64BitIndexingEXT:
+		return features.shader_64_bit_indexing.shader64BitIndexing == VK_TRUE;
+	case spv::CapabilityFMAKHR:
+		return features.shader_fma.shaderFmaFloat16 == VK_TRUE ||
+		       features.shader_fma.shaderFmaFloat32 == VK_TRUE ||
+		       features.shader_fma.shaderFmaFloat64 == VK_TRUE;
+	case spv::CapabilityShaderInvocationReorderEXT:
+		return enabled_extensions.count(VK_EXT_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME) != 0;
+	case spv::CapabilityPushConstantBanksNV:
+		return features.push_constant_bank_nv.pushConstantBank == VK_TRUE;
 
 	default:
 		LOGE("Unrecognized SPIR-V capability %u, treating as unsupported.\n", unsigned(cap));

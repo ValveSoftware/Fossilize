@@ -147,6 +147,12 @@ struct VulkanFeatures
 	VkPhysicalDevicePartitionedAccelerationStructureFeaturesNV partitioned_acceleration_structure_nv;
 	VkPhysicalDeviceFragmentDensityMapLayeredFeaturesVALVE fragment_density_map_layered_valve;
 	VkPhysicalDevicePipelineCreationCacheControlFeatures pipeline_creation_cache_control;
+	VkPhysicalDeviceDescriptorHeapFeaturesEXT descriptor_heap;
+	VkPhysicalDeviceShaderLongVectorFeaturesEXT long_vector;
+	VkPhysicalDeviceShader64BitIndexingFeaturesEXT shader_64_bit_indexing;
+	VkPhysicalDeviceShaderFmaFeaturesKHR shader_fma;
+	VkPhysicalDevicePushConstantBankFeaturesNV push_constant_bank_nv;
+	VkPhysicalDeviceShaderSubgroupPartitionedFeaturesEXT shader_subgroup_partitioned;
 
 	struct
 	{
@@ -197,6 +203,7 @@ struct VulkanProperties
 	VkPhysicalDeviceBlendOperationAdvancedPropertiesEXT blend_operation_advanced;
 	VkPhysicalDeviceMaintenance7PropertiesKHR maintenance7;
 	VkPhysicalDeviceFragmentDensityMapLayeredPropertiesVALVE fragment_density_map_layered_valve;
+	VkPhysicalDeviceDescriptorHeapPropertiesEXT descriptor_heap;
 
 	struct
 	{

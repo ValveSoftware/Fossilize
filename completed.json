@@ -131,7 +131,8 @@
 		"VK_KHR_video_encode_quantization_map",
 		"VK_KHR_maintenance9",
 		"VK_QCOM_tile_shading",
-		"VK_QCOM_tile_memory_heap"
+		"VK_QCOM_tile_memory_heap",
+		"VK_ARM_data_graph"
 	],
 	"cherry-pick": [
 		"VK_DYNAMIC_STATE_VIEWPORT_W_SCALING_NV",
@@ -341,6 +342,14 @@
 		"TensorsARM",
 		"UntypedPointersKHR",
 		"StorageTensorArrayDynamicIndexingARM",
-		"StorageTensorArrayNonUniformIndexingARM"
+		"StorageTensorArrayNonUniformIndexingARM",
+		"DescriptorHeapEXT",
+		"LongVectorEXT",
+		"Shader64BitIndexingEXT",
+		"FMAKHR",
+		"GraphARM",
+		"ShaderInvocationReorderEXT",
+		"PushConstantBanksNV",
+		"GroupNonUniformPartitionedEXT"
 	]
 }
