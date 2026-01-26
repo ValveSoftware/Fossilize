@@ -226,15 +226,21 @@ def main():
     print('\n\n=== SPIR-V extensions table ===')
     for ext in root.find('spirvextensions').iter('spirvextension'):
         core_version = None
-        vkext = None
+        vkexts = []
         for en in ext.iter('enable'):
             if 'version' in en.attrib:
                 core_version = en.attrib['version']
             if 'extension' in en.attrib:
-                if vkext is not None:
-                    raise('Cannot have more than one extension per SPIR-V extension.')
-                vkext = en.attrib['extension']
-        print('{', '"{0}", "{1}", {2}'.format(ext.attrib['name'], vkext, 'VK_API' + core_version[2:] if core_version else 0), '},')
+                vkexts.append(en.attrib['extension'])
+        spirv_ext = ext.attrib['name']
+
+        if len(vkexts) > 2:
+            print(f'Error: attempting to map SPIR-V ext {spirv_ext} to more than two Vulkan extensions: {vkexts}.')
+            sys.exit(1)
+
+        print('{', '"{0}", "{1}", "{2}", {3}'.format(
+            spirv_ext, vkexts[0], vkexts[1] if len(vkexts) >= 2 else '',
+            'VK_API' + core_version[2:] if core_version else 0), '},')
 
     print('\n\n=== Completed SPIR-V capabilities ===')
     for ext in root.find('spirvcapabilities').iter('spirvcapability'):
