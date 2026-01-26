@@ -890,7 +890,7 @@ static void hash_pnext_struct(const StateRecorder *, Hasher &h,
 	h.u32(info.allowClusterAccelerationStructure);
 }
 
-static void hash_pnext_struct(const StateRecorder *, Hasher &h,
+static bool hash_pnext_struct(const StateRecorder *, Hasher &h,
                               const VkShaderDescriptorSetAndBindingMappingInfoEXT &info)
 {
 	h.u32(info.mappingCount);
@@ -911,8 +911,10 @@ static void hash_pnext_struct(const StateRecorder *, Hasher &h,
 			h.u32(m.samplerHeapOffset);
 			Hash sampler_hash = 0;
 			if (m.pEmbeddedSampler)
-				compute_hash_sampler(*m.pEmbeddedSampler, &sampler_hash);
+				if (!compute_hash_sampler(*m.pEmbeddedSampler, &sampler_hash))
+					return false;
 			h.u64(sampler_hash);
+			return true;
 		};
 
 		const auto hash_base_heap_stride = [&](const auto &m)
@@ -939,7 +941,8 @@ static void hash_pnext_struct(const StateRecorder *, Hasher &h,
 		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_CONSTANT_OFFSET_EXT:
 		{
 			auto &m = mapping.sourceData.constantOffset;
-			hash_base_heap(m);
+			if (!hash_base_heap(m))
+				return false;
 			hash_base_heap_stride(m);
 			break;
 		}
@@ -947,7 +950,8 @@ static void hash_pnext_struct(const StateRecorder *, Hasher &h,
 		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_PUSH_INDEX_EXT:
 		{
 			auto &m = mapping.sourceData.pushIndex;
-			hash_base_heap(m);
+			if (!hash_base_heap(m))
+				return false;
 			hash_base_heap_stride(m);
 			hash_index_heap(m);
 			h.u32(m.pushOffset);
@@ -957,7 +961,8 @@ static void hash_pnext_struct(const StateRecorder *, Hasher &h,
 		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_INDIRECT_INDEX_EXT:
 		{
 			auto &m = mapping.sourceData.indirectIndex;
-			hash_base_heap(m);
+			if (!hash_base_heap(m))
+				return false;
 			hash_base_heap_stride(m);
 			hash_index_heap(m);
 			h.u32(m.pushOffset);
@@ -968,7 +973,8 @@ static void hash_pnext_struct(const StateRecorder *, Hasher &h,
 		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_INDIRECT_INDEX_ARRAY_EXT:
 		{
 			auto &m = mapping.sourceData.indirectIndexArray;
-			hash_base_heap(m);
+			if (!hash_base_heap(m))
+				return false;
 			hash_index_heap(m);
 			h.u32(m.pushOffset);
 			hash_indirection_heap(m);
@@ -1000,7 +1006,8 @@ static void hash_pnext_struct(const StateRecorder *, Hasher &h,
 		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_SHADER_RECORD_INDEX_EXT:
 		{
 			auto &m = mapping.sourceData.shaderRecordIndex;
-			hash_base_heap(m);
+			if (!hash_base_heap(m))
+				return false;
 			hash_base_heap_stride(m);
 			hash_index_heap(m);
 			h.u32(m.shaderRecordOffset);
@@ -1012,6 +1019,7 @@ static void hash_pnext_struct(const StateRecorder *, Hasher &h,
 			h.u32(mapping.sourceData.shaderRecordDataOffset);
 			break;
 		}
+
 		case VK_DESCRIPTOR_MAPPING_SOURCE_SHADER_RECORD_ADDRESS_EXT:
 		{
 			h.u32(mapping.sourceData.shaderRecordAddressOffset);
@@ -1022,6 +1030,8 @@ static void hash_pnext_struct(const StateRecorder *, Hasher &h,
 			break;
 		}
 	}
+
+	return true;
 }
 
 static bool hash_pnext_chain_pdf2(const StateRecorder *recorder, Hasher &h, const void *pNext)
@@ -1863,7 +1873,8 @@ static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const voi
 			break;
 
 		case VK_STRUCTURE_TYPE_SHADER_DESCRIPTOR_SET_AND_BINDING_MAPPING_INFO_EXT:
-			hash_pnext_struct(recorder, h, *static_cast<const VkShaderDescriptorSetAndBindingMappingInfoEXT *>(pNext));
+			if (!hash_pnext_struct(recorder, h, *static_cast<const VkShaderDescriptorSetAndBindingMappingInfoEXT *>(pNext)))
+				return false;
 			break;
 
 		default:
