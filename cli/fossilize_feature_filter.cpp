@@ -595,6 +595,7 @@ struct FeatureFilter::Impl
 	bool aspect_mask_is_supported(VkImageAspectFlags aspect) const;
 	bool format_is_supported(VkFormat, VkFormatFeatureFlags format_features) const;
 	bool attachment_description_flags_are_supported(VkAttachmentDescriptionFlags flags) const;
+	bool descriptor_set_and_binding_mapping_is_supported(const VkShaderDescriptorSetAndBindingMappingInfoEXT &info) const;
 
 	bool stage_limits_are_supported(const VkPipelineShaderStageCreateInfo &info) const;
 
@@ -979,6 +980,136 @@ bool FeatureFilter::Impl::multiview_mask_is_supported(uint32_t mask) const
 			(props.multiview.maxMultiviewViewCount >= 32 ? 0u : (1u << props.multiview.maxMultiviewViewCount)) - 1u;
 
 	return (mask & allowed_mask) == mask;
+}
+
+bool FeatureFilter::Impl::descriptor_set_and_binding_mapping_is_supported(
+	const VkShaderDescriptorSetAndBindingMappingInfoEXT &info) const
+{
+	for (uint32_t i = 0; i < info.mappingCount; i++)
+	{
+		auto &mapping = info.pMappings[i];
+
+		VkDeviceSize minimum_alignment =
+				(std::min)(props.descriptor_heap.bufferDescriptorAlignment,
+				           props.descriptor_heap.imageDescriptorAlignment);
+		minimum_alignment = (std::min)(minimum_alignment, props.descriptor_heap.samplerDescriptorAlignment);
+
+		constexpr VkSpirvResourceTypeFlagsEXT image_types =
+			VK_SPIRV_RESOURCE_TYPE_SAMPLED_IMAGE_BIT_EXT |
+			VK_SPIRV_RESOURCE_TYPE_READ_ONLY_IMAGE_BIT_EXT |
+			VK_SPIRV_RESOURCE_TYPE_READ_WRITE_IMAGE_BIT_EXT |
+			VK_SPIRV_RESOURCE_TYPE_COMBINED_SAMPLED_IMAGE_BIT_EXT |
+			VK_SPIRV_RESOURCE_TYPE_UNIFORM_BUFFER_BIT_EXT |
+			VK_SPIRV_RESOURCE_TYPE_READ_ONLY_STORAGE_BUFFER_BIT_EXT |
+			VK_SPIRV_RESOURCE_TYPE_READ_WRITE_STORAGE_BUFFER_BIT_EXT |
+			VK_SPIRV_RESOURCE_TYPE_ACCELERATION_STRUCTURE_BIT_EXT;
+
+		constexpr VkSpirvResourceTypeFlagsEXT buffer_types =
+			VK_SPIRV_RESOURCE_TYPE_UNIFORM_BUFFER_BIT_EXT |
+			VK_SPIRV_RESOURCE_TYPE_READ_ONLY_STORAGE_BUFFER_BIT_EXT |
+			VK_SPIRV_RESOURCE_TYPE_READ_WRITE_STORAGE_BUFFER_BIT_EXT |
+			VK_SPIRV_RESOURCE_TYPE_ACCELERATION_STRUCTURE_BIT_EXT;
+
+		bool binds_to_any = mapping.resourceMask == VK_SPIRV_RESOURCE_TYPE_ALL_EXT;
+		bool binds_to_image = (mapping.resourceMask & image_types) != 0 && !binds_to_any;
+		bool binds_to_buffer = (mapping.resourceMask & buffer_types) != 0 && !binds_to_any;
+		bool binds_to_sampler = (mapping.resourceMask & VK_SPIRV_RESOURCE_TYPE_SAMPLER_BIT_EXT) != 0 && !binds_to_any;
+		bool binds_to_combined_sampler =
+			(mapping.resourceMask & VK_SPIRV_RESOURCE_TYPE_COMBINED_SAMPLED_IMAGE_BIT_EXT) != 0;
+
+		VkDeviceSize target_alignment = 1;
+		VkDeviceSize combined_alignment = 1;
+		if (binds_to_image)
+			target_alignment = (std::max)(target_alignment, props.descriptor_heap.imageDescriptorAlignment);
+		if (binds_to_buffer)
+			target_alignment = (std::max)(target_alignment, props.descriptor_heap.bufferDescriptorAlignment);
+		if (binds_to_sampler)
+			target_alignment = (std::max)(target_alignment, props.descriptor_heap.samplerDescriptorAlignment);
+		if (binds_to_combined_sampler)
+			combined_alignment = (std::max)(combined_alignment, props.descriptor_heap.samplerDescriptorAlignment);
+		if (binds_to_any)
+		{
+			target_alignment = (std::max)(target_alignment, minimum_alignment);
+			combined_alignment = (std::max)(combined_alignment, props.descriptor_heap.samplerDescriptorAlignment);
+		}
+		target_alignment--;
+		combined_alignment--;
+
+		const auto validate_alignments = [&](const auto &m)
+		{
+			bool mapping_is_pure_embedded_sampler = m.pEmbeddedSampler != nullptr &&
+			                                        mapping.resourceMask == VK_SPIRV_RESOURCE_TYPE_SAMPLER_BIT_EXT;
+
+			if (!mapping_is_pure_embedded_sampler)
+			{
+				if (m.heapOffset & target_alignment)
+					return false;
+				if (m.heapArrayStride & target_alignment)
+					return false;
+			}
+
+			if (binds_to_combined_sampler)
+			{
+				if (m.samplerHeapOffset & combined_alignment)
+					return false;
+				if (m.samplerHeapArrayStride & combined_alignment)
+					return false;
+			}
+
+			return true;
+		};
+
+		// Validating alignment is tricky, since it depends on the actual types used in the shader.
+		// Hope nothing blows up. It's possible we need to look at the shader in question to get exact validity,
+		// but that'd be needlessly annoying.
+		// If the application is using explicit type mapping, we validate as intended.
+		// For ALL mapping, we accept it if the minimum alignment requirement is sound.
+		switch (mapping.source)
+		{
+		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_CONSTANT_OFFSET_EXT:
+			if (!validate_alignments(mapping.sourceData.constantOffset))
+				return false;
+			break;
+
+		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_PUSH_INDEX_EXT:
+			if (!validate_alignments(mapping.sourceData.pushIndex))
+				return false;
+			break;
+
+		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_INDIRECT_INDEX_ARRAY_EXT:
+		{
+			auto &m = mapping.sourceData.indirectIndexArray;
+			bool mapping_is_pure_embedded_sampler = m.pEmbeddedSampler != nullptr &&
+			                                        mapping.resourceMask == VK_SPIRV_RESOURCE_TYPE_SAMPLER_BIT_EXT;
+
+			// IndexArray does not have array stride since each individual descriptor has its own indirection.
+			if (!mapping_is_pure_embedded_sampler)
+				if (m.heapOffset & target_alignment)
+					return false;
+
+			if (binds_to_combined_sampler)
+				if (m.samplerHeapOffset & combined_alignment)
+					return false;
+
+			break;
+		}
+
+		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_INDIRECT_INDEX_EXT:
+			if (!validate_alignments(mapping.sourceData.indirectIndex))
+				return false;
+			break;
+
+		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_SHADER_RECORD_INDEX_EXT:
+			if (!validate_alignments(mapping.sourceData.shaderRecordIndex))
+				return false;
+			break;
+
+		default:
+			break;
+		}
+	}
+
+	return true;
 }
 
 bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
@@ -1615,6 +1746,16 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 		case VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CLUSTER_ACCELERATION_STRUCTURE_CREATE_INFO_NV:
 		{
 			if (features.cluster_acceleration_structure_nv.clusterAccelerationStructure == VK_FALSE)
+				return false;
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_SHADER_DESCRIPTOR_SET_AND_BINDING_MAPPING_INFO_EXT:
+		{
+			auto *info = static_cast<const VkShaderDescriptorSetAndBindingMappingInfoEXT *>(pNext);
+			if (features.descriptor_heap.descriptorHeap == VK_FALSE)
+				return false;
+			if (!descriptor_set_and_binding_mapping_is_supported(*info))
 				return false;
 			break;
 		}
