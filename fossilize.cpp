@@ -957,6 +957,7 @@ static bool hash_pnext_struct(const StateRecorder *, Hasher &h,
 			hash_base_heap_stride(m);
 			hash_index_heap(m);
 			h.u32(m.pushOffset);
+			h.u32(m.samplerPushOffset);
 			break;
 		}
 
@@ -979,6 +980,7 @@ static bool hash_pnext_struct(const StateRecorder *, Hasher &h,
 				return false;
 			hash_index_heap(m);
 			h.u32(m.pushOffset);
+			h.u32(m.useCombinedImageSamplerIndex);
 			hash_indirection_heap(m);
 			break;
 		}
@@ -1013,6 +1015,7 @@ static bool hash_pnext_struct(const StateRecorder *, Hasher &h,
 			hash_base_heap_stride(m);
 			hash_index_heap(m);
 			h.u32(m.shaderRecordOffset);
+			h.u32(m.samplerShaderRecordOffset);
 			break;
 		}
 
@@ -9988,6 +9991,175 @@ static bool json_value(const VkRayTracingPipelineClusterAccelerationStructureCre
 }
 
 template <typename Allocator>
+static bool json_value(const VkShaderDescriptorSetAndBindingMappingInfoEXT &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+
+	Value mappings(kArrayType);
+	for (uint32_t i = 0; i < create_info.mappingCount; i++)
+	{
+		auto &map = create_info.pMappings[i];
+		Value mapping(kObjectType);
+		mapping.AddMember("descriptorSet", map.descriptorSet, alloc);
+		mapping.AddMember("firstBinding", map.firstBinding, alloc);
+		mapping.AddMember("bindingCount", map.bindingCount, alloc);
+		mapping.AddMember("resourceMask", map.resourceMask, alloc);
+		mapping.AddMember("source", map.source, alloc);
+
+		Value source_data(kObjectType);
+		Value uni(kObjectType);
+
+		const auto add_heap_offset = [&](const auto &m)
+		{
+			uni.AddMember("heapOffset", m.heapOffset, alloc);
+			uni.AddMember("samplerHeapOffset", m.samplerHeapOffset, alloc);
+		};
+
+		const auto add_heap_array_stride = [&](const auto &m)
+		{
+			uni.AddMember("heapArrayStride", m.heapArrayStride, alloc);
+			uni.AddMember("samplerHeapArrayStride", m.samplerHeapArrayStride, alloc);
+		};
+
+		const auto add_heap_index_stride = [&](const auto &m)
+		{
+			uni.AddMember("heapIndexStride", m.heapIndexStride, alloc);
+			uni.AddMember("samplerHeapIndexStride", m.samplerHeapIndexStride, alloc);
+			uni.AddMember("useCombinedImageSamplerIndex", m.useCombinedImageSamplerIndex, alloc);
+		};
+
+		const auto add_embedded_sampler = [&](const auto &m)
+		{
+			if (m.pEmbeddedSampler)
+			{
+				Value samp;
+				if (!json_value(*m.pEmbeddedSampler, alloc, &samp))
+					return false;
+				uni.AddMember("embeddedSampler", samp, alloc);
+			}
+
+			return true;
+		};
+
+		switch (map.source)
+		{
+		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_CONSTANT_OFFSET_EXT:
+		{
+			auto &m = map.sourceData.constantOffset;
+			add_heap_offset(m);
+			add_heap_array_stride(m);
+			if (!add_embedded_sampler(m))
+				return false;
+			source_data.AddMember("constantOffset", uni, alloc);
+			break;
+		}
+
+		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_PUSH_INDEX_EXT:
+		{
+			auto &m = map.sourceData.pushIndex;
+			add_heap_offset(m);
+			add_heap_array_stride(m);
+			add_heap_index_stride(m);
+			if (!add_embedded_sampler(m))
+				return false;
+			uni.AddMember("pushOffset", m.pushOffset, alloc);
+			uni.AddMember("samplerPushOffset", m.samplerPushOffset, alloc);
+			source_data.AddMember("pushIndex", uni, alloc);
+			break;
+		}
+
+		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_INDIRECT_INDEX_EXT:
+		{
+			auto &m = map.sourceData.indirectIndex;
+			add_heap_offset(m);
+			add_heap_array_stride(m);
+			add_heap_index_stride(m);
+			if (!add_embedded_sampler(m))
+				return false;
+			uni.AddMember("pushOffset", m.pushOffset, alloc);
+			uni.AddMember("addressOffset", m.addressOffset, alloc);
+			uni.AddMember("samplerAddressOffset", m.samplerAddressOffset, alloc);
+			source_data.AddMember("indirectIndex", uni, alloc);
+			break;
+		}
+
+		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_INDIRECT_INDEX_ARRAY_EXT:
+		{
+			auto &m = map.sourceData.indirectIndexArray;
+			add_heap_offset(m);
+			add_heap_index_stride(m);
+			if (!add_embedded_sampler(m))
+				return false;
+			uni.AddMember("pushOffset", m.pushOffset, alloc);
+			uni.AddMember("addressOffset", m.addressOffset, alloc);
+			uni.AddMember("samplerAddressOffset", m.samplerAddressOffset, alloc);
+			source_data.AddMember("indirectIndex", uni, alloc);
+			break;
+		}
+
+		case VK_DESCRIPTOR_MAPPING_SOURCE_RESOURCE_HEAP_DATA_EXT:
+		{
+			auto &m = map.sourceData.heapData;
+			uni.AddMember("heapOffset", m.heapOffset, alloc);
+			uni.AddMember("pushOffset", m.pushOffset, alloc);
+			source_data.AddMember("heapData", uni, alloc);
+			break;
+		}
+
+		case VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_DATA_EXT:
+			source_data.AddMember("pushDataOffset", map.sourceData.pushDataOffset, alloc);
+			break;
+
+		case VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT:
+			source_data.AddMember("pushAddressOffset", map.sourceData.pushAddressOffset, alloc);
+			break;
+
+		case VK_DESCRIPTOR_MAPPING_SOURCE_INDIRECT_ADDRESS_EXT:
+		{
+			auto &m = map.sourceData.indirectAddress;
+			uni.AddMember("pushOffset", m.pushOffset, alloc);
+			uni.AddMember("addressOffset", m.addressOffset, alloc);
+			source_data.AddMember("indirectAddress", uni, alloc);
+			break;
+		}
+
+		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_SHADER_RECORD_INDEX_EXT:
+		{
+			auto &m = map.sourceData.shaderRecordIndex;
+			add_heap_offset(m);
+			add_heap_array_stride(m);
+			add_heap_index_stride(m);
+			if (!add_embedded_sampler(m))
+				return false;
+			uni.AddMember("shaderRecordOffset", m.shaderRecordOffset, alloc);
+			uni.AddMember("samplerShaderRecordOffset", m.samplerShaderRecordOffset, alloc);
+			source_data.AddMember("shaderRecordIndex", uni, alloc);
+			break;
+		}
+
+		case VK_DESCRIPTOR_MAPPING_SOURCE_SHADER_RECORD_DATA_EXT:
+			source_data.AddMember("shaderRecordDataOffset", map.sourceData.shaderRecordDataOffset, alloc);
+			break;
+
+		case VK_DESCRIPTOR_MAPPING_SOURCE_SHADER_RECORD_ADDRESS_EXT:
+			source_data.AddMember("shaderRecordAddressOffset", map.sourceData.shaderRecordAddressOffset, alloc);
+			break;
+
+		default:
+			return false;
+		}
+
+		mapping.AddMember("sourceData", source_data, alloc);
+		mappings.PushBack(mapping, alloc);
+	}
+	value.AddMember("mappings", mappings, alloc);
+
+	*out_value = value;
+	return true;
+}
+
+template <typename Allocator>
 static bool json_value(const VkSubpassDescriptionDepthStencilResolve &create_info, Allocator &alloc, Value *out_value);
 template <typename Allocator>
 static bool json_value(const VkFragmentShadingRateAttachmentInfoKHR &create_info, Allocator &alloc, Value *out_value);
@@ -10219,6 +10391,11 @@ static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *o
 
 		case VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CLUSTER_ACCELERATION_STRUCTURE_CREATE_INFO_NV:
 			if (!json_value(*static_cast<const VkRayTracingPipelineClusterAccelerationStructureCreateInfoNV *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_SHADER_DESCRIPTOR_SET_AND_BINDING_MAPPING_INFO_EXT:
+			if (!json_value(*static_cast<const VkShaderDescriptorSetAndBindingMappingInfoEXT *>(pNext), alloc, &next))
 				return false;
 			break;
 
