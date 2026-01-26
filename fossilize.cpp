@@ -540,6 +540,8 @@ struct StateRecorder::Impl
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkRenderingInputAttachmentIndexInfoKHR *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkShaderDescriptorSetAndBindingMappingInfoEXT *create_info,
+	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	template <typename T>
 	void *copy_pnext_struct_simple(const T *create_info, ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 
@@ -6246,6 +6248,55 @@ void *StateRecorder::Impl::copy_pnext_struct(const VkRenderingInputAttachmentInd
 	return loc_info;
 }
 
+void *StateRecorder::Impl::copy_pnext_struct(
+	const VkShaderDescriptorSetAndBindingMappingInfoEXT *create_info, ScratchAllocator &alloc)
+{
+	auto *info = copy(create_info, 1, alloc);
+	info->pMappings = copy(info->pMappings, info->mappingCount, alloc);
+
+	for (uint32_t i = 0; i < info->mappingCount; i++)
+	{
+		auto &mapping = const_cast<VkDescriptorSetAndBindingMappingEXT &>(info->pMappings[i]);
+
+		const auto embedded_copy = [&](const VkSamplerCreateInfo *&sampler_info)
+		{
+			VkSamplerCreateInfo *out_info;
+			if (copy_sampler(sampler_info, alloc, &out_info))
+				sampler_info = out_info;
+			else
+				sampler_info = nullptr;
+		};
+
+		switch (mapping.source)
+		{
+		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_CONSTANT_OFFSET_EXT:
+			embedded_copy(mapping.sourceData.constantOffset.pEmbeddedSampler);
+			break;
+
+		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_PUSH_INDEX_EXT:
+			embedded_copy(mapping.sourceData.pushIndex.pEmbeddedSampler);
+			break;
+
+		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_INDIRECT_INDEX_EXT:
+			embedded_copy(mapping.sourceData.indirectIndex.pEmbeddedSampler);
+			break;
+
+		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_INDIRECT_INDEX_ARRAY_EXT:
+			embedded_copy(mapping.sourceData.indirectIndexArray.pEmbeddedSampler);
+			break;
+
+		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_SHADER_RECORD_INDEX_EXT:
+			embedded_copy(mapping.sourceData.shaderRecordIndex.pEmbeddedSampler);
+			break;
+
+		default:
+			break;
+		}
+	}
+
+	return info;
+}
+
 template <typename T>
 void *StateRecorder::Impl::copy_pnext_struct_simple(const T *create_info, ScratchAllocator &alloc)
 {
@@ -6609,6 +6660,13 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 		{
 			auto *ci = static_cast<const VkRayTracingPipelineClusterAccelerationStructureCreateInfoNV *>(pNext);
 			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_SHADER_DESCRIPTOR_SET_AND_BINDING_MAPPING_INFO_EXT:
+		{
+			auto *ci = static_cast<const VkShaderDescriptorSetAndBindingMappingInfoEXT *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
 			break;
 		}
 
