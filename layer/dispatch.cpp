@@ -1259,6 +1259,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL CreateSampler(VkDevice device, const VkSam
 	auto *layer = get_device_layer(device);
 	auto res = layer->getTable()->CreateSampler(device, pCreateInfo, pCallbacks, pSampler);
 
+	// If included, this cannot affect compilation. Avoids error spam due to "missing pNext type".
+	if (findpNext(pCreateInfo, VK_STRUCTURE_TYPE_SAMPLER_CUSTOM_BORDER_COLOR_INDEX_CREATE_INFO_EXT))
+		return res;
+
 	// Safety against this being called through instance get proc address.
 	// We conservatively allow that case to hook this entry point.
 	if (res == VK_SUCCESS && layer->getInstance()->recordsImmutableSamplers())

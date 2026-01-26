@@ -3172,6 +3172,8 @@ bool FeatureFilter::Impl::access_mask_is_supported(VkAccessFlags2 access) const
 			VK_ACCESS_2_COMMAND_PREPROCESS_WRITE_BIT_EXT |
 			VK_ACCESS_2_OPTICAL_FLOW_READ_BIT_NV |
 			VK_ACCESS_2_OPTICAL_FLOW_WRITE_BIT_NV |
+			VK_ACCESS_2_SAMPLER_HEAP_READ_BIT_EXT |
+			VK_ACCESS_2_RESOURCE_HEAP_READ_BIT_EXT |
 			sync2_flags;
 
 	if (access & ~supported_flags)
@@ -3236,6 +3238,10 @@ bool FeatureFilter::Impl::access_mask_is_supported(VkAccessFlags2 access) const
 	if ((access & (VK_ACCESS_2_OPTICAL_FLOW_READ_BIT_NV |
 	               VK_ACCESS_2_OPTICAL_FLOW_WRITE_BIT_NV)) != 0 &&
 	    features.optical_flow_nv.opticalFlow == VK_FALSE)
+		return false;
+
+	if ((access & (VK_ACCESS_2_SAMPLER_HEAP_READ_BIT_EXT | VK_ACCESS_2_RESOURCE_HEAP_READ_BIT_EXT)) != 0 &&
+	    features.descriptor_heap.descriptorHeap == VK_FALSE)
 		return false;
 
 	return true;
@@ -4159,7 +4165,8 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 			VK_PIPELINE_CREATE_2_RAY_TRACING_ALLOW_SPHERES_AND_LINEAR_SWEPT_SPHERES_BIT_NV |
 			VK_PIPELINE_CREATE_2_PER_LAYER_FRAGMENT_DENSITY_BIT_VALVE |
 			VK_PIPELINE_CREATE_2_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT |
-			VK_PIPELINE_CREATE_2_64_BIT_INDEXING_BIT_EXT;
+			VK_PIPELINE_CREATE_2_64_BIT_INDEXING_BIT_EXT |
+			VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT;
 
 	auto flags = get_effective_flags(info);
 
@@ -4240,6 +4247,10 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 
 	if ((flags & VK_PIPELINE_CREATE_2_64_BIT_INDEXING_BIT_EXT) != 0 &&
 		features.shader_64_bit_indexing.shader64BitIndexing == VK_FALSE)
+		return false;
+
+	if ((flags & VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT) != 0 &&
+		features.descriptor_heap.descriptorHeap == VK_FALSE)
 		return false;
 
 	const VkDynamicState *dynamic_states = nullptr;
@@ -4551,7 +4562,8 @@ bool FeatureFilter::Impl::compute_pipeline_is_supported(const VkComputePipelineC
 			VK_PIPELINE_CREATE_2_DISALLOW_OPACITY_MICROMAP_BIT_ARM |
 			VK_PIPELINE_CREATE_2_RAY_TRACING_ALLOW_SPHERES_AND_LINEAR_SWEPT_SPHERES_BIT_NV |
 			VK_PIPELINE_CREATE_2_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT |
-			VK_PIPELINE_CREATE_2_64_BIT_INDEXING_BIT_EXT;
+			VK_PIPELINE_CREATE_2_64_BIT_INDEXING_BIT_EXT |
+			VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT;
 
 	auto flags = get_effective_flags(info);
 
@@ -4597,6 +4609,10 @@ bool FeatureFilter::Impl::compute_pipeline_is_supported(const VkComputePipelineC
 	    features.shader_64_bit_indexing.shader64BitIndexing == VK_FALSE)
 		return false;
 
+	if ((flags & VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT) != 0 &&
+		features.descriptor_heap.descriptorHeap == VK_FALSE)
+		return false;
+
 	if (!subgroup_size_control_is_supported(info->stage))
 		return false;
 
@@ -4630,7 +4646,8 @@ bool FeatureFilter::Impl::raytracing_pipeline_is_supported(const VkRayTracingPip
 			VK_PIPELINE_CREATE_2_DISALLOW_OPACITY_MICROMAP_BIT_ARM |
 			VK_PIPELINE_CREATE_2_RAY_TRACING_ALLOW_SPHERES_AND_LINEAR_SWEPT_SPHERES_BIT_NV |
 			VK_PIPELINE_CREATE_2_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT |
-			VK_PIPELINE_CREATE_2_64_BIT_INDEXING_BIT_EXT;
+			VK_PIPELINE_CREATE_2_64_BIT_INDEXING_BIT_EXT |
+			VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT;
 
 	auto flags = get_effective_flags(info);
 
@@ -4681,6 +4698,10 @@ bool FeatureFilter::Impl::raytracing_pipeline_is_supported(const VkRayTracingPip
 
 	if ((flags & VK_PIPELINE_CREATE_2_64_BIT_INDEXING_BIT_EXT) != 0 &&
 		features.shader_64_bit_indexing.shader64BitIndexing == VK_FALSE)
+		return false;
+
+	if ((flags & VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT) != 0 &&
+		features.descriptor_heap.descriptorHeap == VK_FALSE)
 		return false;
 
 	if (features.ray_tracing_pipeline.rayTracingPipeline == VK_FALSE)
