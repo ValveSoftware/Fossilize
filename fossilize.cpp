@@ -890,6 +890,140 @@ static void hash_pnext_struct(const StateRecorder *, Hasher &h,
 	h.u32(info.allowClusterAccelerationStructure);
 }
 
+static void hash_pnext_struct(const StateRecorder *, Hasher &h,
+                              const VkShaderDescriptorSetAndBindingMappingInfoEXT &info)
+{
+	h.u32(info.mappingCount);
+	for (uint32_t i = 0; i < info.mappingCount; i++)
+		h.u32(info.pMappings[i].source);
+
+	for (uint32_t i = 0; i < info.mappingCount; i++)
+	{
+		auto &mapping = info.pMappings[i];
+		h.u32(mapping.resourceMask);
+		h.u32(mapping.descriptorSet);
+		h.u32(mapping.firstBinding);
+		h.u32(mapping.bindingCount);
+
+		const auto hash_base_heap = [&](const auto &m)
+		{
+			h.u32(m.heapOffset);
+			h.u32(m.samplerHeapOffset);
+			Hash sampler_hash = 0;
+			if (m.pEmbeddedSampler)
+				compute_hash_sampler(*m.pEmbeddedSampler, &sampler_hash);
+			h.u64(sampler_hash);
+		};
+
+		const auto hash_base_heap_stride = [&](const auto &m)
+		{
+			h.u32(m.heapArrayStride);
+			h.u32(m.samplerHeapArrayStride);
+		};
+
+		const auto hash_index_heap = [&](const auto &m)
+		{
+			h.u32(m.heapIndexStride);
+			h.u32(m.samplerHeapIndexStride);
+			h.u32(m.useCombinedImageSamplerIndex);
+		};
+
+		const auto hash_indirection_heap = [&](const auto &m)
+		{
+			h.u32(m.addressOffset);
+			h.u32(m.samplerAddressOffset);
+		};
+
+		switch (mapping.source)
+		{
+		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_CONSTANT_OFFSET_EXT:
+		{
+			auto &m = mapping.sourceData.constantOffset;
+			hash_base_heap(m);
+			hash_base_heap_stride(m);
+			break;
+		}
+
+		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_PUSH_INDEX_EXT:
+		{
+			auto &m = mapping.sourceData.pushIndex;
+			hash_base_heap(m);
+			hash_base_heap_stride(m);
+			hash_index_heap(m);
+			h.u32(m.pushOffset);
+			break;
+		}
+
+		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_INDIRECT_INDEX_EXT:
+		{
+			auto &m = mapping.sourceData.indirectIndex;
+			hash_base_heap(m);
+			hash_base_heap_stride(m);
+			hash_index_heap(m);
+			h.u32(m.pushOffset);
+			hash_indirection_heap(m);
+			break;
+		}
+
+		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_INDIRECT_INDEX_ARRAY_EXT:
+		{
+			auto &m = mapping.sourceData.indirectIndexArray;
+			hash_base_heap(m);
+			hash_index_heap(m);
+			h.u32(m.pushOffset);
+			hash_indirection_heap(m);
+			break;
+		}
+
+		case VK_DESCRIPTOR_MAPPING_SOURCE_RESOURCE_HEAP_DATA_EXT:
+		{
+			h.u32(mapping.sourceData.heapData.heapOffset);
+			h.u32(mapping.sourceData.heapData.pushOffset);
+			break;
+		}
+
+		case VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_DATA_EXT:
+		{
+			h.u32(mapping.sourceData.pushDataOffset);
+			break;
+		}
+
+		case VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT:
+			h.u32(mapping.sourceData.pushAddressOffset);
+			break;
+
+		case VK_DESCRIPTOR_MAPPING_SOURCE_INDIRECT_ADDRESS_EXT:
+			h.u32(mapping.sourceData.indirectAddress.pushOffset);
+			h.u32(mapping.sourceData.indirectAddress.addressOffset);
+			break;
+
+		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_SHADER_RECORD_INDEX_EXT:
+		{
+			auto &m = mapping.sourceData.shaderRecordIndex;
+			hash_base_heap(m);
+			hash_base_heap_stride(m);
+			hash_index_heap(m);
+			h.u32(m.shaderRecordOffset);
+			break;
+		}
+
+		case VK_DESCRIPTOR_MAPPING_SOURCE_SHADER_RECORD_DATA_EXT:
+		{
+			h.u32(mapping.sourceData.shaderRecordDataOffset);
+			break;
+		}
+		case VK_DESCRIPTOR_MAPPING_SOURCE_SHADER_RECORD_ADDRESS_EXT:
+		{
+			h.u32(mapping.sourceData.shaderRecordAddressOffset);
+			break;
+		}
+
+		default:
+			break;
+		}
+	}
+}
+
 static bool hash_pnext_chain_pdf2(const StateRecorder *recorder, Hasher &h, const void *pNext)
 {
 	while ((pNext = pnext_chain_pdf2_skip_ignored_entries(pNext)) != nullptr)
@@ -1726,6 +1860,10 @@ static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const voi
 
 		case VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CLUSTER_ACCELERATION_STRUCTURE_CREATE_INFO_NV:
 			hash_pnext_struct(recorder, h, *static_cast<const VkRayTracingPipelineClusterAccelerationStructureCreateInfoNV *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_SHADER_DESCRIPTOR_SET_AND_BINDING_MAPPING_INFO_EXT:
+			hash_pnext_struct(recorder, h, *static_cast<const VkShaderDescriptorSetAndBindingMappingInfoEXT *>(pNext));
 			break;
 
 		default:
