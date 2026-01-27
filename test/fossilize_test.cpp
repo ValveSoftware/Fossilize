@@ -2427,13 +2427,17 @@ static void record_raytracing_pipelines(StateRecorder &recorder)
 static void record_descriptor_heap(StateRecorder &recorder)
 {
 	VkComputePipelineCreateInfo info = { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
-	VkDescriptorSetAndBindingMappingEXT mapping = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_AND_BINDING_MAPPING_EXT };
 	VkShaderDescriptorSetAndBindingMappingInfoEXT mapping_info =
 		{ VK_STRUCTURE_TYPE_SHADER_DESCRIPTOR_SET_AND_BINDING_MAPPING_INFO_EXT };
 	VkSamplerCreateInfo sampler_info = { VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+	VkDescriptorSetAndBindingMappingEXT mappings[2];
 
+	for (auto &m : mappings)
+		m = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_AND_BINDING_MAPPING_EXT };
+
+	auto &mapping = mappings[0];
 	mapping_info.mappingCount = 1;
-	mapping_info.pMappings = &mapping;
+	mapping_info.pMappings = &mappings[0];
 
 	info.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
 	info.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -2498,10 +2502,15 @@ static void record_descriptor_heap(StateRecorder &recorder)
 			abort();
 	};
 
-	test_uint_hash_variance(mapping.descriptorSet);
-	test_uint_hash_variance(mapping.firstBinding);
-	test_uint_hash_variance(mapping.bindingCount);
-	test_uint_hash_variance(mapping.resourceMask);
+	test_uint_hash_variance(mapping_info.mappingCount);
+
+	for (auto &m : mappings)
+	{
+		test_uint_hash_variance(m.descriptorSet);
+		test_uint_hash_variance(m.firstBinding);
+		test_uint_hash_variance(m.bindingCount);
+		test_uint_hash_variance(m.resourceMask);
+	}
 
 	{
 		mapping.source = VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_CONSTANT_OFFSET_EXT;
