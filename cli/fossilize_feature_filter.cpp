@@ -49,33 +49,33 @@ void *build_pnext_chain(VulkanFeatures &features, uint32_t api_version,
 	for (uint32_t i = 0; i < extension_count; i++)
 		enabled_extension_set.insert(enabled_extensions[i]);
 
-#define CHAIN(struct_type, member, min_api_version, required_extension, required_extension_alias) \
+#define CHAIN(struct_type, member, min_api_version, supports_extension) \
 	do { \
-        bool is_minimum_api_version = api_version >= min_api_version; \
-		bool supports_extension = enabled_extension_set.count(required_extension) != 0; \
-        if (!supports_extension && required_extension_alias) \
-			supports_extension = enabled_extension_set.count(static_cast<const char *>(required_extension_alias)) != 0; \
-		if (is_minimum_api_version && supports_extension) { \
+		if (api_version >= min_api_version && (supports_extension)) { \
 			member.sType = struct_type; \
 			if (!pNext) pNext = &member; \
 			if (ppNext) *ppNext = &member; \
 			ppNext = &member.pNext; \
 		} \
 	} while (0)
+#define SUPPORTS_EXTENSION(required_extension) enabled_extension_set.count(required_extension) != 0
 
 #define F(struct_type, member, minimum_api_version, required_extension) \
 	CHAIN(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_FEATURES, features.member, \
-	VK_API_VERSION_##minimum_api_version, VK_##required_extension##_EXTENSION_NAME, nullptr)
+		  VK_API_VERSION_##minimum_api_version, SUPPORTS_EXTENSION(VK_##required_extension##_EXTENSION_NAME))
 #define FE(struct_type, member, ext) \
 	CHAIN(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_FEATURES_##ext, features.member, \
-	VK_API_VERSION_1_0, VK_##ext##_##struct_type##_EXTENSION_NAME, nullptr)
+		  VK_API_VERSION_1_0, SUPPORTS_EXTENSION(VK_##ext##_##struct_type##_EXTENSION_NAME))
 #define FE_ALIAS(struct_type, member, ext, ext_alias) \
 	CHAIN(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_FEATURES_##ext, features.member, \
-	VK_API_VERSION_1_0, VK_##ext##_##struct_type##_EXTENSION_NAME, VK_##ext_alias##_##struct_type##_EXTENSION_NAME)
+		  VK_API_VERSION_1_0, \
+		  SUPPORTS_EXTENSION(VK_##ext##_##struct_type##_EXTENSION_NAME) || \
+			  SUPPORTS_EXTENSION(VK_##ext_alias##_##struct_type##_EXTENSION_NAME))
 
 #include "fossilize_feature_filter_features.inc"
 
 #undef CHAIN
+#undef SUPPORTS_EXTENSION
 #undef F
 #undef FE
 #undef FE_ALIAS
@@ -511,36 +511,36 @@ void *build_pnext_chain(VulkanProperties &props, uint32_t api_version,
 	for (uint32_t i = 0; i < extension_count; i++)
 		enabled_extension_set.insert(enabled_extensions[i]);
 
-#define CHAIN(struct_type, member, min_api_version, required_extension, required_extension_alias) \
+#define CHAIN(struct_type, member, min_api_version, supports_extension) \
 	do { \
-		bool is_minimum_api_version = api_version >= min_api_version; \
-		bool supports_extension = required_extension == nullptr || enabled_extension_set.count(static_cast<const char *>(required_extension)) != 0; \
-		if (!supports_extension && required_extension_alias) \
-			supports_extension = enabled_extension_set.count(static_cast<const char *>(required_extension_alias)) != 0; \
-		if (supports_extension && is_minimum_api_version) { \
+		if (api_version >= min_api_version && (supports_extension)) { \
 			member.sType = struct_type; \
 			if (!pNext) pNext = &member; \
 			if (ppNext) *ppNext = &member; \
 			ppNext = &member.pNext; \
 		} \
 	} while (0)
+#define SUPPORTS_EXTENSION(required_extension) enabled_extension_set.count(required_extension) != 0
 
 #define P(struct_type, member, minimum_api_version, required_extension) \
 	CHAIN(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_PROPERTIES, props.member, \
-	VK_API_VERSION_##minimum_api_version, VK_##required_extension##_EXTENSION_NAME, nullptr)
+		  VK_API_VERSION_##minimum_api_version, SUPPORTS_EXTENSION(VK_##required_extension##_EXTENSION_NAME))
 #define P_CORE(struct_type, member, minimum_api_version) \
 	CHAIN(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_PROPERTIES, props.member, \
-	VK_API_VERSION_##minimum_api_version, nullptr, nullptr)
+		  VK_API_VERSION_##minimum_api_version, true)
 #define PE(struct_type, member, ext) \
 	CHAIN(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_PROPERTIES_##ext, props.member, \
-	VK_API_VERSION_1_0, VK_##ext##_##struct_type##_EXTENSION_NAME, nullptr)
+		  VK_API_VERSION_1_0, SUPPORTS_EXTENSION(VK_##ext##_##struct_type##_EXTENSION_NAME))
 #define PE_ALIAS(struct_type, member, ext, ext_alias) \
 	CHAIN(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_##struct_type##_PROPERTIES_##ext, props.member, \
-	VK_API_VERSION_1_0, VK_##ext##_##struct_type##_EXTENSION_NAME, VK_##ext##_##struct_type##_EXTENSION_NAME)
+		  VK_API_VERSION_1_0, \
+		  SUPPORTS_EXTENSION(VK_##ext##_##struct_type##_EXTENSION_NAME) || \
+			  SUPPORTS_EXTENSION(VK_##ext##_##struct_type##_EXTENSION_NAME))
 
 #include "fossilize_feature_filter_properties.inc"
 
 #undef CHAIN
+#undef SUPPORTS_EXTENSION
 #undef P
 #undef P_CORE
 #undef PE
