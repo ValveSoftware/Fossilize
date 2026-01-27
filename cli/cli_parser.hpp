@@ -59,6 +59,8 @@ public:
 
 	const char *next_string();
 
+	size_t next_size();
+
 	bool is_ended_state() const
 	{
 		return ended_state;
