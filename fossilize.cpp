@@ -12273,6 +12273,8 @@ static const void *pnext_chain_skip_ignored_entries(const void *pNext)
 		case VK_STRUCTURE_TYPE_RENDER_PASS_CREATION_FEEDBACK_CREATE_INFO_EXT:
 		case VK_STRUCTURE_TYPE_RENDER_PASS_SUBPASS_FEEDBACK_CREATE_INFO_EXT:
 		case VK_STRUCTURE_TYPE_PIPELINE_BINARY_INFO_KHR:
+		case VK_STRUCTURE_TYPE_SAMPLER_CAPTURE_DESCRIPTOR_DATA_INFO_EXT:
+		case VK_STRUCTURE_TYPE_OPAQUE_CAPTURE_DESCRIPTOR_DATA_CREATE_INFO_EXT:
 			// We need to ignore any pNext struct which represents output information from a pipeline object, or
 			// irrelevant information which only tooling would care about.
 			ignored = true;
