@@ -90,7 +90,8 @@ R"delim(
 				"DummyIgnored",
 				"FragmentShadingRate",
 				"DynamicRendering",
-				"DescriptorBuffer"
+				"DescriptorBuffer",
+				"DescriptorHeap"
 			]
 		},
 		"test2" : { "minimumEngineVersion" : 10, "minimumApplicationVersion" : 1000 },
@@ -420,6 +421,8 @@ R"delim(
 				{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR };
 		VkPhysicalDeviceDescriptorBufferFeaturesEXT descriptor_buffer_features =
 				{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT };
+		VkPhysicalDeviceDescriptorHeapFeaturesEXT descriptor_heap_features =
+				{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_HEAP_FEATURES_EXT };
 
 		props2.properties.vendorID = 1;
 		appinfo.pEngineName = "variance";
@@ -434,6 +437,10 @@ R"delim(
 
 		// Ensure that hashing disabled structs does not change anything either.
 		features2.pNext = &descriptor_buffer_features;
+		if (filter.get_bucket_hash(&props2, &appinfo, &features2) != hash1)
+			return EXIT_FAILURE;
+
+		features2.pNext = &descriptor_heap_features;
 		if (filter.get_bucket_hash(&props2, &appinfo, &features2) != hash1)
 			return EXIT_FAILURE;
 
@@ -478,6 +485,13 @@ R"delim(
 		vulkan12_features.bufferDeviceAddress = VK_TRUE;
 		hash3 = filter.get_bucket_hash(&props2, &appinfo, &features2);
 		if (hash2 != hash3)
+			return EXIT_FAILURE;
+
+		features2.pNext = &descriptor_heap_features;
+		hash1 = filter.get_bucket_hash(&props2, &appinfo, &features2);
+		descriptor_heap_features.descriptorHeap = VK_TRUE;
+		hash2 = filter.get_bucket_hash(&props2, &appinfo, &features2);
+		if (hash1 == hash2)
 			return EXIT_FAILURE;
 	}
 
