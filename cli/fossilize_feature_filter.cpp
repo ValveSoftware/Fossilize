@@ -34,6 +34,7 @@
 
 // There is a mismatch in pluralization between extension name and feature structure name which screws up our macros.
 #define VK_ARM_TENSOR_EXTENSION_NAME VK_ARM_TENSORS_EXTENSION_NAME
+#define VK_EXT_SHADER_64_BIT_INDEXING_EXTENSION_NAME VK_EXT_SHADER_64BIT_INDEXING_EXTENSION_NAME
 
 namespace Fossilize
 {
@@ -593,6 +594,8 @@ struct FeatureFilter::Impl
 	bool shader_stage_mask_is_supported(VkShaderStageFlags stages) const;
 	bool aspect_mask_is_supported(VkImageAspectFlags aspect) const;
 	bool format_is_supported(VkFormat, VkFormatFeatureFlags format_features) const;
+	bool attachment_description_flags_are_supported(VkAttachmentDescriptionFlags flags) const;
+	bool descriptor_set_and_binding_mapping_is_supported(const VkShaderDescriptorSetAndBindingMappingInfoEXT &info) const;
 
 	bool stage_limits_are_supported(const VkPipelineShaderStageCreateInfo &info) const;
 
@@ -977,6 +980,136 @@ bool FeatureFilter::Impl::multiview_mask_is_supported(uint32_t mask) const
 			(props.multiview.maxMultiviewViewCount >= 32 ? 0u : (1u << props.multiview.maxMultiviewViewCount)) - 1u;
 
 	return (mask & allowed_mask) == mask;
+}
+
+bool FeatureFilter::Impl::descriptor_set_and_binding_mapping_is_supported(
+	const VkShaderDescriptorSetAndBindingMappingInfoEXT &info) const
+{
+	for (uint32_t i = 0; i < info.mappingCount; i++)
+	{
+		auto &mapping = info.pMappings[i];
+
+		VkDeviceSize minimum_alignment =
+				(std::min)(props.descriptor_heap.bufferDescriptorAlignment,
+				           props.descriptor_heap.imageDescriptorAlignment);
+		minimum_alignment = (std::min)(minimum_alignment, props.descriptor_heap.samplerDescriptorAlignment);
+
+		constexpr VkSpirvResourceTypeFlagsEXT image_types =
+			VK_SPIRV_RESOURCE_TYPE_SAMPLED_IMAGE_BIT_EXT |
+			VK_SPIRV_RESOURCE_TYPE_READ_ONLY_IMAGE_BIT_EXT |
+			VK_SPIRV_RESOURCE_TYPE_READ_WRITE_IMAGE_BIT_EXT |
+			VK_SPIRV_RESOURCE_TYPE_COMBINED_SAMPLED_IMAGE_BIT_EXT |
+			VK_SPIRV_RESOURCE_TYPE_UNIFORM_BUFFER_BIT_EXT |
+			VK_SPIRV_RESOURCE_TYPE_READ_ONLY_STORAGE_BUFFER_BIT_EXT |
+			VK_SPIRV_RESOURCE_TYPE_READ_WRITE_STORAGE_BUFFER_BIT_EXT |
+			VK_SPIRV_RESOURCE_TYPE_ACCELERATION_STRUCTURE_BIT_EXT;
+
+		constexpr VkSpirvResourceTypeFlagsEXT buffer_types =
+			VK_SPIRV_RESOURCE_TYPE_UNIFORM_BUFFER_BIT_EXT |
+			VK_SPIRV_RESOURCE_TYPE_READ_ONLY_STORAGE_BUFFER_BIT_EXT |
+			VK_SPIRV_RESOURCE_TYPE_READ_WRITE_STORAGE_BUFFER_BIT_EXT |
+			VK_SPIRV_RESOURCE_TYPE_ACCELERATION_STRUCTURE_BIT_EXT;
+
+		bool binds_to_any = mapping.resourceMask == VK_SPIRV_RESOURCE_TYPE_ALL_EXT;
+		bool binds_to_image = (mapping.resourceMask & image_types) != 0 && !binds_to_any;
+		bool binds_to_buffer = (mapping.resourceMask & buffer_types) != 0 && !binds_to_any;
+		bool binds_to_sampler = (mapping.resourceMask & VK_SPIRV_RESOURCE_TYPE_SAMPLER_BIT_EXT) != 0 && !binds_to_any;
+		bool binds_to_combined_sampler =
+			(mapping.resourceMask & VK_SPIRV_RESOURCE_TYPE_COMBINED_SAMPLED_IMAGE_BIT_EXT) != 0;
+
+		VkDeviceSize target_alignment = 1;
+		VkDeviceSize combined_alignment = 1;
+		if (binds_to_image)
+			target_alignment = (std::max)(target_alignment, props.descriptor_heap.imageDescriptorAlignment);
+		if (binds_to_buffer)
+			target_alignment = (std::max)(target_alignment, props.descriptor_heap.bufferDescriptorAlignment);
+		if (binds_to_sampler)
+			target_alignment = (std::max)(target_alignment, props.descriptor_heap.samplerDescriptorAlignment);
+		if (binds_to_combined_sampler)
+			combined_alignment = (std::max)(combined_alignment, props.descriptor_heap.samplerDescriptorAlignment);
+		if (binds_to_any)
+		{
+			target_alignment = (std::max)(target_alignment, minimum_alignment);
+			combined_alignment = (std::max)(combined_alignment, props.descriptor_heap.samplerDescriptorAlignment);
+		}
+		target_alignment--;
+		combined_alignment--;
+
+		const auto validate_alignments = [&](const auto &m)
+		{
+			bool mapping_is_pure_embedded_sampler = m.pEmbeddedSampler != nullptr &&
+			                                        mapping.resourceMask == VK_SPIRV_RESOURCE_TYPE_SAMPLER_BIT_EXT;
+
+			if (!mapping_is_pure_embedded_sampler)
+			{
+				if (m.heapOffset & target_alignment)
+					return false;
+				if (m.heapArrayStride & target_alignment)
+					return false;
+			}
+
+			if (binds_to_combined_sampler)
+			{
+				if (m.samplerHeapOffset & combined_alignment)
+					return false;
+				if (m.samplerHeapArrayStride & combined_alignment)
+					return false;
+			}
+
+			return true;
+		};
+
+		// Validating alignment is tricky, since it depends on the actual types used in the shader.
+		// Hope nothing blows up. It's possible we need to look at the shader in question to get exact validity,
+		// but that'd be needlessly annoying.
+		// If the application is using explicit type mapping, we validate as intended.
+		// For ALL mapping, we accept it if the minimum alignment requirement is sound.
+		switch (mapping.source)
+		{
+		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_CONSTANT_OFFSET_EXT:
+			if (!validate_alignments(mapping.sourceData.constantOffset))
+				return false;
+			break;
+
+		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_PUSH_INDEX_EXT:
+			if (!validate_alignments(mapping.sourceData.pushIndex))
+				return false;
+			break;
+
+		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_INDIRECT_INDEX_ARRAY_EXT:
+		{
+			auto &m = mapping.sourceData.indirectIndexArray;
+			bool mapping_is_pure_embedded_sampler = m.pEmbeddedSampler != nullptr &&
+			                                        mapping.resourceMask == VK_SPIRV_RESOURCE_TYPE_SAMPLER_BIT_EXT;
+
+			// IndexArray does not have array stride since each individual descriptor has its own indirection.
+			if (!mapping_is_pure_embedded_sampler)
+				if (m.heapOffset & target_alignment)
+					return false;
+
+			if (binds_to_combined_sampler)
+				if (m.samplerHeapOffset & combined_alignment)
+					return false;
+
+			break;
+		}
+
+		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_INDIRECT_INDEX_EXT:
+			if (!validate_alignments(mapping.sourceData.indirectIndex))
+				return false;
+			break;
+
+		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_SHADER_RECORD_INDEX_EXT:
+			if (!validate_alignments(mapping.sourceData.shaderRecordIndex))
+				return false;
+			break;
+
+		default:
+			break;
+		}
+	}
+
+	return true;
 }
 
 bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
@@ -1617,6 +1750,16 @@ bool FeatureFilter::Impl::pnext_chain_is_supported(const void *pNext) const
 			break;
 		}
 
+		case VK_STRUCTURE_TYPE_SHADER_DESCRIPTOR_SET_AND_BINDING_MAPPING_INFO_EXT:
+		{
+			auto *info = static_cast<const VkShaderDescriptorSetAndBindingMappingInfoEXT *>(pNext);
+			if (features.descriptor_heap.descriptorHeap == VK_FALSE)
+				return false;
+			if (!descriptor_set_and_binding_mapping_is_supported(*info))
+				return false;
+			break;
+		}
+
 		default:
 			LOGE("Unrecognized pNext sType: %u. Treating as unsupported.\n", unsigned(base->sType));
 			return false;
@@ -2076,105 +2219,113 @@ bool FeatureFilter::Impl::validate_spirv_extension(const std::string &ext) const
 	{
 		const char *spirv_ext;
 		const char *vulkan_ext;
+		const char *alt_vulkan_ext;
 		uint32_t promoted_core_version;
 	} ext_mapping[] = {
 		// Autogenerated table.
-		{ "SPV_KHR_variable_pointers", "VK_KHR_variable_pointers", VK_API_VERSION_1_1 },
-		{ "SPV_AMD_shader_explicit_vertex_parameter", "VK_AMD_shader_explicit_vertex_parameter", 0 },
-		{ "SPV_AMD_gcn_shader", "VK_AMD_gcn_shader", 0 },
-		{ "SPV_AMD_gpu_shader_half_float", "VK_AMD_gpu_shader_half_float", 0 },
-		{ "SPV_AMD_gpu_shader_int16", "VK_AMD_gpu_shader_int16", 0 },
-		{ "SPV_AMD_shader_ballot", "VK_AMD_shader_ballot", 0 },
-		{ "SPV_AMD_shader_fragment_mask", "VK_AMD_shader_fragment_mask", 0 },
-		{ "SPV_AMD_shader_image_load_store_lod", "VK_AMD_shader_image_load_store_lod", 0 },
-		{ "SPV_AMD_shader_trinary_minmax", "VK_AMD_shader_trinary_minmax", 0 },
-		{ "SPV_AMD_texture_gather_bias_lod", "VK_AMD_texture_gather_bias_lod", 0 },
-		{ "SPV_AMD_shader_early_and_late_fragment_tests", "VK_AMD_shader_early_and_late_fragment_tests", 0 },
-		{ "SPV_KHR_shader_draw_parameters", "VK_KHR_shader_draw_parameters", VK_API_VERSION_1_1 },
-		{ "SPV_KHR_8bit_storage", "VK_KHR_8bit_storage", VK_API_VERSION_1_2 },
-		{ "SPV_KHR_16bit_storage", "VK_KHR_16bit_storage", VK_API_VERSION_1_1 },
-		{ "SPV_KHR_shader_clock", "VK_KHR_shader_clock", 0 },
-		{ "SPV_KHR_float_controls", "VK_KHR_shader_float_controls", VK_API_VERSION_1_2 },
-		{ "SPV_KHR_storage_buffer_storage_class", "VK_KHR_storage_buffer_storage_class", VK_API_VERSION_1_1 },
-		{ "SPV_KHR_post_depth_coverage", "VK_EXT_post_depth_coverage", 0 },
-		{ "SPV_EXT_shader_stencil_export", "VK_EXT_shader_stencil_export", 0 },
-		{ "SPV_KHR_shader_ballot", "VK_EXT_shader_subgroup_ballot", 0 },
-		{ "SPV_KHR_subgroup_vote", "VK_EXT_shader_subgroup_vote", 0 },
-		{ "SPV_NV_sample_mask_override_coverage", "VK_NV_sample_mask_override_coverage", 0 },
-		{ "SPV_NV_geometry_shader_passthrough", "VK_NV_geometry_shader_passthrough", 0 },
-		{ "SPV_NV_mesh_shader", "VK_NV_mesh_shader", 0 },
-		{ "SPV_NV_viewport_array2", "VK_NV_viewport_array2", 0 },
-		{ "SPV_NV_shader_subgroup_partitioned", "VK_NV_shader_subgroup_partitioned", 0 },
-		{ "SPV_NV_shader_invocation_reorder", "VK_NV_ray_tracing_invocation_reorder", 0 },
-		{ "SPV_EXT_shader_viewport_index_layer", "VK_EXT_shader_viewport_index_layer", VK_API_VERSION_1_2 },
-		{ "SPV_NVX_multiview_per_view_attributes", "VK_NVX_multiview_per_view_attributes", 0 },
-		{ "SPV_EXT_descriptor_indexing", "VK_EXT_descriptor_indexing", VK_API_VERSION_1_2 },
-		{ "SPV_KHR_vulkan_memory_model", "VK_KHR_vulkan_memory_model", VK_API_VERSION_1_2 },
-		{ "SPV_NV_compute_shader_derivatives", "VK_NV_compute_shader_derivatives", 0 },
-		{ "SPV_NV_fragment_shader_barycentric", "VK_NV_fragment_shader_barycentric", 0 },
-		{ "SPV_NV_shader_image_footprint", "VK_NV_shader_image_footprint", 0 },
-		{ "SPV_NV_shading_rate", "VK_NV_shading_rate_image", 0 },
-		{ "SPV_NV_ray_tracing", "VK_NV_ray_tracing", 0 },
-		{ "SPV_KHR_ray_tracing", "VK_KHR_ray_tracing_pipeline", 0 },
-		{ "SPV_KHR_ray_query", "VK_KHR_ray_query", 0 },
-		{ "SPV_KHR_ray_cull_mask", "VK_KHR_ray_tracing_maintenance1", 0 },
-		{ "SPV_GOOGLE_hlsl_functionality1", "VK_GOOGLE_hlsl_functionality1", 0 },
-		{ "SPV_GOOGLE_user_type", "VK_GOOGLE_user_type", 0 },
-		{ "SPV_GOOGLE_decorate_string", "VK_GOOGLE_decorate_string", 0 },
-		{ "SPV_EXT_fragment_invocation_density", "VK_EXT_fragment_density_map", 0 },
-		{ "SPV_KHR_physical_storage_buffer", "VK_KHR_buffer_device_address", VK_API_VERSION_1_2 },
-		{ "SPV_EXT_physical_storage_buffer", "VK_EXT_buffer_device_address", 0 },
-		{ "SPV_NV_cooperative_matrix", "VK_NV_cooperative_matrix", 0 },
-		{ "SPV_NV_shader_sm_builtins", "VK_NV_shader_sm_builtins", 0 },
-		{ "SPV_EXT_fragment_shader_interlock", "VK_EXT_fragment_shader_interlock", 0 },
-		{ "SPV_EXT_demote_to_helper_invocation", "VK_EXT_shader_demote_to_helper_invocation", VK_API_VERSION_1_3 },
-		{ "SPV_KHR_fragment_shading_rate", "VK_KHR_fragment_shading_rate", 0 },
-		{ "SPV_KHR_non_semantic_info", "VK_KHR_shader_non_semantic_info", VK_API_VERSION_1_3 },
-		{ "SPV_EXT_shader_image_int64", "VK_EXT_shader_image_atomic_int64", 0 },
-		{ "SPV_KHR_terminate_invocation", "VK_KHR_shader_terminate_invocation", VK_API_VERSION_1_3 },
-		{ "SPV_KHR_multiview", "VK_KHR_multiview", VK_API_VERSION_1_1 },
-		{ "SPV_KHR_workgroup_memory_explicit_layout", "VK_KHR_workgroup_memory_explicit_layout", 0 },
-		{ "SPV_EXT_shader_atomic_float_add", "VK_EXT_shader_atomic_float", 0 },
-		{ "SPV_KHR_fragment_shader_barycentric", "VK_KHR_fragment_shader_barycentric", 0 },
-		{ "SPV_KHR_subgroup_uniform_control_flow", "VK_KHR_shader_subgroup_uniform_control_flow", 0 },
-		{ "SPV_EXT_shader_atomic_float_min_max", "VK_EXT_shader_atomic_float2", 0 },
-		{ "SPV_EXT_shader_atomic_float16_add", "VK_EXT_shader_atomic_float2", 0 },
-		{ "SPV_NV_shader_atomic_fp16_vector", "VK_NV_shader_atomic_float16_vector", 0 },
-		{ "SPV_EXT_fragment_fully_covered", "VK_EXT_conservative_rasterization", 0 },
-		{ "SPV_KHR_integer_dot_product", "VK_KHR_shader_integer_dot_product", VK_API_VERSION_1_3 },
-		{ "SPV_INTEL_shader_integer_functions2", "VK_INTEL_shader_integer_functions2", 0 },
-		{ "SPV_KHR_device_group", "VK_KHR_device_group", VK_API_VERSION_1_1 },
-		{ "SPV_QCOM_image_processing", "VK_QCOM_image_processing", 0 },
-		{ "SPV_QCOM_image_processing2", "VK_QCOM_image_processing2", 0 },
-		{ "SPV_EXT_mesh_shader", "VK_EXT_mesh_shader", 0 },
-		{ "SPV_KHR_ray_tracing_position_fetch", "VK_KHR_ray_tracing_position_fetch", 0 },
-		{ "SPV_EXT_shader_tile_image", "VK_EXT_shader_tile_image", 0 },
-		{ "SPV_EXT_opacity_micromap", "VK_EXT_opacity_micromap", 0 },
-		{ "SPV_KHR_cooperative_matrix", "VK_KHR_cooperative_matrix", 0 },
-		{ "SPV_ARM_core_builtins", "VK_ARM_shader_core_builtins", 0 },
-		{ "SPV_AMDX_shader_enqueue", "VK_AMDX_shader_enqueue", 0 },
-		{ "SPV_HUAWEI_cluster_culling_shader", "VK_HUAWEI_cluster_culling_shader", 0 },
-		{ "SPV_HUAWEI_subpass_shading", "VK_HUAWEI_subpass_shading", 0 },
-		{ "SPV_NV_ray_tracing_motion_blur", "VK_NV_ray_tracing_motion_blur", 0 },
-		{ "SPV_KHR_maximal_reconvergence", "VK_KHR_shader_maximal_reconvergence", 0 },
-		{ "SPV_KHR_subgroup_rotate", "VK_KHR_shader_subgroup_rotate", VK_API_VERSION_1_4 },
-		{ "SPV_KHR_expect_assume", "VK_KHR_shader_expect_assume", VK_API_VERSION_1_4 },
-		{ "SPV_KHR_float_controls2", "VK_KHR_shader_float_controls2", VK_API_VERSION_1_4 },
-		{ "SPV_KHR_quad_control", "VK_KHR_shader_quad_control", 0 },
-		{ "SPV_KHR_bfloat16", "VK_KHR_shader_bfloat16", 0 },
-		{ "SPV_NV_raw_access_chains", "VK_NV_raw_access_chains", 0 },
-		{ "SPV_KHR_compute_shader_derivatives", "VK_KHR_compute_shader_derivatives", 0 },
-		{ "SPV_EXT_replicated_composites", "VK_EXT_shader_replicated_composites", 0 },
-		{ "SPV_KHR_relaxed_extended_instruction", "VK_KHR_shader_relaxed_extended_instruction", 0 },
-		{ "SPV_NV_cooperative_matrix2", "VK_NV_cooperative_matrix2", 0 },
-		{ "SPV_NV_tensor_addressing", "VK_NV_cooperative_matrix2", 0 },
-		{ "SPV_NV_linear_swept_spheres", "VK_NV_ray_tracing_linear_swept_spheres", 0 },
-		{ "SPV_NV_cluster_acceleration_structure", "VK_NV_cluster_acceleration_structure", 0 },
-		{ "SPV_NV_cooperative_vector", "VK_NV_cooperative_vector", 0 },
-		{ "SPV_QCOM_tile_shading", "VK_QCOM_tile_shading", 0 },
-		{ "SPV_ARM_tensors", "VK_ARM_tensors", 0 },
-		{ "SPV_EXT_float8", "VK_EXT_shader_float8", 0 },
-		{ "SPV_KHR_untyped_pointers", "VK_KHR_shader_untyped_pointers", 0 },
+		{"SPV_KHR_variable_pointers", "VK_KHR_variable_pointers", "", VK_API_VERSION_1_1},
+		{"SPV_AMD_shader_explicit_vertex_parameter", "VK_AMD_shader_explicit_vertex_parameter", "", 0},
+		{"SPV_AMD_gcn_shader", "VK_AMD_gcn_shader", "", 0},
+		{"SPV_AMD_gpu_shader_half_float", "VK_AMD_gpu_shader_half_float", "", 0},
+		{"SPV_AMD_gpu_shader_int16", "VK_AMD_gpu_shader_int16", "", 0},
+		{"SPV_AMD_shader_ballot", "VK_AMD_shader_ballot", "", 0},
+		{"SPV_AMD_shader_fragment_mask", "VK_AMD_shader_fragment_mask", "", 0},
+		{"SPV_AMD_shader_image_load_store_lod", "VK_AMD_shader_image_load_store_lod", "", 0},
+		{"SPV_AMD_shader_trinary_minmax", "VK_AMD_shader_trinary_minmax", "", 0},
+		{"SPV_AMD_texture_gather_bias_lod", "VK_AMD_texture_gather_bias_lod", "", 0},
+		{"SPV_AMD_shader_early_and_late_fragment_tests", "VK_AMD_shader_early_and_late_fragment_tests", "", 0},
+		{"SPV_KHR_shader_draw_parameters", "VK_KHR_shader_draw_parameters", "", VK_API_VERSION_1_1},
+		{"SPV_KHR_8bit_storage", "VK_KHR_8bit_storage", "", VK_API_VERSION_1_2},
+		{"SPV_KHR_16bit_storage", "VK_KHR_16bit_storage", "", VK_API_VERSION_1_1},
+		{"SPV_KHR_shader_clock", "VK_KHR_shader_clock", "", 0},
+		{"SPV_KHR_float_controls", "VK_KHR_shader_float_controls", "", VK_API_VERSION_1_2},
+		{"SPV_KHR_storage_buffer_storage_class", "VK_KHR_storage_buffer_storage_class", "", VK_API_VERSION_1_1},
+		{"SPV_KHR_post_depth_coverage", "VK_EXT_post_depth_coverage", "", 0},
+		{"SPV_EXT_shader_stencil_export", "VK_EXT_shader_stencil_export", "", 0},
+		{"SPV_KHR_shader_ballot", "VK_EXT_shader_subgroup_ballot", "", 0},
+		{"SPV_KHR_subgroup_vote", "VK_EXT_shader_subgroup_vote", "", 0},
+		{"SPV_NV_sample_mask_override_coverage", "VK_NV_sample_mask_override_coverage", "", 0},
+		{"SPV_NV_geometry_shader_passthrough", "VK_NV_geometry_shader_passthrough", "", 0},
+		{"SPV_NV_mesh_shader", "VK_NV_mesh_shader", "", 0},
+		{"SPV_NV_viewport_array2", "VK_NV_viewport_array2", "", 0},
+		{"SPV_NV_shader_subgroup_partitioned", "VK_NV_shader_subgroup_partitioned", "VK_EXT_shader_subgroup_partitioned", 0},
+		{"SPV_EXT_shader_subgroup_partitioned", "VK_EXT_shader_subgroup_partitioned", "", 0},
+		{"SPV_NV_shader_invocation_reorder", "VK_NV_ray_tracing_invocation_reorder", "", 0},
+		{"SPV_EXT_shader_viewport_index_layer", "VK_EXT_shader_viewport_index_layer", "", VK_API_VERSION_1_2},
+		{"SPV_NVX_multiview_per_view_attributes", "VK_NVX_multiview_per_view_attributes", "", 0},
+		{"SPV_EXT_descriptor_indexing", "VK_EXT_descriptor_indexing", "", VK_API_VERSION_1_2},
+		{"SPV_KHR_vulkan_memory_model", "VK_KHR_vulkan_memory_model", "", VK_API_VERSION_1_2},
+		{"SPV_NV_compute_shader_derivatives", "VK_NV_compute_shader_derivatives", "", 0},
+		{"SPV_NV_fragment_shader_barycentric", "VK_NV_fragment_shader_barycentric", "", 0},
+		{"SPV_NV_shader_image_footprint", "VK_NV_shader_image_footprint", "", 0},
+		{"SPV_NV_shading_rate", "VK_NV_shading_rate_image", "", 0},
+		{"SPV_NV_ray_tracing", "VK_NV_ray_tracing", "", 0},
+		{"SPV_KHR_ray_tracing", "VK_KHR_ray_tracing_pipeline", "", 0},
+		{"SPV_KHR_ray_query", "VK_KHR_ray_query", "", 0},
+		{"SPV_KHR_ray_cull_mask", "VK_KHR_ray_tracing_maintenance1", "", 0},
+		{"SPV_GOOGLE_hlsl_functionality1", "VK_GOOGLE_hlsl_functionality1", "", 0},
+		{"SPV_GOOGLE_user_type", "VK_GOOGLE_user_type", "", 0},
+		{"SPV_GOOGLE_decorate_string", "VK_GOOGLE_decorate_string", "", 0},
+		{"SPV_EXT_fragment_invocation_density", "VK_EXT_fragment_density_map", "", 0},
+		{"SPV_KHR_physical_storage_buffer", "VK_KHR_buffer_device_address", "", VK_API_VERSION_1_2},
+		{"SPV_EXT_physical_storage_buffer", "VK_EXT_buffer_device_address", "", 0},
+		{"SPV_NV_cooperative_matrix", "VK_NV_cooperative_matrix", "", 0},
+		{"SPV_NV_shader_sm_builtins", "VK_NV_shader_sm_builtins", "", 0},
+		{"SPV_EXT_fragment_shader_interlock", "VK_EXT_fragment_shader_interlock", "", 0},
+		{"SPV_EXT_demote_to_helper_invocation", "VK_EXT_shader_demote_to_helper_invocation", "", VK_API_VERSION_1_3},
+		{"SPV_KHR_fragment_shading_rate", "VK_KHR_fragment_shading_rate", "", 0},
+		{"SPV_KHR_non_semantic_info", "VK_KHR_shader_non_semantic_info", "", VK_API_VERSION_1_3},
+		{"SPV_EXT_shader_image_int64", "VK_EXT_shader_image_atomic_int64", "", 0},
+		{"SPV_KHR_terminate_invocation", "VK_KHR_shader_terminate_invocation", "", VK_API_VERSION_1_3},
+		{"SPV_KHR_multiview", "VK_KHR_multiview", "", VK_API_VERSION_1_1},
+		{"SPV_KHR_workgroup_memory_explicit_layout", "VK_KHR_workgroup_memory_explicit_layout", "", 0},
+		{"SPV_EXT_shader_atomic_float_add", "VK_EXT_shader_atomic_float", "", 0},
+		{"SPV_KHR_fragment_shader_barycentric", "VK_KHR_fragment_shader_barycentric", "", 0},
+		{"SPV_KHR_subgroup_uniform_control_flow", "VK_KHR_shader_subgroup_uniform_control_flow", "", 0},
+		{"SPV_EXT_shader_atomic_float_min_max", "VK_EXT_shader_atomic_float2", "", 0},
+		{"SPV_EXT_shader_atomic_float16_add", "VK_EXT_shader_atomic_float2", "", 0},
+		{"SPV_NV_shader_atomic_fp16_vector", "VK_NV_shader_atomic_float16_vector", "", 0},
+		{"SPV_EXT_fragment_fully_covered", "VK_EXT_conservative_rasterization", "", 0},
+		{"SPV_KHR_integer_dot_product", "VK_KHR_shader_integer_dot_product", "", VK_API_VERSION_1_3},
+		{"SPV_INTEL_shader_integer_functions2", "VK_INTEL_shader_integer_functions2", "", 0},
+		{"SPV_KHR_device_group", "VK_KHR_device_group", "", VK_API_VERSION_1_1},
+		{"SPV_QCOM_image_processing", "VK_QCOM_image_processing", "", 0},
+		{"SPV_QCOM_image_processing2", "VK_QCOM_image_processing2", "", 0},
+		{"SPV_EXT_mesh_shader", "VK_EXT_mesh_shader", "", 0},
+		{"SPV_KHR_ray_tracing_position_fetch", "VK_KHR_ray_tracing_position_fetch", "", 0},
+		{"SPV_EXT_shader_tile_image", "VK_EXT_shader_tile_image", "", 0},
+		{"SPV_EXT_opacity_micromap", "VK_EXT_opacity_micromap", "", 0},
+		{"SPV_KHR_cooperative_matrix", "VK_KHR_cooperative_matrix", "", 0},
+		{"SPV_ARM_core_builtins", "VK_ARM_shader_core_builtins", "", 0},
+		{"SPV_HUAWEI_cluster_culling_shader", "VK_HUAWEI_cluster_culling_shader", "", 0},
+		{"SPV_HUAWEI_subpass_shading", "VK_HUAWEI_subpass_shading", "", 0},
+		{"SPV_NV_ray_tracing_motion_blur", "VK_NV_ray_tracing_motion_blur", "", 0},
+		{"SPV_KHR_maximal_reconvergence", "VK_KHR_shader_maximal_reconvergence", "", 0},
+		{"SPV_KHR_subgroup_rotate", "VK_KHR_shader_subgroup_rotate", "", VK_API_VERSION_1_4},
+		{"SPV_KHR_expect_assume", "VK_KHR_shader_expect_assume", "", VK_API_VERSION_1_4},
+		{"SPV_KHR_float_controls2", "VK_KHR_shader_float_controls2", "", VK_API_VERSION_1_4},
+		{"SPV_KHR_fma", "VK_KHR_shader_fma", "", 0},
+		{"SPV_KHR_quad_control", "VK_KHR_shader_quad_control", "", 0},
+		{"SPV_KHR_bfloat16", "VK_KHR_shader_bfloat16", "", 0},
+		{"SPV_NV_raw_access_chains", "VK_NV_raw_access_chains", "", 0},
+		{"SPV_KHR_compute_shader_derivatives", "VK_KHR_compute_shader_derivatives", "", 0},
+		{"SPV_EXT_replicated_composites", "VK_EXT_shader_replicated_composites", "", 0},
+		{"SPV_KHR_relaxed_extended_instruction", "VK_KHR_shader_relaxed_extended_instruction", "", 0},
+		{"SPV_NV_cooperative_matrix2", "VK_NV_cooperative_matrix2", "", 0},
+		{"SPV_NV_tensor_addressing", "VK_NV_cooperative_matrix2", "", 0},
+		{"SPV_NV_linear_swept_spheres", "VK_NV_ray_tracing_linear_swept_spheres", "", 0},
+		{"SPV_NV_cluster_acceleration_structure", "VK_NV_cluster_acceleration_structure", "", 0},
+		{"SPV_NV_cooperative_vector", "VK_NV_cooperative_vector", "", 0},
+		{"SPV_NV_push_constant_bank", "VK_NV_push_constant_bank", "", 0},
+		{"SPV_EXT_shader_invocation_reorder", "VK_EXT_ray_tracing_invocation_reorder", "", 0},
+		{"SPV_QCOM_tile_shading", "VK_QCOM_tile_shading", "", 0},
+		{"SPV_ARM_tensors", "VK_ARM_tensors", "", 0},
+		{"SPV_EXT_float8", "VK_EXT_shader_float8", "", 0},
+		{"SPV_ARM_graph", "VK_ARM_data_graph", "", 0},
+		{"SPV_KHR_untyped_pointers", "VK_KHR_shader_untyped_pointers", "", 0},
+		{"SPV_EXT_shader_64bit_indexing", "VK_EXT_shader_64bit_indexing", "", 0},
+		{"SPV_EXT_long_vector", "VK_EXT_shader_long_vector", "", 0},
+		{"SPV_EXT_descriptor_heap", "VK_EXT_descriptor_heap", "", 0},
 	};
 
 	for (auto &mapping : ext_mapping)
@@ -2184,6 +2335,8 @@ bool FeatureFilter::Impl::validate_spirv_extension(const std::string &ext) const
 			if (mapping.promoted_core_version && api_version >= mapping.promoted_core_version)
 				return true;
 			if (enabled_extensions.count(mapping.vulkan_ext) != 0)
+				return true;
+			if (*mapping.alt_vulkan_ext != '\0' && enabled_extensions.count(mapping.alt_vulkan_ext) != 0)
 				return true;
 			break;
 		}
@@ -2358,8 +2511,9 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 		return (props.subgroup.supportedOperations & VK_SUBGROUP_FEATURE_CLUSTERED_BIT) != 0;
 	case spv::CapabilityGroupNonUniformQuad:
 		return (props.subgroup.supportedOperations & VK_SUBGROUP_FEATURE_QUAD_BIT) != 0;
-	case spv::CapabilityGroupNonUniformPartitionedNV:
-		return (props.subgroup.supportedOperations & VK_SUBGROUP_FEATURE_PARTITIONED_BIT_NV) != 0;
+	case spv::CapabilityGroupNonUniformPartitionedEXT:
+		return (props.subgroup.supportedOperations & VK_SUBGROUP_FEATURE_PARTITIONED_BIT_NV) != 0 ||
+		       features.shader_subgroup_partitioned.shaderSubgroupPartitioned == VK_TRUE;
 	case spv::CapabilitySampleMaskPostDepthCoverage:
 		return enabled_extensions.count(VK_EXT_POST_DEPTH_COVERAGE_EXTENSION_NAME) != 0;
 	case spv::CapabilityShaderNonUniform:
@@ -2574,6 +2728,20 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 		return features.tensor_arm.shaderStorageTensorArrayNonUniformIndexing == VK_TRUE;
 	case spv::CapabilityUntypedPointersKHR:
 		return features.shader_untyped_pointers.shaderUntypedPointers == VK_TRUE;
+	case spv::CapabilityDescriptorHeapEXT:
+		return features.descriptor_heap.descriptorHeap == VK_TRUE;
+	case spv::CapabilityLongVectorEXT:
+		return features.long_vector.longVector == VK_TRUE;
+	case spv::CapabilityShader64BitIndexingEXT:
+		return features.shader_64_bit_indexing.shader64BitIndexing == VK_TRUE;
+	case spv::CapabilityFMAKHR:
+		return features.shader_fma.shaderFmaFloat16 == VK_TRUE ||
+		       features.shader_fma.shaderFmaFloat32 == VK_TRUE ||
+		       features.shader_fma.shaderFmaFloat64 == VK_TRUE;
+	case spv::CapabilityShaderInvocationReorderEXT:
+		return enabled_extensions.count(VK_EXT_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME) != 0;
+	case spv::CapabilityPushConstantBanksNV:
+		return features.push_constant_bank_nv.pushConstantBank == VK_TRUE;
 
 	default:
 		LOGE("Unrecognized SPIR-V capability %u, treating as unsupported.\n", unsigned(cap));
@@ -3145,6 +3313,8 @@ bool FeatureFilter::Impl::access_mask_is_supported(VkAccessFlags2 access) const
 			VK_ACCESS_2_COMMAND_PREPROCESS_WRITE_BIT_EXT |
 			VK_ACCESS_2_OPTICAL_FLOW_READ_BIT_NV |
 			VK_ACCESS_2_OPTICAL_FLOW_WRITE_BIT_NV |
+			VK_ACCESS_2_SAMPLER_HEAP_READ_BIT_EXT |
+			VK_ACCESS_2_RESOURCE_HEAP_READ_BIT_EXT |
 			sync2_flags;
 
 	if (access & ~supported_flags)
@@ -3209,6 +3379,10 @@ bool FeatureFilter::Impl::access_mask_is_supported(VkAccessFlags2 access) const
 	if ((access & (VK_ACCESS_2_OPTICAL_FLOW_READ_BIT_NV |
 	               VK_ACCESS_2_OPTICAL_FLOW_WRITE_BIT_NV)) != 0 &&
 	    features.optical_flow_nv.opticalFlow == VK_FALSE)
+		return false;
+
+	if ((access & (VK_ACCESS_2_SAMPLER_HEAP_READ_BIT_EXT | VK_ACCESS_2_RESOURCE_HEAP_READ_BIT_EXT)) != 0 &&
+	    features.descriptor_heap.descriptorHeap == VK_FALSE)
 		return false;
 
 	return true;
@@ -3509,9 +3683,35 @@ bool FeatureFilter::Impl::attachment_reference2_is_supported(const VkAttachmentR
 	return true;
 }
 
+bool FeatureFilter::Impl::attachment_description_flags_are_supported(VkAttachmentDescriptionFlags flags) const
+{
+	constexpr VkAttachmentDescriptionFlags recognized_flags =
+			VK_ATTACHMENT_DESCRIPTION_RESOLVE_ENABLE_TRANSFER_FUNCTION_BIT_KHR |
+			VK_ATTACHMENT_DESCRIPTION_RESOLVE_SKIP_TRANSFER_FUNCTION_BIT_KHR |
+			VK_ATTACHMENT_DESCRIPTION_MAY_ALIAS_BIT;
+
+	if (flags & ~recognized_flags)
+		return false;
+
+	if ((flags & (
+		     VK_ATTACHMENT_DESCRIPTION_RESOLVE_ENABLE_TRANSFER_FUNCTION_BIT_KHR |
+		     VK_ATTACHMENT_DESCRIPTION_RESOLVE_SKIP_TRANSFER_FUNCTION_BIT_KHR)) != 0)
+	{
+		if (!features.maintenance10.maintenance10)
+			return false;
+		if (!props.maintenance10.resolveSrgbFormatSupportsTransferFunctionControl)
+			return false;
+	}
+
+	return true;
+}
+
 bool FeatureFilter::Impl::attachment_description_is_supported(const VkAttachmentDescription &desc,
                                                               VkFormatFeatureFlags format_features) const
 {
+
+	if (!attachment_description_flags_are_supported(desc.flags))
+		return false;
 	if (!image_layout_is_supported(desc.initialLayout))
 		return false;
 	if (!image_layout_is_supported(desc.finalLayout))
@@ -3533,6 +3733,8 @@ bool FeatureFilter::Impl::attachment_description_is_supported(const VkAttachment
 bool FeatureFilter::Impl::attachment_description2_is_supported(const VkAttachmentDescription2 &desc,
                                                                VkFormatFeatureFlags format_features) const
 {
+	if (!attachment_description_flags_are_supported(desc.flags))
+		return false;
 	if (!pnext_chain_is_supported(desc.pNext))
 		return false;
 	if (!image_layout_is_supported(desc.initialLayout))
@@ -3558,9 +3760,9 @@ bool FeatureFilter::Impl::subpass_description_flags_is_supported(VkSubpassDescri
 	constexpr VkSubpassDescriptionFlags supported_flags =
 			VK_SUBPASS_DESCRIPTION_PER_VIEW_ATTRIBUTES_BIT_NVX |
 			VK_SUBPASS_DESCRIPTION_PER_VIEW_POSITION_X_ONLY_BIT_NVX |
-			VK_SUBPASS_DESCRIPTION_FRAGMENT_REGION_BIT_QCOM |
-			VK_SUBPASS_DESCRIPTION_SHADER_RESOLVE_BIT_QCOM |
-			VK_SUBPASS_DESCRIPTION_ENABLE_LEGACY_DITHERING_BIT_EXT;
+			VK_SUBPASS_DESCRIPTION_ENABLE_LEGACY_DITHERING_BIT_EXT |
+			VK_SUBPASS_DESCRIPTION_CUSTOM_RESOLVE_BIT_EXT |
+			VK_SUBPASS_DESCRIPTION_FRAGMENT_REGION_BIT_EXT;
 
 	if (flags & ~supported_flags)
 		return false;
@@ -3570,10 +3772,15 @@ bool FeatureFilter::Impl::subpass_description_flags_is_supported(VkSubpassDescri
 	    enabled_extensions.count(VK_NVX_MULTIVIEW_PER_VIEW_ATTRIBUTES_EXTENSION_NAME) == 0)
 		return false;
 
-	if ((flags & (VK_SUBPASS_DESCRIPTION_FRAGMENT_REGION_BIT_QCOM |
-	              VK_SUBPASS_DESCRIPTION_SHADER_RESOLVE_BIT_QCOM)) != 0 &&
-	    enabled_extensions.count(VK_QCOM_RENDER_PASS_SHADER_RESOLVE_EXTENSION_NAME) == 0)
-		return false;
+	if ((flags & (VK_SUBPASS_DESCRIPTION_FRAGMENT_REGION_BIT_EXT |
+	              VK_SUBPASS_DESCRIPTION_CUSTOM_RESOLVE_BIT_EXT)) != 0)
+	{
+		if (enabled_extensions.count(VK_QCOM_RENDER_PASS_SHADER_RESOLVE_EXTENSION_NAME) == 0 &&
+		    features.custom_resolve.customResolve == VK_FALSE)
+		{
+			return false;
+		}
+	}
 
 	if ((flags & VK_SUBPASS_DESCRIPTION_ENABLE_LEGACY_DITHERING_BIT_EXT) != 0 &&
 	    features.legacy_dithering.legacyDithering == VK_FALSE)
@@ -4098,7 +4305,9 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 			VK_PIPELINE_CREATE_2_DISALLOW_OPACITY_MICROMAP_BIT_ARM |
 			VK_PIPELINE_CREATE_2_RAY_TRACING_ALLOW_SPHERES_AND_LINEAR_SWEPT_SPHERES_BIT_NV |
 			VK_PIPELINE_CREATE_2_PER_LAYER_FRAGMENT_DENSITY_BIT_VALVE |
-			VK_PIPELINE_CREATE_2_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT;
+			VK_PIPELINE_CREATE_2_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT |
+			VK_PIPELINE_CREATE_2_64_BIT_INDEXING_BIT_EXT |
+			VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT;
 
 	auto flags = get_effective_flags(info);
 
@@ -4175,6 +4384,14 @@ bool FeatureFilter::Impl::graphics_pipeline_is_supported(const VkGraphicsPipelin
 
 	if ((flags & VK_PIPELINE_CREATE_2_PER_LAYER_FRAGMENT_DENSITY_BIT_VALVE) != 0 &&
 	    features.fragment_density_map_layered_valve.fragmentDensityMapLayered == VK_FALSE)
+		return false;
+
+	if ((flags & VK_PIPELINE_CREATE_2_64_BIT_INDEXING_BIT_EXT) != 0 &&
+		features.shader_64_bit_indexing.shader64BitIndexing == VK_FALSE)
+		return false;
+
+	if ((flags & VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT) != 0 &&
+		features.descriptor_heap.descriptorHeap == VK_FALSE)
 		return false;
 
 	const VkDynamicState *dynamic_states = nullptr;
@@ -4485,7 +4702,9 @@ bool FeatureFilter::Impl::compute_pipeline_is_supported(const VkComputePipelineC
 			VK_PIPELINE_CREATE_2_INDIRECT_BINDABLE_BIT_EXT |
 			VK_PIPELINE_CREATE_2_DISALLOW_OPACITY_MICROMAP_BIT_ARM |
 			VK_PIPELINE_CREATE_2_RAY_TRACING_ALLOW_SPHERES_AND_LINEAR_SWEPT_SPHERES_BIT_NV |
-			VK_PIPELINE_CREATE_2_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT;
+			VK_PIPELINE_CREATE_2_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT |
+			VK_PIPELINE_CREATE_2_64_BIT_INDEXING_BIT_EXT |
+			VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT;
 
 	auto flags = get_effective_flags(info);
 
@@ -4527,6 +4746,14 @@ bool FeatureFilter::Impl::compute_pipeline_is_supported(const VkComputePipelineC
 	    features.ray_tracing_linear_swept_spheres_nv.linearSweptSpheres == VK_FALSE)
 		return false;
 
+	if ((flags & VK_PIPELINE_CREATE_2_64_BIT_INDEXING_BIT_EXT) != 0 &&
+	    features.shader_64_bit_indexing.shader64BitIndexing == VK_FALSE)
+		return false;
+
+	if ((flags & VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT) != 0 &&
+		features.descriptor_heap.descriptorHeap == VK_FALSE)
+		return false;
+
 	if (!subgroup_size_control_is_supported(info->stage))
 		return false;
 
@@ -4559,7 +4786,9 @@ bool FeatureFilter::Impl::raytracing_pipeline_is_supported(const VkRayTracingPip
 			VK_PIPELINE_CREATE_NO_PROTECTED_ACCESS_BIT_EXT |
 			VK_PIPELINE_CREATE_2_DISALLOW_OPACITY_MICROMAP_BIT_ARM |
 			VK_PIPELINE_CREATE_2_RAY_TRACING_ALLOW_SPHERES_AND_LINEAR_SWEPT_SPHERES_BIT_NV |
-			VK_PIPELINE_CREATE_2_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT;
+			VK_PIPELINE_CREATE_2_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT |
+			VK_PIPELINE_CREATE_2_64_BIT_INDEXING_BIT_EXT |
+			VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT;
 
 	auto flags = get_effective_flags(info);
 
@@ -4606,6 +4835,14 @@ bool FeatureFilter::Impl::raytracing_pipeline_is_supported(const VkRayTracingPip
 	if ((flags & VK_PIPELINE_CREATE_2_RAY_TRACING_ALLOW_SPHERES_AND_LINEAR_SWEPT_SPHERES_BIT_NV) != 0 &&
 	    features.ray_tracing_linear_swept_spheres_nv.spheres == VK_FALSE &&
 	    features.ray_tracing_linear_swept_spheres_nv.linearSweptSpheres == VK_FALSE)
+		return false;
+
+	if ((flags & VK_PIPELINE_CREATE_2_64_BIT_INDEXING_BIT_EXT) != 0 &&
+		features.shader_64_bit_indexing.shader64BitIndexing == VK_FALSE)
+		return false;
+
+	if ((flags & VK_PIPELINE_CREATE_2_DESCRIPTOR_HEAP_BIT_EXT) != 0 &&
+		features.descriptor_heap.descriptorHeap == VK_FALSE)
 		return false;
 
 	if (features.ray_tracing_pipeline.rayTracingPipeline == VK_FALSE)

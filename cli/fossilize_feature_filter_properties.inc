@@ -39,3 +39,5 @@ PE(SHADER_MODULE_IDENTIFIER, shader_module_identifier, EXT);
 PE(BLEND_OPERATION_ADVANCED, blend_operation_advanced, EXT);
 PE(MAINTENANCE_7, maintenance7, KHR);
 PE(FRAGMENT_DENSITY_MAP_LAYERED, fragment_density_map_layered_valve, VALVE);
+PE(DESCRIPTOR_HEAP, descriptor_heap, EXT);
+PE(MAINTENANCE_10, maintenance10, KHR);
