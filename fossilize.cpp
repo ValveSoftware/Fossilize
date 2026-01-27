@@ -12210,7 +12210,7 @@ void StateRecorder::init_recording_thread(DatabaseInterface *iface)
 	auto level = get_thread_log_level();
 	auto cb = Internal::get_thread_log_callback();
 	auto userdata = Internal::get_thread_log_userdata();
-	impl->worker_thread = std::thread([=]() {
+	impl->worker_thread = std::thread([this, level, cb, userdata]() {
 		set_thread_log_level(level);
 		set_thread_log_callback(cb, userdata);
 		impl->record_task(this, true);
