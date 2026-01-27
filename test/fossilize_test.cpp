@@ -2424,6 +2424,215 @@ static void record_raytracing_pipelines(StateRecorder &recorder)
 		abort();
 }
 
+static void record_descriptor_heap(StateRecorder &recorder)
+{
+	VkComputePipelineCreateInfo info = { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
+	VkDescriptorSetAndBindingMappingEXT mapping = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_AND_BINDING_MAPPING_EXT };
+	VkShaderDescriptorSetAndBindingMappingInfoEXT mapping_info =
+		{ VK_STRUCTURE_TYPE_SHADER_DESCRIPTOR_SET_AND_BINDING_MAPPING_INFO_EXT };
+	VkSamplerCreateInfo sampler_info = { VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+
+	mapping_info.mappingCount = 1;
+	mapping_info.pMappings = &mapping;
+
+	info.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	info.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	info.stage.module = fake_handle<VkShaderModule>(5000);
+	info.stage.pName = "main";
+	info.stage.pNext = &mapping_info;
+
+	// Test that we're hashing every last member based on type.
+	// This is too easy to screw up otherwise.
+	const auto test_uint_hash_variance = [&](uint32_t &value)
+	{
+		Hash prev_h, next_h;
+
+		value = 1;
+		if (!Hashing::compute_hash_compute_pipeline(recorder, info, &prev_h))
+			abort();
+		if (!recorder.record_compute_pipeline(fake_handle<VkPipeline>(1),
+									  info, nullptr, 0))
+			abort();
+
+		value = 2;
+		if (!Hashing::compute_hash_compute_pipeline(recorder, info, &next_h))
+			abort();
+		if (!recorder.record_compute_pipeline(fake_handle<VkPipeline>(1),
+									  info, nullptr, 0))
+			abort();
+
+		if (prev_h == next_h)
+			abort();
+	};
+
+	const auto test_sampler_hash_variance = [&](const VkSamplerCreateInfo *&pEmbedded)
+	{
+		pEmbedded = nullptr;
+		Hash prev_h, next_h;
+
+		if (!Hashing::compute_hash_compute_pipeline(recorder, info, &prev_h))
+			abort();
+		if (!recorder.record_compute_pipeline(fake_handle<VkPipeline>(1),
+									  info, nullptr, 0))
+			abort();
+
+		sampler_info = { VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+		pEmbedded = &sampler_info;
+		if (!Hashing::compute_hash_compute_pipeline(recorder, info, &next_h))
+			abort();
+		if (!recorder.record_compute_pipeline(fake_handle<VkPipeline>(1),
+											  info, nullptr, 0))
+			abort();
+
+		if (prev_h == next_h)
+			abort();
+
+		sampler_info.maxLod = 1.0f;
+		if (!Hashing::compute_hash_compute_pipeline(recorder, info, &prev_h))
+			abort();
+		if (!recorder.record_compute_pipeline(fake_handle<VkPipeline>(1),
+									  info, nullptr, 0))
+			abort();
+
+		if (prev_h == next_h)
+			abort();
+	};
+
+	test_uint_hash_variance(mapping.descriptorSet);
+	test_uint_hash_variance(mapping.firstBinding);
+	test_uint_hash_variance(mapping.bindingCount);
+	test_uint_hash_variance(mapping.resourceMask);
+
+	{
+		mapping.source = VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_CONSTANT_OFFSET_EXT;
+		auto &uni = mapping.sourceData.constantOffset;
+		uni = {};
+		test_uint_hash_variance(uni.heapOffset);
+		test_uint_hash_variance(uni.heapArrayStride);
+		test_sampler_hash_variance(uni.pEmbeddedSampler);
+		test_uint_hash_variance(uni.samplerHeapOffset);
+		test_uint_hash_variance(uni.samplerHeapArrayStride);
+	}
+
+	{
+		mapping.source = VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_PUSH_INDEX_EXT;
+		auto &uni = mapping.sourceData.pushIndex;
+		uni = {};
+		test_uint_hash_variance(uni.heapOffset);
+		test_uint_hash_variance(uni.pushOffset);
+		test_uint_hash_variance(uni.heapIndexStride);
+		test_uint_hash_variance(uni.heapArrayStride);
+		test_sampler_hash_variance(uni.pEmbeddedSampler);
+		test_uint_hash_variance(uni.useCombinedImageSamplerIndex);
+		test_uint_hash_variance(uni.samplerHeapOffset);
+		test_uint_hash_variance(uni.samplerPushOffset);
+		test_uint_hash_variance(uni.samplerHeapIndexStride);
+		test_uint_hash_variance(uni.samplerHeapArrayStride);
+	}
+
+	{
+		mapping.source = VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_INDIRECT_INDEX_EXT;
+		auto &uni = mapping.sourceData.indirectIndex;
+		uni = {};
+		test_uint_hash_variance(uni.heapOffset);
+		test_uint_hash_variance(uni.pushOffset);
+		test_uint_hash_variance(uni.addressOffset);
+		test_uint_hash_variance(uni.heapIndexStride);
+		test_uint_hash_variance(uni.heapArrayStride);
+		test_sampler_hash_variance(uni.pEmbeddedSampler);
+		test_uint_hash_variance(uni.useCombinedImageSamplerIndex);
+		test_uint_hash_variance(uni.samplerHeapOffset);
+		test_uint_hash_variance(uni.samplerPushOffset);
+		test_uint_hash_variance(uni.samplerAddressOffset);
+		test_uint_hash_variance(uni.samplerHeapIndexStride);
+		test_uint_hash_variance(uni.samplerHeapArrayStride);
+	}
+
+	{
+		mapping.source = VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_INDIRECT_INDEX_ARRAY_EXT;
+		auto &uni = mapping.sourceData.indirectIndexArray;
+		uni = {};
+		test_uint_hash_variance(uni.heapOffset);
+		test_uint_hash_variance(uni.pushOffset);
+		test_uint_hash_variance(uni.addressOffset);
+		test_uint_hash_variance(uni.heapIndexStride);
+		test_sampler_hash_variance(uni.pEmbeddedSampler);
+		test_uint_hash_variance(uni.useCombinedImageSamplerIndex);
+		test_uint_hash_variance(uni.samplerHeapOffset);
+		test_uint_hash_variance(uni.samplerPushOffset);
+		test_uint_hash_variance(uni.samplerAddressOffset);
+		test_uint_hash_variance(uni.samplerHeapIndexStride);
+	}
+
+	{
+		mapping.source = VK_DESCRIPTOR_MAPPING_SOURCE_RESOURCE_HEAP_DATA_EXT;
+		auto &uni = mapping.sourceData.heapData;
+		uni = {};
+		test_uint_hash_variance(uni.heapOffset);
+		test_uint_hash_variance(uni.pushOffset);
+	}
+
+	{
+		mapping.source = VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_DATA_EXT;
+		test_uint_hash_variance(mapping.sourceData.pushDataOffset);
+	}
+
+	{
+		mapping.source = VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT;
+		test_uint_hash_variance(mapping.sourceData.pushAddressOffset);
+	}
+
+	{
+		mapping.source = VK_DESCRIPTOR_MAPPING_SOURCE_INDIRECT_ADDRESS_EXT;
+		auto &uni = mapping.sourceData.indirectAddress;
+		uni = {};
+		test_uint_hash_variance(uni.pushOffset);
+		test_uint_hash_variance(uni.addressOffset);
+	}
+
+	{
+		mapping.source = VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_SHADER_RECORD_INDEX_EXT;
+		auto &uni = mapping.sourceData.shaderRecordIndex;
+		uni = {};
+		test_uint_hash_variance(uni.heapOffset);
+		test_uint_hash_variance(uni.shaderRecordOffset);
+		test_uint_hash_variance(uni.heapIndexStride);
+		test_uint_hash_variance(uni.heapArrayStride);
+		test_sampler_hash_variance(uni.pEmbeddedSampler);
+		test_uint_hash_variance(uni.useCombinedImageSamplerIndex);
+		test_uint_hash_variance(uni.samplerHeapOffset);
+		test_uint_hash_variance(uni.samplerShaderRecordOffset);
+		test_uint_hash_variance(uni.samplerHeapIndexStride);
+		test_uint_hash_variance(uni.samplerHeapArrayStride);
+	}
+
+	{
+		mapping.source = VK_DESCRIPTOR_MAPPING_SOURCE_SHADER_RECORD_DATA_EXT;
+		test_uint_hash_variance(mapping.sourceData.shaderRecordDataOffset);
+	}
+
+	{
+		mapping.source = VK_DESCRIPTOR_MAPPING_SOURCE_SHADER_RECORD_ADDRESS_EXT;
+		test_uint_hash_variance(mapping.sourceData.shaderRecordAddressOffset);
+	}
+
+	{
+		Hash hash[2];
+		mapping.sourceData = {};
+
+		mapping.source = VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_DATA_EXT;
+		if (!Hashing::compute_hash_compute_pipeline(recorder, info, &hash[0]))
+			abort();
+
+		mapping.source = VK_DESCRIPTOR_MAPPING_SOURCE_SHADER_RECORD_DATA_EXT;
+		if (!Hashing::compute_hash_compute_pipeline(recorder, info, &hash[1]))
+			abort();
+
+		if (hash[0] == hash[1])
+			abort();
+	}
+}
+
 static bool test_database()
 {
 	remove(".__test_tmp.foz");
@@ -4492,6 +4701,7 @@ int main()
 		record_graphics_pipelines_robustness(recorder);
 		record_pipelines_identifier(recorder);
 		record_pipeline_flags2(recorder);
+		record_descriptor_heap(recorder);
 
 		uint8_t *serialized;
 		size_t serialized_size;

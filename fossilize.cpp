@@ -978,6 +978,7 @@ static bool hash_pnext_struct(const StateRecorder *recorder, Hasher &h,
 			hash_base_heap_stride(m);
 			hash_index_heap(m);
 			h.u32(m.pushOffset);
+			h.u32(m.samplerPushOffset);
 			hash_indirection_heap(m);
 			break;
 		}
@@ -989,6 +990,7 @@ static bool hash_pnext_struct(const StateRecorder *recorder, Hasher &h,
 				return false;
 			hash_index_heap(m);
 			h.u32(m.pushOffset);
+			h.u32(m.samplerPushOffset);
 			h.u32(m.useCombinedImageSamplerIndex);
 			hash_indirection_heap(m);
 			break;
@@ -5151,6 +5153,8 @@ bool StateReplayer::Impl::parse_shader_descriptor_set_and_binding_mapping(
 			if (!parse_pnext_chain(state_mapping["pNext"], &mapping.pNext))
 				return false;
 
+		auto &source_data = state_mapping["sourceData"];
+
 		const auto parse_heap_offset = [](auto &api, const Value &value)
 		{
 			api.heapOffset = value["heapOffset"].GetUint();
@@ -5160,7 +5164,7 @@ bool StateReplayer::Impl::parse_shader_descriptor_set_and_binding_mapping(
 		const auto parse_heap_stride = [](auto &api, const Value &value)
 		{
 			api.heapArrayStride = value["heapArrayStride"].GetUint();
-			api.samplerHeapArrayStride = value["heapArrayStride"].GetUint();
+			api.samplerHeapArrayStride = value["samplerHeapArrayStride"].GetUint();
 		};
 
 		const auto parse_embedded = [&](auto &api, const Value &value)
@@ -5199,7 +5203,7 @@ bool StateReplayer::Impl::parse_shader_descriptor_set_and_binding_mapping(
 		{
 		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_CONSTANT_OFFSET_EXT:
 		{
-			auto &uni = state_mapping["constantOffset"];
+			auto &uni = source_data["constantOffset"];
 			auto &api = mapping.sourceData.constantOffset;
 			parse_heap_offset(api, uni);
 			parse_heap_stride(api, uni);
@@ -5209,7 +5213,7 @@ bool StateReplayer::Impl::parse_shader_descriptor_set_and_binding_mapping(
 		}
 		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_PUSH_INDEX_EXT:
 		{
-			auto &uni = state_mapping["pushIndex"];
+			auto &uni = source_data["pushIndex"];
 			auto &api = mapping.sourceData.pushIndex;
 			parse_heap_offset(api, uni);
 			parse_heap_stride(api, uni);
@@ -5221,7 +5225,7 @@ bool StateReplayer::Impl::parse_shader_descriptor_set_and_binding_mapping(
 		}
 		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_INDIRECT_INDEX_EXT:
 		{
-			auto &uni = state_mapping["indirectIndex"];
+			auto &uni = source_data["indirectIndex"];
 			auto &api = mapping.sourceData.indirectIndex;
 			parse_heap_offset(api, uni);
 			parse_heap_stride(api, uni);
@@ -5234,7 +5238,7 @@ bool StateReplayer::Impl::parse_shader_descriptor_set_and_binding_mapping(
 		}
 		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_INDIRECT_INDEX_ARRAY_EXT:
 		{
-			auto &uni = state_mapping["indirectIndexArray"];
+			auto &uni = source_data["indirectIndexArray"];
 			auto &api = mapping.sourceData.indirectIndexArray;
 			parse_heap_offset(api, uni);
 			parse_heap_index(api, uni);
@@ -5246,7 +5250,7 @@ bool StateReplayer::Impl::parse_shader_descriptor_set_and_binding_mapping(
 		}
 		case VK_DESCRIPTOR_MAPPING_SOURCE_RESOURCE_HEAP_DATA_EXT:
 		{
-			auto &uni = state_mapping["heapData"];
+			auto &uni = source_data["heapData"];
 			auto &api = mapping.sourceData.heapData;
 			api.heapOffset = uni["heapOffset"].GetUint();
 			api.pushOffset = uni["pushOffset"].GetUint();
@@ -5254,17 +5258,17 @@ bool StateReplayer::Impl::parse_shader_descriptor_set_and_binding_mapping(
 		}
 		case VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_DATA_EXT:
 		{
-			mapping.sourceData.pushDataOffset = state_mapping["pushDataOffset"].GetUint();
+			mapping.sourceData.pushDataOffset = source_data["pushDataOffset"].GetUint();
 			break;
 		}
 		case VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT:
 		{
-			mapping.sourceData.pushAddressOffset = state_mapping["pushAddressOffset"].GetUint();
+			mapping.sourceData.pushAddressOffset = source_data["pushAddressOffset"].GetUint();
 			break;
 		}
 		case VK_DESCRIPTOR_MAPPING_SOURCE_INDIRECT_ADDRESS_EXT:
 		{
-			auto &uni = state_mapping["indirectAddress"];
+			auto &uni = source_data["indirectAddress"];
 			auto &api = mapping.sourceData.indirectAddress;
 			api.pushOffset = uni["pushOffset"].GetUint();
 			api.addressOffset = uni["addressOffset"].GetUint();
@@ -5272,7 +5276,7 @@ bool StateReplayer::Impl::parse_shader_descriptor_set_and_binding_mapping(
 		}
 		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_SHADER_RECORD_INDEX_EXT:
 		{
-			auto &uni = state_mapping["shaderRecordIndex"];
+			auto &uni = source_data["shaderRecordIndex"];
 			auto &api = mapping.sourceData.shaderRecordIndex;
 			parse_heap_offset(api, uni);
 			parse_heap_stride(api, uni);
@@ -5285,12 +5289,12 @@ bool StateReplayer::Impl::parse_shader_descriptor_set_and_binding_mapping(
 		}
 		case VK_DESCRIPTOR_MAPPING_SOURCE_SHADER_RECORD_DATA_EXT:
 		{
-			mapping.sourceData.shaderRecordDataOffset = state_mapping["shaderRecordDataOffset"].GetUint();
+			mapping.sourceData.shaderRecordDataOffset = source_data["shaderRecordDataOffset"].GetUint();
 			break;
 		}
 		case VK_DESCRIPTOR_MAPPING_SOURCE_SHADER_RECORD_ADDRESS_EXT:
 		{
-			mapping.sourceData.shaderRecordAddressOffset = state_mapping["shaderRecordAddressOffset"].GetUint();
+			mapping.sourceData.shaderRecordAddressOffset = source_data["shaderRecordAddressOffset"].GetUint();
 			break;
 		}
 		default:
@@ -10248,6 +10252,12 @@ static bool json_value(const VkShaderDescriptorSetAndBindingMappingInfoEXT &crea
 			uni.AddMember("useCombinedImageSamplerIndex", m.useCombinedImageSamplerIndex, alloc);
 		};
 
+		const auto add_push_offset = [&](const auto &m)
+		{
+			uni.AddMember("pushOffset", m.pushOffset, alloc);
+			uni.AddMember("samplerPushOffset", m.samplerPushOffset, alloc);
+		};
+
 		const auto add_embedded_sampler = [&](const auto &m)
 		{
 			if (m.pEmbeddedSampler)
@@ -10282,8 +10292,7 @@ static bool json_value(const VkShaderDescriptorSetAndBindingMappingInfoEXT &crea
 			add_heap_index_stride(m);
 			if (!add_embedded_sampler(m))
 				return false;
-			uni.AddMember("pushOffset", m.pushOffset, alloc);
-			uni.AddMember("samplerPushOffset", m.samplerPushOffset, alloc);
+			add_push_offset(m);
 			source_data.AddMember("pushIndex", uni, alloc);
 			break;
 		}
@@ -10296,7 +10305,7 @@ static bool json_value(const VkShaderDescriptorSetAndBindingMappingInfoEXT &crea
 			add_heap_index_stride(m);
 			if (!add_embedded_sampler(m))
 				return false;
-			uni.AddMember("pushOffset", m.pushOffset, alloc);
+			add_push_offset(m);
 			uni.AddMember("addressOffset", m.addressOffset, alloc);
 			uni.AddMember("samplerAddressOffset", m.samplerAddressOffset, alloc);
 			source_data.AddMember("indirectIndex", uni, alloc);
@@ -10310,10 +10319,10 @@ static bool json_value(const VkShaderDescriptorSetAndBindingMappingInfoEXT &crea
 			add_heap_index_stride(m);
 			if (!add_embedded_sampler(m))
 				return false;
-			uni.AddMember("pushOffset", m.pushOffset, alloc);
+			add_push_offset(m);
 			uni.AddMember("addressOffset", m.addressOffset, alloc);
 			uni.AddMember("samplerAddressOffset", m.samplerAddressOffset, alloc);
-			source_data.AddMember("indirectIndex", uni, alloc);
+			source_data.AddMember("indirectIndexArray", uni, alloc);
 			break;
 		}
 
