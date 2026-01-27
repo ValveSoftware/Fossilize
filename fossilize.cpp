@@ -265,6 +265,7 @@ struct StateReplayer::Impl
 	void forget_handle_references();
 	void forget_pipeline_handle_references();
 	bool parse_samplers(StateCreatorInterface &iface, const Value &samplers) FOSSILIZE_WARN_UNUSED;
+	bool parse_sampler(const Value &sampler, VkSamplerCreateInfo &create_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_descriptor_set_layouts(StateCreatorInterface &iface, DatabaseInterface *resolver, const Value &layouts) FOSSILIZE_WARN_UNUSED;
 	bool parse_pipeline_layouts(StateCreatorInterface &iface, const Value &layouts) FOSSILIZE_WARN_UNUSED;
 	bool parse_shader_modules(StateCreatorInterface &iface, const Value &modules, const uint8_t *varint, size_t varint_size) FOSSILIZE_WARN_UNUSED;
@@ -384,6 +385,7 @@ struct StateReplayer::Impl
 	bool parse_rendering_input_attachment_index_info(const Value &state, VkRenderingInputAttachmentIndexInfoKHR **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_pipeline_fragment_density_map_layered_info(const Value &state, VkPipelineFragmentDensityMapLayeredCreateInfoVALVE **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_ray_tracing_pipeline_cluster_acceleration_structure_info(const Value &state, VkRayTracingPipelineClusterAccelerationStructureCreateInfoNV **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_shader_descriptor_set_and_binding_mapping(const Value &state, VkShaderDescriptorSetAndBindingMappingInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_uints(const Value &attachments, const uint32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	bool parse_sints(const Value &attachments, const int32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	const char *duplicate_string(const char *str, size_t len);
@@ -892,7 +894,11 @@ static void hash_pnext_struct(const StateRecorder *, Hasher &h,
 	h.u32(info.allowClusterAccelerationStructure);
 }
 
-static bool hash_pnext_struct(const StateRecorder *, Hasher &h,
+static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const void *pNext,
+							 const DynamicStateInfo *dynamic_state_info,
+							 VkGraphicsPipelineLibraryFlagsEXT state_flags) FOSSILIZE_WARN_UNUSED;
+
+static bool hash_pnext_struct(const StateRecorder *recorder, Hasher &h,
                               const VkShaderDescriptorSetAndBindingMappingInfoEXT &info)
 {
 	h.u32(info.mappingCount);
@@ -906,6 +912,9 @@ static bool hash_pnext_struct(const StateRecorder *, Hasher &h,
 		h.u32(mapping.descriptorSet);
 		h.u32(mapping.firstBinding);
 		h.u32(mapping.bindingCount);
+
+		if (!hash_pnext_chain(recorder, h, mapping.pNext, nullptr, 0))
+			return false;
 
 		const auto hash_base_heap = [&](const auto &m)
 		{
@@ -1158,10 +1167,6 @@ static Hash compute_hash_application_info_link(Hash app_hash, ResourceTag tag, H
 	h.u64(hash);
 	return h.get();
 }
-
-static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const void *pNext,
-                             const DynamicStateInfo *dynamic_state_info,
-                             VkGraphicsPipelineLibraryFlagsEXT state_flags) FOSSILIZE_WARN_UNUSED;
 
 bool compute_hash_sampler(const VkSamplerCreateInfo &sampler, Hash *out_hash)
 {
@@ -3230,6 +3235,34 @@ bool StateReplayer::Impl::parse_application_info_link(StateCreatorInterface &ifa
 	return true;
 }
 
+bool StateReplayer::Impl::parse_sampler(const Value &obj, VkSamplerCreateInfo &info)
+{
+	info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+
+	info.addressModeU = static_cast<VkSamplerAddressMode>(obj["addressModeU"].GetUint());
+	info.addressModeV = static_cast<VkSamplerAddressMode>(obj["addressModeV"].GetUint());
+	info.addressModeW = static_cast<VkSamplerAddressMode>(obj["addressModeW"].GetUint());
+	info.anisotropyEnable = obj["anisotropyEnable"].GetUint();
+	info.borderColor = static_cast<VkBorderColor>(obj["borderColor"].GetUint());
+	info.compareEnable = obj["compareEnable"].GetUint();
+	info.compareOp = static_cast<VkCompareOp>(obj["compareOp"].GetUint());
+	info.flags = obj["flags"].GetUint();
+	info.magFilter = static_cast<VkFilter>(obj["magFilter"].GetUint());
+	info.minFilter = static_cast<VkFilter>(obj["minFilter"].GetUint());
+	info.maxAnisotropy = obj["maxAnisotropy"].GetFloat();
+	info.mipmapMode = static_cast<VkSamplerMipmapMode>(obj["mipmapMode"].GetUint());
+	info.maxLod = obj["maxLod"].GetFloat();
+	info.minLod = obj["minLod"].GetFloat();
+	info.mipLodBias = obj["mipLodBias"].GetFloat();
+	info.unnormalizedCoordinates = obj["unnormalizedCoordinates"].GetUint();
+
+	if (obj.HasMember("pNext"))
+		if (!parse_pnext_chain(obj["pNext"], &info.pNext))
+			return false;
+
+	return true;
+}
+
 bool StateReplayer::Impl::parse_samplers(StateCreatorInterface &iface, const Value &samplers)
 {
 	auto *infos = allocator.allocate_n_cleared<VkSamplerCreateInfo>(samplers.MemberCount());
@@ -3242,28 +3275,9 @@ bool StateReplayer::Impl::parse_samplers(StateCreatorInterface &iface, const Val
 			continue;
 		auto &obj = itr->value;
 		auto &info = infos[index];
-		info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
 
-		info.addressModeU = static_cast<VkSamplerAddressMode>(obj["addressModeU"].GetUint());
-		info.addressModeV = static_cast<VkSamplerAddressMode>(obj["addressModeV"].GetUint());
-		info.addressModeW = static_cast<VkSamplerAddressMode>(obj["addressModeW"].GetUint());
-		info.anisotropyEnable = obj["anisotropyEnable"].GetUint();
-		info.borderColor = static_cast<VkBorderColor>(obj["borderColor"].GetUint());
-		info.compareEnable = obj["compareEnable"].GetUint();
-		info.compareOp = static_cast<VkCompareOp>(obj["compareOp"].GetUint());
-		info.flags = obj["flags"].GetUint();
-		info.magFilter = static_cast<VkFilter>(obj["magFilter"].GetUint());
-		info.minFilter = static_cast<VkFilter>(obj["minFilter"].GetUint());
-		info.maxAnisotropy = obj["maxAnisotropy"].GetFloat();
-		info.mipmapMode = static_cast<VkSamplerMipmapMode>(obj["mipmapMode"].GetUint());
-		info.maxLod = obj["maxLod"].GetFloat();
-		info.minLod = obj["minLod"].GetFloat();
-		info.mipLodBias = obj["mipLodBias"].GetFloat();
-		info.unnormalizedCoordinates = obj["unnormalizedCoordinates"].GetUint();
-
-		if (obj.HasMember("pNext"))
-			if (!parse_pnext_chain(obj["pNext"], &info.pNext))
-				return false;
+		if (!parse_sampler(obj, info))
+			return false;
 
 		if (!iface.enqueue_create_sampler(hash, &info, &replayed_samplers[hash]))
 			return false;
@@ -5107,6 +5121,186 @@ bool StateReplayer::Impl::parse_ray_tracing_pipeline_cluster_acceleration_struct
 	return true;
 }
 
+bool StateReplayer::Impl::parse_shader_descriptor_set_and_binding_mapping(
+		const Value &state, VkShaderDescriptorSetAndBindingMappingInfoEXT **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkShaderDescriptorSetAndBindingMappingInfoEXT>();
+
+	*out_info = info;
+	if (!state.HasMember("mappings"))
+		return true;
+
+	auto &state_mappings = state["mappings"];
+	info->mappingCount = state_mappings.Size();
+	auto *mappings = allocator.allocate_n_cleared<VkDescriptorSetAndBindingMappingEXT>(info->mappingCount);
+	info->pMappings = mappings;
+
+	for (uint32_t i = 0; i < info->mappingCount; i++)
+	{
+		auto &mapping = mappings[i];
+		auto &state_mapping = state_mappings[i];
+
+		mapping.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_AND_BINDING_MAPPING_EXT;
+		mapping.descriptorSet = state_mapping["descriptorSet"].GetUint();
+		mapping.firstBinding = state_mapping["firstBinding"].GetUint();
+		mapping.bindingCount = state_mapping["bindingCount"].GetUint();
+		mapping.resourceMask = state_mapping["resourceMask"].GetUint();
+		mapping.source = VkDescriptorMappingSourceEXT(state_mapping["source"].GetUint());
+
+		if (state_mapping.HasMember("pNext"))
+			if (!parse_pnext_chain(state_mapping["pNext"], &mapping.pNext))
+				return false;
+
+		const auto parse_heap_offset = [](auto &api, const Value &value)
+		{
+			api.heapOffset = value["heapOffset"].GetUint();
+			api.samplerHeapOffset = value["samplerHeapOffset"].GetUint();
+		};
+
+		const auto parse_heap_stride = [](auto &api, const Value &value)
+		{
+			api.heapArrayStride = value["heapArrayStride"].GetUint();
+			api.samplerHeapArrayStride = value["heapArrayStride"].GetUint();
+		};
+
+		const auto parse_embedded = [&](auto &api, const Value &value)
+		{
+			if (value.HasMember("embeddedSampler"))
+			{
+				auto *samp = allocator.allocate_cleared<VkSamplerCreateInfo>();
+				if (!parse_sampler(value["embeddedSampler"], *samp))
+					return false;
+				api.pEmbeddedSampler = samp;
+			}
+
+			return true;
+		};
+
+		const auto parse_push_offset = [](auto &api, const Value &value)
+		{
+			api.pushOffset = value["pushOffset"].GetUint();
+			api.samplerPushOffset = value["samplerPushOffset"].GetUint();
+		};
+
+		const auto parse_indirect = [](auto &api, const Value &value)
+		{
+			api.addressOffset = value["addressOffset"].GetUint();
+			api.samplerAddressOffset = value["samplerAddressOffset"].GetUint();
+		};
+
+		const auto parse_heap_index = [](auto &api, const Value &value)
+		{
+			api.heapIndexStride = value["heapIndexStride"].GetUint();
+			api.samplerHeapIndexStride = value["samplerHeapIndexStride"].GetUint();
+			api.useCombinedImageSamplerIndex = value["useCombinedImageSamplerIndex"].GetUint();
+		};
+
+		switch (mapping.source)
+		{
+		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_CONSTANT_OFFSET_EXT:
+		{
+			auto &uni = state_mapping["constantOffset"];
+			auto &api = mapping.sourceData.constantOffset;
+			parse_heap_offset(api, uni);
+			parse_heap_stride(api, uni);
+			if (!parse_embedded(api, uni))
+				return false;
+			break;
+		}
+		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_PUSH_INDEX_EXT:
+		{
+			auto &uni = state_mapping["pushIndex"];
+			auto &api = mapping.sourceData.pushIndex;
+			parse_heap_offset(api, uni);
+			parse_heap_stride(api, uni);
+			parse_heap_index(api, uni);
+			parse_push_offset(api, uni);
+			if (!parse_embedded(api, uni))
+				return false;
+			break;
+		}
+		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_INDIRECT_INDEX_EXT:
+		{
+			auto &uni = state_mapping["indirectIndex"];
+			auto &api = mapping.sourceData.indirectIndex;
+			parse_heap_offset(api, uni);
+			parse_heap_stride(api, uni);
+			parse_heap_index(api, uni);
+			if (!parse_embedded(api, uni))
+				return false;
+			parse_push_offset(api, uni);
+			parse_indirect(api, uni);
+			break;
+		}
+		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_INDIRECT_INDEX_ARRAY_EXT:
+		{
+			auto &uni = state_mapping["indirectIndexArray"];
+			auto &api = mapping.sourceData.indirectIndexArray;
+			parse_heap_offset(api, uni);
+			parse_heap_index(api, uni);
+			if (!parse_embedded(api, uni))
+				return false;
+			parse_push_offset(api, uni);
+			parse_indirect(api, uni);
+			break;
+		}
+		case VK_DESCRIPTOR_MAPPING_SOURCE_RESOURCE_HEAP_DATA_EXT:
+		{
+			auto &uni = state_mapping["heapData"];
+			auto &api = mapping.sourceData.heapData;
+			api.heapOffset = uni["heapOffset"].GetUint();
+			api.pushOffset = uni["pushOffset"].GetUint();
+			break;
+		}
+		case VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_DATA_EXT:
+		{
+			mapping.sourceData.pushDataOffset = state_mapping["pushDataOffset"].GetUint();
+			break;
+		}
+		case VK_DESCRIPTOR_MAPPING_SOURCE_PUSH_ADDRESS_EXT:
+		{
+			mapping.sourceData.pushAddressOffset = state_mapping["pushAddressOffset"].GetUint();
+			break;
+		}
+		case VK_DESCRIPTOR_MAPPING_SOURCE_INDIRECT_ADDRESS_EXT:
+		{
+			auto &uni = state_mapping["indirectAddress"];
+			auto &api = mapping.sourceData.indirectAddress;
+			api.pushOffset = uni["pushOffset"].GetUint();
+			api.addressOffset = uni["addressOffset"].GetUint();
+			break;
+		}
+		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_SHADER_RECORD_INDEX_EXT:
+		{
+			auto &uni = state_mapping["shaderRecordIndex"];
+			auto &api = mapping.sourceData.shaderRecordIndex;
+			parse_heap_offset(api, uni);
+			parse_heap_stride(api, uni);
+			parse_heap_index(api, uni);
+			if (!parse_embedded(api, uni))
+				return false;
+			api.shaderRecordOffset = uni["shaderRecordOffset"].GetUint();
+			api.samplerShaderRecordOffset = uni["samplerShaderRecordOffset"].GetUint();
+			break;
+		}
+		case VK_DESCRIPTOR_MAPPING_SOURCE_SHADER_RECORD_DATA_EXT:
+		{
+			mapping.sourceData.shaderRecordDataOffset = state_mapping["shaderRecordDataOffset"].GetUint();
+			break;
+		}
+		case VK_DESCRIPTOR_MAPPING_SOURCE_SHADER_RECORD_ADDRESS_EXT:
+		{
+			mapping.sourceData.shaderRecordAddressOffset = state_mapping["shaderRecordAddressOffset"].GetUint();
+			break;
+		}
+		default:
+			break;
+		}
+	}
+
+	return true;
+}
+
 bool StateReplayer::Impl::parse_mutable_descriptor_type(const Value &state,
                                                         VkMutableDescriptorTypeCreateInfoEXT **out_info)
 {
@@ -5564,6 +5758,15 @@ bool StateReplayer::Impl::parse_pnext_chain(
 		{
 			VkRayTracingPipelineClusterAccelerationStructureCreateInfoNV *info = nullptr;
 			if (!parse_ray_tracing_pipeline_cluster_acceleration_structure_info(next, &info))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_SHADER_DESCRIPTOR_SET_AND_BINDING_MAPPING_INFO_EXT:
+		{
+			VkShaderDescriptorSetAndBindingMappingInfoEXT *info = nullptr;
+			if (!parse_shader_descriptor_set_and_binding_mapping(next, &info))
 				return false;
 			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
 			break;
@@ -6261,35 +6464,48 @@ void *StateRecorder::Impl::copy_pnext_struct(
 	{
 		auto &mapping = const_cast<VkDescriptorSetAndBindingMappingEXT &>(info->pMappings[i]);
 
+		if (!copy_pnext_chain(mapping.pNext, alloc, &mapping.pNext, nullptr, 0))
+			return nullptr;
+
 		const auto embedded_copy = [&](const VkSamplerCreateInfo *&sampler_info)
 		{
-			VkSamplerCreateInfo *out_info;
-			if (copy_sampler(sampler_info, alloc, &out_info))
-				sampler_info = out_info;
-			else
-				sampler_info = nullptr;
+			if (sampler_info)
+			{
+				VkSamplerCreateInfo *out_info;
+				if (copy_sampler(sampler_info, alloc, &out_info))
+					sampler_info = out_info;
+				else
+					return false;
+			}
+
+			return true;
 		};
 
 		switch (mapping.source)
 		{
 		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_CONSTANT_OFFSET_EXT:
-			embedded_copy(mapping.sourceData.constantOffset.pEmbeddedSampler);
+			if (!embedded_copy(mapping.sourceData.constantOffset.pEmbeddedSampler))
+				return nullptr;
 			break;
 
 		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_PUSH_INDEX_EXT:
-			embedded_copy(mapping.sourceData.pushIndex.pEmbeddedSampler);
+			if (!embedded_copy(mapping.sourceData.pushIndex.pEmbeddedSampler))
+				return nullptr;
 			break;
 
 		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_INDIRECT_INDEX_EXT:
-			embedded_copy(mapping.sourceData.indirectIndex.pEmbeddedSampler);
+			if (!embedded_copy(mapping.sourceData.indirectIndex.pEmbeddedSampler))
+				return nullptr;
 			break;
 
 		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_INDIRECT_INDEX_ARRAY_EXT:
-			embedded_copy(mapping.sourceData.indirectIndexArray.pEmbeddedSampler);
+			if (!embedded_copy(mapping.sourceData.indirectIndexArray.pEmbeddedSampler))
+				return nullptr;
 			break;
 
 		case VK_DESCRIPTOR_MAPPING_SOURCE_HEAP_WITH_SHADER_RECORD_INDEX_EXT:
-			embedded_copy(mapping.sourceData.shaderRecordIndex.pEmbeddedSampler);
+			if (!embedded_copy(mapping.sourceData.shaderRecordIndex.pEmbeddedSampler))
+				return nullptr;
 			break;
 
 		default:
@@ -6669,7 +6885,10 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 		case VK_STRUCTURE_TYPE_SHADER_DESCRIPTOR_SET_AND_BINDING_MAPPING_INFO_EXT:
 		{
 			auto *ci = static_cast<const VkShaderDescriptorSetAndBindingMappingInfoEXT *>(pNext);
-			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			auto *mapping = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc));
+			if (!mapping)
+				return false;
+			*ppNext = mapping;
 			break;
 		}
 
