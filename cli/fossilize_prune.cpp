@@ -76,6 +76,16 @@ static inline const T *find_pnext(VkStructureType type, const void *pNext)
 	return nullptr;
 }
 
+template <typename T>
+static VkPipelineCreateFlagBits2KHR get_effective_pipeline_flags(const T *info)
+{
+	auto *flags_info = find_pnext<VkPipelineCreateFlags2CreateInfoKHR>(VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO_KHR, info->pNext);
+	if (flags_info)
+		return flags_info->flags;
+	else
+		return info->flags;
+}
+
 struct PruneReplayer : StateCreatorInterface
 {
 	unordered_set<Hash> accessed_samplers;
@@ -320,31 +330,36 @@ struct PruneReplayer : StateCreatorInterface
 	bool enqueue_create_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
 		*pipeline = fake_handle<VkPipeline>(hash);
-		bool allow_pipeline = false;
+		bool allow_pipeline = (get_effective_pipeline_flags(create_info) & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0;
+		bool has_banned_modules = false;
+
+		// Need to test this as well, if there is at least one banned module used, we don't allow the pipeline.
+		for (uint32_t i = 0; i < create_info->stageCount; i++)
+		{
+			if (banned_modules.count((Hash)create_info->pStages[i].module))
+			{
+				allow_pipeline = false;
+				has_banned_modules = true;
+				break;
+			}
+		}
 
 		if (filter_object(RESOURCE_GRAPHICS_PIPELINE, hash))
 		{
-			for (uint32_t i = 0; i < create_info->stageCount; i++)
+			if (!has_banned_modules)
 			{
-				if (filter_shader_module((Hash) create_info->pStages[i].module))
+				for (uint32_t i = 0; i < create_info->stageCount; i++)
 				{
-					allow_pipeline = true;
-					break;
+					if (filter_shader_module((Hash)create_info->pStages[i].module))
+					{
+						allow_pipeline = true;
+						break;
+					}
 				}
 			}
 
 			if (create_info->stageCount == 0)
 				allow_pipeline = true;
-
-			// Need to test this as well, if there is at least one banned module used, we don't allow the pipeline.
-			for (uint32_t i = 0; i < create_info->stageCount; i++)
-			{
-				if (banned_modules.count((Hash) create_info->pStages[i].module))
-				{
-					allow_pipeline = false;
-					break;
-				}
-			}
 
 			auto *library_info =
 					find_pnext<VkPipelineLibraryCreateInfoKHR>(VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR,
@@ -355,7 +370,7 @@ struct PruneReplayer : StateCreatorInterface
 				bool has_default_allowed_library = false;
 				for (uint32_t i = 0; i < library_info->libraryCount; i++)
 				{
-					if (banned_graphics.count((Hash) library_info->pLibraries[i]))
+					if (banned_graphics.count((Hash)library_info->pLibraries[i]))
 					{
 						allow_pipeline = false;
 						break;
@@ -364,8 +379,8 @@ struct PruneReplayer : StateCreatorInterface
 					if (!has_default_allowed_library)
 					{
 						// Only consider libraries which contain modules.
-						auto itr = graphics_pipelines.find((Hash) library_info->pLibraries[i]);
-						if (itr != graphics_pipelines.end() && itr->second->stageCount != 0)
+						auto itr = library_graphics_pipelines.find((Hash)library_info->pLibraries[i]);
+						if (itr != library_graphics_pipelines.end() && itr->second->stageCount != 0)
 							has_default_allowed_library = true;
 					}
 				}
@@ -374,21 +389,19 @@ struct PruneReplayer : StateCreatorInterface
 				if (create_info->stageCount == 0 && allow_pipeline)
 					allow_pipeline = has_default_allowed_library;
 			}
-
-			// Never include libraries by default unless they contain real code.
-			if ((create_info->flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0 && create_info->stageCount == 0)
-				allow_pipeline = false;
 		}
 
-		// A pipeline library may be a dependency of another pipeline which we have to pull in late.
-		// Store for later.
-		if ((create_info->flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0)
-			library_graphics_pipelines[hash] = create_info;
-
-		// With whitelist, we don't know yet if a pipeline will be allowed or not.
-		// We might be explicitly pulling in a library to be included, even if the linked pipeline does not exist.
 		if (allow_pipeline)
+		{
+			// A pipeline library may be a dependency of another pipeline which we have to pull in late.
+			// Store for later.
+			if ((get_effective_pipeline_flags(create_info) & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0)
+				library_graphics_pipelines[hash] = create_info;
+
+			// With whitelist, we don't know yet if a pipeline will be allowed or not.
+			// We might be explicitly pulling in a library to be included, even if the linked pipeline does not exist.
 			graphics_pipelines[hash] = create_info;
+		}
 
 		return true;
 	}
@@ -488,45 +501,50 @@ struct PruneReplayer : StateCreatorInterface
 	bool enqueue_create_raytracing_pipeline(Hash hash, const VkRayTracingPipelineCreateInfoKHR *create_info, VkPipeline *pipeline) override
 	{
 		*pipeline = fake_handle<VkPipeline>(hash);
-		bool allow_pipeline = false;
+		bool allow_pipeline = (get_effective_pipeline_flags(create_info) & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0;
+		bool has_banned_modules = false;
+
+		// Need to test this as well, if there is at least one banned module used, we don't allow the pipeline.
+		for (uint32_t i = 0; i < create_info->stageCount; i++)
+		{
+			if (banned_modules.count((Hash)create_info->pStages[i].module))
+			{
+				allow_pipeline = false;
+				has_banned_modules = true;
+				break;
+			}
+		}
 
 		if (filter_object(RESOURCE_RAYTRACING_PIPELINE, hash))
 		{
-			for (uint32_t i = 0; i < create_info->stageCount; i++)
+			if (!has_banned_modules)
 			{
-				if (filter_shader_module((Hash) create_info->pStages[i].module))
+				for (uint32_t i = 0; i < create_info->stageCount; i++)
 				{
-					allow_pipeline = true;
-					break;
+					if (filter_shader_module((Hash)create_info->pStages[i].module))
+					{
+						allow_pipeline = true;
+						break;
+					}
 				}
 			}
 
 			if (create_info->stageCount == 0)
 				allow_pipeline = true;
 
-			// Need to test this as well, if there is at least one banned module used, we don't allow the pipeline.
-			for (uint32_t i = 0; i < create_info->stageCount; i++)
-			{
-				if (banned_modules.count((Hash) create_info->pStages[i].module))
-				{
-					allow_pipeline = false;
-					break;
-				}
-			}
-
 			if (create_info->pLibraryInfo)
 			{
 				bool has_default_allowed_library = false;
 				for (uint32_t i = 0; i < create_info->pLibraryInfo->libraryCount; i++)
 				{
-					if (banned_raytracing.count((Hash) create_info->pLibraryInfo->pLibraries[i]))
+					if (banned_raytracing.count((Hash)create_info->pLibraryInfo->pLibraries[i]))
 					{
 						allow_pipeline = false;
 						break;
 					}
 
 					if (!has_default_allowed_library &&
-					    raytracing_pipelines.count((Hash) create_info->pLibraryInfo->pLibraries[i]))
+					    library_raytracing_pipelines.count((Hash)create_info->pLibraryInfo->pLibraries[i]))
 					{
 						has_default_allowed_library = true;
 					}
@@ -536,21 +554,19 @@ struct PruneReplayer : StateCreatorInterface
 						allow_pipeline = has_default_allowed_library;
 				}
 			}
-
-			// Never include libraries by default unless they contain real code.
-			if ((create_info->flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0 && create_info->stageCount == 0)
-				allow_pipeline = false;
 		}
 
-		// A pipeline library may be a dependency of another pipeline which we have to pull in late.
-		// Store for later.
-		if ((create_info->flags & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0)
-			library_raytracing_pipelines[hash] = create_info;
-
-		// With whitelist, we don't know yet if a pipeline will be allowed or not.
-		// We might be explicitly pulling in a library to be included, even if the linked pipeline does not exist.
 		if (allow_pipeline)
+		{
+			// A pipeline library may be a dependency of another pipeline which we have to pull in late.
+			// Store for later.
+			if ((get_effective_pipeline_flags(create_info) & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0)
+				library_raytracing_pipelines[hash] = create_info;
+
+			// With whitelist, we don't know yet if a pipeline will be allowed or not.
+			// We might be explicitly pulling in a library to be included, even if the linked pipeline does not exist.
 			raytracing_pipelines[hash] = create_info;
+		}
 
 		return true;
 	}
