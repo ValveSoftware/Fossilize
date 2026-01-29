@@ -271,6 +271,23 @@ struct PruneReplayer : StateCreatorInterface
 		return ret;
 	}
 
+	bool filter_library_object(ResourceTag tag) const
+	{
+		bool hash_filtering = !(filter_compute.empty() && filter_graphics.empty() && filter_raytracing.empty());
+
+		if (hash_filtering)
+		{
+			if (tag == RESOURCE_GRAPHICS_PIPELINE)
+				return !filter_graphics.empty();
+			else if (tag == RESOURCE_COMPUTE_PIPELINE)
+				return !filter_compute.empty();
+			else if (tag == RESOURCE_RAYTRACING_PIPELINE)
+				return !filter_raytracing.empty();
+		}
+
+		return true;
+	}
+
 	bool filter_object(ResourceTag tag, Hash hash) const
 	{
 		if (!filter_timestamp(tag, hash, nullptr))
@@ -330,7 +347,8 @@ struct PruneReplayer : StateCreatorInterface
 	bool enqueue_create_graphics_pipeline(Hash hash, const VkGraphicsPipelineCreateInfo *create_info, VkPipeline *pipeline) override
 	{
 		*pipeline = fake_handle<VkPipeline>(hash);
-		bool allow_pipeline = (get_effective_pipeline_flags(create_info) & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0;
+		bool allow_pipeline = (get_effective_pipeline_flags(create_info) & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0 &&
+		                      filter_library_object(RESOURCE_GRAPHICS_PIPELINE);
 		bool has_banned_modules = false;
 
 		// Need to test this as well, if there is at least one banned module used, we don't allow the pipeline.
@@ -501,7 +519,8 @@ struct PruneReplayer : StateCreatorInterface
 	bool enqueue_create_raytracing_pipeline(Hash hash, const VkRayTracingPipelineCreateInfoKHR *create_info, VkPipeline *pipeline) override
 	{
 		*pipeline = fake_handle<VkPipeline>(hash);
-		bool allow_pipeline = (get_effective_pipeline_flags(create_info) & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0;
+		bool allow_pipeline = (get_effective_pipeline_flags(create_info) & VK_PIPELINE_CREATE_LIBRARY_BIT_KHR) != 0 &&
+		                      filter_library_object(RESOURCE_RAYTRACING_PIPELINE);
 		bool has_banned_modules = false;
 
 		// Need to test this as well, if there is at least one banned module used, we don't allow the pipeline.
