@@ -57,11 +57,23 @@ static const char *tag_names[] = {
 
 static void print_help()
 {
-	LOGI("Usage: fossilize-list\n"
-	     "\t<database path>\n"
-	     "\t[--tag index]\n"
-	     "\t[--size]\n"
-		 "\t[--connectivity]\n");
+	string help_msg = "Usage: fossilize-list\n"
+	                  "\t<database path>\n"
+	                  "\t[--tag index]\n";
+
+	size_t num_tags = sizeof(tag_names) / sizeof(tag_names[0]);
+	for (size_t i = 0; i < num_tags; i++)
+	{
+		help_msg += "\t\t" + to_string(i) + ": " + tag_names[i];
+		if (i == 0)
+			help_msg += " (default)";
+		help_msg += "\n";
+	}
+
+	help_msg += "\t[--size]\n"
+	            "\t[--connectivity]\n";
+
+	LOGI("%s", help_msg.c_str());
 }
 
 template <typename T>
