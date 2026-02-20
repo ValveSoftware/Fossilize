@@ -44,6 +44,14 @@ static void print_help()
 	     "\t[--geom shader.spv]\n"
 	     "\t[--frag shader.spv]\n"
 	     "\t[--comp shader.spv]\n"
+	     "\t[--vert-entry-point entrypoint]\n"
+	     "\t[--task-entry-point entrypoint]\n"
+	     "\t[--mesh-entry-point entrypoint]\n"
+	     "\t[--tesc-entry-point entrypoint]\n"
+	     "\t[--tese-entry-point entrypoint]\n"
+	     "\t[--geom-entry-point entrypoint]\n"
+	     "\t[--frag-entry-point entrypoint]\n"
+	     "\t[--comp-entry-point entrypoint]\n"
 	     "\t[--multiview views]\n"
 	     "\t[--robustness]\n"
 	     "\t[--output out.foz]\n"
@@ -592,6 +600,7 @@ static VkRenderPass synthesize_render_pass(StateRecorder &recorder, spvc_compile
 }
 
 static VkPipeline synthesize_compute_pipeline(StateRecorder &recorder,
+                                              const std::string &entry_point,
                                               const std::vector<uint8_t> *modules, VkPipelineLayout layout,
                                               SpecConstant &specs)
 {
@@ -612,7 +621,7 @@ static VkPipeline synthesize_compute_pipeline(StateRecorder &recorder,
 	info.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 	info.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
 	info.stage.module = (VkShaderModule)uint64_t(1);
-	info.stage.pName = "main";
+	info.stage.pName = !entry_point.empty() ? entry_point.c_str() : "main";
 	if (spec_info.dataSize != 0)
 		info.stage.pSpecializationInfo = &spec_info;
 	info.layout = layout;
@@ -693,6 +702,7 @@ static bool append_attributes(spvc_compiler vert,
 }
 
 static VkPipeline synthesize_graphics_pipeline(StateRecorder &recorder,
+                                               const std::string *entry_points,
                                                const std::vector<uint8_t> *modules,
                                                spvc_compiler *compilers,
                                                VkPipelineLayout layout,
@@ -722,7 +732,7 @@ static VkPipeline synthesize_graphics_pipeline(StateRecorder &recorder,
 
 			VkPipelineShaderStageCreateInfo stage = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
 			stage.module = (VkShaderModule)uint64_t(1 + i);
-			stage.pName = "main";
+			stage.pName = !entry_points[i].empty() ? entry_points[i].c_str() : "main";
 			stage.stage = to_vk_shader_stage[i];
 			if (spec_info.dataSize != 0)
 				stage.pSpecializationInfo = &spec_info;
@@ -832,6 +842,7 @@ int main(int argc, char *argv[])
 {
 	CLICallbacks cbs;
 	std::string spv_paths[STAGE_COUNT];
+	std::string entry_points[STAGE_COUNT];
 	std::string output_path;
 	SpecConstant spec_constants;
 	uint32_t view_count = 0;
@@ -845,6 +856,14 @@ int main(int argc, char *argv[])
 	cbs.add("--comp", [&](CLIParser &parser) { spv_paths[STAGE_COMP] = parser.next_string(); });
 	cbs.add("--task", [&](CLIParser &parser) { spv_paths[STAGE_TASK] = parser.next_string(); });
 	cbs.add("--mesh", [&](CLIParser &parser) { spv_paths[STAGE_MESH] = parser.next_string(); });
+	cbs.add("--vert-entry-point", [&](CLIParser &parser) { entry_points[STAGE_VERT] = parser.next_string(); });
+	cbs.add("--tesc-entry-point", [&](CLIParser &parser) { entry_points[STAGE_TESC] = parser.next_string(); });
+	cbs.add("--tese-entry-point", [&](CLIParser &parser) { entry_points[STAGE_TESE] = parser.next_string(); });
+	cbs.add("--geom-entry-point", [&](CLIParser &parser) { entry_points[STAGE_GEOM] = parser.next_string(); });
+	cbs.add("--frag-entry-point", [&](CLIParser &parser) { entry_points[STAGE_FRAG] = parser.next_string(); });
+	cbs.add("--comp-entry-point", [&](CLIParser &parser) { entry_points[STAGE_COMP] = parser.next_string(); });
+	cbs.add("--task-entry-point", [&](CLIParser &parser) { entry_points[STAGE_TASK] = parser.next_string(); });
+	cbs.add("--mesh-entry-point", [&](CLIParser &parser) { entry_points[STAGE_MESH] = parser.next_string(); });
 	cbs.add("--output", [&](CLIParser &parser) { output_path = parser.next_string(); });
 	cbs.add("--help", [&](CLIParser &parser) { parser.end(); });
 	cbs.add("--spec", [&](CLIParser &parser) {
@@ -977,9 +996,9 @@ int main(int argc, char *argv[])
 
 	VkPipeline pipeline;
 	if (compilers[STAGE_COMP])
-		pipeline = synthesize_compute_pipeline(recorder, modules, layout, spec_constants);
+		pipeline = synthesize_compute_pipeline(recorder, entry_points[STAGE_COMP], modules, layout, spec_constants);
 	else
-		pipeline = synthesize_graphics_pipeline(recorder, modules, compilers, layout, render_pass, active_rt_mask, spec_constants);
+		pipeline = synthesize_graphics_pipeline(recorder, entry_points, modules, compilers, layout, render_pass, active_rt_mask, spec_constants);
 
 	if (pipeline == VK_NULL_HANDLE)
 		return EXIT_FAILURE;
