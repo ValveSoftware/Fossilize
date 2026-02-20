@@ -144,11 +144,11 @@ const char *CLIParser::next_string()
 	return ret;
 }
 
-
 size_t CLIParser::next_size()
 {
 	const char *max_size_str = next_string();
-	size_t max_size;
+	size_t max_size = 0;
+
 	if (max_size_str)
 	{
 		char *end;
@@ -175,4 +175,5 @@ size_t CLIParser::next_size()
 		}
    }
    return max_size;
+}
 }
