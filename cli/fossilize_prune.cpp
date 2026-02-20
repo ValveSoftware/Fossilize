@@ -539,7 +539,7 @@ struct PruneReplayer : StateCreatorInterface
 		if (insert)
 			accessed_raytracing_pipelines.insert(hash);
 		else
-			get_compressed_size(iface, RESOURCE_RAYTRACING_PIPELINE, hash);
+			size = get_compressed_size(iface, RESOURCE_RAYTRACING_PIPELINE, hash);
 
 		size += access_pipeline_layout(iface, (Hash) create_info->layout, insert);
 

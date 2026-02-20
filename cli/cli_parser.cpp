@@ -170,5 +170,35 @@ size_t CLIParser::next_size()
 		}
    }
    return max_size;
-}
+
+size_t CLIParser::next_size()
+{
+	const char *max_size_str = next_string();
+	size_t max_size;
+	if (max_size_str)
+	{
+		char *end;
+		max_size = strtoul(max_size_str, &end, 10);
+		if (end == max_size_str)
+		{
+			max_size = 0;
+		}
+		else
+		{
+			switch (*end)
+			{
+			case 'K':
+			case 'k':
+				max_size *= 1024;
+				break;
+			case 'M':
+			case 'm':
+				max_size *= 1024 * 1024;
+				break;
+			default:
+				break;
+			}
+		}
+   }
+   return max_size;
 }
