@@ -2287,6 +2287,7 @@ bool FeatureFilter::Impl::validate_spirv_extension(const std::string &ext) const
 		{"SPV_KHR_device_group", "VK_KHR_device_group", "", VK_API_VERSION_1_1},
 		{"SPV_QCOM_image_processing", "VK_QCOM_image_processing", "", 0},
 		{"SPV_QCOM_image_processing2", "VK_QCOM_image_processing2", "", 0},
+		{"SPV_QCOM_cooperative_matrix_conversion", "VK_QCOM_cooperative_matrix_conversion", "", 0},
 		{"SPV_EXT_mesh_shader", "VK_EXT_mesh_shader", "", 0},
 		{"SPV_KHR_ray_tracing_position_fetch", "VK_KHR_ray_tracing_position_fetch", "", 0},
 		{"SPV_EXT_shader_tile_image", "VK_EXT_shader_tile_image", "", 0},
@@ -2322,6 +2323,7 @@ bool FeatureFilter::Impl::validate_spirv_extension(const std::string &ext) const
 		{"SPV_EXT_shader_64bit_indexing", "VK_EXT_shader_64bit_indexing", "", 0},
 		{"SPV_EXT_long_vector", "VK_EXT_shader_long_vector", "", 0},
 		{"SPV_EXT_descriptor_heap", "VK_EXT_descriptor_heap", "", 0},
+		{"SPV_VALVE_mixed_float_dot_product", "VK_VALVE_shader_mixed_float_dot_product", "", 0},
 	};
 
 	for (auto &mapping : ext_mapping)
@@ -2738,6 +2740,16 @@ bool FeatureFilter::Impl::validate_module_capability(spv::Capability cap) const
 		return enabled_extensions.count(VK_EXT_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME) != 0;
 	case spv::CapabilityPushConstantBanksNV:
 		return features.push_constant_bank_nv.pushConstantBank == VK_TRUE;
+	case spv::CapabilityCooperativeMatrixConversionQCOM:
+		return features.cooperative_matrix_conversion.cooperativeMatrixConversion == VK_TRUE;
+	case spv::CapabilityDotProductFloat16AccFloat32VALVE:
+		return features.shader_mixed_dot_product.shaderMixedFloatDotProductFloat16AccFloat32 == VK_TRUE;
+	case spv::CapabilityDotProductFloat16AccFloat16VALVE:
+		return features.shader_mixed_dot_product.shaderMixedFloatDotProductFloat16AccFloat16 == VK_TRUE;
+	case spv::CapabilityDotProductBFloat16AccVALVE:
+		return features.shader_mixed_dot_product.shaderMixedFloatDotProductBFloat16Acc == VK_TRUE;
+	case spv::CapabilityDotProductFloat8AccFloat32VALVE:
+		return features.shader_mixed_dot_product.shaderMixedFloatDotProductFloat8AccFloat32 == VK_TRUE;
 
 	default:
 		LOGE("Unrecognized SPIR-V capability %u, treating as unsupported.\n", unsigned(cap));

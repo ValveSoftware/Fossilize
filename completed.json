@@ -103,7 +103,8 @@
 		"VK_VALVE_fragment_density_map_layered",
 		"VK_KHR_maintenance10",
 		"VK_EXT_custom_resolve",
-		"VK_EXT_shader_64bit_indexing"
+		"VK_EXT_shader_64bit_indexing",
+		"VK_EXT_descriptor_heap"
 	],
 	"fully-ignored" : [
 		"VK_AMD_mixed_attachment_samples",
@@ -357,6 +358,11 @@
 		"GraphARM",
 		"ShaderInvocationReorderEXT",
 		"PushConstantBanksNV",
-		"GroupNonUniformPartitionedEXT"
+		"GroupNonUniformPartitionedEXT",
+		"CooperativeMatrixConversionQCOM",
+		"DotProductFloat16AccFloat32VALVE",
+		"DotProductFloat16AccFloat16VALVE",
+		"DotProductBFloat16AccVALVE",
+		"DotProductFloat8AccFloat32VALVE"
 	]
 }

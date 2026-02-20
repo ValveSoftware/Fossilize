@@ -155,6 +155,8 @@ struct VulkanFeatures
 	VkPhysicalDeviceShaderSubgroupPartitionedFeaturesEXT shader_subgroup_partitioned;
 	VkPhysicalDeviceMaintenance10FeaturesKHR maintenance10;
 	VkPhysicalDeviceCustomResolveFeaturesEXT custom_resolve;
+	VkPhysicalDeviceCooperativeMatrixConversionFeaturesQCOM cooperative_matrix_conversion;
+	VkPhysicalDeviceShaderMixedFloatDotProductFeaturesVALVE shader_mixed_dot_product;
 
 	struct
 	{

@@ -145,3 +145,5 @@ FE(PUSH_CONSTANT_BANK, push_constant_bank_nv, NV);
 FE(SHADER_SUBGROUP_PARTITIONED, shader_subgroup_partitioned, EXT);
 FE(MAINTENANCE_10, maintenance10, KHR);
 FE(CUSTOM_RESOLVE, custom_resolve, EXT);
+FE(COOPERATIVE_MATRIX_CONVERSION, cooperative_matrix_conversion, QCOM);
+FE(SHADER_MIXED_FLOAT_DOT_PRODUCT, shader_mixed_dot_product, VALVE);
