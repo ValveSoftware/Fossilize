@@ -600,7 +600,7 @@ static VkRenderPass synthesize_render_pass(StateRecorder &recorder, spvc_compile
 }
 
 static VkPipeline synthesize_compute_pipeline(StateRecorder &recorder,
-                                              const std::string& entry_point,
+                                              const std::string &entry_point,
                                               const std::vector<uint8_t> *modules, VkPipelineLayout layout,
                                               SpecConstant &specs)
 {
