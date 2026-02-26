@@ -1286,7 +1286,8 @@ static int run_master_process(const VulkanDevice::Options &opts,
 						if (proc.watchdog_timer_fd >= 0)
 						{
 							uint64_t dummy;
-							(void)::read(proc.watchdog_timer_fd, &dummy, sizeof(dummy));
+							ssize_t ret_dummy = ::read(proc.watchdog_timer_fd, &dummy, sizeof(dummy));
+							(void)ret_dummy;
 
 							// Hitting watchdog timer while asleep is okay.
 							if (!proc.stopped)
