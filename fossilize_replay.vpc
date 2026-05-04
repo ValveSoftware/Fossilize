@@ -5,7 +5,7 @@
 //-----------------------------------------------------------------------------
 
 $macro SRCDIR     "..\.."
-$macro OUTBINDIR  "$SRDIR\..\client"
+$macro OUTBINDIR  "$CLIENTROOT"
 $macro TARGETNAME "fossilize-replay"   [$WIN32]
 $macro TARGETNAME "fossilize-replay64" [$WIN64]
 $macro OUTBINNAME "fossilize-replay"   [$WIN32]
@@ -49,8 +49,6 @@ $Configuration
 		$WarningLevel						"Level 2 (/W2)"
 		$GCC_ExtraCompilerFlags				"$BASE -Wno-shadow" [$LINUXALL]
 		$GCC_ExtraCompilerFlags				"$BASE -Wno-unused-variable" [$LINUXALL]
-		$GCC_ExtraCompilerFlags				"$BASE -Wno-format" [$LINUXALL]
-		$GCC_ExtraCompilerFlags				"$BASE -Wno-format-security" [$LINUXALL]
 		$DisableSpecificWarnings			"$BASE;6313" [$ANALYZE] // Disable C6313: Incorrect operator: zero-valued flag cannot be tested with bitwise-and for rapidjson code
 	}
 	$Linker
@@ -61,7 +59,7 @@ $Configuration
 	$PostBuildEvent [!$ANALYZE]
 	{
 		$CommandLine						"$BASE" "\n" \
-											"call $SRCDIR\copyexefiles_p4.bat $(TargetName) $(TargetDir) $SRCDIR\..\client\bin $SRCDIR $TARGETNAME $TARGETNAME" [$WINDOWS]
+											"call $SRCDIR\copyexefiles_p4.bat $(TargetName) $(TargetDir) $CLIENTBINDIR\bin $SRCDIR $TARGETNAME $TARGETNAME" [$WINDOWS]
 	}
 }
 
@@ -113,6 +111,15 @@ $Project "fossilize_replay"
 	$Folder "miniz"
 	{
 		$File ".\miniz\miniz.c"
+		{
+			$Configuration
+			{
+				$Compiler
+				{
+					$DisableSpecificWarnings		"6297;6386"	
+				}
+			}
+		}
 		$File ".\miniz\miniz.h"
 	}
 	
@@ -125,7 +132,6 @@ $Project "fossilize_replay"
 		$File ".\cli\SPIRV-Tools\source\binary.cpp"
 		$File ".\cli\SPIRV-Tools\source\diagnostic.cpp"
 		$File ".\cli\SPIRV-Tools\source\disassemble.cpp"
-		$File ".\cli\SPIRV-Tools\source\enum_string_mapping.cpp"
 		$File ".\cli\SPIRV-Tools\source\ext_inst.cpp"
 		$File ".\cli\SPIRV-Tools\source\extensions.cpp"
 		$File ".\cli\SPIRV-Tools\source\libspirv.cpp"
@@ -142,8 +148,10 @@ $Project "fossilize_replay"
 		$File ".\cli\SPIRV-Tools\source\spirv_target_env.cpp"
 		$File ".\cli\SPIRV-Tools\source\spirv_validator_options.cpp"
 		$File ".\cli\SPIRV-Tools\source\table.cpp"
+		$File ".\cli\SPIRV-Tools\source\table2.cpp"
 		$File ".\cli\SPIRV-Tools\source\text.cpp"
 		$File ".\cli\SPIRV-Tools\source\text_handler.cpp"
+		$File ".\cli\SPIRV-Tools\source\to_string.cpp"
 		$File ".\cli\SPIRV-Tools\source\val\validate.cpp"
 		$File ".\cli\SPIRV-Tools\source\val\validate_adjacency.cpp"
 		$File ".\cli\SPIRV-Tools\source\val\validate_annotation.cpp"
@@ -160,28 +168,36 @@ $Project "fossilize_replay"
 		$File ".\cli\SPIRV-Tools\source\val\validate_debug.cpp"
 		$File ".\cli\SPIRV-Tools\source\val\validate_decorations.cpp"
 		$File ".\cli\SPIRV-Tools\source\val\validate_derivatives.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_dot_product.cpp"
 		$File ".\cli\SPIRV-Tools\source\val\validate_extensions.cpp"
 		$File ".\cli\SPIRV-Tools\source\val\validate_execution_limitations.cpp"
 		$File ".\cli\SPIRV-Tools\source\val\validate_function.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_graph.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_group.cpp"
 		$File ".\cli\SPIRV-Tools\source\val\validate_id.cpp"
 		$File ".\cli\SPIRV-Tools\source\val\validate_image.cpp"
 		$File ".\cli\SPIRV-Tools\source\val\validate_interfaces.cpp"
 		$File ".\cli\SPIRV-Tools\source\val\validate_instruction.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_invalid_type.cpp"
 		$File ".\cli\SPIRV-Tools\source\val\validate_layout.cpp"
 		$File ".\cli\SPIRV-Tools\source\val\validate_literals.cpp"
 		$File ".\cli\SPIRV-Tools\source\val\validate_logicals.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_logical_pointers.cpp"
 		$File ".\cli\SPIRV-Tools\source\val\validate_memory.cpp"
 		$File ".\cli\SPIRV-Tools\source\val\validate_memory_semantics.cpp"
 		$File ".\cli\SPIRV-Tools\source\val\validate_mesh_shading.cpp"
 		$File ".\cli\SPIRV-Tools\source\val\validate_misc.cpp"
 		$File ".\cli\SPIRV-Tools\source\val\validate_mode_setting.cpp"
 		$File ".\cli\SPIRV-Tools\source\val\validate_non_uniform.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_pipe.cpp"
 		$File ".\cli\SPIRV-Tools\source\val\validate_primitives.cpp"
 		$File ".\cli\SPIRV-Tools\source\val\validate_ray_query.cpp"
 		$File ".\cli\SPIRV-Tools\source\val\validate_ray_tracing.cpp"
 		$File ".\cli\SPIRV-Tools\source\val\validate_ray_tracing_reorder.cpp"
 		$File ".\cli\SPIRV-Tools\source\val\validate_scopes.cpp"
 		$File ".\cli\SPIRV-Tools\source\val\validate_small_type_uses.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_tensor.cpp"
+		$File ".\cli\SPIRV-Tools\source\val\validate_tensor_layout.cpp"
 		$File ".\cli\SPIRV-Tools\source\val\validate_type.cpp"
 		$File ".\cli\SPIRV-Tools\source\val\basic_block.cpp"
 		$File ".\cli\SPIRV-Tools\source\val\construct.cpp"
