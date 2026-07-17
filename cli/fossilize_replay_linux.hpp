@@ -32,6 +32,7 @@
 #include <sys/timerfd.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
+#include <sys/prctl.h>
 #include <fcntl.h>
 #include <limits.h>
 #include <errno.h>
@@ -560,6 +561,9 @@ bool ProcessProgress::start_child_process(vector<ProcessProgress> &siblings)
 			close(Global::control_fd);
 
 		// We're the child process.
+		// Kill the child immediately if the parent (fossilize_replay / steam) dies.
+		prctl(PR_SET_PDEATHSIG, SIGKILL);
+
 		// Unblock the signal mask.
 		if (pthread_sigmask(SIG_SETMASK, &Global::old_mask, nullptr) != 0)
 			return EXIT_FAILURE;
