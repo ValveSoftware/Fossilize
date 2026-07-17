@@ -26,6 +26,7 @@
 #include <sys/stat.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
+#include <sys/prctl.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <sched.h>
@@ -948,6 +949,7 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 	if (socketpair(AF_UNIX, SOCK_SEQPACKET, 0, control_fds) < 0)
 		return false;
 
+	pid_t parent_pid = getpid();
 	pid_t new_pid = fork();
 	if (new_pid > 0)
 	{
@@ -966,6 +968,17 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 	}
 	else if (new_pid == 0)
 	{
+		// Kill replayer process immediately if parent application dies.
+		if (prctl(PR_SET_PDEATHSIG, SIGKILL) != 0)
+		{
+			LOGE("Failed to set PR_SET_PDEATHSIG, aborting child startup.\n");
+			_exit(1);
+		}
+
+		// Resolve race condition if parent got reaped too early.
+		if (getppid() != parent_pid)
+			_exit(1);
+
 		close(fds[0]);
 		close(control_fds[1]);
 		close(child_fds[0]);
