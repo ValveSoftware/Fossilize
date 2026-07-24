@@ -586,6 +586,18 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 	cmdline += " --device-index ";
 	cmdline += std::to_string(options.device_index);
 
+	if (options.device_pci_vendor != 0)
+	{
+		cmdline += " --device-pci-vendor 0x";
+		cmdline += std::to_string(options.device_pci_vendor);
+	}
+
+	if (options.device_pci_device != 0)
+	{
+		cmdline += " --device-pci-device 0x";
+		cmdline += std::to_string(options.device_pci_device);
+	}
+
 	if (options.enable_validation)
 		cmdline += " --enable-validation";
 

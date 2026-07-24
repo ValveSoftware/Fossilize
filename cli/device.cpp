@@ -284,18 +284,34 @@ bool VulkanDevice::init_device(const Options &opts)
 	if (vkEnumeratePhysicalDevices(instance, &gpu_count, gpus.data()) != VK_SUCCESS)
 		return false;
 
+	int selected_gpu_index = -1;
 	for (uint32_t i = 0; i < gpu_count; i++)
 	{
-		vkGetPhysicalDeviceProperties(gpus[i], &gpu_props);
+		VkPhysicalDeviceProperties gpu_enum_props;
+		vkGetPhysicalDeviceProperties(gpus[i], &gpu_enum_props);
 		LOGI("Enumerated GPU #%u:\n", i);
-		LOGI("  name: %s\n", gpu_props.deviceName);
+		LOGI("  name: %s\n", gpu_enum_props.deviceName);
 		LOGI("  apiVersion: %u.%u.%u\n",
-		     VK_VERSION_MAJOR(gpu_props.apiVersion),
-		     VK_VERSION_MINOR(gpu_props.apiVersion),
-		     VK_VERSION_PATCH(gpu_props.apiVersion));
+		     VK_VERSION_MAJOR(gpu_enum_props.apiVersion),
+		     VK_VERSION_MINOR(gpu_enum_props.apiVersion),
+		     VK_VERSION_PATCH(gpu_enum_props.apiVersion));
+		LOGI("  vendorID: 0x%x\n", gpu_enum_props.vendorID);
+		LOGI("  deviceID: 0x%x\n", gpu_enum_props.deviceID);
+
+		if (opts.device_pci_vendor != 0 && gpu_enum_props.vendorID == opts.device_pci_vendor)
+		{
+			if (opts.device_pci_device == 0 || gpu_enum_props.deviceID == opts.device_pci_device)
+			{
+				selected_gpu_index = i;
+			}
+		}
 	}
 
-	if (opts.device_index >= 0)
+	if (selected_gpu_index >= 0)
+	{
+		gpu = gpus[selected_gpu_index];
+	}
+	else if (opts.device_index >= 0)
 	{
 		if (size_t(opts.device_index) >= gpus.size())
 		{
