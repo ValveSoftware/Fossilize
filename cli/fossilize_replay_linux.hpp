@@ -525,6 +525,7 @@ bool ProcessProgress::start_child_process(vector<ProcessProgress> &siblings)
 	if (pipe(input_fds) < 0)
 		return false;
 
+	pid_t parent_pid = getpid();
 	pid_t new_pid = fork(); // Fork off a child.
 	if (new_pid > 0)
 	{
@@ -563,6 +564,8 @@ bool ProcessProgress::start_child_process(vector<ProcessProgress> &siblings)
 		// We're the child process.
 		// Kill the child immediately if the parent (fossilize_replay / steam) dies.
 		prctl(PR_SET_PDEATHSIG, SIGKILL);
+		if (getppid() != parent_pid)
+			_exit(EXIT_FAILURE);
 
 		// Unblock the signal mask.
 		if (pthread_sigmask(SIG_SETMASK, &Global::old_mask, nullptr) != 0)
