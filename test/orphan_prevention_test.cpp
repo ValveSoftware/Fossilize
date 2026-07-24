@@ -97,11 +97,20 @@ int main()
 	int status = 0;
 	waitpid(intermediate_pid, &status, 0);
 
-	// Give Linux kernel time to deliver PDEATHSIG (SIGKILL) to child
-	usleep(100000); // 100ms
+	// Poll for kernel process reclamation (max 2.0s timeout, 10ms polling interval)
+	// Eliminates CI runner scheduler starvation flakiness.
+	bool child_terminated = false;
+	for (int i = 0; i < 200; i++)
+	{
+		if (kill(child_pid, 0) == -1 && errno == ESRCH)
+		{
+			child_terminated = true;
+			break;
+		}
+		usleep(10000); // 10ms
+	}
 
-	// Verify child process is dead (ESRCH: No such process)
-	if (kill(child_pid, 0) == -1 && errno == ESRCH)
+	if (child_terminated)
 	{
 		printf("[TEST] SUCCESS: Child process %d was cleanly terminated by PDEATHSIG when parent died!\n", child_pid);
 		return 0;
