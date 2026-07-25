@@ -709,14 +709,14 @@ void ExternalReplayer::Impl::start_replayer_process(const ExternalReplayer::Opti
 	if (options.device_pci_vendor != 0)
 	{
 		argv.push_back("--device-pci-vendor");
-		sprintf(pci_vendor_name, "0x%x", options.device_pci_vendor);
+		snprintf(pci_vendor_name, sizeof(pci_vendor_name), "0x%x", options.device_pci_vendor);
 		argv.push_back(pci_vendor_name);
 	}
 
 	if (options.device_pci_device != 0)
 	{
 		argv.push_back("--device-pci-device");
-		sprintf(pci_device_name, "0x%x", options.device_pci_device);
+		snprintf(pci_device_name, sizeof(pci_device_name), "0x%x", options.device_pci_device);
 		argv.push_back(pci_device_name);
 	}
 

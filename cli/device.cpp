@@ -303,6 +303,7 @@ bool VulkanDevice::init_device(const Options &opts)
 			if (opts.device_pci_device == 0 || gpu_enum_props.deviceID == opts.device_pci_device)
 			{
 				selected_gpu_index = i;
+				break;
 			}
 		}
 	}
