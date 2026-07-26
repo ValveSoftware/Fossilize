@@ -285,6 +285,8 @@ bool VulkanDevice::init_device(const Options &opts)
 		return false;
 
 	int selected_gpu_index = -1;
+	bool pci_filter_set = opts.device_pci_vendor != 0;
+	bool pci_filter_matched = false;
 	for (uint32_t i = 0; i < gpu_count; i++)
 	{
 		VkPhysicalDeviceProperties gpu_enum_props;
@@ -298,14 +300,21 @@ bool VulkanDevice::init_device(const Options &opts)
 		LOGI("  vendorID: 0x%x\n", gpu_enum_props.vendorID);
 		LOGI("  deviceID: 0x%x\n", gpu_enum_props.deviceID);
 
-		if (opts.device_pci_vendor != 0 && gpu_enum_props.vendorID == opts.device_pci_vendor)
+		if (VulkanDevice::pci_filter_matches(opts,
+		                                      gpu_enum_props.vendorID,
+		                                      gpu_enum_props.deviceID))
 		{
-			if (opts.device_pci_device == 0 || gpu_enum_props.deviceID == opts.device_pci_device)
-			{
-				selected_gpu_index = i;
-				break;
-			}
+			selected_gpu_index = i;
+			pci_filter_matched = true;
+			break;
 		}
+	}
+
+	if (pci_filter_set && !pci_filter_matched)
+	{
+		LOGW("No GPU matched --device-pci-vendor 0x%x%s; falling back to default selection.\n",
+		     opts.device_pci_vendor,
+		     opts.device_pci_device ? " (with --device-pci-device)" : "");
 	}
 
 	if (selected_gpu_index >= 0)

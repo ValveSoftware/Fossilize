@@ -563,7 +563,11 @@ bool ProcessProgress::start_child_process(vector<ProcessProgress> &siblings)
 
 		// We're the child process.
 		// Kill the child immediately if the parent (fossilize_replay / steam) dies.
-		prctl(PR_SET_PDEATHSIG, SIGKILL);
+		if (prctl(PR_SET_PDEATHSIG, SIGKILL) != 0)
+		{
+			LOGE("Failed to set PR_SET_PDEATHSIG, aborting child startup.\n");
+			_exit(EXIT_FAILURE);
+		}
 		if (getppid() != parent_pid)
 			_exit(EXIT_FAILURE);
 

@@ -984,7 +984,11 @@ bool ExternalReplayer::Impl::start(const ExternalReplayer::Options &options)
 	else if (new_pid == 0)
 	{
 		// Kill replayer process immediately if parent application dies.
-		prctl(PR_SET_PDEATHSIG, SIGKILL);
+		if (prctl(PR_SET_PDEATHSIG, SIGKILL) != 0)
+		{
+			LOGE("Failed to set PR_SET_PDEATHSIG, aborting child startup.\n");
+			_exit(1);
+		}
 		if (getppid() != parent_pid)
 			_exit(1);
 

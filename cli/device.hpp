@@ -113,6 +113,22 @@ public:
 		return gpu_props;
 	}
 
+	// Pure predicate used both by init_device's selection loop and the
+	// gpu_selection_test. Keeps PCI filter semantics in a single place so
+	// the CLI and the test cannot drift apart.
+	static inline bool pci_filter_matches(const Options &opts,
+	                                      uint32_t vendor_id,
+	                                      uint32_t device_id)
+	{
+		if (opts.device_pci_vendor == 0)
+			return false;
+		if (vendor_id != opts.device_pci_vendor)
+			return false;
+		if (opts.device_pci_device != 0 && device_id != opts.device_pci_device)
+			return false;
+		return true;
+	}
+
 	// Special helper which deals with SAMPLER_YCBCR_CONVERSION_CREATE_INFO.
 	// Prefer using this instead of vkCreateSampler directly.
 	// The relevant pNext will be mutated into CONVERSION_INFO in-place if it exists.
