@@ -483,11 +483,11 @@ struct DisasmReplayer : StateCreatorInterface
 	}
 
 	template<typename T>
-	static void add_pipeline_flags(const T* create_info, VkPipelineCreateFlags2 flags)
+	static void add_pipeline_flags(const T *create_info, VkPipelineCreateFlags2 flags)
 	{
 		auto next = reinterpret_cast<const VkBaseInStructure *>(create_info->pNext);
 
-		while (next->sType != VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO)
+		while (next && next->sType != VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO)
 			next = next->pNext;
 
 		if (next)
