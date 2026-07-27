@@ -369,8 +369,8 @@ struct DisasmReplayer : StateCreatorInterface
 		if (device)
 		{
 			if (device->has_pipeline_stats())
-				const_cast<VkComputePipelineCreateInfo *>(create_info)->flags |=
-						VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR | VK_PIPELINE_CREATE_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR;
+				add_pipeline_flags(create_info,
+						VK_PIPELINE_CREATE_2_CAPTURE_STATISTICS_BIT_KHR | VK_PIPELINE_CREATE_2_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR);
 
 			LOGI("Creating compute pipeline %0" PRIX64 "\n", hash);
 			if (vkCreateComputePipelines(device->get_device(), pipeline_cache, 1, create_info, nullptr, pipeline) !=
@@ -401,8 +401,8 @@ struct DisasmReplayer : StateCreatorInterface
 		if (device)
 		{
 			if (device->has_pipeline_stats())
-				const_cast<VkGraphicsPipelineCreateInfo *>(create_info)->flags |=
-						VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR | VK_PIPELINE_CREATE_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR;
+				add_pipeline_flags(create_info,
+						VK_PIPELINE_CREATE_2_CAPTURE_STATISTICS_BIT_KHR | VK_PIPELINE_CREATE_2_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR);
 
 			LOGI("Creating graphics pipeline %0" PRIX64 "\n", hash);
 			if (vkCreateGraphicsPipelines(device->get_device(), pipeline_cache, 1, create_info, nullptr, pipeline) !=
@@ -434,8 +434,8 @@ struct DisasmReplayer : StateCreatorInterface
 		{
 			if (device->has_pipeline_stats())
 			{
-				const_cast<VkRayTracingPipelineCreateInfoKHR *>(create_info)->flags |=
-						VK_PIPELINE_CREATE_CAPTURE_STATISTICS_BIT_KHR | VK_PIPELINE_CREATE_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR;
+				add_pipeline_flags(create_info,
+						VK_PIPELINE_CREATE_2_CAPTURE_STATISTICS_BIT_KHR | VK_PIPELINE_CREATE_2_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR);
 			}
 
 			LOGI("Creating raytracing pipeline %0" PRIX64 "\n", hash);
@@ -480,6 +480,25 @@ struct DisasmReplayer : StateCreatorInterface
 	{
 		return !filter_graphics.empty() || !filter_compute.empty() ||
 		       !filter_raytracing.empty() || !filter_modules.empty();
+	}
+
+	template<typename T>
+	static void add_pipeline_flags(const T *create_info, VkPipelineCreateFlags2 flags)
+	{
+		auto next = reinterpret_cast<const VkBaseInStructure *>(create_info->pNext);
+
+		while (next && next->sType != VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO)
+			next = next->pNext;
+
+		if (next)
+		{
+			auto flags2_info = reinterpret_cast<const VkPipelineCreateFlags2CreateInfo *>(next);
+			const_cast<VkPipelineCreateFlags2CreateInfo *>(flags2_info)->flags |= flags;
+		}
+		else
+		{
+			const_cast<T *>(create_info)->flags |= VkPipelineCreateFlags(flags);
+		}
 	}
 
 	VulkanDevice *device;
