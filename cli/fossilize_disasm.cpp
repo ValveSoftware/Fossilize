@@ -789,7 +789,7 @@ static string disassemble_spirv_isa(const VulkanDevice &device, VkPipeline pipel
 		{
 			statistics.resize(count);
 			for (auto &stat : statistics)
-				stat.sType = VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_INTERNAL_REPRESENTATION_KHR;
+				stat.sType = VK_STRUCTURE_TYPE_PIPELINE_EXECUTABLE_STATISTIC_KHR;
 
 			const bool success = vkGetPipelineExecutableStatisticsKHR(device.get_device(), &executable, &count, statistics.data()) == VK_SUCCESS;
 			if (!success)
