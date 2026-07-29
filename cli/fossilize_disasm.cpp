@@ -109,6 +109,9 @@ struct FilterReplayer : StateCreatorInterface
 	{
 		*pipeline = fake_handle<VkPipeline>(hash);
 
+		auto *library_info = find_pnext<VkPipelineLibraryCreateInfoKHR>(
+			VK_STRUCTURE_TYPE_PIPELINE_LIBRARY_CREATE_INFO_KHR, create_info->pNext);
+
 		// We are active if we either explicitly add the pipeline, or we explicitly add one of the module dependencies.
 		bool active;
 		if (filter_graphics.count(hash) != 0)
@@ -120,6 +123,8 @@ struct FilterReplayer : StateCreatorInterface
 			active = false;
 			for (uint32_t i = 0; !active && i < create_info->stageCount; i++)
 				active = filter_modules.count((Hash)create_info->pStages[i].module) != 0;
+			for (uint32_t i = 0; !active && library_info && i < library_info->libraryCount; i++)
+				active = filter_graphics.count((Hash)library_info->pLibraries[i]) != 0;
 		}
 
 		if (!active)
@@ -130,6 +135,11 @@ struct FilterReplayer : StateCreatorInterface
 			filter_graphics.insert((Hash)create_info->basePipelineHandle);
 		for (uint32_t i = 0; i < create_info->stageCount; i++)
 			filter_modules_promoted.insert((Hash)create_info->pStages[i].module);
+
+		if (library_info)
+			for (uint32_t i = 0; i < library_info->libraryCount; i++)
+				filter_graphics.insert((Hash)library_info->pLibraries[i]);
+
 		filter_graphics.insert(hash);
 
 		return true;
@@ -1124,15 +1134,27 @@ int main(int argc, char *argv[])
 		else
 		{
 			// Need copies since we might modify the hashmap inside the replay callback.
-			auto replays_graphics = filter_replayer.filter_graphics;
-			auto replays_compute = filter_replayer.filter_compute;
-			auto replays_raytracing = filter_replayer.filter_raytracing;
-			replay_all_hashes(RESOURCE_GRAPHICS_PIPELINE, *resolver, state_replayer,
-			                  filter_replayer, state_json, &replays_graphics);
-			replay_all_hashes(RESOURCE_COMPUTE_PIPELINE, *resolver, state_replayer,
-			                  filter_replayer, state_json, &replays_compute);
-			replay_all_hashes(RESOURCE_RAYTRACING_PIPELINE, *resolver, state_replayer,
-			                  filter_replayer, state_json, &replays_raytracing);
+			std::unordered_set<Hash> replays_graphics, replays_compute, replays_raytracing;
+
+			bool added_dependencies;
+
+			do
+			{
+				replays_graphics = filter_replayer.filter_graphics;
+				replays_compute = filter_replayer.filter_compute;
+				replays_raytracing = filter_replayer.filter_raytracing;
+
+				replay_all_hashes(RESOURCE_GRAPHICS_PIPELINE, *resolver, state_replayer,
+								  filter_replayer, state_json, &replays_graphics);
+				replay_all_hashes(RESOURCE_COMPUTE_PIPELINE, *resolver, state_replayer,
+								  filter_replayer, state_json, &replays_compute);
+				replay_all_hashes(RESOURCE_RAYTRACING_PIPELINE, *resolver, state_replayer,
+								  filter_replayer, state_json, &replays_raytracing);
+
+				added_dependencies = filter_replayer.filter_graphics.size() > replays_graphics.size() ||
+				                     filter_replayer.filter_compute.size() > replays_compute.size() ||
+				                     filter_replayer.filter_raytracing.size() > replays_raytracing.size();
+			} while (added_dependencies);
 		}
 
 		filter_graphics = std::move(filter_replayer.filter_graphics);
