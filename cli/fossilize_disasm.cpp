@@ -47,6 +47,30 @@ static inline T fake_handle(uint64_t v)
 using namespace std;
 using namespace Fossilize;
 
+template<typename T>
+static void add_pipeline_flags(const T *create_info, VkPipelineCreateFlags2 flags)
+{
+	auto *flags2_info = find_pnext<VkPipelineCreateFlags2CreateInfo>(
+		VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO, create_info->pNext);
+
+	if (flags2_info)
+		const_cast<VkPipelineCreateFlags2CreateInfo *>(flags2_info)->flags |= flags;
+	else
+		const_cast<T *>(create_info)->flags |= VkPipelineCreateFlags(flags);
+}
+
+template<typename T>
+static VkPipelineCreateFlags2 get_pipeline_flags(const T *create_info)
+{
+	auto *flags2_info = find_pnext<VkPipelineCreateFlags2CreateInfo>(
+		VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO, create_info->pNext);
+
+	if (flags2_info)
+		return flags2_info->flags;
+	else
+		return create_info->flags;
+}
+
 struct FilterReplayer : StateCreatorInterface
 {
 	bool enqueue_create_sampler(Hash hash, const VkSamplerCreateInfo *, VkSampler *sampler) override
@@ -480,25 +504,6 @@ struct DisasmReplayer : StateCreatorInterface
 	{
 		return !filter_graphics.empty() || !filter_compute.empty() ||
 		       !filter_raytracing.empty() || !filter_modules.empty();
-	}
-
-	template<typename T>
-	static void add_pipeline_flags(const T *create_info, VkPipelineCreateFlags2 flags)
-	{
-		auto next = reinterpret_cast<const VkBaseInStructure *>(create_info->pNext);
-
-		while (next && next->sType != VK_STRUCTURE_TYPE_PIPELINE_CREATE_FLAGS_2_CREATE_INFO)
-			next = next->pNext;
-
-		if (next)
-		{
-			auto flags2_info = reinterpret_cast<const VkPipelineCreateFlags2CreateInfo *>(next);
-			const_cast<VkPipelineCreateFlags2CreateInfo *>(flags2_info)->flags |= flags;
-		}
-		else
-		{
-			const_cast<T *>(create_info)->flags |= VkPipelineCreateFlags(flags);
-		}
 	}
 
 	VulkanDevice *device;
