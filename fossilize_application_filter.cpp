@@ -36,6 +36,8 @@
 #include "rapidjson/writer.h"
 using namespace rapidjson;
 
+using Allocator = RAPIDJSON_DEFAULT_ALLOCATOR;
+
 namespace Fossilize
 {
 enum { FOSSILIZE_APPLICATION_INFO_FILTER_VERSION = 2 };
@@ -141,7 +143,13 @@ struct ApplicationInfoFilter::Impl
 	bool needs_buckets(const VkApplicationInfo *info);
 	Hash get_bucket_hash(const VkPhysicalDeviceProperties2 *props,
 	                     const VkApplicationInfo *info,
-	                     const void *device_pnext);
+	                     const void *device_pnext,
+	                     Value *json, Allocator *json_allocator);
+
+	std::string get_bucket_json_description(
+		const VkPhysicalDeviceProperties2 *props2,
+		const VkApplicationInfo *info,
+		const void *device_pnext);
 
 	const char *(*getenv_wrapper)(const char *, void *) = nullptr;
 	void *getenv_userdata = nullptr;
@@ -225,7 +233,8 @@ static void hash_variant(Hasher &h, VariantDependency dep,
                          const VkPhysicalDeviceProperties2 *props,
                          const VkApplicationInfo *info,
                          const void *device_pnext,
-                         bool feature_hash)
+                         bool feature_hash,
+                         Value *json, Allocator *json_allocator)
 {
 	const VkApplicationInfo default_app_info = { VK_STRUCTURE_TYPE_APPLICATION_INFO };
 	bool hash_enabled = true;
@@ -236,8 +245,13 @@ static void hash_variant(Hasher &h, VariantDependency dep,
 	switch (dep)
 	{
 	case VariantDependency::VendorID:
-		h.u32(props ? props->properties.vendorID : 0);
+	{
+		uint32_t vendorID = props ? props->properties.vendorID : 0;
+		if (json)
+			json->AddMember("VendorID", vendorID, *json_allocator);
+		h.u32(vendorID);
 		break;
+	}
 
 	case VariantDependency::MutableDescriptorType:
 	{
@@ -246,6 +260,8 @@ static void hash_variant(Hasher &h, VariantDependency dep,
 				device_pnext);
 
 		bool enabled = mut && mut->mutableDescriptorType;
+		if (json)
+			json->AddMember("MutableDescriptorType", int(enabled), *json_allocator);
 
 		if (feature_hash)
 		{
@@ -271,6 +287,9 @@ static void hash_variant(Hasher &h, VariantDependency dep,
 		bool enabled = (bda && bda->bufferDeviceAddress) ||
 		               (features12 && features12->bufferDeviceAddress);
 
+		if (json)
+			json->AddMember("BufferDeviceAddress", int(enabled), *json_allocator);
+
 		if (feature_hash)
 		{
 			hash_enabled = enabled;
@@ -292,6 +311,9 @@ static void hash_variant(Hasher &h, VariantDependency dep,
 		                       vrs->pipelineFragmentShadingRate ||
 		                       vrs->primitiveFragmentShadingRate);
 
+		if (json)
+			json->AddMember("FragmentShadingRate", int(enabled), *json_allocator);
+
 		if (feature_hash)
 		{
 			hash_enabled = enabled;
@@ -304,6 +326,21 @@ static void hash_variant(Hasher &h, VariantDependency dep,
 			h.u32(uint32_t(vrs && vrs->attachmentFragmentShadingRate));
 			h.u32(uint32_t(vrs && vrs->pipelineFragmentShadingRate));
 			h.u32(uint32_t(vrs && vrs->primitiveFragmentShadingRate));
+
+			if (json)
+			{
+				json->AddMember("attachmentFragmentShadingRate",
+				                int(vrs && vrs->attachmentFragmentShadingRate),
+				                *json_allocator);
+
+				json->AddMember("pipelineFragmentShadingRate",
+								int(vrs && vrs->pipelineFragmentShadingRate),
+								*json_allocator);
+
+				json->AddMember("primitiveFragmentShadingRate",
+								int(vrs && vrs->primitiveFragmentShadingRate),
+								*json_allocator);
+			}
 		}
 		break;
 	}
@@ -316,6 +353,9 @@ static void hash_variant(Hasher &h, VariantDependency dep,
 				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES, device_pnext);
 		bool enabled = (dynamic_rendering && dynamic_rendering->dynamicRendering) ||
 		               (features13 && features13->dynamicRendering);
+
+		if (json)
+			json->AddMember("DynamicRendering", int(enabled), *json_allocator);
 
 		if (feature_hash)
 		{
@@ -339,6 +379,9 @@ static void hash_variant(Hasher &h, VariantDependency dep,
 				device_pnext);
 		bool enabled = (indexing && indexing->descriptorBindingUniformBufferUpdateAfterBind) ||
 		               (features12 && features12->descriptorBindingUniformBufferUpdateAfterBind);
+
+		if (json)
+			json->AddMember("BindlessUBO", int(enabled), *json_allocator);
 
 		if (feature_hash)
 		{
@@ -366,6 +409,9 @@ static void hash_variant(Hasher &h, VariantDependency dep,
 		bool enabled = descriptor_buffer && (descriptor_buffer->descriptorBuffer ||
 		                                     descriptor_buffer->descriptorBufferPushDescriptors);
 
+		if (json)
+			json->AddMember("DescriptorBuffer", int(enabled), *json_allocator);
+
 		if (feature_hash)
 		{
 			hash_enabled = enabled;
@@ -379,6 +425,16 @@ static void hash_variant(Hasher &h, VariantDependency dep,
 			h.u32(uint32_t(descriptor_buffer && descriptor_buffer->descriptorBufferPushDescriptors));
 			// The other feature bits are highly unlikely to ever affect
 			// pipeline construction in application in any meaningful way.
+			if (json)
+			{
+				json->AddMember("descriptorBuffer",
+				                int(descriptor_buffer && descriptor_buffer->descriptorBuffer),
+				                *json_allocator);
+
+				json->AddMember("descriptorBufferPushDescriptors",
+								int(descriptor_buffer && descriptor_buffer->descriptorBufferPushDescriptors),
+								*json_allocator);
+			}
 		}
 		break;
 	}
@@ -390,6 +446,9 @@ static void hash_variant(Hasher &h, VariantDependency dep,
 				device_pnext);
 
 		bool enabled = descriptor_heap && descriptor_heap->descriptorHeap;
+
+		if (json)
+			json->AddMember("DescriptorHeap", int(enabled), *json_allocator);
 
 		if (feature_hash)
 		{
@@ -405,42 +464,62 @@ static void hash_variant(Hasher &h, VariantDependency dep,
 	}
 
 	case VariantDependency::ApplicationVersion:
+		if (json)
+			json->AddMember("ApplicationVersion", info->applicationVersion, *json_allocator);
 		h.u32(info->applicationVersion);
 		break;
 
 	case VariantDependency::ApplicationVersionMajor:
+		if (json)
+			json->AddMember("ApplicationVersionMajor", VK_VERSION_MAJOR(info->applicationVersion), *json_allocator);
 		h.u32(VK_VERSION_MAJOR(info->applicationVersion));
 		break;
 
 	case VariantDependency::ApplicationVersionMinor:
+		if (json)
+			json->AddMember("ApplicationVersionMinor", VK_VERSION_MINOR(info->applicationVersion), *json_allocator);
 		h.u32(VK_VERSION_MINOR(info->applicationVersion));
 		break;
 
 	case VariantDependency::ApplicationVersionPatch:
+		if (json)
+			json->AddMember("ApplicationVersionPatch", VK_VERSION_PATCH(info->applicationVersion), *json_allocator);
 		h.u32(VK_VERSION_PATCH(info->applicationVersion));
 		break;
 
 	case VariantDependency::EngineVersion:
+		if (json)
+			json->AddMember("EngineVersion", info->engineVersion, *json_allocator);
 		h.u32(info->engineVersion);
 		break;
 
 	case VariantDependency::EngineVersionMajor:
+		if (json)
+			json->AddMember("EngineVersionMajor", VK_VERSION_MAJOR(info->engineVersion), *json_allocator);
 		h.u32(VK_VERSION_MAJOR(info->engineVersion));
 		break;
 
 	case VariantDependency::EngineVersionMinor:
+		if (json)
+			json->AddMember("EngineVersionMinor", VK_VERSION_MINOR(info->engineVersion), *json_allocator);
 		h.u32(VK_VERSION_MINOR(info->engineVersion));
 		break;
 
 	case VariantDependency::EngineVersionPatch:
+		if (json)
+			json->AddMember("EngineVersionPatch", VK_VERSION_PATCH(info->engineVersion), *json_allocator);
 		h.u32(VK_VERSION_PATCH(info->engineVersion));
 		break;
 
 	case VariantDependency::ApplicationName:
+		if (json)
+			json->AddMember("ApplicationName", StringRef(info->pApplicationName ? info->pApplicationName : ""), *json_allocator);
 		h.string(info->pApplicationName ? info->pApplicationName : "");
 		break;
 
 	case VariantDependency::EngineName:
+		if (json)
+			json->AddMember("EngineName", StringRef(info->pEngineName ? info->pEngineName : ""), *json_allocator);
 		h.string(info->pEngineName ? info->pEngineName : "");
 		break;
 
@@ -449,9 +528,28 @@ static void hash_variant(Hasher &h, VariantDependency dep,
 	}
 }
 
+std::string ApplicationInfoFilter::Impl::get_bucket_json_description(
+		const VkPhysicalDeviceProperties2 *props2, const VkApplicationInfo *info,
+		const void *device_pnext)
+{
+	Document doc;
+	doc.SetObject();
+	Value bucket(kObjectType);
+	get_bucket_hash(props2, info, device_pnext, &bucket, &doc.GetAllocator());
+	doc.AddMember("bucket", bucket, doc.GetAllocator());
+
+	StringBuffer buf;
+	PrettyWriter<StringBuffer> writer(buf);
+	doc.Accept(writer);
+	std::string str;
+	str.insert(str.end(), buf.GetString(), buf.GetString() + buf.GetLength());
+	return str;
+}
+
 Hash ApplicationInfoFilter::Impl::get_bucket_hash(const VkPhysicalDeviceProperties2 *props,
                                                   const VkApplicationInfo *info,
-                                                  const void *device_pnext)
+                                                  const void *device_pnext,
+                                                  Value *json, Allocator *json_allocator)
 {
 	Hasher h;
 	bool use_default_variant = true;
@@ -464,9 +562,9 @@ Hash ApplicationInfoFilter::Impl::get_bucket_hash(const VkPhysicalDeviceProperti
 		{
 			use_default_variant = false;
 			for (auto &dep : itr->second.variant_dependencies)
-				hash_variant(h, dep, props, info, device_pnext, false);
+				hash_variant(h, dep, props, info, device_pnext, false, json, json_allocator);
 			for (auto &dep : itr->second.variant_dependencies_feature)
-				hash_variant(h, dep, props, info, device_pnext, true);
+				hash_variant(h, dep, props, info, device_pnext, true, json, json_allocator);
 		}
 	}
 
@@ -478,24 +576,37 @@ Hash ApplicationInfoFilter::Impl::get_bucket_hash(const VkPhysicalDeviceProperti
 		{
 			use_default_variant = false;
 			for (auto &dep : itr->second.variant_dependencies)
-				hash_variant(h, dep, props, info, device_pnext, false);
+				hash_variant(h, dep, props, info, device_pnext, false, json, json_allocator);
 			for (auto &dep : itr->second.variant_dependencies_feature)
-				hash_variant(h, dep, props, info, device_pnext, true);
+				hash_variant(h, dep, props, info, device_pnext, true, json, json_allocator);
 			for (auto &dep : itr->second.application_version_deltas)
+			{
 				if (info->applicationVersion >= dep)
+				{
 					h.u32(dep ^ 0xabba);
+					if (json)
+						json->AddMember("applicationVersionDelta", dep, *json_allocator);
+				}
+			}
+
 			for (auto &dep : itr->second.engine_version_deltas)
+			{
 				if (info->engineVersion >= dep)
+				{
 					h.u32(dep ^ 0xcafe);
+					if (json)
+						json->AddMember("engineVersionDelta", dep, *json_allocator);
+				}
+			}
 		}
 	}
 
 	if (use_default_variant)
 	{
 		for (auto &dep : default_variant_dependencies)
-			hash_variant(h, dep, props, info, device_pnext, false);
+			hash_variant(h, dep, props, info, device_pnext, false, json, json_allocator);
 		for (auto &dep : default_variant_dependencies_feature)
-			hash_variant(h, dep, props, info, device_pnext, true);
+			hash_variant(h, dep, props, info, device_pnext, true, json, json_allocator);
 	}
 
 	return h.get();
@@ -924,7 +1035,13 @@ Hash ApplicationInfoFilter::get_bucket_hash(const VkPhysicalDeviceProperties2 *p
                                             const VkApplicationInfo *info,
                                             const void *device_pnext)
 {
-	return impl->get_bucket_hash(props, info, device_pnext);
+	return impl->get_bucket_hash(props, info, device_pnext, nullptr, nullptr);
+}
+
+std::string ApplicationInfoFilter::get_bucket_json_description(
+		const VkPhysicalDeviceProperties2 *props, const VkApplicationInfo *info, const void *device_pnext)
+{
+	return impl->get_bucket_json_description(props, info, device_pnext);
 }
 
 bool ApplicationInfoFilter::should_record_immutable_samplers(const VkApplicationInfo *info)

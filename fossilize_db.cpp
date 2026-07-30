@@ -427,6 +427,10 @@ bool DatabaseInterface::set_bucket_path(const char *, const char *)
 	return false;
 }
 
+void DatabaseInterface::set_bucket_info(const char *)
+{
+}
+
 static size_t deduce_imported_size(const void *mapped, size_t maximum_size)
 {
 	size_t total_size = 0;
@@ -1933,6 +1937,23 @@ struct ConcurrentDatabase : DatabaseInterface
 		}
 
 		base_path += "/";
+
+		if (!bucket_info.empty())
+		{
+			auto info_path = base_path + "bucket.json";
+			FILE *file = fopen(info_path.c_str(), "w");
+			if (file)
+			{
+				fputs(bucket_info.c_str(), file);
+				fclose(file);
+			}
+			else
+			{
+				LOGE("Failed to create file \"%s\".\n", info_path.c_str());
+				return false;
+			}
+		}
+
 		if (!Path::touch(base_path + "TOUCH"))
 			LOGW("Failed to touch last access in %s.\n", base_path.c_str());
 		base_path += "/" + bucket_basename;
@@ -2378,9 +2399,15 @@ struct ConcurrentDatabase : DatabaseInterface
 		return true;
 	}
 
+	void set_bucket_info(const char *json) override
+	{
+		bucket_info = json;
+	}
+
 	std::string base_path;
 	std::string bucket_dirname;
 	std::string bucket_basename;
+	std::string bucket_info;
 	DatabaseMode mode;
 	std::unique_ptr<DatabaseInterface> readonly_interface;
 	std::unique_ptr<DatabaseInterface> writeonly_interface;

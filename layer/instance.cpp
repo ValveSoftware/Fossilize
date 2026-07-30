@@ -432,6 +432,8 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDevicePropert
 		Hash bucketHash = infoFilter->get_bucket_hash(props, appInfo, device_pnext);
 		sprintf(bucketPath, "%016" PRIx64, bucketHash);
 
+		std::string bucketInfo = infoFilter->get_bucket_json_description(props, appInfo, device_pnext);
+
 		// For convenience. Makes filenames similar in top-level directory and bucket directories.
 		auto basename = Path::basename(serializationPath);
 		auto prefix = basename;
@@ -440,6 +442,8 @@ StateRecorder *Instance::getStateRecorderForDevice(const VkPhysicalDevicePropert
 		prefix += hashString;
 
 		entry.interface->set_bucket_path(bucketPath, prefix.c_str());
+		if (!bucketInfo.empty())
+			entry.interface->set_bucket_info(bucketInfo.c_str());
 
 		if (entry.last_use_interface)
 		{
