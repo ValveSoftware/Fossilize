@@ -136,7 +136,7 @@ R"delim(
 
 	std::unique_ptr<Fossilize::ApplicationInfoFilter> filter_handle;
 	filter_handle.reset(Fossilize::ApplicationInfoFilter::parse(".__test_appinfo.json",
-																getenv_wrapper, &data));
+	                                                            getenv_wrapper, &data));
 
 	if (!filter_handle)
 	{
@@ -388,10 +388,17 @@ R"delim(
 		if (hash14 != hash15)
 			return EXIT_FAILURE;
 
+		std::string json15 = filter.get_bucket_json_description(&props2, &appinfo, &features2);
+
 		// Spot check for ApplicationName.
 		appinfo.pApplicationName = "foo";
 		auto hash16 = filter.get_bucket_hash(&props2, &appinfo, &features2);
 		if (hash16 == hash15)
+			return EXIT_FAILURE;
+
+		// Check that the JSON changed too.
+		std::string json16 = filter.get_bucket_json_description(&props2, &appinfo, &features2);
+		if (json15 == json16)
 			return EXIT_FAILURE;
 
 		// Check that the default variant hash is used.
@@ -439,33 +446,57 @@ R"delim(
 		features2.pNext = &descriptor_buffer_features;
 		if (filter.get_bucket_hash(&props2, &appinfo, &features2) != hash1)
 			return EXIT_FAILURE;
+		std::string json1 = filter.get_bucket_json_description(&props2, &appinfo, &features2);
 
 		features2.pNext = &descriptor_heap_features;
 		if (filter.get_bucket_hash(&props2, &appinfo, &features2) != hash1)
 			return EXIT_FAILURE;
 
+		// Check for JSON invariance. Not sure if rapidjson guarantees this, but seems like it.
+		std::string json2 = filter.get_bucket_json_description(&props2, &appinfo, &features2);
+		if (json2 != json1)
+			return EXIT_FAILURE;
+
 		features2.pNext = &bda_features;
 		if (filter.get_bucket_hash(&props2, &appinfo, &features2) != hash1)
+			return EXIT_FAILURE;
+		std::string json3 = filter.get_bucket_json_description(&props2, &appinfo, &features2);
+		if (json3 != json1)
 			return EXIT_FAILURE;
 
 		features2.pNext = &vulkan12_features;
 		if (filter.get_bucket_hash(&props2, &appinfo, &features2) != hash1)
 			return EXIT_FAILURE;
+		std::string json4 = filter.get_bucket_json_description(&props2, &appinfo, &features2);
+		if (json4 != json1)
+			return EXIT_FAILURE;
 
 		features2.pNext = &vulkan13_features;
 		if (filter.get_bucket_hash(&props2, &appinfo, &features2) != hash1)
+			return EXIT_FAILURE;
+		std::string json5 = filter.get_bucket_json_description(&props2, &appinfo, &features2);
+		if (json5 != json1)
 			return EXIT_FAILURE;
 
 		features2.pNext = &indexing_features;
 		if (filter.get_bucket_hash(&props2, &appinfo, &features2) != hash1)
 			return EXIT_FAILURE;
+		std::string json6 = filter.get_bucket_json_description(&props2, &appinfo, &features2);
+		if (json6 != json1)
+			return EXIT_FAILURE;
 
 		features2.pNext = &mutable_features;
 		if (filter.get_bucket_hash(&props2, &appinfo, &features2) != hash1)
 			return EXIT_FAILURE;
+		std::string json7 = filter.get_bucket_json_description(&props2, &appinfo, &features2);
+		if (json7 != json1)
+			return EXIT_FAILURE;
 
 		features2.pNext = &vrs_features;
 		if (filter.get_bucket_hash(&props2, &appinfo, &features2) != hash1)
+			return EXIT_FAILURE;
+		std::string json8 = filter.get_bucket_json_description(&props2, &appinfo, &features2);
+		if (json8 != json1)
 			return EXIT_FAILURE;
 
 		features2.pNext = &descriptor_buffer_features;

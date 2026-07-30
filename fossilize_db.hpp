@@ -197,6 +197,11 @@ public:
 	// See further comments after create_concurrent_database().
 	virtual bool set_bucket_path(const char *bucket_dirname, const char *bucket_basename);
 
+	// When using buckets, it's possible to add a bucket.json to the bucket to make it easy
+	// to check which configuration the bucket belongs to.
+	// This info does not have semantic meaning for parsing of an archive and can be discarded.
+	virtual void set_bucket_info(const char *json);
+
 	// Request termination of prepare() which can take a long time for very
 	// large archives.  This is useful if running prepare() on a thread and the need
 	// arises to stop loading the database.

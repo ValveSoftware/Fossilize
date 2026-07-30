@@ -22,6 +22,7 @@
 
 #pragma once
 #include "fossilize_types.hpp"
+#include <string>
 
 struct VkApplicationInfo;
 struct VkPhysicalDeviceFeatures2;
@@ -52,6 +53,10 @@ public:
 	                     const VkApplicationInfo *info,
 	                     const void *device_pnext);
 	bool should_record_immutable_samplers(const VkApplicationInfo *info);
+
+	std::string get_bucket_json_description(const VkPhysicalDeviceProperties2 *props,
+	                                        const VkApplicationInfo *info,
+	                                        const void *device_pnext);
 
 private:
 	ApplicationInfoFilter();

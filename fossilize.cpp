@@ -47,6 +47,7 @@
 #include "rapidjson/writer.h"
 using namespace rapidjson;
 
+using Allocator = RAPIDJSON_DEFAULT_ALLOCATOR;
 
 #ifdef PRETTY_WRITER
 using CustomWriter = PrettyWriter<StringBuffer>;
@@ -102,7 +103,6 @@ struct HashedInfo
 	T info;
 };
 
-template <typename Allocator>
 static Value uint64_string(uint64_t value, Allocator &alloc)
 {
 	char str[17]; // 16 digits + null
@@ -9494,11 +9494,10 @@ static std::string encode_base64(const void *data_, size_t size)
 	return ret;
 }
 
-template <typename T, typename Allocator>
+template <typename T>
 static bool pnext_chain_add_json_value(Value &base, const T &t, Allocator &alloc,
                                        const DynamicStateInfo *dynamic_state_info);
 
-template <typename Allocator>
 static bool json_value(const VkSamplerCreateInfo& sampler, Allocator& alloc, Value *out_value)
 {
 	Value s(kObjectType);
@@ -9526,7 +9525,6 @@ static bool json_value(const VkSamplerCreateInfo& sampler, Allocator& alloc, Val
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkPipelineLayoutCreateInfo& layout, Allocator& alloc, Value *out_value)
 {
 	Value p(kObjectType);
@@ -9551,7 +9549,6 @@ static bool json_value(const VkPipelineLayoutCreateInfo& layout, Allocator& allo
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkShaderModuleCreateInfo& module, Allocator& alloc, Value *out_value)
 {
 	Value m(kObjectType);
@@ -9563,7 +9560,6 @@ static bool json_value(const VkShaderModuleCreateInfo& module, Allocator& alloc,
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkPipelineTessellationDomainOriginStateCreateInfo &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -9574,7 +9570,6 @@ static bool json_value(const VkPipelineTessellationDomainOriginStateCreateInfo &
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkPipelineVertexInputDivisorStateCreateInfoKHR &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -9598,7 +9593,6 @@ static bool json_value(const VkPipelineVertexInputDivisorStateCreateInfoKHR &cre
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkPipelineRasterizationDepthClipStateCreateInfoEXT &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -9610,7 +9604,6 @@ static bool json_value(const VkPipelineRasterizationDepthClipStateCreateInfoEXT 
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkPipelineRasterizationStateStreamCreateInfoEXT &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -9622,7 +9615,6 @@ static bool json_value(const VkPipelineRasterizationStateStreamCreateInfoEXT &cr
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkRenderPassMultiviewCreateInfo &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -9656,7 +9648,6 @@ static bool json_value(const VkRenderPassMultiviewCreateInfo &create_info, Alloc
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkDescriptorSetLayoutBindingFlagsCreateInfoEXT &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -9674,7 +9665,6 @@ static bool json_value(const VkDescriptorSetLayoutBindingFlagsCreateInfoEXT &cre
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkPipelineColorBlendAdvancedStateCreateInfoEXT &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -9688,7 +9678,6 @@ static bool json_value(const VkPipelineColorBlendAdvancedStateCreateInfoEXT &cre
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkPipelineRasterizationConservativeStateCreateInfoEXT &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -9702,7 +9691,6 @@ static bool json_value(const VkPipelineRasterizationConservativeStateCreateInfoE
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkPipelineRasterizationLineStateCreateInfoKHR &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -9717,7 +9705,6 @@ static bool json_value(const VkPipelineRasterizationLineStateCreateInfoKHR &crea
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -9728,7 +9715,6 @@ static bool json_value(const VkPipelineShaderStageRequiredSubgroupSizeCreateInfo
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkMutableDescriptorTypeCreateInfoEXT &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -9749,7 +9735,6 @@ static bool json_value(const VkMutableDescriptorTypeCreateInfoEXT &create_info, 
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkAttachmentDescriptionStencilLayout &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -9760,7 +9745,6 @@ static bool json_value(const VkAttachmentDescriptionStencilLayout &create_info, 
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkAttachmentReferenceStencilLayout &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -9770,7 +9754,6 @@ static bool json_value(const VkAttachmentReferenceStencilLayout &create_info, Al
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkPipelineRenderingCreateInfoKHR &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -9791,7 +9774,6 @@ static bool json_value(const VkPipelineRenderingCreateInfoKHR &create_info, Allo
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkPipelineColorWriteCreateInfoEXT &create_info, Allocator &alloc, Value *out_value,
                        const DynamicStateInfo *dynamic_state_info)
 {
@@ -9814,7 +9796,6 @@ static bool json_value(const VkPipelineColorWriteCreateInfoEXT &create_info, All
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkPipelineRasterizationProvokingVertexStateCreateInfoEXT &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -9825,7 +9806,6 @@ static bool json_value(const VkPipelineRasterizationProvokingVertexStateCreateIn
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkSamplerCustomBorderColorCreateInfoEXT &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -9841,7 +9821,6 @@ static bool json_value(const VkSamplerCustomBorderColorCreateInfoEXT &create_inf
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkSamplerReductionModeCreateInfo &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -9852,7 +9831,6 @@ static bool json_value(const VkSamplerReductionModeCreateInfo &create_info, Allo
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkRenderPassInputAttachmentAspectCreateInfo &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -9873,7 +9851,6 @@ static bool json_value(const VkRenderPassInputAttachmentAspectCreateInfo &create
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkPipelineDiscardRectangleStateCreateInfoEXT &create_info, Allocator &alloc, Value *out_value,
                        const DynamicStateInfo *dynamic_state_info)
 {
@@ -9902,7 +9879,6 @@ static bool json_value(const VkPipelineDiscardRectangleStateCreateInfoEXT &creat
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkMemoryBarrier2KHR &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -9916,7 +9892,6 @@ static bool json_value(const VkMemoryBarrier2KHR &create_info, Allocator &alloc,
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkGraphicsPipelineLibraryCreateInfoEXT &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -9926,7 +9901,6 @@ static bool json_value(const VkGraphicsPipelineLibraryCreateInfoEXT &create_info
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkPipelineFragmentShadingRateStateCreateInfoKHR &create_info, Allocator &alloc, Value *out_value,
                        const DynamicStateInfo *dynamic_state_info)
 {
@@ -9950,7 +9924,6 @@ static bool json_value(const VkPipelineFragmentShadingRateStateCreateInfoKHR &cr
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkSamplerYcbcrConversionCreateInfo &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -9974,7 +9947,6 @@ static bool json_value(const VkSamplerYcbcrConversionCreateInfo &create_info, Al
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkPipelineLibraryCreateInfoKHR &create_info, Allocator &alloc,
                        bool in_pnext_chain, Value *out_value)
 {
@@ -9998,7 +9970,6 @@ static bool json_value(const VkPipelineLibraryCreateInfoKHR &create_info, Alloca
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkPipelineViewportDepthClipControlCreateInfoEXT &create_info,
                        Allocator &alloc, Value *out_value)
 {
@@ -10009,7 +9980,6 @@ static bool json_value(const VkPipelineViewportDepthClipControlCreateInfoEXT &cr
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkRenderPassCreationControlEXT &create_info,
                        Allocator &alloc, Value *out_value)
 {
@@ -10020,7 +9990,6 @@ static bool json_value(const VkRenderPassCreationControlEXT &create_info,
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkSamplerBorderColorComponentMappingCreateInfoEXT &create_info,
                        Allocator &alloc, Value *out_value)
 {
@@ -10037,7 +10006,6 @@ static bool json_value(const VkSamplerBorderColorComponentMappingCreateInfoEXT &
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkMultisampledRenderToSingleSampledInfoEXT &create_info,
                        Allocator &alloc, Value *out_value)
 {
@@ -10049,7 +10017,6 @@ static bool json_value(const VkMultisampledRenderToSingleSampledInfoEXT &create_
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkDepthBiasRepresentationInfoEXT &create_info,
                        Allocator &alloc, Value *out_value)
 {
@@ -10061,7 +10028,6 @@ static bool json_value(const VkDepthBiasRepresentationInfoEXT &create_info,
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkRenderPassFragmentDensityMapCreateInfoEXT &create_info,
                        Allocator &alloc, Value *out_value)
 {
@@ -10075,7 +10041,6 @@ static bool json_value(const VkRenderPassFragmentDensityMapCreateInfoEXT &create
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkSampleLocationsInfoEXT &create_info,
                        Allocator &alloc, Value *out_value)
 {
@@ -10107,7 +10072,6 @@ static bool json_value(const VkSampleLocationsInfoEXT &create_info,
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkPipelineRobustnessCreateInfoEXT &create_info,
                        Allocator &alloc, Value *out_value)
 {
@@ -10121,7 +10085,6 @@ static bool json_value(const VkPipelineRobustnessCreateInfoEXT &create_info,
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkPipelineCreateFlags2CreateInfoKHR &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -10131,7 +10094,6 @@ static bool json_value(const VkPipelineCreateFlags2CreateInfoKHR &create_info, A
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkPipelineViewportDepthClampControlCreateInfoEXT &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -10150,7 +10112,6 @@ static bool json_value(const VkPipelineViewportDepthClampControlCreateInfoEXT &c
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkRenderingAttachmentLocationInfoKHR &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -10169,7 +10130,6 @@ static bool json_value(const VkRenderingAttachmentLocationInfoKHR &create_info, 
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkRenderingInputAttachmentIndexInfoKHR &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -10193,7 +10153,6 @@ static bool json_value(const VkRenderingInputAttachmentIndexInfoKHR &create_info
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkPipelineFragmentDensityMapLayeredCreateInfoVALVE &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -10203,7 +10162,6 @@ static bool json_value(const VkPipelineFragmentDensityMapLayeredCreateInfoVALVE 
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkRayTracingPipelineClusterAccelerationStructureCreateInfoNV &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -10213,7 +10171,6 @@ static bool json_value(const VkRayTracingPipelineClusterAccelerationStructureCre
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkShaderDescriptorSetAndBindingMappingInfoEXT &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -10387,12 +10344,11 @@ static bool json_value(const VkShaderDescriptorSetAndBindingMappingInfoEXT &crea
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkSubpassDescriptionDepthStencilResolve &create_info, Allocator &alloc, Value *out_value);
-template <typename Allocator>
 static bool json_value(const VkFragmentShadingRateAttachmentInfoKHR &create_info, Allocator &alloc, Value *out_value);
+static bool json_value(const VkPipelineSampleLocationsStateCreateInfoEXT &create_info, Allocator &alloc, Value *out_value,
+					   const DynamicStateInfo *dynamic_state_info);
 
-template <typename Allocator>
 static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *out_value,
                                    const DynamicStateInfo *dynamic_state_info)
 {
@@ -10641,7 +10597,7 @@ static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *o
 	return true;
 }
 
-template <typename T, typename Allocator>
+template <typename T>
 static bool pnext_chain_add_json_value(Value &base, const T &t, Allocator &alloc,
                                        const DynamicStateInfo *dynamic_state_info)
 {
@@ -10655,7 +10611,6 @@ static bool pnext_chain_add_json_value(Value &base, const T &t, Allocator &alloc
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkAttachmentReference2 &att, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -10669,7 +10624,6 @@ static bool json_value(const VkAttachmentReference2 &att, Allocator &alloc, Valu
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkSubpassDescriptionDepthStencilResolve &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -10687,7 +10641,6 @@ static bool json_value(const VkSubpassDescriptionDepthStencilResolve &create_inf
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkFragmentShadingRateAttachmentInfoKHR &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -10708,7 +10661,6 @@ static bool json_value(const VkFragmentShadingRateAttachmentInfoKHR &create_info
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkPipelineSampleLocationsStateCreateInfoEXT &create_info, Allocator &alloc, Value *out_value,
                        const DynamicStateInfo *dynamic_state_info)
 {
@@ -10753,7 +10705,6 @@ static bool json_value(const VkPipelineSampleLocationsStateCreateInfoEXT &create
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkComputePipelineCreateInfo& pipe, Allocator& alloc, Value *out_value)
 {
 	Value p(kObjectType);
@@ -10798,7 +10749,6 @@ static bool json_value(const VkComputePipelineCreateInfo& pipe, Allocator& alloc
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkDescriptorSetLayoutCreateInfo& layout, Allocator& alloc, Value *out_value)
 {
 	Value l(kObjectType);
@@ -10831,7 +10781,6 @@ static bool json_value(const VkDescriptorSetLayoutCreateInfo& layout, Allocator&
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkRenderPassCreateInfo& pass, Allocator& alloc, Value *out_value)
 {
 	Value json_object(kObjectType);
@@ -10957,7 +10906,6 @@ static bool json_value(const VkRenderPassCreateInfo& pass, Allocator& alloc, Val
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkRenderPassCreateInfo2 &pass, Allocator &alloc, Value *out_value)
 {
 	Value json_object(kObjectType);
@@ -11095,7 +11043,6 @@ static bool json_value(const VkRenderPassCreateInfo2 &pass, Allocator &alloc, Va
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkPipelineShaderStageCreateInfo *pStages, uint32_t stageCount,
                        Allocator &alloc, Value *out_value)
 {
@@ -11138,7 +11085,6 @@ static bool json_value(const VkPipelineShaderStageCreateInfo *pStages, uint32_t 
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkPipelineDynamicStateCreateInfo &dynamic, Allocator &alloc, Value *out_value)
 {
 	Value dyn(kObjectType);
@@ -11152,7 +11098,6 @@ static bool json_value(const VkPipelineDynamicStateCreateInfo &dynamic, Allocato
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkRayTracingPipelineCreateInfoKHR &pipe, Allocator &alloc, Value *out_value)
 {
 	Value p(kObjectType);
@@ -11215,7 +11160,6 @@ static bool json_value(const VkRayTracingPipelineCreateInfoKHR &pipe, Allocator 
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkGraphicsPipelineCreateInfo &pipe,
                        const StateRecorder::SubpassMeta &subpass_meta,
                        Allocator &alloc, Value *out_value)
@@ -11497,8 +11441,7 @@ static bool json_value(const VkGraphicsPipelineCreateInfo &pipe,
 	return true;
 }
 
-template <typename AllocType>
-static void serialize_application_info_inline(Value &value, const VkApplicationInfo &info, AllocType &alloc)
+static void serialize_application_info_inline(Value &value, const VkApplicationInfo &info, Allocator &alloc)
 {
 	if (info.pApplicationName)
 		value.AddMember("applicationName", StringRef(info.pApplicationName), alloc);
@@ -11509,7 +11452,6 @@ static void serialize_application_info_inline(Value &value, const VkApplicationI
 	value.AddMember("apiVersion", info.apiVersion, alloc);
 }
 
-template <typename Allocator>
 static bool json_value(const VkPhysicalDeviceRobustness2FeaturesEXT &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -11521,7 +11463,6 @@ static bool json_value(const VkPhysicalDeviceRobustness2FeaturesEXT &create_info
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkPhysicalDeviceImageRobustnessFeaturesEXT &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -11531,7 +11472,6 @@ static bool json_value(const VkPhysicalDeviceImageRobustnessFeaturesEXT &create_
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -11543,7 +11483,6 @@ static bool json_value(const VkPhysicalDeviceFragmentShadingRateEnumsFeaturesNV 
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkPhysicalDeviceFragmentShadingRateFeaturesKHR &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -11555,7 +11494,6 @@ static bool json_value(const VkPhysicalDeviceFragmentShadingRateFeaturesKHR &cre
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkPhysicalDeviceMeshShaderFeaturesEXT &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -11569,7 +11507,6 @@ static bool json_value(const VkPhysicalDeviceMeshShaderFeaturesEXT &create_info,
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkPhysicalDeviceMeshShaderFeaturesNV &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -11580,7 +11517,6 @@ static bool json_value(const VkPhysicalDeviceMeshShaderFeaturesNV &create_info, 
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkPhysicalDeviceDescriptorBufferFeaturesEXT &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -11593,7 +11529,6 @@ static bool json_value(const VkPhysicalDeviceDescriptorBufferFeaturesEXT &create
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkPhysicalDeviceShaderObjectFeaturesEXT &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -11603,7 +11538,6 @@ static bool json_value(const VkPhysicalDeviceShaderObjectFeaturesEXT &create_inf
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkPhysicalDevicePrimitivesGeneratedQueryFeaturesEXT &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -11615,7 +11549,6 @@ static bool json_value(const VkPhysicalDevicePrimitivesGeneratedQueryFeaturesEXT
 	return true;
 }
 
-template <typename Allocator>
 static bool json_value(const VkPhysicalDeviceImage2DViewOf3DFeaturesEXT &create_info, Allocator &alloc, Value *out_value)
 {
 	Value value(kObjectType);
@@ -11626,7 +11559,6 @@ static bool json_value(const VkPhysicalDeviceImage2DViewOf3DFeaturesEXT &create_
 	return true;
 }
 
-template <typename Allocator>
 static bool pnext_chain_pdf2_json_value(const void *pNext, Allocator &alloc, Value *out_value)
 {
 	Value nexts(kArrayType);
@@ -11700,7 +11632,7 @@ static bool pnext_chain_pdf2_json_value(const void *pNext, Allocator &alloc, Val
 	return true;
 }
 
-template <typename T, typename Allocator>
+template <typename T>
 static bool pnext_chain_pdf2_add_json_value(Value &base, const T &t, Allocator &alloc)
 {
 	if (t.pNext)
@@ -11713,8 +11645,7 @@ static bool pnext_chain_pdf2_add_json_value(Value &base, const T &t, Allocator &
 	return true;
 }
 
-template <typename AllocType>
-static bool serialize_physical_device_features_inline(Value &value, const VkPhysicalDeviceFeatures2 &features, AllocType &alloc)
+static bool serialize_physical_device_features_inline(Value &value, const VkPhysicalDeviceFeatures2 &features, Allocator &alloc)
 {
 	value.AddMember("robustBufferAccess", features.features.robustBufferAccess, alloc);
 	if (!pnext_chain_pdf2_add_json_value(value, features, alloc))
