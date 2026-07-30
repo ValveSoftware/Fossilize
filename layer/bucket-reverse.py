@@ -58,7 +58,8 @@ def dep_to_stype(dep : str) -> int:
 def reverse_engine_version(filter : dict, hash : int, engine_name : str, engine_version) -> Optional[dict]:
     num_variant_deps = len(filter['bucketVariantDependencies']) if 'bucketVariantDependencies' in filter else 0
     num_variant_feature_deps = len(filter['bucketVariantFeatureDependencies']) if 'bucketVariantFeatureDependencies' in filter else 0
-    num_variants = 1 << (num_variant_deps + num_variant_feature_deps)
+    num_bucket_deltas = len(filter['engineVersionBucketDeltas']) if 'engineVersionBucketDeltas' in filter else 0
+    num_variants = 1 << (num_variant_deps + num_variant_feature_deps + num_bucket_deltas)
 
     if num_variant_deps != 0:
         # VendorID consumes 2 bits instead of 1.
@@ -143,10 +144,14 @@ def reverse_engine_version(filter : dict, hash : int, engine_name : str, engine_
 
                 bit_index += 1
 
-        if 'engineVersionDeltas' in filter:
-            for dep in filter['engineVersionDeltas']:
-                if dep >= make_version(engine_version[0], engine_version[1]):
+        if num_bucket_deltas != 0:
+            deltas = []
+            for dep in filter['engineVersionBucketDeltas']:
+                if make_version(engine_version[0], engine_version[1]) >= dep:
                     h.u32(dep ^ 0xcafe)
+                    deltas.append(dep)
+                bit_index += 1
+            candidate['engineVersionBucketDeltas'] = deltas
 
         #print(f'Engine {engine_name}, version {engine_version[0]}.{engine_version[1]}, candidate {candidate} yields hash {hex(h.get())}')
 
@@ -179,7 +184,13 @@ def reverse_bucket_hash_vkd3d(filter : dict, hash : int) -> Optional[dict]:
     return reverse_engine_version_range(filter, hash, 'vkd3d', minimum_version, (3, 1), 14)
 
 def reverse_bucket_hash_dxvk(filter : dict, hash : int) -> Optional[dict]:
-    pass
+    # The Steam filter uses these. That's what we care about.
+    if 'minimumEngineVersion' not in filter:
+        return None
+
+    minimum_version = (version_major(filter['minimumEngineVersion']), version_minor(filter['minimumEngineVersion']))
+    # The minor version is not relevant for DXVK, but there are bucket delta hashes.
+    return reverse_engine_version_range(filter, hash, 'DXVK', minimum_version, (3, 1), 0)
 
 # filter is a loaded dict of the fossilize_engine_filters.json.
 def reverse_bucket_hash(filter : dict, hash : int) -> Optional[dict]:

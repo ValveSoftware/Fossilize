@@ -579,13 +579,17 @@ Hash ApplicationInfoFilter::Impl::get_bucket_hash(const VkPhysicalDeviceProperti
 				hash_variant(h, dep, props, info, device_pnext, false, json, json_allocator);
 			for (auto &dep : itr->second.variant_dependencies_feature)
 				hash_variant(h, dep, props, info, device_pnext, true, json, json_allocator);
+
+			Value applicationDeltas(kArrayType);
+			Value engineDeltas(kArrayType);
+
 			for (auto &dep : itr->second.application_version_deltas)
 			{
 				if (info->applicationVersion >= dep)
 				{
 					h.u32(dep ^ 0xabba);
 					if (json)
-						json->AddMember("applicationVersionDelta", dep, *json_allocator);
+						applicationDeltas.PushBack(dep, *json_allocator);
 				}
 			}
 
@@ -595,8 +599,14 @@ Hash ApplicationInfoFilter::Impl::get_bucket_hash(const VkPhysicalDeviceProperti
 				{
 					h.u32(dep ^ 0xcafe);
 					if (json)
-						json->AddMember("engineVersionDelta", dep, *json_allocator);
+						engineDeltas.PushBack(dep, *json_allocator);
 				}
+			}
+
+			if (json)
+			{
+				json->AddMember("applicationVersionBucketDeltas", applicationDeltas, *json_allocator);
+				json->AddMember("engineVersionBucketDeltas", engineDeltas, *json_allocator);
 			}
 		}
 	}
