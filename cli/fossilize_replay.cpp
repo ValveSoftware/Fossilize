@@ -4205,6 +4205,35 @@ static int run_normal_process(ThreadedReplayer &replayer, const vector<const cha
 		"Raytracing Pipeline",
 	};
 
+	{
+		size_t resource_hash_count = 0;
+		if (!resolver->get_hash_list_for_resource_tag(RESOURCE_BUCKET_INFO, &resource_hash_count, nullptr))
+		{
+			LOGE("Failed to get list of resource hashes.\n");
+			return EXIT_FAILURE;
+		}
+
+		resource_hashes.resize(resource_hash_count);
+
+		if (!resolver->get_hash_list_for_resource_tag(RESOURCE_BUCKET_INFO, &resource_hash_count, resource_hashes.data()))
+		{
+			LOGE("Failed to get list of resource hashes.\n");
+			return EXIT_FAILURE;
+		}
+
+		for (auto &hash : resource_hashes)
+		{
+			size_t state_json_size = 0;
+			if (!resolver->read_entry(RESOURCE_BUCKET_INFO, hash, &state_json_size, nullptr, PAYLOAD_READ_NO_FLAGS))
+				return EXIT_FAILURE;
+			state_json.resize(state_json_size);
+			if (!resolver->read_entry(RESOURCE_BUCKET_INFO, hash, &state_json_size, state_json.data(), PAYLOAD_READ_NO_FLAGS))
+				return EXIT_FAILURE;
+			state_json.push_back('\0');
+			LOGI("Replaying for bucket: %s\n", reinterpret_cast<const char *>(state_json.data()));
+		}
+	}
+
 	for (auto &tag : initial_playback_order)
 	{
 		auto main_thread_start = std::chrono::steady_clock::now();
