@@ -33,6 +33,7 @@
 #endif
 
 #include "fossilize_db.hpp"
+#include "fossilize_hasher.hpp"
 #include "path.hpp"
 #include "layer/utils.hpp"
 #include "miniz.h"
@@ -2046,6 +2047,19 @@ struct ConcurrentDatabase : DatabaseInterface
 		}
 
 		has_prepared_readonly = true;
+
+		// To make harvesting easier, also store the bucket info as a separate entry in the DB.
+		if (mode != DatabaseMode::ReadOnly && !bucket_basename.empty() && !bucket_info.empty())
+		{
+			Hasher h;
+			h.string(bucket_info);
+			if (!write_entry(RESOURCE_BUCKET_INFO, h.get(),
+							 bucket_info.data(), bucket_info.size(), PAYLOAD_WRITE_NO_FLAGS))
+			{
+				return false;
+			}
+		}
+
 		return true;
 	}
 
