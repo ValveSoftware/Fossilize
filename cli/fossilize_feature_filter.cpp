@@ -387,6 +387,7 @@ static void filter_active_extensions(VkPhysicalDeviceFeatures2 &pdf,
 			    feature->robustImageAccess2 == VK_FALSE)
 			{
 				remove_extension(active_extensions, out_extension_count, VK_EXT_ROBUSTNESS_2_EXTENSION_NAME);
+				remove_extension(active_extensions, out_extension_count, VK_KHR_ROBUSTNESS_2_EXTENSION_NAME);
 				accept = false;
 			}
 			break;
