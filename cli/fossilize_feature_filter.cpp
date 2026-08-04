@@ -87,6 +87,8 @@ static void filter_feature_enablement(
 		VkPhysicalDeviceFeatures2 &pdf, VulkanFeatures &features,
 		const VkPhysicalDeviceFeatures2 *target_features)
 {
+	features.cooperative_matrix.cooperativeMatrixRobustBufferAccess = VK_FALSE;
+
 	// These feature bits conflict according to validation layers.
 	if (features.fragment_shading_rate.pipelineFragmentShadingRate == VK_TRUE ||
 	    features.fragment_shading_rate.attachmentFragmentShadingRate == VK_TRUE ||
