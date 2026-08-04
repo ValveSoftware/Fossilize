@@ -65,3 +65,9 @@ add_fossilize_cli(fossilize-opt fossilize_opt.cpp)
 target_link_libraries(fossilize-opt SPIRV-Tools-opt)
 add_fossilize_cli(fossilize-synth fossilize_synth.cpp)
 target_link_libraries(fossilize-synth spirv-cross-c)
+
+if ((NOT WIN32) AND (NOT ANDROID))
+	# For now, this tools is only relevant for Mesa CI purposes.
+	# Can be ported over as needed.
+	add_fossilize_cli(fossilize-validate-cache-roundtrip fossilize_validate_cache_roundtrip.cpp)
+endif()
