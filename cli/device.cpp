@@ -228,6 +228,13 @@ static bool application_info_promote_fragment_shading_rate(const VkApplicationIn
 	return false;
 }
 
+static void pipeline_binary_key_to_str(char (&str)[VK_MAX_PIPELINE_BINARY_KEY_SIZE_KHR * 2 + 1], const VkPipelineBinaryKeyKHR &key)
+{
+	str[0] = '\0';
+	for (uint32_t i = 0; i < key.keySize; i++)
+		sprintf(str + 2 * i, "%02x", key.key[i]);
+}
+
 bool VulkanDevice::init_device(const Options &opts)
 {
 	if (opts.null_device)
@@ -523,6 +530,16 @@ bool VulkanDevice::init_device(const Options &opts)
 
 	supports_module_identifiers = features.shader_module_identifier.shaderModuleIdentifier == VK_TRUE;
 
+	VkPhysicalDevicePipelineBinaryFeaturesKHR pipeline_binary_features =
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_BINARY_FEATURES_KHR, gpu_features2.pNext, VK_TRUE };
+
+	supports_pipeline_binary = find_if(begin(active_device_extensions), end(active_device_extensions), [](const char *ext) {
+		return strcmp(ext, VK_KHR_PIPELINE_BINARY_EXTENSION_NAME) == 0;
+	}) != end(active_device_extensions);
+
+	if (supports_pipeline_binary)
+		gpu_features2.pNext = &pipeline_binary_features;
+
 	VkDeviceCreateInfo device_info = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
 	device_info.pNext = has_device_features2 ? &gpu_features2 : nullptr;
 	device_info.pEnabledFeatures = has_device_features2 ? nullptr : &gpu_features2.features;
@@ -543,6 +560,19 @@ bool VulkanDevice::init_device(const Options &opts)
 	{
 		LOGE("Failed to create device.\n");
 		return false;
+	}
+
+	volkLoadDevice(device);
+
+	if (supports_pipeline_binary)
+	{
+		VkPipelineBinaryKeyKHR key = { VK_STRUCTURE_TYPE_PIPELINE_BINARY_KEY_KHR };
+		if (vkGetPipelineKeyKHR(device, nullptr, &key) == VK_SUCCESS)
+		{
+			char str[VK_MAX_PIPELINE_BINARY_KEY_SIZE_KHR * 2 + 1];
+			pipeline_binary_key_to_str(str, key);
+			LOGI("Replayer global pipeline binary key: %s\n", str);
+		}
 	}
 
 	if (!feature_filter.init(api_version, active_device_extensions.data(), active_device_extensions.size(),

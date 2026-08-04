@@ -74,6 +74,13 @@ static VkInstance create_instance()
 	return instance;
 }
 
+static void pipeline_binary_key_to_str(char (&str)[VK_MAX_PIPELINE_BINARY_KEY_SIZE_KHR * 2 + 1], const VkPipelineBinaryKeyKHR &key)
+{
+	str[0] = '\0';
+	for (uint32_t i = 0; i < key.keySize; i++)
+		sprintf(str + 2 * i, "%02x", key.key[i]);
+}
+
 static VkDevice create_device(VkInstance instance, const VkPhysicalDeviceFeatures &features, bool pipeline_binary_key)
 {
 	// Just pick the first GPU. Could be improved if needed.
@@ -145,11 +152,10 @@ static VkDevice create_device(VkInstance instance, const VkPhysicalDeviceFeature
 			LOGE("Failed to get the global pipeline binary key.\n");
 			return VK_NULL_HANDLE;
 		}
-		uint32_t key_values[VK_MAX_PIPELINE_BINARY_KEY_SIZE_KHR / sizeof(uint32_t)] = {};
-		memcpy(key_values, key.key, key.keySize);
-		LOGI("Global pipeline binary key: %08x%08x%08x%08x%08x%08x%08x%08x\n",
-			 key_values[0], key_values[1], key_values[2], key_values[3],
-			 key_values[4], key_values[5], key_values[6], key_values[7]);
+
+		char str[VK_MAX_PIPELINE_BINARY_KEY_SIZE_KHR * 2 + 1];
+		pipeline_binary_key_to_str(str, key);
+		LOGI("Global pipeline binary key: %s\n", str);
 	}
 
 	return device;
@@ -561,8 +567,11 @@ static bool check_replayer_roundtrip(const std::string &replayer, const char *fo
 				hits = parse_number_end_of_line(line);
 			else if (strstr(line, "Pipeline cache misses reported"))
 				misses = parse_number_end_of_line(line);
-			else if (strncmp(line, "Fossilize ERROR:", strlen("Fossilize ERROR:")) == 0)
+			else if (strncmp(line, "Fossilize ERROR:", strlen("Fossilize ERROR:")) == 0 ||
+			         strstr(line, "Replayer global pipeline binary key:"))
+			{
 				fprintf(stderr, "%s", line);
+			}
 		}
 
 		fclose(file);
