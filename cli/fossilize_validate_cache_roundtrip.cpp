@@ -36,7 +36,10 @@ using namespace Fossilize;
 
 static void print_help()
 {
-	LOGI("fossilize-validate-cache-roundtrip [--help] [--fossilize-replay <custom path to replayer>] [--pipeline-binary-key]\n");
+	LOGI("fossilize-validate-cache-roundtrip\n"
+		"\t[--help]\n"
+		"\t[--fossilize-replay <custom path to replayer>]\n"
+		"\t[--pipeline-binary-key]\n");
 }
 
 static constexpr VkApplicationInfo app_info = {
@@ -94,25 +97,39 @@ static VkDevice create_device(VkInstance instance, const VkPhysicalDeviceFeature
 	queue_create_info.pQueuePriorities = &queue_prio;
 	device_info.pQueueCreateInfos = &queue_create_info;
 
-	VkPhysicalDevicePipelineBinaryFeaturesKHR binary = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_BINARY_FEATURES_KHR };
+	VkPhysicalDevicePipelineBinaryFeaturesKHR binary = {
+		VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_BINARY_FEATURES_KHR, nullptr, VK_TRUE
+	};
+
+	VkPhysicalDeviceRobustness2FeaturesEXT robustness2 = {
+		VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT, nullptr,
+		VK_TRUE, VK_TRUE, VK_TRUE
+	};
+
+	if (features.robustBufferAccess)
+		binary.pNext = &robustness2;
+
 	VkPhysicalDeviceFeatures2 features2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &binary, features };
+	device_info.pNext = &features2;
+
+	static const char *extensions[] = {
+		VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
+		VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME,
+		VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME,
+		VK_KHR_MAINTENANCE_5_EXTENSION_NAME,
+		VK_KHR_PIPELINE_BINARY_EXTENSION_NAME,
+		VK_EXT_ROBUSTNESS_2_EXTENSION_NAME,
+	};
 
 	if (pipeline_binary_key)
 	{
-		device_info.pNext = &features2;
-		static const char *extensions[] = {
-			VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
-			VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME,
-			VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME,
-			VK_KHR_MAINTENANCE_5_EXTENSION_NAME,
-			VK_KHR_PIPELINE_BINARY_EXTENSION_NAME
-		};
 		device_info.ppEnabledExtensionNames = extensions;
-		device_info.enabledExtensionCount = 5;
+		device_info.enabledExtensionCount = features.robustBufferAccess ? 6 : 5;
 	}
 	else
 	{
-		device_info.pEnabledFeatures = &features;
+		device_info.ppEnabledExtensionNames = extensions + 5;
+		device_info.enabledExtensionCount = 1;
 	}
 
 	VkDevice device;
@@ -603,11 +620,13 @@ int main(int argc, char **argv)
 {
 	std::string fossilize_replay = "fossilize-replay";
 	bool pipeline_binary_key = false;
+	bool robustness = false;
 	CLICallbacks cbs;
 
 	cbs.add("--help", [&](CLIParser &parser) { parser.end(); });
 	cbs.add("--fossilize-replay", [&](CLIParser &parser) { fossilize_replay = parser.next_string(); });
 	cbs.add("--pipeline-binary-key", [&](CLIParser &) { pipeline_binary_key = true; });
+	cbs.add("--robustness", [&](CLIParser &) { robustness = true; });
 
 	CLIParser parser(std::move(cbs), argc - 1, argv + 1);
 	if (!parser.parse())
@@ -622,7 +641,10 @@ int main(int argc, char **argv)
 	}
 
 	VkInstance instance = create_instance();
+
 	VkPhysicalDeviceFeatures features = {};
+	features.robustBufferAccess = robustness;
+
 	VkDevice device = create_device(instance, features, pipeline_binary_key);
 	VkPipelineCache cache = create_pipeline_cache(device);
 
