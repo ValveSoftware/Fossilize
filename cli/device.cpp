@@ -74,11 +74,22 @@ static bool filter_extension(const char *ext, bool want_amd_shader_info,
 		VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
 		VK_KHR_RAY_QUERY_EXTENSION_NAME,
 		VK_KHR_MAINTENANCE_4_EXTENSION_NAME,
+		VK_KHR_MAINTENANCE_5_EXTENSION_NAME,
+		VK_KHR_MAINTENANCE_6_EXTENSION_NAME,
+		VK_KHR_MAINTENANCE_7_EXTENSION_NAME,
+		VK_KHR_MAINTENANCE_8_EXTENSION_NAME,
+		VK_KHR_MAINTENANCE_9_EXTENSION_NAME,
+		VK_KHR_MAINTENANCE_10_EXTENSION_NAME,
 		VK_KHR_SHADER_SUBGROUP_UNIFORM_CONTROL_FLOW_EXTENSION_NAME,
 		VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME,
 		VK_NV_SHADER_SM_BUILTINS_EXTENSION_NAME,
 		VK_NV_SHADER_SUBGROUP_PARTITIONED_EXTENSION_NAME,
 		VK_NV_DEVICE_GENERATED_COMMANDS_EXTENSION_NAME,
+		VK_KHR_INTERNALLY_SYNCHRONIZED_QUEUES_EXTENSION_NAME,
+	};
+
+	static const char *vulkan_12_only_extensions[] = {
+		VK_EXT_SHADER_LONG_VECTOR_EXTENSION_NAME,
 	};
 
 	bool ext_is_vulkan_11_only = false;
@@ -87,6 +98,16 @@ static bool filter_extension(const char *ext, bool want_amd_shader_info,
 		if (strcmp(candidate, ext) == 0)
 		{
 			ext_is_vulkan_11_only = true;
+			break;
+		}
+	}
+
+	bool ext_is_vulkan_12_only = false;
+	for (auto *candidate : vulkan_12_only_extensions)
+	{
+		if (strcmp(candidate, ext) == 0)
+		{
+			ext_is_vulkan_12_only = true;
 			break;
 		}
 	}
@@ -108,6 +129,10 @@ static bool filter_extension(const char *ext, bool want_amd_shader_info,
 		return false;
 	}
 	else if (api_version < VK_API_VERSION_1_1 && ext_is_vulkan_11_only)
+	{
+		return false;
+	}
+	else if (api_version < VK_API_VERSION_1_2 && ext_is_vulkan_12_only)
 	{
 		return false;
 	}
