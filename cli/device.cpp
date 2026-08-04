@@ -450,35 +450,6 @@ bool VulkanDevice::init_device(const Options &opts)
 		}
 	}
 
-	vector<const char *> active_device_layers;
-	if (opts.enable_validation)
-	{
-		uint32_t device_layer_count = 0;
-		if (vkEnumerateDeviceLayerProperties(gpu, &device_layer_count, nullptr) != VK_SUCCESS)
-			return false;
-		vector<VkLayerProperties> device_layers(device_layer_count);
-		if (device_layer_count && vkEnumerateDeviceLayerProperties(gpu, &device_layer_count, device_layers.data()) != VK_SUCCESS)
-			return false;
-
-		if (find_layer(device_layers, "VK_LAYER_KHRONOS_validation"))
-		{
-			active_device_layers.push_back("VK_LAYER_KHRONOS_validation");
-
-			uint32_t validation_ext_count = 0;
-			vkEnumerateDeviceExtensionProperties(gpu, "VK_LAYER_KHRONOS_validation", &validation_ext_count, nullptr);
-			vector<VkExtensionProperties> validation_extensions(validation_ext_count);
-			vkEnumerateDeviceExtensionProperties(gpu, "VK_LAYER_KHRONOS_validation", &validation_ext_count, validation_extensions.data());
-			validation_cache = find_extension(validation_extensions, VK_EXT_VALIDATION_CACHE_EXTENSION_NAME);
-			if (validation_cache)
-				active_device_extensions.push_back(VK_EXT_VALIDATION_CACHE_EXTENSION_NAME);
-		}
-		else
-		{
-			LOGE("Cannot find VK_LAYER_KHRONOS_validation layer.\n");
-			return false;
-		}
-	}
-
 	supports_pipeline_feedback = find_if(begin(active_device_extensions), end(active_device_extensions), [](const char *ext) {
 		return strcmp(ext, VK_EXT_PIPELINE_CREATION_FEEDBACK_EXTENSION_NAME) == 0;
 	}) != end(active_device_extensions);
@@ -498,8 +469,6 @@ bool VulkanDevice::init_device(const Options &opts)
 	device_info.pEnabledFeatures = has_device_features2 ? nullptr : &gpu_features2.features;
 	device_info.pQueueCreateInfos = &queue_info;
 	device_info.queueCreateInfoCount = 1;
-	device_info.enabledLayerCount = uint32_t(active_device_layers.size());
-	device_info.ppEnabledLayerNames = active_device_layers.empty() ? nullptr : active_device_layers.data();
 	device_info.enabledExtensionCount = uint32_t(active_device_extensions.size());
 	device_info.ppEnabledExtensionNames = active_device_extensions.empty() ? nullptr : active_device_extensions.data();
 
