@@ -39,6 +39,7 @@ static void print_help()
 	LOGI("fossilize-validate-cache-roundtrip\n"
 		"\t[--help]\n"
 		"\t[--fossilize-replay <custom path to replayer>]\n"
+		"\t[--robustness]\n"
 		"\t[--pipeline-binary-key]\n");
 }
 
