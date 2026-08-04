@@ -36,7 +36,7 @@ using namespace Fossilize;
 
 static void print_help()
 {
-	LOGI("fossilize-validate-cache-roundtrip [--help] [--fossilize-replay <custom path to replayer>]\n");
+	LOGI("fossilize-validate-cache-roundtrip [--help] [--fossilize-replay <custom path to replayer>] [--pipeline-binary-key]\n");
 }
 
 static constexpr VkApplicationInfo app_info = {
@@ -71,7 +71,7 @@ static VkInstance create_instance()
 	return instance;
 }
 
-static VkDevice create_device(VkInstance instance, const VkPhysicalDeviceFeatures &features)
+static VkDevice create_device(VkInstance instance, const VkPhysicalDeviceFeatures &features, bool pipeline_binary_key)
 {
 	// Just pick the first GPU. Could be improved if needed.
 	uint32_t count = 1;
@@ -93,12 +93,47 @@ static VkDevice create_device(VkInstance instance, const VkPhysicalDeviceFeature
 	queue_create_info.queueFamilyIndex = 0;
 	queue_create_info.pQueuePriorities = &queue_prio;
 	device_info.pQueueCreateInfos = &queue_create_info;
-	device_info.pEnabledFeatures = &features;
+
+	VkPhysicalDevicePipelineBinaryFeaturesKHR binary = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_BINARY_FEATURES_KHR };
+	VkPhysicalDeviceFeatures2 features2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &binary, features };
+
+	if (pipeline_binary_key)
+	{
+		device_info.pNext = &features2;
+		static const char *extensions[] = {
+			VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
+			VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME,
+			VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME,
+			VK_KHR_MAINTENANCE_5_EXTENSION_NAME,
+			VK_KHR_PIPELINE_BINARY_EXTENSION_NAME
+		};
+		device_info.ppEnabledExtensionNames = extensions;
+		device_info.enabledExtensionCount = 5;
+	}
+	else
+	{
+		device_info.pEnabledFeatures = &features;
+	}
 
 	VkDevice device;
 	if (vkCreateDevice(gpu, &device_info, nullptr, &device) != VK_SUCCESS)
 		return VK_NULL_HANDLE;
 	volkLoadDevice(device);
+
+	if (pipeline_binary_key)
+	{
+		VkPipelineBinaryKeyKHR key = { VK_STRUCTURE_TYPE_PIPELINE_BINARY_KEY_KHR };
+		if (vkGetPipelineKeyKHR(device, nullptr, &key) != VK_SUCCESS)
+		{
+			LOGE("Failed to get the global pipeline binary key.\n");
+			return VK_NULL_HANDLE;
+		}
+		uint32_t key_values[VK_MAX_PIPELINE_BINARY_KEY_SIZE_KHR / sizeof(uint32_t)] = {};
+		memcpy(key_values, key.key, key.keySize);
+		LOGI("Global pipeline binary key: %08x%08x%08x%08x%08x%08x%08x%08x\n",
+			 key_values[0], key_values[1], key_values[2], key_values[3],
+			 key_values[4], key_values[5], key_values[6], key_values[7]);
+	}
 
 	return device;
 }
@@ -567,10 +602,12 @@ static bool check_replayer_roundtrip(const std::string &replayer, const char *fo
 int main(int argc, char **argv)
 {
 	std::string fossilize_replay = "fossilize-replay";
+	bool pipeline_binary_key = false;
 	CLICallbacks cbs;
 
 	cbs.add("--help", [&](CLIParser &parser) { parser.end(); });
 	cbs.add("--fossilize-replay", [&](CLIParser &parser) { fossilize_replay = parser.next_string(); });
+	cbs.add("--pipeline-binary-key", [&](CLIParser &) { pipeline_binary_key = true; });
 
 	CLIParser parser(std::move(cbs), argc - 1, argv + 1);
 	if (!parser.parse())
@@ -586,7 +623,7 @@ int main(int argc, char **argv)
 
 	VkInstance instance = create_instance();
 	VkPhysicalDeviceFeatures features = {};
-	VkDevice device = create_device(instance, features);
+	VkDevice device = create_device(instance, features, pipeline_binary_key);
 	VkPipelineCache cache = create_pipeline_cache(device);
 
 	char tmp_foz[PATH_MAX];
