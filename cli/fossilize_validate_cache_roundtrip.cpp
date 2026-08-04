@@ -81,7 +81,7 @@ static void pipeline_binary_key_to_str(char (&str)[VK_MAX_PIPELINE_BINARY_KEY_SI
 		sprintf(str + 2 * i, "%02x", key.key[i]);
 }
 
-static VkDevice create_device(VkInstance instance, const VkPhysicalDeviceFeatures &features, bool pipeline_binary_key)
+static VkDevice create_device(VkInstance instance, const VkPhysicalDeviceFeatures2 &features2_base, bool pipeline_binary_key)
 {
 	// Just pick the first GPU. Could be improved if needed.
 	uint32_t count = 1;
@@ -108,15 +108,7 @@ static VkDevice create_device(VkInstance instance, const VkPhysicalDeviceFeature
 		VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_BINARY_FEATURES_KHR, nullptr, VK_TRUE
 	};
 
-	VkPhysicalDeviceRobustness2FeaturesEXT robustness2 = {
-		VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT, nullptr,
-		VK_TRUE, VK_TRUE, VK_TRUE
-	};
-
-	if (features.robustBufferAccess)
-		binary.pNext = &robustness2;
-
-	VkPhysicalDeviceFeatures2 features2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &binary, features };
+	auto features2 = features2_base;
 	device_info.pNext = &features2;
 
 	static const char *extensions[] = {
@@ -130,10 +122,13 @@ static VkDevice create_device(VkInstance instance, const VkPhysicalDeviceFeature
 
 	if (pipeline_binary_key)
 	{
+		binary.pNext = features2.pNext;
+		features2.pNext = &binary;
+
 		device_info.ppEnabledExtensionNames = extensions;
-		device_info.enabledExtensionCount = features.robustBufferAccess ? 6 : 5;
+		device_info.enabledExtensionCount = features2.features.robustBufferAccess ? 6 : 5;
 	}
-	else
+	else if (features2.features.robustBufferAccess)
 	{
 		device_info.ppEnabledExtensionNames = extensions + 5;
 		device_info.enabledExtensionCount = 1;
@@ -651,10 +646,13 @@ int main(int argc, char **argv)
 
 	VkInstance instance = create_instance();
 
-	VkPhysicalDeviceFeatures features = {};
-	features.robustBufferAccess = robustness;
+	VkPhysicalDeviceRobustness2FeaturesKHR robustness2 = {
+		VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_KHR, nullptr,
+		VK_TRUE, VK_TRUE, VK_TRUE,
+	};
+	VkPhysicalDeviceFeatures2 features2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, robustness ? &robustness2 : nullptr, { robustness } };
 
-	VkDevice device = create_device(instance, features, pipeline_binary_key);
+	VkDevice device = create_device(instance, features2, pipeline_binary_key);
 	VkPipelineCache cache = create_pipeline_cache(device);
 
 	char tmp_foz[PATH_MAX];
@@ -671,7 +669,7 @@ int main(int argc, char **argv)
 
 		if (!recorder.record_application_info(app_info))
 			return EXIT_FAILURE;
-		if (!recorder.record_physical_device_features(features))
+		if (!recorder.record_physical_device_features(&features2))
 			return EXIT_FAILURE;
 
 		ret = record_foz_and_cache(device, cache, recorder);
