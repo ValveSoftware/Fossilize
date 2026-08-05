@@ -131,6 +131,7 @@ private:
 	bool supports_pipeline_feedback = false;
 	bool supports_pipeline_cache_control = false;
 	bool supports_module_identifiers = false;
+	bool supports_pipeline_binary = false;
 
 	void init_null_device();
 	bool is_null_device = false;

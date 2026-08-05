@@ -87,6 +87,8 @@ static void filter_feature_enablement(
 		VkPhysicalDeviceFeatures2 &pdf, VulkanFeatures &features,
 		const VkPhysicalDeviceFeatures2 *target_features)
 {
+	features.cooperative_matrix.cooperativeMatrixRobustBufferAccess = VK_FALSE;
+
 	// These feature bits conflict according to validation layers.
 	if (features.fragment_shading_rate.pipelineFragmentShadingRate == VK_TRUE ||
 	    features.fragment_shading_rate.attachmentFragmentShadingRate == VK_TRUE ||
@@ -385,6 +387,7 @@ static void filter_active_extensions(VkPhysicalDeviceFeatures2 &pdf,
 			    feature->robustImageAccess2 == VK_FALSE)
 			{
 				remove_extension(active_extensions, out_extension_count, VK_EXT_ROBUSTNESS_2_EXTENSION_NAME);
+				remove_extension(active_extensions, out_extension_count, VK_KHR_ROBUSTNESS_2_EXTENSION_NAME);
 				accept = false;
 			}
 			break;

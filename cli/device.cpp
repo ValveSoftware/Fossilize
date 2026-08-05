@@ -65,20 +65,65 @@ static bool filter_instance_extension(const char *ext, uint32_t api_version)
 static bool filter_extension(const char *ext, bool want_amd_shader_info,
                              const vector<VkExtensionProperties> &all_exts, uint32_t api_version)
 {
+	// TODO: Possible to autogen this table? :|
 	static const char *vulkan_11_only_extensions[] = {
 		VK_KHR_SHADER_SUBGROUP_EXTENDED_TYPES_EXTENSION_NAME,
 		VK_KHR_SPIRV_1_4_EXTENSION_NAME,
 		VK_KHR_SHARED_PRESENTABLE_IMAGE_EXTENSION_NAME,
 		VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME,
+		VK_KHR_SHADER_FLOAT_CONTROLS_2_EXTENSION_NAME,
 		VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
+		VK_KHR_OPACITY_MICROMAP_EXTENSION_NAME,
+		VK_EXT_OPACITY_MICROMAP_EXTENSION_NAME,
 		VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
+		VK_KHR_RAY_TRACING_MAINTENANCE_1_EXTENSION_NAME,
+		VK_KHR_RAY_TRACING_POSITION_FETCH_EXTENSION_NAME,
+		VK_KHR_PIPELINE_BINARY_EXTENSION_NAME,
+		VK_KHR_SHADER_MAXIMAL_RECONVERGENCE_EXTENSION_NAME,
+		VK_KHR_SHADER_QUAD_CONTROL_EXTENSION_NAME,
+		VK_KHR_VIDEO_QUEUE_EXTENSION_NAME,
+		VK_KHR_VIDEO_DECODE_QUEUE_EXTENSION_NAME,
+		VK_KHR_VIDEO_ENCODE_QUEUE_EXTENSION_NAME,
+		VK_KHR_VIDEO_MAINTENANCE_1_EXTENSION_NAME,
+		VK_KHR_VIDEO_MAINTENANCE_2_EXTENSION_NAME,
+		VK_EXT_DEVICE_GENERATED_COMMANDS_EXTENSION_NAME,
+		VK_EXT_PIPELINE_LIBRARY_GROUP_HANDLES_EXTENSION_NAME,
+		VK_EXT_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME,
+		VK_NV_CLUSTER_ACCELERATION_STRUCTURE_EXTENSION_NAME,
+		VK_NV_DESCRIPTOR_POOL_OVERALLOCATION_EXTENSION_NAME,
+		VK_EXT_DESCRIPTOR_HEAP_EXTENSION_NAME,
 		VK_KHR_RAY_QUERY_EXTENSION_NAME,
 		VK_KHR_MAINTENANCE_4_EXTENSION_NAME,
+		VK_KHR_MAINTENANCE_5_EXTENSION_NAME,
+		VK_KHR_MAINTENANCE_6_EXTENSION_NAME,
+		VK_KHR_MAINTENANCE_7_EXTENSION_NAME,
+		VK_KHR_MAINTENANCE_8_EXTENSION_NAME,
+		VK_KHR_MAINTENANCE_9_EXTENSION_NAME,
+		VK_KHR_MAINTENANCE_10_EXTENSION_NAME,
 		VK_KHR_SHADER_SUBGROUP_UNIFORM_CONTROL_FLOW_EXTENSION_NAME,
 		VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME,
 		VK_NV_SHADER_SM_BUILTINS_EXTENSION_NAME,
 		VK_NV_SHADER_SUBGROUP_PARTITIONED_EXTENSION_NAME,
 		VK_NV_DEVICE_GENERATED_COMMANDS_EXTENSION_NAME,
+		VK_KHR_INTERNALLY_SYNCHRONIZED_QUEUES_EXTENSION_NAME,
+		VK_KHR_VIDEO_DECODE_AV1_EXTENSION_NAME,
+		VK_KHR_VIDEO_DECODE_H264_EXTENSION_NAME,
+		VK_KHR_VIDEO_DECODE_H265_EXTENSION_NAME,
+		VK_KHR_VIDEO_DECODE_VP9_EXTENSION_NAME,
+		VK_KHR_VIDEO_ENCODE_AV1_EXTENSION_NAME,
+		VK_KHR_VIDEO_ENCODE_H264_EXTENSION_NAME,
+		VK_KHR_VIDEO_ENCODE_H265_EXTENSION_NAME,
+		VK_KHR_VIDEO_ENCODE_INTRA_REFRESH_EXTENSION_NAME,
+		VK_KHR_VIDEO_ENCODE_QUANTIZATION_MAP_EXTENSION_NAME,
+		VK_NV_DEVICE_GENERATED_COMMANDS_COMPUTE_EXTENSION_NAME,
+		VK_NV_PARTITIONED_ACCELERATION_STRUCTURE_EXTENSION_NAME,
+		VK_NV_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME,
+		VK_NV_RAY_TRACING_MOTION_BLUR_EXTENSION_NAME,
+		VK_VALVE_VIDEO_ENCODE_RGB_CONVERSION_EXTENSION_NAME,
+	};
+
+	static const char *vulkan_12_only_extensions[] = {
+		VK_EXT_SHADER_LONG_VECTOR_EXTENSION_NAME,
 	};
 
 	bool ext_is_vulkan_11_only = false;
@@ -87,6 +132,16 @@ static bool filter_extension(const char *ext, bool want_amd_shader_info,
 		if (strcmp(candidate, ext) == 0)
 		{
 			ext_is_vulkan_11_only = true;
+			break;
+		}
+	}
+
+	bool ext_is_vulkan_12_only = false;
+	for (auto *candidate : vulkan_12_only_extensions)
+	{
+		if (strcmp(candidate, ext) == 0)
+		{
+			ext_is_vulkan_12_only = true;
 			break;
 		}
 	}
@@ -108,6 +163,10 @@ static bool filter_extension(const char *ext, bool want_amd_shader_info,
 		return false;
 	}
 	else if (api_version < VK_API_VERSION_1_1 && ext_is_vulkan_11_only)
+	{
+		return false;
+	}
+	else if (api_version < VK_API_VERSION_1_2 && ext_is_vulkan_12_only)
 	{
 		return false;
 	}
@@ -167,6 +226,13 @@ static bool application_info_promote_fragment_shading_rate(const VkApplicationIn
 		return true;
 
 	return false;
+}
+
+static void pipeline_binary_key_to_str(char (&str)[VK_MAX_PIPELINE_BINARY_KEY_SIZE_KHR * 2 + 1], const VkPipelineBinaryKeyKHR &key)
+{
+	str[0] = '\0';
+	for (uint32_t i = 0; i < key.keySize; i++)
+		sprintf(str + 2 * i, "%02x", key.key[i]);
 }
 
 bool VulkanDevice::init_device(const Options &opts)
@@ -450,35 +516,6 @@ bool VulkanDevice::init_device(const Options &opts)
 		}
 	}
 
-	vector<const char *> active_device_layers;
-	if (opts.enable_validation)
-	{
-		uint32_t device_layer_count = 0;
-		if (vkEnumerateDeviceLayerProperties(gpu, &device_layer_count, nullptr) != VK_SUCCESS)
-			return false;
-		vector<VkLayerProperties> device_layers(device_layer_count);
-		if (device_layer_count && vkEnumerateDeviceLayerProperties(gpu, &device_layer_count, device_layers.data()) != VK_SUCCESS)
-			return false;
-
-		if (find_layer(device_layers, "VK_LAYER_KHRONOS_validation"))
-		{
-			active_device_layers.push_back("VK_LAYER_KHRONOS_validation");
-
-			uint32_t validation_ext_count = 0;
-			vkEnumerateDeviceExtensionProperties(gpu, "VK_LAYER_KHRONOS_validation", &validation_ext_count, nullptr);
-			vector<VkExtensionProperties> validation_extensions(validation_ext_count);
-			vkEnumerateDeviceExtensionProperties(gpu, "VK_LAYER_KHRONOS_validation", &validation_ext_count, validation_extensions.data());
-			validation_cache = find_extension(validation_extensions, VK_EXT_VALIDATION_CACHE_EXTENSION_NAME);
-			if (validation_cache)
-				active_device_extensions.push_back(VK_EXT_VALIDATION_CACHE_EXTENSION_NAME);
-		}
-		else
-		{
-			LOGE("Cannot find VK_LAYER_KHRONOS_validation layer.\n");
-			return false;
-		}
-	}
-
 	supports_pipeline_feedback = find_if(begin(active_device_extensions), end(active_device_extensions), [](const char *ext) {
 		return strcmp(ext, VK_EXT_PIPELINE_CREATION_FEEDBACK_EXTENSION_NAME) == 0;
 	}) != end(active_device_extensions);
@@ -493,13 +530,21 @@ bool VulkanDevice::init_device(const Options &opts)
 
 	supports_module_identifiers = features.shader_module_identifier.shaderModuleIdentifier == VK_TRUE;
 
+	VkPhysicalDevicePipelineBinaryFeaturesKHR pipeline_binary_features =
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_BINARY_FEATURES_KHR, gpu_features2.pNext, VK_TRUE };
+
+	supports_pipeline_binary = find_if(begin(active_device_extensions), end(active_device_extensions), [](const char *ext) {
+		return strcmp(ext, VK_KHR_PIPELINE_BINARY_EXTENSION_NAME) == 0;
+	}) != end(active_device_extensions);
+
+	if (supports_pipeline_binary)
+		gpu_features2.pNext = &pipeline_binary_features;
+
 	VkDeviceCreateInfo device_info = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
 	device_info.pNext = has_device_features2 ? &gpu_features2 : nullptr;
 	device_info.pEnabledFeatures = has_device_features2 ? nullptr : &gpu_features2.features;
 	device_info.pQueueCreateInfos = &queue_info;
 	device_info.queueCreateInfoCount = 1;
-	device_info.enabledLayerCount = uint32_t(active_device_layers.size());
-	device_info.ppEnabledLayerNames = active_device_layers.empty() ? nullptr : active_device_layers.data();
 	device_info.enabledExtensionCount = uint32_t(active_device_extensions.size());
 	device_info.ppEnabledExtensionNames = active_device_extensions.empty() ? nullptr : active_device_extensions.data();
 
@@ -515,6 +560,19 @@ bool VulkanDevice::init_device(const Options &opts)
 	{
 		LOGE("Failed to create device.\n");
 		return false;
+	}
+
+	volkLoadDevice(device);
+
+	if (supports_pipeline_binary)
+	{
+		VkPipelineBinaryKeyKHR key = { VK_STRUCTURE_TYPE_PIPELINE_BINARY_KEY_KHR };
+		if (vkGetPipelineKeyKHR(device, nullptr, &key) == VK_SUCCESS)
+		{
+			char str[VK_MAX_PIPELINE_BINARY_KEY_SIZE_KHR * 2 + 1];
+			pipeline_binary_key_to_str(str, key);
+			LOGI("Replayer global pipeline binary key: %s\n", str);
+		}
 	}
 
 	if (!feature_filter.init(api_version, active_device_extensions.data(), active_device_extensions.size(),
