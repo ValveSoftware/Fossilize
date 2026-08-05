@@ -1952,6 +1952,96 @@ static void record_graphics_pipeline_libraries(StateRecorder &recorder)
 		if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(3001), gpipe, nullptr, 0))
 			abort();
 	}
+
+	VkCustomResolveCreateInfoEXT custom = { VK_STRUCTURE_TYPE_CUSTOM_RESOLVE_CREATE_INFO_EXT };
+	custom.customResolve = VK_FALSE;
+
+	// Render pass is used, only customResolve is hashed, rest is ignored.
+	custom.colorAttachmentCount = 1;
+	custom.depthAttachmentFormat = VK_FORMAT_D32_SFLOAT_S8_UINT;
+	custom.stencilAttachmentFormat = VK_FORMAT_D32_SFLOAT_S8_UINT;
+	pipe.flags &= ~VK_PIPELINE_CREATE_LIBRARY_BIT_KHR;
+	pipe.pNext = &custom;
+
+	Hash hash[2];
+	if (!Hashing::compute_hash_graphics_pipeline(recorder, pipe, &hash[0]))
+		abort();
+	custom.depthAttachmentFormat = VK_FORMAT_D16_UNORM_S8_UINT;
+	custom.stencilAttachmentFormat = VK_FORMAT_D16_UNORM_S8_UINT;
+	custom.colorAttachmentCount = 2;
+	if (!Hashing::compute_hash_graphics_pipeline(recorder, pipe, &hash[1]))
+		abort();
+
+	if (hash[0] != hash[1])
+		abort();
+
+	// Custom resolve should change the hash.
+	custom.customResolve = VK_TRUE;
+	if (!Hashing::compute_hash_graphics_pipeline(recorder, pipe, &hash[1]))
+		abort();
+	if (hash[0] == hash[1])
+		abort();
+
+	static const VkFormat color_formats[] = { VK_FORMAT_R8_UNORM, VK_FORMAT_R8G8_UNORM };
+
+	// Dynamic rendering path, should hash everything.
+
+	// OUTPUT_INTERFACE includes everything.
+	library_info.flags = VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_OUTPUT_INTERFACE_BIT_EXT;
+
+	pipe.flags |= VK_PIPELINE_CREATE_LIBRARY_BIT_KHR;
+	custom.pNext = &library_info;
+
+	pipe.renderPass = VK_NULL_HANDLE;
+	custom.colorAttachmentCount = 1;
+	custom.pColorAttachmentFormats = color_formats;
+	if (!Hashing::compute_hash_graphics_pipeline(recorder, pipe, &hash[0]))
+		abort();
+	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(3002), pipe, nullptr, 0))
+		abort();
+	custom.colorAttachmentCount = 2;
+	if (!Hashing::compute_hash_graphics_pipeline(recorder, pipe, &hash[1]))
+		abort();
+	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(3003), pipe, nullptr, 0))
+		abort();
+	if (hash[0] == hash[1])
+		abort();
+	custom.colorAttachmentCount = 1;
+	custom.pColorAttachmentFormats = &color_formats[1];
+	if (!Hashing::compute_hash_graphics_pipeline(recorder, pipe, &hash[1]))
+		abort();
+	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(3004), pipe, nullptr, 0))
+		abort();
+	if (hash[0] == hash[1])
+		abort();
+	custom.pColorAttachmentFormats = color_formats;
+	custom.depthAttachmentFormat = VK_FORMAT_D32_SFLOAT_S8_UINT;
+	if (!Hashing::compute_hash_graphics_pipeline(recorder, pipe, &hash[0]))
+		abort();
+	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(3005), pipe, nullptr, 0))
+		abort();
+	if (hash[0] == hash[1])
+		abort();
+	custom.stencilAttachmentFormat = VK_FORMAT_D32_SFLOAT_S8_UINT;
+	if (!Hashing::compute_hash_graphics_pipeline(recorder, pipe, &hash[1]))
+		abort();
+	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(3006), pipe, nullptr, 0))
+		abort();
+	if (hash[0] == hash[1])
+		abort();
+
+	// Only customResolve matters here.
+	library_info.flags = VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_SHADER_BIT_EXT;
+	if (!Hashing::compute_hash_graphics_pipeline(recorder, pipe, &hash[0]))
+		abort();
+	custom.pColorAttachmentFormats = nullptr;
+	custom.colorAttachmentCount = 10;
+	if (!Hashing::compute_hash_graphics_pipeline(recorder, pipe, &hash[1]))
+		abort();
+	if (!recorder.record_graphics_pipeline(fake_handle<VkPipeline>(3007), pipe, nullptr, 0))
+		abort();
+	if (hash[0] != hash[1])
+		abort();
 }
 
 static void record_graphics_pipelines(StateRecorder &recorder)
@@ -4711,6 +4801,7 @@ int main()
 		record_pipelines_identifier(recorder);
 		record_pipeline_flags2(recorder);
 		record_descriptor_heap(recorder);
+		record_graphics_pipeline_libraries(recorder);
 
 		uint8_t *serialized;
 		size_t serialized_size;
