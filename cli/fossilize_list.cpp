@@ -52,8 +52,14 @@ static const char *tag_names[] = {
 	"graphicsPipeline",
 	"computePipeline",
 	"applicationBlobLink",
-	"raytracingPipeline"
+	"raytracingPipeline",
+	"bucketInfo"
 };
+
+static_assert(sizeof(tag_names) / sizeof(tag_names[0]) == RESOURCE_COUNT,
+              "tag_names[] must be kept in sync with RESOURCE_COUNT in fossilize_types.hpp. "
+              "If you add a new ResourceTag, add a label here too — fossilize-list --help and "
+              "--connectivity index into this array by tag number.");
 
 static void print_help()
 {
