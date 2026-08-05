@@ -196,6 +196,9 @@ struct DynamicStateInfo
 	bool coverage_reduction_mode;
 
 	bool depth_clamp_range;
+
+	// Used by CustomResolve
+	bool has_render_pass;
 };
 
 static VkPipelineCreateFlags2KHR normalize_pipeline_creation_flags(VkPipelineCreateFlags2KHR flags)
@@ -386,6 +389,7 @@ struct StateReplayer::Impl
 	bool parse_pipeline_fragment_density_map_layered_info(const Value &state, VkPipelineFragmentDensityMapLayeredCreateInfoVALVE **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_ray_tracing_pipeline_cluster_acceleration_structure_info(const Value &state, VkRayTracingPipelineClusterAccelerationStructureCreateInfoNV **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_shader_descriptor_set_and_binding_mapping(const Value &state, VkShaderDescriptorSetAndBindingMappingInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
+	bool parse_custom_resolve(const Value &state, VkCustomResolveCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_uints(const Value &attachments, const uint32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	bool parse_sints(const Value &attachments, const int32_t **out_uints) FOSSILIZE_WARN_UNUSED;
 	const char *duplicate_string(const char *str, size_t len);
@@ -544,6 +548,9 @@ struct StateRecorder::Impl
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 	void *copy_pnext_struct(const VkShaderDescriptorSetAndBindingMappingInfoEXT *create_info,
 	                        ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
+	void *copy_pnext_struct(const VkCustomResolveCreateInfoEXT *create_info,
+	                        ScratchAllocator &alloc, const DynamicStateInfo *dynamic_state_info,
+	                        VkGraphicsPipelineLibraryFlagsEXT state_flags) FOSSILIZE_WARN_UNUSED;
 	template <typename T>
 	void *copy_pnext_struct_simple(const T *create_info, ScratchAllocator &alloc) FOSSILIZE_WARN_UNUSED;
 
@@ -1045,6 +1052,31 @@ static bool hash_pnext_struct(const StateRecorder *recorder, Hasher &h,
 		default:
 			break;
 		}
+	}
+
+	return true;
+}
+
+static bool hash_pnext_struct(const StateRecorder *, Hasher &h, const VkCustomResolveCreateInfoEXT &info,
+                              const DynamicStateInfo *dynamic_state_info, VkGraphicsPipelineLibraryFlagsEXT state_flags)
+{
+	h.u32(info.customResolve);
+
+	// Spec says that everything is ignored if we have render pass, but that can't be right ...
+	// customResolve matters. The formats would be pulled from the VkRenderPass object though.
+
+	if ((!dynamic_state_info || dynamic_state_info->has_render_pass) ||
+		(state_flags & VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_OUTPUT_INTERFACE_BIT_EXT) == 0)
+	{
+		h.u32(0);
+	}
+	else
+	{
+		h.u32(info.colorAttachmentCount);
+		h.u32(info.depthAttachmentFormat);
+		h.u32(info.stencilAttachmentFormat);
+		for (uint32_t i = 0; i < info.colorAttachmentCount; i++)
+			h.u32(info.pColorAttachmentFormats[i]);
 	}
 
 	return true;
@@ -1889,6 +1921,14 @@ static bool hash_pnext_chain(const StateRecorder *recorder, Hasher &h, const voi
 				return false;
 			break;
 
+		case VK_STRUCTURE_TYPE_CUSTOM_RESOLVE_CREATE_INFO_EXT:
+			if (!hash_pnext_struct(recorder, h, *static_cast<const VkCustomResolveCreateInfoEXT *>(pNext),
+				dynamic_state_info, state_flags))
+			{
+				return false;
+			}
+			break;
+
 		default:
 			log_error_pnext_chain("Unsupported pNext found, cannot hash.", pNext);
 			return false;
@@ -2160,6 +2200,7 @@ bool compute_hash_graphics_pipeline(const StateRecorder &recorder, const VkGraph
 	DynamicStateInfo dynamic_info = {};
 	if (create_info.pDynamicState)
 		dynamic_info = parse_dynamic_state_info(*create_info.pDynamicState);
+	dynamic_info.has_render_pass = create_info.renderPass != VK_NULL_HANDLE;
 	GlobalStateInfo global_info = parse_global_state_info(create_info, dynamic_info, { true, true });
 
 	if (global_info.layout_state)
@@ -5305,6 +5346,30 @@ bool StateReplayer::Impl::parse_shader_descriptor_set_and_binding_mapping(
 	return true;
 }
 
+bool StateReplayer::Impl::parse_custom_resolve(const Value &state, VkCustomResolveCreateInfoEXT **out_info)
+{
+	auto *info = allocator.allocate_cleared<VkCustomResolveCreateInfoEXT>();
+
+	info->customResolve = state["customResolve"].GetUint();
+	info->depthAttachmentFormat = static_cast<VkFormat>(state["depthAttachmentFormat"].GetUint());
+	info->stencilAttachmentFormat = static_cast<VkFormat>(state["stencilAttachmentFormat"].GetUint());
+
+	if (state.HasMember("colorAttachmentFormats"))
+	{
+		auto &att = state["colorAttachmentFormats"];
+		info->colorAttachmentCount = uint32_t(att.Size());
+
+		auto *formats = allocator.allocate_n<VkFormat>(att.Size());
+		for (uint32_t i = 0; i < info->colorAttachmentCount; i++)
+			formats[i] = static_cast<VkFormat>(att[i].GetUint());
+
+		info->pColorAttachmentFormats = formats;
+	}
+
+	*out_info = info;
+	return true;
+}
+
 bool StateReplayer::Impl::parse_mutable_descriptor_type(const Value &state,
                                                         VkMutableDescriptorTypeCreateInfoEXT **out_info)
 {
@@ -5771,6 +5836,15 @@ bool StateReplayer::Impl::parse_pnext_chain(
 		{
 			VkShaderDescriptorSetAndBindingMappingInfoEXT *info = nullptr;
 			if (!parse_shader_descriptor_set_and_binding_mapping(next, &info))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_CUSTOM_RESOLVE_CREATE_INFO_EXT:
+		{
+			VkCustomResolveCreateInfoEXT *info = nullptr;
+			if (!parse_custom_resolve(next, &info))
 				return false;
 			new_struct = reinterpret_cast<VkBaseInStructure *>(info);
 			break;
@@ -6520,6 +6594,30 @@ void *StateRecorder::Impl::copy_pnext_struct(
 	return info;
 }
 
+void *StateRecorder::Impl::copy_pnext_struct(
+		const VkCustomResolveCreateInfoEXT *create_info,
+		ScratchAllocator &alloc,
+		const DynamicStateInfo *dynamic_state_info,
+		VkGraphicsPipelineLibraryFlagsEXT state_flags)
+{
+	auto *info = copy(create_info, 1, alloc);
+
+	if ((!dynamic_state_info || dynamic_state_info->has_render_pass) ||
+	    (state_flags & VK_GRAPHICS_PIPELINE_LIBRARY_FRAGMENT_OUTPUT_INTERFACE_BIT_EXT) == 0)
+	{
+		info->colorAttachmentCount = 0;
+		info->pColorAttachmentFormats = nullptr;
+		info->depthAttachmentFormat = VK_FORMAT_UNDEFINED;
+		info->stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
+	}
+	else
+	{
+		info->pColorAttachmentFormats = copy(info->pColorAttachmentFormats, info->colorAttachmentCount, alloc);
+	}
+
+	return info;
+}
+
 template <typename T>
 void *StateRecorder::Impl::copy_pnext_struct_simple(const T *create_info, ScratchAllocator &alloc)
 {
@@ -6893,6 +6991,16 @@ bool StateRecorder::Impl::copy_pnext_chain(const void *pNext, ScratchAllocator &
 			if (!mapping)
 				return false;
 			*ppNext = mapping;
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_CUSTOM_RESOLVE_CREATE_INFO_EXT:
+		{
+			auto *ci = static_cast<const VkCustomResolveCreateInfoEXT *>(pNext);
+			auto *custom = static_cast<VkBaseInStructure *>(copy_pnext_struct(ci, alloc, dynamic_state_info, state_flags));
+			if (!custom)
+				return false;
+			*ppNext = custom;
 			break;
 		}
 
@@ -8079,6 +8187,7 @@ bool StateRecorder::Impl::copy_graphics_pipeline(const VkGraphicsPipelineCreateI
 	DynamicStateInfo dynamic_info = {};
 	if (create_info->pDynamicState)
 		dynamic_info = Hashing::parse_dynamic_state_info(*create_info->pDynamicState);
+	dynamic_info.has_render_pass = create_info->renderPass != VK_NULL_HANDLE;
 	GlobalStateInfo global_info = Hashing::parse_global_state_info(*create_info, dynamic_info, subpass_meta);
 	auto state_flags = graphics_pipeline_get_effective_state_flags(*info);
 
@@ -10344,6 +10453,27 @@ static bool json_value(const VkShaderDescriptorSetAndBindingMappingInfoEXT &crea
 	return true;
 }
 
+static bool json_value(const VkCustomResolveCreateInfoEXT &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+
+	value.AddMember("customResolve", create_info.customResolve, alloc);
+	value.AddMember("depthAttachmentFormat", create_info.depthAttachmentFormat, alloc);
+	value.AddMember("stencilAttachmentFormat", create_info.stencilAttachmentFormat, alloc);
+
+	if (create_info.colorAttachmentCount)
+	{
+		Value color_formats(kArrayType);
+		for (uint32_t i = 0; i < create_info.colorAttachmentCount; i++)
+			color_formats.PushBack(create_info.pColorAttachmentFormats[i], alloc);
+		value.AddMember("colorAttachmentFormats", color_formats, alloc);
+	}
+
+	*out_value = value;
+	return true;
+}
+
 static bool json_value(const VkSubpassDescriptionDepthStencilResolve &create_info, Allocator &alloc, Value *out_value);
 static bool json_value(const VkFragmentShadingRateAttachmentInfoKHR &create_info, Allocator &alloc, Value *out_value);
 static bool json_value(const VkPipelineSampleLocationsStateCreateInfoEXT &create_info, Allocator &alloc, Value *out_value,
@@ -10580,6 +10710,11 @@ static bool pnext_chain_json_value(const void *pNext, Allocator &alloc, Value *o
 
 		case VK_STRUCTURE_TYPE_SHADER_DESCRIPTOR_SET_AND_BINDING_MAPPING_INFO_EXT:
 			if (!json_value(*static_cast<const VkShaderDescriptorSetAndBindingMappingInfoEXT *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_CUSTOM_RESOLVE_CREATE_INFO_EXT:
+			if (!json_value(*static_cast<const VkCustomResolveCreateInfoEXT *>(pNext), alloc, &next))
 				return false;
 			break;
 
@@ -11175,6 +11310,7 @@ static bool json_value(const VkGraphicsPipelineCreateInfo &pipe,
 	DynamicStateInfo dynamic_info = {};
 	if (pipe.pDynamicState)
 		dynamic_info = Hashing::parse_dynamic_state_info(*pipe.pDynamicState);
+	dynamic_info.has_render_pass = pipe.renderPass != VK_NULL_HANDLE;
 	GlobalStateInfo global_info = Hashing::parse_global_state_info(pipe, dynamic_info, subpass_meta);
 
 	if (global_info.tessellation_state)
