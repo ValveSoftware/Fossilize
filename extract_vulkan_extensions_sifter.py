@@ -6,59 +6,6 @@ import xml.etree.ElementTree as ET
 import json
 import sys
 
-StructType = namedtuple('StructType', ['extends', 'member_types'])
-EnumType = namedtuple('EnumType', ['extensions'])
-
-def traverse_active_struct_type(active_types, t, mapping):
-    if t not in mapping:
-        return
-    if t in active_types:
-        return
-    active_types.add(t)
-    for m in mapping[t].member_types:
-        traverse_active_struct_type(active_types, m, mapping)
-
-def traverse_active_struct_types(base_types, mapping):
-    active_types = set()
-    for t in base_types:
-        traverse_active_struct_type(active_types, t, mapping)
-    return active_types
-
-def struct_extends_any(active_types, t, mappings):
-    if t not in mappings:
-        return False
-    for e in mappings[t].extends:
-        if e in active_types or struct_extends_any(active_types, e, mappings):
-            return True
-    return False
-
-def find_extending_structs(active_types, mappings):
-    extending_structs = set()
-    for m in mappings.keys():
-        if struct_extends_any(active_types, m, mappings):
-            for memb in traverse_active_struct_types([m], mappings):
-                extending_structs.add(memb)
-    return extending_structs
-
-def find_active_enum_types(active_types, extending_types, mappings, enum_types, bitmask_reqs):
-    active_enum_types = set()
-
-    for t in active_types:
-        for m in mappings[t].member_types:
-            if m in bitmask_reqs:
-                active_enum_types.add(bitmask_reqs[m])
-            elif m in enum_types:
-                active_enum_types.add(m)
-
-    for t in extending_types:
-        for m in mappings[t].member_types:
-            if m in bitmask_reqs:
-                active_enum_types.add(bitmask_reqs[m])
-            elif m in enum_types:
-                active_enum_types.add(m)
-
-    return active_enum_types
-
 def is_banned_ext(ext):
     if 'Scissor' in ext:
         return False
