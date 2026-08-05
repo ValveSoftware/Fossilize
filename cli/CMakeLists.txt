@@ -71,3 +71,4 @@ if ((NOT WIN32) AND (NOT ANDROID))
 	# Can be ported over as needed.
 	add_fossilize_cli(fossilize-validate-cache-roundtrip fossilize_validate_cache_roundtrip.cpp)
 endif()
+add_fossilize_cli(fossilize-feature-sifter fossilize_feature_sifter.cpp fossilize_feature_sifter.hpp)
