@@ -609,9 +609,9 @@ static bool check_replayer_roundtrip(const std::string &replayer, const char *fo
 			_exit(EXIT_FAILURE);
 		close(pipe_fd[1]);
 
-		if (execl(replayer.c_str(), replayer.c_str(),
-		          foz_path, "--num-threads", "1", "--on-disk-pipeline-cache",
-		          cache_bin, static_cast<char *>(nullptr)) < 0)
+		if (execlp(replayer.c_str(), replayer.c_str(),
+		           foz_path, "--num-threads", "1", "--on-disk-pipeline-cache",
+		           cache_bin, static_cast<char *>(nullptr)) < 0)
 		{
 			LOGE("Failed to spawn child process \"%s\".\n", replayer.c_str());
 			_exit(EXIT_FAILURE);
