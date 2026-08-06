@@ -104,6 +104,7 @@ static VkDevice create_device(VkInstance instance, const VkPhysicalDeviceFeature
 	queue_create_info.queueFamilyIndex = 0;
 	queue_create_info.pQueuePriorities = &queue_prio;
 	device_info.pQueueCreateInfos = &queue_create_info;
+	device_info.queueCreateInfoCount = 1;
 
 	VkPhysicalDevicePipelineBinaryFeaturesKHR binary = {
 		VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_BINARY_FEATURES_KHR, nullptr, VK_TRUE
