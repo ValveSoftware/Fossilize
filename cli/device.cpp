@@ -350,6 +350,9 @@ bool VulkanDevice::init_device(const Options &opts)
 	if (vkEnumeratePhysicalDevices(instance, &gpu_count, gpus.data()) != VK_SUCCESS)
 		return false;
 
+	int selected_gpu_index = -1;
+	bool pci_filter_set = opts.device_pci_vendor != 0;
+	bool pci_filter_matched = false;
 	for (uint32_t i = 0; i < gpu_count; i++)
 	{
 		vkGetPhysicalDeviceProperties(gpus[i], &gpu_props);
@@ -359,9 +362,32 @@ bool VulkanDevice::init_device(const Options &opts)
 		     VK_VERSION_MAJOR(gpu_props.apiVersion),
 		     VK_VERSION_MINOR(gpu_props.apiVersion),
 		     VK_VERSION_PATCH(gpu_props.apiVersion));
+		LOGI("  vendorID: 0x%x\n", gpu_props.vendorID);
+		LOGI("  deviceID: 0x%x\n", gpu_props.deviceID);
+
+		if (gpu_props.vendorID == opts.device_pci_vendor)
+		{
+			if (opts.device_pci_device == 0 || gpu_props.deviceID == opts.device_pci_device)
+			{
+				selected_gpu_index = i;
+				pci_filter_matched = true;
+				break;
+			}
+		}
 	}
 
-	if (opts.device_index >= 0)
+	if (pci_filter_set && !pci_filter_matched)
+	{
+		LOGW("No GPU matched --device-pci-vendor 0x%x%s; falling back to default selection.\n",
+		     opts.device_pci_vendor,
+		     opts.device_pci_device ? " (with --device-pci-device)" : "");
+	}
+
+	if (selected_gpu_index >= 0)
+	{
+		gpu = gpus[selected_gpu_index];
+	}
+	else if (opts.device_index >= 0)
 	{
 		if (size_t(opts.device_index) >= gpus.size())
 		{

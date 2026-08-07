@@ -705,6 +705,21 @@ void ExternalReplayer::Impl::start_replayer_process(const ExternalReplayer::Opti
 	sprintf(index_name, "%u", options.device_index);
 	argv.push_back(index_name);
 
+	char pci_vendor_name[16], pci_device_name[16];
+	if (options.device_pci_vendor != 0)
+	{
+		argv.push_back("--device-pci-vendor");
+		sprintf(pci_vendor_name, "0x%x", options.device_pci_vendor);
+		argv.push_back(pci_vendor_name);
+	}
+
+	if (options.device_pci_device != 0)
+	{
+		argv.push_back("--device-pci-device");
+		sprintf(pci_device_name, "0x%x", options.device_pci_device);
+		argv.push_back(pci_device_name);
+	}
+
 	char graphics_range_start[16], graphics_range_end[16];
 	char compute_range_start[16], compute_range_end[16];
 	char raytracing_range_start[16], raytracing_range_end[16];
