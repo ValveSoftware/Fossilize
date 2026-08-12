@@ -57,6 +57,9 @@ static bool create_instance(Instance &instance)
 
 	VkInstanceCreateInfo instance_info = { VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO };
 
+	// NV changes behavior in 1.4 w.r.t. robustness.
+	instance_version = std::min<uint32_t>(instance_version, VK_API_VERSION_1_3);
+
 	const VkApplicationInfo app_info = {
 		VK_STRUCTURE_TYPE_APPLICATION_INFO, nullptr,
 		"fossilize-sifter", 1,
@@ -136,6 +139,7 @@ static bool get_pipeline_key(VkPhysicalDevice gpu, const std::vector<const char 
 	auto tmp_extensions = extensions;
 	tmp_extensions.push_back(VK_KHR_PIPELINE_BINARY_EXTENSION_NAME);
 	tmp_extensions.push_back(VK_EXT_PIPELINE_CREATION_FEEDBACK_EXTENSION_NAME);
+	tmp_extensions.push_back(VK_KHR_MAINTENANCE_5_EXTENSION_NAME);
 
 	binary.pNext = features2.pNext;
 	features2.pNext = &binary;
@@ -289,11 +293,24 @@ int main(int argc, char **argv)
 		return false;
 	};
 
+	const auto is_implied_extension = [](const char *e)
+	{
+		static const char *implied_extensions[] = {
+			VK_KHR_PIPELINE_BINARY_EXTENSION_NAME,
+			VK_EXT_PIPELINE_CREATION_FEEDBACK_EXTENSION_NAME,
+			VK_KHR_MAINTENANCE_5_EXTENSION_NAME,
+		};
+
+		for (auto *implied : implied_extensions)
+			if (strcmp(implied, e) == 0)
+				return true;
+
+		return false;
+	};
+
 	for (auto &ext : extensions)
 	{
-		if (strcmp(ext.extensionName, VK_KHR_PIPELINE_BINARY_EXTENSION_NAME) == 0)
-			continue;
-		if (strcmp(ext.extensionName, VK_EXT_PIPELINE_CREATION_FEEDBACK_EXTENSION_NAME) == 0)
+		if (is_implied_extension(ext.extensionName))
 			continue;
 
 		feature_structs.reset_pnext();
