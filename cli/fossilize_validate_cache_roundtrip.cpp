@@ -161,9 +161,9 @@ static VkDevice create_device(VkInstance instance, const VkPhysicalDeviceFeature
 
 static bool record_foz_and_cache(VkDevice device, VkPipelineCache cache, StateRecorder &recorder)
 {
-	if (!create_compute_pipeline(device, cache, &recorder))
+	if (!create_compute_pipeline(device, cache, &recorder, false))
 		return false;
-	if (!create_graphics_pipeline(device, cache, &recorder))
+	if (!create_graphics_pipeline(device, cache, &recorder, false))
 		return false;
 
 	return true;
@@ -320,7 +320,7 @@ int main(int argc, char **argv)
 	VkPhysicalDeviceFeatures2 features2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, robustness ? &robustness2 : nullptr, { robustness } };
 
 	VkDevice device = create_device(instance, features2, pipeline_binary_key);
-	VkPipelineCache cache = create_pipeline_cache(device);
+	VkPipelineCache cache = create_pipeline_cache(device, nullptr, 0);
 
 	char tmp_foz[PATH_MAX];
 	char tmp_bin[PATH_MAX];

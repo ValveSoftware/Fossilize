@@ -28,10 +28,10 @@
 namespace Fossilize
 {
 class StateRecorder;
-VkPipelineCache create_pipeline_cache(VkDevice device);
+VkPipelineCache create_pipeline_cache(VkDevice device, const void *data, size_t size);
 
-bool create_graphics_pipeline(VkDevice device, VkPipelineCache cache, StateRecorder *recorder);
-bool create_compute_pipeline(VkDevice device, VkPipelineCache cache, StateRecorder *recorder);
+bool create_graphics_pipeline(VkDevice device, VkPipelineCache cache, StateRecorder *recorder, bool feedback);
+bool create_compute_pipeline(VkDevice device, VkPipelineCache cache, StateRecorder *recorder, bool feedback);
 std::vector<uint8_t> serialize_pipeline_cache_to_data(VkDevice device, VkPipelineCache cache);
 
 }

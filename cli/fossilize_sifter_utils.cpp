@@ -25,9 +25,11 @@
 
 namespace Fossilize
 {
-VkPipelineCache create_pipeline_cache(VkDevice device)
+VkPipelineCache create_pipeline_cache(VkDevice device, const void *data, size_t size)
 {
 	VkPipelineCacheCreateInfo create_info = { VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO };
+	create_info.pInitialData = data;
+	create_info.initialDataSize = size;
 	VkPipelineCache cache;
 	if (vkCreatePipelineCache(device, &create_info, nullptr, &cache) != VK_SUCCESS)
 		return VK_NULL_HANDLE;
@@ -190,7 +192,23 @@ static const uint32_t compute_spirv[] = {
 	0x00010038
 };
 
-bool create_graphics_pipeline(VkDevice device, VkPipelineCache cache, StateRecorder *recorder)
+static bool check_feedback(const VkPipelineCreationFeedbackCreateInfo &feedback)
+{
+	constexpr VkPipelineCreationFeedbackFlags required =
+			VK_PIPELINE_CREATION_FEEDBACK_APPLICATION_PIPELINE_CACHE_HIT_BIT |
+			VK_PIPELINE_CREATION_FEEDBACK_VALID_BIT;
+
+	if ((feedback.pPipelineStageCreationFeedbacks->flags & required) != required)
+		return false;
+
+	for (uint32_t i = 0; i < feedback.pipelineStageCreationFeedbackCount; i++)
+		if ((feedback.pPipelineStageCreationFeedbacks[i].flags & required) != required)
+			return false;
+
+	return true;
+}
+
+bool create_graphics_pipeline(VkDevice device, VkPipelineCache cache, StateRecorder *recorder, bool feedback)
 {
 	VkPipelineLayoutCreateInfo layout_info = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
 	VkPushConstantRange push_range = {};
@@ -300,6 +318,19 @@ bool create_graphics_pipeline(VkDevice device, VkPipelineCache cache, StateRecor
 	ia_info.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 	pipeline_info.pInputAssemblyState = &ia_info;
 
+	VkPipelineCreationFeedbackCreateInfo feedback_info = { VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO };
+	VkPipelineCreationFeedbackEXT feedbacks[2] = {};
+	VkPipelineCreationFeedbackEXT primary_feedback = {};
+
+	if (feedback)
+	{
+		feedback_info.pPipelineCreationFeedback = &primary_feedback;
+		feedback_info.pPipelineStageCreationFeedbacks = feedbacks;
+		feedback_info.pipelineStageCreationFeedbackCount = 2;
+		feedback_info.pNext = pipeline_info.pNext;
+		pipeline_info.pNext = &feedback_info;
+	}
+
 	VkPipeline pipeline;
 	if (vkCreateGraphicsPipelines(device, cache, 1, &pipeline_info, nullptr, &pipeline) != VK_SUCCESS)
 		return false;
@@ -311,10 +342,14 @@ bool create_graphics_pipeline(VkDevice device, VkPipelineCache cache, StateRecor
 	vkDestroyPipeline(device, pipeline, nullptr);
 	vkDestroyShaderModule(device, vert_module, nullptr);
 	vkDestroyShaderModule(device, frag_module, nullptr);
+
+	if (feedback && !check_feedback(feedback_info))
+		return false;
+
 	return true;
 }
 
-bool create_compute_pipeline(VkDevice device, VkPipelineCache cache, StateRecorder *recorder)
+bool create_compute_pipeline(VkDevice device, VkPipelineCache cache, StateRecorder *recorder, bool feedback)
 {
 	VkPipelineLayoutCreateInfo layout_info = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
 	VkPushConstantRange push_range = {};
@@ -346,6 +381,19 @@ bool create_compute_pipeline(VkDevice device, VkPipelineCache cache, StateRecord
 	compute_info.stage.module = shader_module;
 	compute_info.stage.pName = "main";
 
+	VkPipelineCreationFeedbackCreateInfo feedback_info = { VK_STRUCTURE_TYPE_PIPELINE_CREATION_FEEDBACK_CREATE_INFO };
+	VkPipelineCreationFeedbackEXT feedbacks[1] = {};
+	VkPipelineCreationFeedbackEXT primary_feedback = {};
+
+	if (feedback)
+	{
+		feedback_info.pPipelineCreationFeedback = &primary_feedback;
+		feedback_info.pPipelineStageCreationFeedbacks = feedbacks;
+		feedback_info.pipelineStageCreationFeedbackCount = 1;
+		feedback_info.pNext = compute_info.pNext;
+		compute_info.pNext = &feedback_info;
+	}
+
 	VkPipeline pipeline;
 	if (vkCreateComputePipelines(device, cache, 1, &compute_info, nullptr, &pipeline) != VK_SUCCESS)
 		return false;
@@ -354,6 +402,9 @@ bool create_compute_pipeline(VkDevice device, VkPipelineCache cache, StateRecord
 	vkDestroyPipelineLayout(device, layout, nullptr);
 	vkDestroyPipeline(device, pipeline, nullptr);
 	vkDestroyShaderModule(device, shader_module, nullptr);
+
+	if (feedback && !check_feedback(feedback_info))
+		return false;
 
 	return true;
 }
