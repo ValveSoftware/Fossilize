@@ -175,6 +175,13 @@ static bool filter_extension(const char *ext, bool want_amd_shader_info,
 		// Mesa disables the pipeline cache when VK_AMD_shader_info is used, so disable this extension unless we need it.
 		return false;
 	}
+	else if (strcmp(ext, VK_KHR_SHADER_ABORT_EXTENSION_NAME) == 0 ||
+	         strcmp(ext, VK_EXT_DEVICE_FAULT_EXTENSION_NAME) == 0 ||
+	         strcmp(ext, VK_KHR_DEVICE_FAULT_EXTENSION_NAME) == 0)
+	{
+		// Disable any pure debugging extensions that might end up disabling caches, etc.
+		return false;
+	}
 
 	return true;
 }
