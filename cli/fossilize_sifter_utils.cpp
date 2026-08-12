@@ -198,9 +198,10 @@ static bool check_feedback(const VkPipelineCreationFeedbackCreateInfo &feedback)
 			VK_PIPELINE_CREATION_FEEDBACK_APPLICATION_PIPELINE_CACHE_HIT_BIT |
 			VK_PIPELINE_CREATION_FEEDBACK_VALID_BIT;
 
-	if ((feedback.pPipelineStageCreationFeedbacks->flags & required) != required)
-		return false;
+	if ((feedback.pPipelineCreationFeedback->flags & required) == required)
+		return true;
 
+	// Fallback to per-stage checks.
 	for (uint32_t i = 0; i < feedback.pipelineStageCreationFeedbackCount; i++)
 		if ((feedback.pPipelineStageCreationFeedbacks[i].flags & required) != required)
 			return false;
@@ -263,7 +264,7 @@ bool create_graphics_pipeline(VkDevice device, VkPipelineCache cache, StateRecor
 	module_info.codeSize = sizeof(frag_spirv);
 	if (vkCreateShaderModule(device, &module_info, nullptr, &frag_module) != VK_SUCCESS)
 		return false;
-	if (!recorder->record_shader_module(frag_module, module_info))
+	if (recorder && !recorder->record_shader_module(frag_module, module_info))
 		return false;
 
 	VkPipelineShaderStageCreateInfo stages[2] = {};
@@ -334,7 +335,7 @@ bool create_graphics_pipeline(VkDevice device, VkPipelineCache cache, StateRecor
 	VkPipeline pipeline;
 	if (vkCreateGraphicsPipelines(device, cache, 1, &pipeline_info, nullptr, &pipeline) != VK_SUCCESS)
 		return false;
-	if (!recorder->record_graphics_pipeline(pipeline, pipeline_info, nullptr, 0))
+	if (recorder && !recorder->record_graphics_pipeline(pipeline, pipeline_info, nullptr, 0))
 		return false;
 
 	vkDestroyRenderPass(device, render_pass, nullptr);
@@ -392,6 +393,7 @@ bool create_compute_pipeline(VkDevice device, VkPipelineCache cache, StateRecord
 		feedback_info.pipelineStageCreationFeedbackCount = 1;
 		feedback_info.pNext = compute_info.pNext;
 		compute_info.pNext = &feedback_info;
+		compute_info.flags |= VK_PIPELINE_CREATION_FEEDBACK_APPLICATION_PIPELINE_CACHE_HIT_BIT;
 	}
 
 	VkPipeline pipeline;

@@ -22,6 +22,7 @@
 
 #include "volk.h"
 #include "fossilize_feature_sifter.hpp"
+#include "fossilize_sifter_utils.hpp"
 
 #include <algorithm>
 #include <vector>
@@ -105,9 +106,15 @@ static bool compare_pipeline_key(const VkPipelineBinaryKeyKHR &a, const VkPipeli
 	return a.keySize == b.keySize && memcmp(a.key, b.key, a.keySize) == 0;
 }
 
+struct CacheResults
+{
+	std::vector<uint8_t> cache;
+	bool valid = false;
+};
+
 static bool get_pipeline_key(VkPhysicalDevice gpu, const std::vector<const char *> &extensions,
                              const VkPhysicalDeviceFeatures2 &features2_base,
-                             VkPipelineBinaryKeyKHR &key)
+                             VkPipelineBinaryKeyKHR &key, CacheResults &cache)
 {
 	VkDeviceCreateInfo device_info = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
 	VkDeviceQueueCreateInfo queue_create_info = { VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO };
@@ -128,6 +135,7 @@ static bool get_pipeline_key(VkPhysicalDevice gpu, const std::vector<const char 
 
 	auto tmp_extensions = extensions;
 	tmp_extensions.push_back(VK_KHR_PIPELINE_BINARY_EXTENSION_NAME);
+	tmp_extensions.push_back(VK_EXT_PIPELINE_CREATION_FEEDBACK_EXTENSION_NAME);
 
 	binary.pNext = features2.pNext;
 	features2.pNext = &binary;
@@ -149,6 +157,24 @@ static bool get_pipeline_key(VkPhysicalDevice gpu, const std::vector<const char 
 		return false;
 	}
 
+	VkPipelineCache pipeline_cache = create_pipeline_cache(device, cache.cache.data(), cache.cache.size());
+	if (pipeline_cache == VK_NULL_HANDLE)
+	{
+		LOGE("Failed to create pipeline cache.\n");
+		vkDestroyDevice(device, nullptr);
+		return false;
+	}
+
+	cache.valid = true;
+	if (!create_graphics_pipeline(device, pipeline_cache, nullptr, !cache.cache.empty()))
+		cache.valid = false;
+	if (!create_compute_pipeline(device, pipeline_cache, nullptr, !cache.cache.empty()))
+		cache.valid = false;
+
+	if (cache.cache.empty())
+		cache.cache = serialize_pipeline_cache_to_data(device, pipeline_cache);
+
+	vkDestroyPipelineCache(device, pipeline_cache, nullptr);
 	vkDestroyDevice(device, nullptr);
 	return true;
 }
@@ -191,7 +217,11 @@ int main(int argc, char **argv)
 	VkPhysicalDeviceFeatures2 features2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
 	VkPipelineBinaryKeyKHR baseline_key = { VK_STRUCTURE_TYPE_PIPELINE_BINARY_KEY_KHR };
 	VkPipelineBinaryKeyKHR full_feature_key = { VK_STRUCTURE_TYPE_PIPELINE_BINARY_KEY_KHR };
-	if (!get_pipeline_key(gpu, {}, features2, baseline_key))
+
+	CacheResults baseline_cache = {};
+	CacheResults full_feature_cache = {};
+
+	if (!get_pipeline_key(gpu, {}, features2, baseline_key, baseline_cache))
 	{
 		LOGE("Failed to get pipeline key.\n");
 		return EXIT_FAILURE;
@@ -200,7 +230,7 @@ int main(int argc, char **argv)
 	print_pipeline_binary_key("Baseline", baseline_key);
 
 	features2.features = features;
-	if (!get_pipeline_key(gpu, {}, features2, full_feature_key))
+	if (!get_pipeline_key(gpu, {}, features2, full_feature_key, full_feature_cache))
 	{
 		LOGE("Failed to get pipeline key.\n");
 		return EXIT_FAILURE;
@@ -216,7 +246,7 @@ int main(int argc, char **argv)
 			reinterpret_cast<VkBool32 *>(&features2.features)[i] = VK_TRUE;
 
 			VkPipelineBinaryKeyKHR key = { VK_STRUCTURE_TYPE_PIPELINE_BINARY_KEY_KHR };
-			if (!get_pipeline_key(gpu, {}, features2, key))
+			if (!get_pipeline_key(gpu, {}, features2, key, baseline_cache))
 			{
 				LOGE("Failed to get pipeline key.\n");
 				return EXIT_FAILURE;
@@ -227,6 +257,9 @@ int main(int argc, char **argv)
 				LOGI("Found key delta for VkPhysicalDeviceFeature feature number %zu ...\n", i);
 				print_pipeline_binary_key("Delta", key);
 			}
+
+			if (!baseline_cache.valid)
+				LOGE("Found cache miss for VkPhysicalDeviceFeature feature number %zu ...\n", i);
 		}
 	}
 
@@ -259,6 +292,8 @@ int main(int argc, char **argv)
 	for (auto &ext : extensions)
 	{
 		if (strcmp(ext.extensionName, VK_KHR_PIPELINE_BINARY_EXTENSION_NAME) == 0)
+			continue;
+		if (strcmp(ext.extensionName, VK_EXT_PIPELINE_CREATION_FEEDBACK_EXTENSION_NAME) == 0)
 			continue;
 
 		feature_structs.reset_pnext();
@@ -338,11 +373,14 @@ int main(int argc, char **argv)
 		vkGetPhysicalDeviceFeatures2(gpu, &features2);
 
 		VkPipelineBinaryKeyKHR key = { VK_STRUCTURE_TYPE_PIPELINE_BINARY_KEY_KHR };
-		if (!get_pipeline_key(gpu, enabled_extensions, features2, key))
+		if (!get_pipeline_key(gpu, enabled_extensions, features2, key, full_feature_cache))
 		{
 			LOGE("Failed to get pipeline key for extension %s.\n", ext.extensionName);
 			continue;
 		}
+
+		if (!full_feature_cache.valid)
+			LOGE("Pipeline cache roundtrip failed for extension %s.\n", ext.extensionName);
 
 		if (!compare_pipeline_key(full_feature_key, key))
 			print_pipeline_binary_key(ext.extensionName, key);
