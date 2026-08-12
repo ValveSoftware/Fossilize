@@ -121,6 +121,9 @@ struct PruneReplayer : StateCreatorInterface
 	unordered_map<Hash, const VkRayTracingPipelineCreateInfoKHR *> library_raytracing_pipelines;
 	unordered_map<Hash, const VkGraphicsPipelineCreateInfo *> library_graphics_pipelines;
 
+	unordered_set<Hash> filtered_graphics_pipelines;
+	unordered_set<Hash> filtered_raytracing_pipelines;
+
 	unordered_set<Hash> filtered_blob_hashes[RESOURCE_COUNT];
 
 	std::unique_ptr<DatabaseInterface> timestamp_db;
@@ -421,7 +424,8 @@ struct PruneReplayer : StateCreatorInterface
 			}
 		}
 
-		if (filter_object(RESOURCE_GRAPHICS_PIPELINE, hash))
+		bool is_filtered = filter_object(RESOURCE_GRAPHICS_PIPELINE, hash);
+		if (is_filtered)
 		{
 			if (!has_banned_modules)
 			{
@@ -478,6 +482,11 @@ struct PruneReplayer : StateCreatorInterface
 			// With whitelist, we don't know yet if a pipeline will be allowed or not.
 			// We might be explicitly pulling in a library to be included, even if the linked pipeline does not exist.
 			graphics_pipelines[hash] = create_info;
+
+			// Only pipelines which actually matched the filter criteria (as opposed to being
+			// pulled in merely as a candidate library dependency) should seed access_pipelines()'s walk.
+			if (is_filtered)
+				filtered_graphics_pipelines.insert(hash);
 		}
 
 		return true;
@@ -625,12 +634,12 @@ struct PruneReplayer : StateCreatorInterface
 		}
 		else
 		{
-			for (auto &pipe : raytracing_pipelines)
-				access_raytracing_pipeline(iface, pipe.first, true, pipe.second);
+			for (auto hash : filtered_raytracing_pipelines)
+				access_raytracing_pipeline(iface, hash, true, raytracing_pipelines.at(hash));
 			for (auto &pipe : compute_pipelines)
 				access_compute_pipeline(iface, pipe.first, true, pipe.second);
-			for (auto &pipe : graphics_pipelines)
-				access_graphics_pipeline(iface, pipe.first, true, pipe.second);
+			for (auto hash : filtered_graphics_pipelines)
+				access_graphics_pipeline(iface, hash, true, graphics_pipelines.at(hash));
 		}
 	}
 
@@ -652,7 +661,8 @@ struct PruneReplayer : StateCreatorInterface
 			}
 		}
 
-		if (filter_object(RESOURCE_RAYTRACING_PIPELINE, hash))
+		bool is_filtered = filter_object(RESOURCE_RAYTRACING_PIPELINE, hash);
+		if (is_filtered)
 		{
 			if (!has_banned_modules)
 			{
@@ -703,6 +713,11 @@ struct PruneReplayer : StateCreatorInterface
 			// With whitelist, we don't know yet if a pipeline will be allowed or not.
 			// We might be explicitly pulling in a library to be included, even if the linked pipeline does not exist.
 			raytracing_pipelines[hash] = create_info;
+
+			// Only pipelines which actually matched the filter criteria (as opposed to being
+			// pulled in merely as a candidate library dependency) should seed access_pipelines()'s walk.
+			if (is_filtered)
+				filtered_raytracing_pipelines.insert(hash);
 		}
 
 		return true;
