@@ -372,18 +372,39 @@ int main(int argc, char **argv)
 
 		vkGetPhysicalDeviceFeatures2(gpu, &features2);
 
-		VkPipelineBinaryKeyKHR key = { VK_STRUCTURE_TYPE_PIPELINE_BINARY_KEY_KHR };
-		if (!get_pipeline_key(gpu, enabled_extensions, features2, key, full_feature_cache))
+		for (int iter = 0; iter < 2; iter++)
 		{
-			LOGE("Failed to get pipeline key for extension %s.\n", ext.extensionName);
-			continue;
+			bool full_1_0_features = iter == 0;
+			auto &cache = full_1_0_features ? full_feature_cache : baseline_cache;
+			if (!full_1_0_features)
+				features2.features = {};
+
+			if (!full_1_0_features)
+				feature_structs.mRobustness2FeaturesKHR.robustBufferAccess2 = VK_FALSE;
+
+			VkPipelineBinaryKeyKHR key = { VK_STRUCTURE_TYPE_PIPELINE_BINARY_KEY_KHR };
+			if (!get_pipeline_key(gpu, enabled_extensions, features2, key, cache))
+			{
+				LOGE("Failed to get pipeline key for extension %s.\n", ext.extensionName);
+				continue;
+			}
+
+			if (!cache.valid)
+			{
+				LOGE("Pipeline cache roundtrip failed for extension %s (%s).\n",
+				     ext.extensionName, (full_1_0_features ? "using all 1.0 features" : "using no 1.0 features"));
+			}
+
+			if (!compare_pipeline_key(full_feature_key, key))
+			{
+				std::string tag = ext.extensionName;
+				if (full_1_0_features)
+					tag += " (using all 1.0 features)";
+				else
+					tag += " (using no 1.0 features)";
+				print_pipeline_binary_key(tag.c_str(), key);
+			}
 		}
-
-		if (!full_feature_cache.valid)
-			LOGE("Pipeline cache roundtrip failed for extension %s.\n", ext.extensionName);
-
-		if (!compare_pipeline_key(full_feature_key, key))
-			print_pipeline_binary_key(ext.extensionName, key);
 	}
 
 	vkDestroyInstance(instance.instance, nullptr);
