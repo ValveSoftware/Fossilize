@@ -563,12 +563,18 @@ bool VulkanDevice::init_device(const Options &opts)
 	VkPhysicalDevicePipelineBinaryFeaturesKHR pipeline_binary_features =
 		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_BINARY_FEATURES_KHR, gpu_features2.pNext, VK_TRUE };
 
-	supports_pipeline_binary = find_if(begin(active_device_extensions), end(active_device_extensions), [](const char *ext) {
-		return strcmp(ext, VK_KHR_PIPELINE_BINARY_EXTENSION_NAME) == 0;
-	}) != end(active_device_extensions);
+	// Workaround really stupid NVIDIA bug where they corrupt the non-volatile RBX register
+	// when calling vkGetPipelineKeyKHR leading to random crashes ... <_<
+	const char *env = getenv("FOSSILIZE_LOG_PIPELINE_BINARY_KEY");
+	if (env && strcmp(env, "1") == 0)
+	{
+		supports_pipeline_binary = find_if(begin(active_device_extensions), end(active_device_extensions), [](const char *ext) {
+			return strcmp(ext, VK_KHR_PIPELINE_BINARY_EXTENSION_NAME) == 0;
+		}) != end(active_device_extensions);
 
-	if (supports_pipeline_binary)
-		gpu_features2.pNext = &pipeline_binary_features;
+		if (supports_pipeline_binary)
+			gpu_features2.pNext = &pipeline_binary_features;
+	}
 
 	VkDeviceCreateInfo device_info = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
 	device_info.pNext = has_device_features2 ? &gpu_features2 : nullptr;

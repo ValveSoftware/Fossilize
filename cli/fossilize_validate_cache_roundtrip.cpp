@@ -189,7 +189,7 @@ static bool serialize_pipeline_cache(VkDevice device, VkPipelineCache cache, con
 	return true;
 }
 
-static bool check_replayer_roundtrip(const std::string &replayer, const char *foz_path, const char *cache_bin)
+static bool check_replayer_roundtrip(const std::string &replayer, const char *foz_path, const char *cache_bin, bool pipeline_binary_key)
 {
 	int pipe_fd[2];
 	if (pipe(pipe_fd) < 0)
@@ -275,6 +275,13 @@ static bool check_replayer_roundtrip(const std::string &replayer, const char *fo
 			_exit(EXIT_FAILURE);
 		close(pipe_fd[1]);
 
+		if (pipeline_binary_key)
+		{
+			// Workaround really stupid NVIDIA bug where they corrupt the non-volatile RBX register
+			// when calling vkGetPipelineKeyKHR leading to random crashes ... <_<
+			setenv("FOSSILIZE_LOG_PIPELINE_BINARY_KEY", "1", 1);
+		}
+
 		if (execlp(replayer.c_str(), replayer.c_str(),
 		           foz_path, "--num-threads", "1", "--on-disk-pipeline-cache",
 		           cache_bin, static_cast<char *>(nullptr)) < 0)
@@ -350,7 +357,7 @@ int main(int argc, char **argv)
 	vkDestroyInstance(instance, nullptr);
 
 	if (ret)
-		ret = check_replayer_roundtrip(fossilize_replay, tmp_foz, tmp_bin);
+		ret = check_replayer_roundtrip(fossilize_replay, tmp_foz, tmp_bin, pipeline_binary_key);
 
 	unlink(tmp_foz);
 	unlink(tmp_bin);
