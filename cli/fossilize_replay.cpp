@@ -3637,6 +3637,8 @@ static void print_help()
 	LOGI("fossilize-replay\n"
 	     "\t[--help]\n"
 	     "\t[--device-index <index>]\n"
+	     "\t[--device-pci-vendor <vendorID_hex>]\n"
+	     "\t[--device-pci-device <deviceID_hex>]\n"
 	     "\t[--enable-validation]\n"
 	     "\t[--enable-pipeline-stats <path>]\n"
 	     "\t[--spirv-val]\n"
@@ -4599,6 +4601,12 @@ int main(int argc, char *argv[])
 	cbs.default_handler = [&](const char *arg) { databases.push_back(arg); };
 	cbs.add("--help", [](CLIParser &parser) { print_help(); parser.end(); });
 	cbs.add("--device-index", [&](CLIParser &parser) { opts.device_index = parser.next_uint(); });
+	cbs.add("--device-pci-vendor", [&](CLIParser &parser) {
+		opts.device_pci_vendor = strtoul(parser.next_string(), nullptr, 0);
+	});
+	cbs.add("--device-pci-device", [&](CLIParser &parser) {
+		opts.device_pci_device = strtoul(parser.next_string(), nullptr, 0);
+	});
 	cbs.add("--enable-validation", [&](CLIParser &) { opts.enable_validation = true; });
 	cbs.add("--spirv-val", [&](CLIParser &) { replayer_opts.spirv_validate = true; });
 	cbs.add("--on-disk-pipeline-cache", [&](CLIParser &parser) { replayer_opts.on_disk_pipeline_cache_path = parser.next_string(); });
