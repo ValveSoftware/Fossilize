@@ -4164,6 +4164,14 @@ static bool test_pdf_recording()
 			VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIMITIVES_GENERATED_QUERY_FEATURES_EXT, nullptr, 501, 502, 503 };
 	VkPhysicalDeviceImage2DViewOf3DFeaturesEXT image_2d_view_of_3d = {
 			VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_2D_VIEW_OF_3D_FEATURES_EXT, nullptr, 504 };
+	VkPhysicalDevicePipelineRobustnessFeatures pipeline_robustness = {
+		VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_ROBUSTNESS_FEATURES, nullptr, 60,
+	};
+	VkPhysicalDeviceMaintenance8FeaturesKHR maint8 = {
+		VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_8_FEATURES_KHR, nullptr, 90,
+	};
+	VkPhysicalDeviceVulkan14Features vk14 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES };
+	vk14.pipelineRobustness = VK_TRUE;
 
 	// Expect to fail here.
 	if (test_pdf_recording(&dummy, h))
@@ -4193,7 +4201,7 @@ static bool test_pdf_recording()
 	}
 
 	{
-		constexpr size_t hash_count = 11;
+		constexpr size_t hash_count = 14;
 		Hash hashes[hash_count] = {};
 
 		pdf2.pNext = nullptr;
@@ -4229,6 +4237,15 @@ static bool test_pdf_recording()
 		prim_generated_query.pNext = &image_2d_view_of_3d;
 		if (!test_pdf_recording(&pdf2, hashes[10]))
 			return false;
+		image_2d_view_of_3d.pNext = &vk14;
+		if (!test_pdf_recording(&pdf2, hashes[11]))
+			return false;
+		vk14.pNext = &pipeline_robustness;
+		if (!test_pdf_recording(&pdf2, hashes[12]))
+			return false;
+		pipeline_robustness.pNext = &maint8;
+		if (!test_pdf_recording(&pdf2, hashes[13]))
+			return false;
 
 		// Make sure all of these are serialized.
 		for (unsigned i = 1; i < hash_count; i++)
@@ -4236,12 +4253,23 @@ static bool test_pdf_recording()
 				return false;
 
 		// If we move PDF2 last, hash should still be invariant.
-		image_2d_view_of_3d.pNext = &pdf2;
+		maint8.pNext = &pdf2;
 		pdf2.pNext = nullptr;
 		if (!test_pdf_recording(&robustness2, hashes[0]))
 			return false;
 
 		if (hashes[0] != hashes[hash_count - 1])
+			return false;
+
+		vk14.pNext = &pdf2;
+		pipeline_robustness.pNext = &pdf2;
+		pipeline_robustness.pipelineRobustness = VK_TRUE;
+		if (!test_pdf_recording(&vk14, hashes[0]))
+			return false;
+		if (!test_pdf_recording(&pipeline_robustness, hashes[1]))
+			return false;
+
+		if (hashes[0] != hashes[1])
 			return false;
 	}
 

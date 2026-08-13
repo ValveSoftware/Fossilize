@@ -354,6 +354,8 @@ struct StateReplayer::Impl
 	bool parse_shader_object_features(const Value &state, VkPhysicalDeviceShaderObjectFeaturesEXT **out_features) FOSSILIZE_WARN_UNUSED;
 	bool parse_primitives_generated_query_features(const Value &state, VkPhysicalDevicePrimitivesGeneratedQueryFeaturesEXT **out_features) FOSSILIZE_WARN_UNUSED;
 	bool parse_2d_view_of_3d_features(const Value &state, VkPhysicalDeviceImage2DViewOf3DFeaturesEXT **out_features) FOSSILIZE_WARN_UNUSED;
+	bool parse_pipeline_robustness_features(const Value &state, VkPhysicalDevicePipelineRobustnessFeatures **out_features) FOSSILIZE_WARN_UNUSED;
+	bool parse_maintenance8_features(const Value &state, VkPhysicalDeviceMaintenance8FeaturesKHR **out_features) FOSSILIZE_WARN_UNUSED;
 
 	bool parse_color_write(const Value &state, VkPipelineColorWriteCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
 	bool parse_sample_locations(const Value &state, VkPipelineSampleLocationsStateCreateInfoEXT **out_info) FOSSILIZE_WARN_UNUSED;
@@ -764,6 +766,20 @@ static void hash_pnext_struct(const StateRecorder *,
 
 static void hash_pnext_struct(const StateRecorder *,
                               Hasher &h,
+                              const VkPhysicalDevicePipelineRobustnessFeatures &info)
+{
+	h.u32(info.pipelineRobustness);
+}
+
+static void hash_pnext_struct(const StateRecorder *,
+                              Hasher &h,
+                              const VkPhysicalDeviceMaintenance8FeaturesKHR &info)
+{
+	h.u32(info.maintenance8);
+}
+
+static void hash_pnext_struct(const StateRecorder *,
+                              Hasher &h,
                               const VkPipelineCreateFlags2CreateInfoKHR &info)
 {
 	auto flags = normalize_pipeline_creation_flags(info.flags);
@@ -1084,6 +1100,16 @@ static bool hash_pnext_struct(const StateRecorder *, Hasher &h, const VkCustomRe
 
 static bool hash_pnext_chain_pdf2(const StateRecorder *recorder, Hasher &h, const void *pNext)
 {
+	auto *vk14 = find_pnext<VkPhysicalDeviceVulkan14Features>(
+			VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES, pNext);
+
+	VkPhysicalDevicePipelineRobustnessFeatures robustness = {
+		VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_ROBUSTNESS_FEATURES, const_cast<void *>(pNext), VK_TRUE
+	};
+
+	if (vk14 && vk14->pipelineRobustness)
+		pNext = &robustness;
+
 	while ((pNext = pnext_chain_pdf2_skip_ignored_entries(pNext)) != nullptr)
 	{
 		auto *pin = static_cast<const VkBaseInStructure *>(pNext);
@@ -1130,6 +1156,14 @@ static bool hash_pnext_chain_pdf2(const StateRecorder *recorder, Hasher &h, cons
 
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_2D_VIEW_OF_3D_FEATURES_EXT:
 			hash_pnext_struct(recorder, h, *static_cast<const VkPhysicalDeviceImage2DViewOf3DFeaturesEXT *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_ROBUSTNESS_FEATURES:
+			hash_pnext_struct(recorder, h, *static_cast<const VkPhysicalDevicePipelineRobustnessFeatures *>(pNext));
+			break;
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_8_FEATURES_KHR:
+			hash_pnext_struct(recorder, h, *static_cast<const VkPhysicalDeviceMaintenance8FeaturesKHR *>(pNext));
 			break;
 
 		default:
@@ -6000,6 +6034,24 @@ bool StateReplayer::Impl::parse_2d_view_of_3d_features(
 	return true;
 }
 
+bool StateReplayer::Impl::parse_pipeline_robustness_features(
+		const Value &state, VkPhysicalDevicePipelineRobustnessFeatures **out_features)
+{
+	auto *features = allocator.allocate_cleared<VkPhysicalDevicePipelineRobustnessFeatures>();
+	*out_features = features;
+	features->pipelineRobustness = state["pipelineRobustness"].GetUint();
+	return true;
+}
+
+bool StateReplayer::Impl::parse_maintenance8_features(
+		const Value &state, VkPhysicalDeviceMaintenance8FeaturesKHR **out_features)
+{
+	auto *features = allocator.allocate_cleared<VkPhysicalDeviceMaintenance8FeaturesKHR>();
+	*out_features = features;
+	features->maintenance8 = state["maintenance8"].GetUint();
+	return true;
+}
+
 bool StateReplayer::Impl::parse_pnext_chain_pdf2(const Value &pnext, void **outpNext)
 {
 	VkBaseInStructure *ret = nullptr;
@@ -6102,6 +6154,26 @@ bool StateReplayer::Impl::parse_pnext_chain_pdf2(const Value &pnext, void **outp
 			new_struct = reinterpret_cast<VkBaseInStructure *>(view_2d_of_3d);
 			break;
 		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_ROBUSTNESS_FEATURES:
+		{
+			VkPhysicalDevicePipelineRobustnessFeatures *pipeline_robustness = nullptr;
+			if (!parse_pipeline_robustness_features(next, &pipeline_robustness))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(pipeline_robustness);
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_8_FEATURES_KHR:
+		{
+			VkPhysicalDeviceMaintenance8FeaturesKHR *maint8 = nullptr;
+			if (!parse_maintenance8_features(next, &maint8))
+				return false;
+			new_struct = reinterpret_cast<VkBaseInStructure *>(maint8);
+			break;
+		}
+
+		// We cannot observe Vulkan1.4 features here, it was canonicalized in serialization.
 
 		default:
 			LOGE_LEVEL("Failed to parse pNext chain for sType: %d\n", int(sType));
@@ -7774,6 +7846,16 @@ bool StateRecorder::Impl::copy_ycbcr_conversion(const VkSamplerYcbcrConversionCr
 
 bool StateRecorder::Impl::copy_pnext_chain_pdf2(const void *pNext, ScratchAllocator &alloc, void **out_pnext)
 {
+	auto *vk14 = find_pnext<VkPhysicalDeviceVulkan14Features>(
+			VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES, pNext);
+
+	VkPhysicalDevicePipelineRobustnessFeatures robustness = {
+		VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_ROBUSTNESS_FEATURES, const_cast<void *>(pNext), VK_TRUE
+	};
+
+	if (vk14 && vk14->pipelineRobustness)
+		pNext = &robustness;
+
 	VkBaseInStructure new_pnext = {};
 	const VkBaseInStructure **ppNext = &new_pnext.pNext;
 
@@ -7783,9 +7865,9 @@ bool StateRecorder::Impl::copy_pnext_chain_pdf2(const void *pNext, ScratchAlloca
 
 		switch (pin->sType)
 		{
-		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT:
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_KHR:
 		{
-			auto *ci = static_cast<const VkPhysicalDeviceRobustness2FeaturesEXT *>(pNext);
+			auto *ci = static_cast<const VkPhysicalDeviceRobustness2FeaturesKHR *>(pNext);
 			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
 			break;
 		}
@@ -7849,6 +7931,20 @@ bool StateRecorder::Impl::copy_pnext_chain_pdf2(const void *pNext, ScratchAlloca
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_2D_VIEW_OF_3D_FEATURES_EXT:
 		{
 			auto *ci = static_cast<const VkPhysicalDeviceImage2DViewOf3DFeaturesEXT *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_ROBUSTNESS_FEATURES:
+		{
+			auto *ci = static_cast<const VkPhysicalDevicePipelineRobustnessFeatures *>(pNext);
+			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_8_FEATURES_KHR:
+		{
+			auto *ci = static_cast<const VkPhysicalDeviceMaintenance8FeaturesKHR *>(pNext);
 			*ppNext = static_cast<VkBaseInStructure *>(copy_pnext_struct_simple(ci, alloc));
 			break;
 		}
@@ -11695,6 +11791,24 @@ static bool json_value(const VkPhysicalDeviceImage2DViewOf3DFeaturesEXT &create_
 	return true;
 }
 
+static bool json_value(const VkPhysicalDevicePipelineRobustnessFeatures &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("pipelineRobustness", create_info.pipelineRobustness, alloc);
+	*out_value = value;
+	return true;
+}
+
+static bool json_value(const VkPhysicalDeviceMaintenance8FeaturesKHR &create_info, Allocator &alloc, Value *out_value)
+{
+	Value value(kObjectType);
+	value.AddMember("sType", create_info.sType, alloc);
+	value.AddMember("maintenance8", create_info.maintenance8, alloc);
+	*out_value = value;
+	return true;
+}
+
 static bool pnext_chain_pdf2_json_value(const void *pNext, Allocator &alloc, Value *out_value)
 {
 	Value nexts(kArrayType);
@@ -11705,8 +11819,8 @@ static bool pnext_chain_pdf2_json_value(const void *pNext, Allocator &alloc, Val
 		Value next;
 		switch (pin->sType)
 		{
-		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT:
-			if (!json_value(*static_cast<const VkPhysicalDeviceRobustness2FeaturesEXT *>(pNext), alloc, &next))
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_KHR:
+			if (!json_value(*static_cast<const VkPhysicalDeviceRobustness2FeaturesKHR *>(pNext), alloc, &next))
 				return false;
 			break;
 
@@ -11752,6 +11866,16 @@ static bool pnext_chain_pdf2_json_value(const void *pNext, Allocator &alloc, Val
 
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_2D_VIEW_OF_3D_FEATURES_EXT:
 			if (!json_value(*static_cast<const VkPhysicalDeviceImage2DViewOf3DFeaturesEXT *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_ROBUSTNESS_FEATURES:
+			if (!json_value(*static_cast<const VkPhysicalDevicePipelineRobustnessFeatures *>(pNext), alloc, &next))
+				return false;
+			break;
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_8_FEATURES_KHR:
+			if (!json_value(*static_cast<const VkPhysicalDeviceMaintenance8FeaturesKHR *>(pNext), alloc, &next))
 				return false;
 			break;
 
@@ -12386,6 +12510,9 @@ static const void *pnext_chain_pdf2_skip_ignored_entries(const void *pNext)
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT:
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRIMITIVES_GENERATED_QUERY_FEATURES_EXT:
 		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_2D_VIEW_OF_3D_FEATURES_EXT:
+		// NV uses these.
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_ROBUSTNESS_FEATURES:
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_8_FEATURES_KHR:
 			ignored = false;
 			break;
 
