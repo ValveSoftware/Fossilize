@@ -87,6 +87,7 @@ static void filter_feature_enablement(
 		VkPhysicalDeviceFeatures2 &pdf, VulkanFeatures &features,
 		const VkPhysicalDeviceFeatures2 *target_features)
 {
+	// Workaround RADV quirk on older drivers.
 	features.cooperative_matrix.cooperativeMatrixRobustBufferAccess = VK_FALSE;
 
 	// These feature bits conflict according to validation layers.
@@ -301,6 +302,30 @@ static void filter_feature_enablement(
 		{
 			reset_features(features.image_2d_view_of_3d, VK_FALSE);
 		}
+
+		const auto *pipeline_robustness = find_pnext<VkPhysicalDevicePipelineRobustnessFeatures>(
+				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_ROBUSTNESS_FEATURES,
+				target_features->pNext);
+
+		if (pipeline_robustness)
+		{
+			features.pipeline_robustness.pipelineRobustness =
+				features.pipeline_robustness.pipelineRobustness &&
+				pipeline_robustness->pipelineRobustness;
+		}
+		else
+		{
+			reset_features(features.pipeline_robustness, VK_FALSE);
+		}
+
+		const auto *maintenance8 = find_pnext<VkPhysicalDeviceMaintenance8FeaturesKHR>(
+				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_8_FEATURES_KHR,
+				target_features->pNext);
+
+		if (maintenance8)
+			features.maintenance8.maintenance8 = features.maintenance8.maintenance8 && maintenance8->maintenance8;
+		else
+			reset_features(features.maintenance8, VK_FALSE);
 	}
 	else
 	{
@@ -315,6 +340,8 @@ static void filter_feature_enablement(
 		reset_features(features.shader_object, VK_FALSE);
 		reset_features(features.primitives_generated_query, VK_FALSE);
 		reset_features(features.image_2d_view_of_3d, VK_FALSE);
+		reset_features(features.pipeline_robustness, VK_FALSE);
+		reset_features(features.maintenance8, VK_FALSE);
 	}
 }
 
@@ -476,6 +503,28 @@ static void filter_active_extensions(VkPhysicalDeviceFeatures2 &pdf,
 			    feature->sampler2DViewOf3D == VK_FALSE)
 			{
 				remove_extension(active_extensions, out_extension_count, VK_EXT_IMAGE_2D_VIEW_OF_3D_EXTENSION_NAME);
+				accept = false;
+			}
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PIPELINE_ROBUSTNESS_FEATURES:
+		{
+			auto *feature = reinterpret_cast<VkPhysicalDevicePipelineRobustnessFeatures *>(s);
+			if (feature->pipelineRobustness == VK_FALSE)
+			{
+				remove_extension(active_extensions, out_extension_count, VK_EXT_PIPELINE_ROBUSTNESS_EXTENSION_NAME);
+				accept = false;
+			}
+			break;
+		}
+
+		case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_8_FEATURES_KHR:
+		{
+			auto *feature = reinterpret_cast<VkPhysicalDeviceMaintenance8FeaturesKHR *>(s);
+			if (feature->maintenance8 == VK_FALSE)
+			{
+				remove_extension(active_extensions, out_extension_count, VK_KHR_MAINTENANCE_8_EXTENSION_NAME);
 				accept = false;
 			}
 			break;

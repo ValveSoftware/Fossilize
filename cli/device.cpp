@@ -235,6 +235,19 @@ static bool application_info_promote_fragment_shading_rate(const VkApplicationIn
 	return false;
 }
 
+static bool application_info_promote_maintenance8(const VkApplicationInfo *app_info)
+{
+	if (!app_info || !app_info->pEngineName)
+		return false;
+
+	if (strcmp("vkd3d", app_info->pEngineName) == 0)
+		return app_info->engineVersion >= VK_MAKE_VERSION(2, 14, 1);
+	else if (strcmp("DXVK", app_info->pEngineName) == 0)
+		return app_info->engineVersion >= VK_MAKE_VERSION(3, 0, 0);
+
+	return false;
+}
+
 static void pipeline_binary_key_to_str(char (&str)[VK_MAX_PIPELINE_BINARY_KEY_SIZE_KHR * 2 + 1], const VkPipelineBinaryKeyKHR &key)
 {
 	str[0] = '\0';
@@ -458,6 +471,7 @@ bool VulkanDevice::init_device(const Options &opts)
 	VkPhysicalDeviceFeatures2 replacement_pdf2;
 	VkPhysicalDeviceRobustness2FeaturesEXT replacement_robustness2;
 	VkPhysicalDeviceFragmentShadingRateFeaturesKHR replacement_fragment_shading_rate;
+	VkPhysicalDeviceMaintenance8FeaturesKHR replacement_maintenance8;
 
 	const auto begin_replacement = [&](void *pnext) {
 		if (&replacement_pdf2 != requested_pdf2)
@@ -494,6 +508,15 @@ bool VulkanDevice::init_device(const Options &opts)
 			replacement_fragment_shading_rate = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR };
 			begin_replacement(&replacement_fragment_shading_rate);
 			reset_features(replacement_fragment_shading_rate, VK_TRUE);
+		}
+
+		if (application_info_promote_maintenance8(opts.application_info) &&
+			find_pnext<VkPhysicalDeviceMaintenance8FeaturesKHR>(
+				VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_8_FEATURES_KHR, opts.features->pNext) == nullptr)
+		{
+			replacement_maintenance8 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_8_FEATURES_KHR };
+			begin_replacement(&replacement_maintenance8);
+			reset_features(replacement_maintenance8, VK_TRUE);
 		}
 	}
 

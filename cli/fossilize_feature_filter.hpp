@@ -157,6 +157,7 @@ struct VulkanFeatures
 	VkPhysicalDeviceCustomResolveFeaturesEXT custom_resolve;
 	VkPhysicalDeviceCooperativeMatrixConversionFeaturesQCOM cooperative_matrix_conversion;
 	VkPhysicalDeviceShaderMixedFloatDotProductFeaturesVALVE shader_mixed_dot_product;
+	VkPhysicalDeviceMaintenance8FeaturesKHR maintenance8;
 
 	struct
 	{
@@ -349,5 +350,15 @@ static inline void reset_features(VkPhysicalDeviceImage2DViewOf3DFeaturesEXT &fe
 {
 	features.image2DViewOf3D = state;
 	features.sampler2DViewOf3D = state;
+}
+
+static inline void reset_features(VkPhysicalDevicePipelineRobustnessFeatures &features, VkBool32 state)
+{
+	features.pipelineRobustness = state;
+}
+
+static inline void reset_features(VkPhysicalDeviceMaintenance8FeaturesKHR &features, VkBool32 state)
+{
+	features.maintenance8 = state;
 }
 }
