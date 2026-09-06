@@ -107,6 +107,10 @@ public:
 		// Maps to --device-index.
 		unsigned device_index;
 
+		// Maps to --device-pci-vendor and --device-pci-device.
+		unsigned device_pci_vendor;
+		unsigned device_pci_device;
+
 		// Carve out a range of which pipelines to replay if use_pipeline_range is set.
 		// Used for multi-process replays where each process gets its own slice to churn through.
 		unsigned start_graphics_index;
