@@ -164,14 +164,14 @@ int main(int argc, char *argv[])
 	output_db.reset(create_database(output_db_path.c_str(), DatabaseMode::OverWrite));
 	if (!input_db || !input_db->prepare())
 	{
-		LOGE("Failed to load database: %s\n", argv[1]);
+		LOGE("Failed to load database: %s\n", input_db_path.c_str());
 		return EXIT_FAILURE;
 	}
 
 	// Recording thread prepares.
 	if (!output_db)
 	{
-		LOGE("Failed to open database for writing: %s\n", argv[2]);
+		LOGE("Failed to open database for writing: %s\n", output_db_path.c_str());
 		return EXIT_FAILURE;
 	}
 
