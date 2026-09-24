@@ -858,13 +858,13 @@ int main(int argc, char *argv[])
 
 	if (!input_db || !input_db->prepare())
 	{
-		LOGE("Failed to load database: %s\n", argv[1]);
+		LOGE("Failed to load database: %s\n", input_db_path.c_str());
 		return EXIT_FAILURE;
 	}
 
 	if (!output_db || !output_db->prepare())
 	{
-		LOGE("Failed to open database for writing: %s\n", argv[2]);
+		LOGE("Failed to open database for writing: %s\n", output_db_path.c_str());
 		return EXIT_FAILURE;
 	}
 

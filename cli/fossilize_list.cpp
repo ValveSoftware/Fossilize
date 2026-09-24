@@ -327,7 +327,7 @@ int main(int argc, char **argv)
 	auto input_db = std::unique_ptr<DatabaseInterface>(create_database(db_path.c_str(), DatabaseMode::ReadOnly));
 	if (!input_db || !input_db->prepare())
 	{
-		LOGE("Failed to load database: %s\n", argv[1]);
+		LOGE("Failed to load database: %s\n", db_path.c_str());
 		return EXIT_FAILURE;
 	}
 
