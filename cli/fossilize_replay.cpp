@@ -4729,7 +4729,9 @@ int main(int argc, char *argv[])
 		if (replayer_opts.start_graphics_index != 0u ||
 		    replayer_opts.end_graphics_index != ~0u ||
 		    replayer_opts.start_compute_index != 0u ||
-		    replayer_opts.end_compute_index != ~0u)
+		    replayer_opts.end_compute_index != ~0u ||
+		    replayer_opts.start_raytracing_index != 0u ||
+		    replayer_opts.end_raytracing_index != ~0u)
 		{
 			LOGE("--pipeline-hash cannot be used together with pipeline ranges.\n");
 			print_help();
