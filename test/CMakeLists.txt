@@ -16,19 +16,21 @@ target_compile_options(application-info-filter-test PRIVATE ${FOSSILIZE_CXX_FLAG
 set_target_properties(application-info-filter-test PROPERTIES LINK_FLAGS "${FOSSILIZE_LINK_FLAGS}")
 add_test(NAME application-info-filter-test COMMAND application-info-filter-test)
 
-add_executable(multi-instance-and-device-test multi_instance_and_device_test.cpp)
-target_link_libraries(multi-instance-and-device-test cli-utils fossilize)
-set_target_properties(multi-instance-and-device-test PROPERTIES LINK_FLAGS "${FOSSILIZE_LINK_FLAGS}")
-
 add_executable(object-cache-test object_cache_test.cpp)
 target_link_libraries(object-cache-test fossilize)
 set_target_properties(object-cache-test PROPERTIES LINK_FLAGS "${FOSSILIZE_LINK_FLAGS}")
 add_test(NAME object-cache-test COMMAND object-cache-test)
 
-add_executable(feature-filter-test feature_filter_test.cpp)
-target_link_libraries(feature-filter-test cli-utils)
-set_target_properties(feature-filter-test PROPERTIES LINK_FLAGS "${FOSSILIZE_LINK_FLAGS}")
-add_test(NAME feature-filter-test COMMAND feature-filter-test)
+if (FOSSILIZE_CLI)
+    add_executable(multi-instance-and-device-test multi_instance_and_device_test.cpp)
+    target_link_libraries(multi-instance-and-device-test cli-utils fossilize)
+    set_target_properties(multi-instance-and-device-test PROPERTIES LINK_FLAGS "${FOSSILIZE_LINK_FLAGS}")
+
+    add_executable(feature-filter-test feature_filter_test.cpp)
+    target_link_libraries(feature-filter-test cli-utils)
+    set_target_properties(feature-filter-test PROPERTIES LINK_FLAGS "${FOSSILIZE_LINK_FLAGS}")
+    add_test(NAME feature-filter-test COMMAND feature-filter-test)
+endif()
 
 option(FOSSILIZE_TEST_RUNTIME_LAYER "Tests runtime layer" OFF)
 
