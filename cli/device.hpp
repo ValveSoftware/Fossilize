@@ -38,6 +38,8 @@ public:
 		bool null_device = false;
 		bool want_pipeline_stats = false;
 		int device_index = -1;
+		unsigned device_pci_vendor = 0;
+		unsigned device_pci_device = 0;
 		const VkApplicationInfo *application_info = nullptr;
 		const VkPhysicalDeviceFeatures2 *features = nullptr;
 	};
