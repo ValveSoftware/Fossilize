@@ -272,21 +272,17 @@ bool parse_tag(ResourceTag tag, StateReplayer &replayer, ListReplayer &list_repl
 
 bool replayer_create_info_fill(ResourceTag selected_tag, StateReplayer &replayer, ListReplayer &list_replayer, DatabaseInterface *input_db)
 {
-	// fill Vulkan object data in replayer
+	// Parse dependencies before collecting connectivity for the selected resource type.
 	for (auto tag : playback_order)
 	{
-		if (tag == selected_tag)
-			continue;
-
 		if (!parse_tag(tag, replayer, list_replayer, input_db))
 			return false;
+		if (tag == selected_tag)
+			return true;
 	}
 
-	// fill connectivity data
-	if (!parse_tag(selected_tag, replayer, list_replayer, input_db))
-		return false;
-
-	return true;
+	// Metadata tags are not part of the Vulkan resource playback order.
+	return parse_tag(selected_tag, replayer, list_replayer, input_db);
 }
 
 void print_connectivity(Hash hash, const ListReplayer &list_replayer)
